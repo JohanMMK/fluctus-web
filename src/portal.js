@@ -9,8 +9,9 @@ const $ = (id) => document.getElementById(id);
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
 const APP_CATALOG = [
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
-  { id: 'congestie',   naam: 'Congestie',        ico: '🌐', beschrijving: 'Netcongestie & load factor.',           url: '/apps/congestie.html' },
-  { id: 'energiemarkt',naam: 'Energiemarkt',     ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.',       url: '/apps/energiemarkt.html' },
+  // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
+  // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
+  // { id: 'energiemarkt',naam: 'Energiemarkt', ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.', url: '/apps/energiemarkt.html' },
 ];
 
 let CFG = null;
