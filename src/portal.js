@@ -45,19 +45,44 @@ async function initAuth() {
   render();
 }
 
-async function login() {
-  const email = $('login-email').value.trim();
-  const password = $('login-pw').value;
-  if (!email || !password) { $('login-msg').textContent = 'Vul e-mail en wachtwoord in.'; return; }
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  $('login-msg').textContent = error ? ('Inloggen mislukt: ' + error.message) : '';
+// Passwordless via e-mailcode — identiek aan de Academy (signInWithOtp + verifyOtp).
+function toonCodeStap(aan) {
+  $('stap-code').classList.toggle('hidden', !aan);
+  $('btn-verify').classList.toggle('hidden', !aan);
+  $('btn-opnieuw').classList.toggle('hidden', !aan);
+  $('btn-code').classList.toggle('hidden', aan);
+  $('login-email').readOnly = aan;
 }
 
-async function magicLink() {
+async function sendCode() {
   const email = $('login-email').value.trim();
-  if (!email) { $('login-msg').textContent = 'Vul je e-mailadres in voor een magic-link.'; return; }
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
-  $('login-msg').textContent = error ? error.message : 'Magic-link verstuurd — check je mailbox.';
+  if (!email) { $('login-msg').textContent = 'Vul je e-mailadres in.'; return; }
+  $('btn-code').disabled = true;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  $('btn-code').disabled = false;
+  if (error) { $('login-msg').textContent = 'Kon geen code sturen: ' + error.message; return; }
+  toonCodeStap(true);
+  $('login-msg').textContent = 'We hebben je een code gemaild. Vul ze hierboven in.';
+  $('login-code').focus();
+}
+
+async function verifyCode() {
+  const email = $('login-email').value.trim();
+  const token = $('login-code').value.trim();
+  if (!token) { $('login-msg').textContent = 'Vul de code uit je e-mail in.'; return; }
+  $('btn-verify').disabled = true;
+  // Zelfde fallback-logica als de Academy: eerst 'email'-OTP, anders 'signup'.
+  let res = await sb.auth.verifyOtp({ email, token, type: 'email' });
+  if (res.error) res = await sb.auth.verifyOtp({ email, token, type: 'signup' });
+  $('btn-verify').disabled = false;
+  if (res.error) { $('login-msg').textContent = 'Code klopt niet of is verlopen: ' + res.error.message; return; }
+  $('login-msg').textContent = '';   // onAuthStateChange → render()
+}
+
+function resetLogin() {
+  toonCodeStap(false);
+  $('login-code').value = '';
+  $('login-msg').textContent = '';
 }
 
 async function logout() { await sb.auth.signOut(); }
@@ -173,9 +198,13 @@ async function verstuurOfferte(pad, ctx) {
 
 // ── Wiring ──
 window.addEventListener('DOMContentLoaded', async () => {
-  $('btn-login').onclick = login;
-  $('btn-magic').onclick = magicLink;
+  $('btn-code').onclick = sendCode;
+  $('btn-verify').onclick = verifyCode;
+  $('btn-opnieuw').onclick = resetLogin;
   $('portal-logout').onclick = logout;
+  // Enter in het codeveld = inloggen.
+  $('login-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
+  $('login-email').addEventListener('keydown', (e) => { if (e.key === 'Enter' && $('stap-code').classList.contains('hidden')) sendCode(); });
   try { await loadConfig(); await initAuth(); }
   catch (e) { $('login-msg').textContent = 'Init-fout: ' + e.message; }
 });
