@@ -1,35 +1,8 @@
 <!DOCTYPE html>
-<html lang="nl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Simulator — Fluctus</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<style>
-  body{margin:0;font-family:'Poppins',Helvetica,Arial,sans-serif;background:#fff}
-  .sim-topbar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid #e2ebe4;background:#fff;position:sticky;top:0;z-index:100}
-  .sim-topbar a{color:#2b8f3a;font-weight:600;text-decoration:none;font-size:.95rem}
-  .sim-topbar a:hover{text-decoration:underline}
-  .sim-topbar .titel{font-weight:800;color:#1a2b22;letter-spacing:-.01em}
-  .sim-wrap{max-width:1120px;margin:0 auto;padding:0 16px}
-</style>
-</head>
-<body>
-<div class="sim-topbar">
-  <a href="/portal.html">← Mijn Fluctus</a>
-  <span class="titel">Simulator</span>
-</div>
-<script>
-  // Niet ingelogd? Terug naar het portaal (de simulator zou anders "Aanmelden
-  // vereist" tonen). De simulator leest zelf de Supabase-sessie uit localStorage.
-  (function(){
-    try{
-      var has=false;
-      for(var i=0;i<localStorage.length;i++){ if(/^sb-.+-auth-token$/.test(localStorage.key(i))) has=true; }
-      if(!has) location.replace('/portal.html');
-    }catch(e){ /* stil */ }
-  })();
-</script>
+<html lang="nl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Simulator — Fluctus</title>
+<style>body{margin:0;font-family:'Poppins',Helvetica,Arial,sans-serif;background:#fff}.sim-topbar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid #e2ebe4;background:#fff;position:sticky;top:0;z-index:100}.sim-topbar a{color:#2b8f3a;font-weight:600;text-decoration:none;font-size:.95rem}.sim-topbar a:hover{text-decoration:underline}.sim-topbar .titel{font-weight:800;color:#1a2b22}.sim-wrap{max-width:1120px;margin:0 auto;padding:0 16px}</style></head>
+<body><div class="sim-topbar"><a href="/portal.html">← Mijn Fluctus</a><span class="titel">Simulator</span></div>
+<script>(function(){try{var has=false;for(var i=0;i<localStorage.length;i++){if(/^sb-.+-auth-token$/.test(localStorage.key(i)))has=true;}if(!has)location.replace('/portal.html');}catch(e){}})();</script>
 <div class="sim-wrap">
 <div id="fdsim-root" style="font-family:Helvetica,Arial,sans-serif;background:#FFFFFF;color:#1A1F2B;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #D5DBE3;">
 <style>
@@ -251,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.20.6</span>
+    <span class="fdsim-version">v1.20.9</span>
   </div>
 </div>
 
@@ -610,6 +583,9 @@ var STATE = {
   // v1.10: PV-injectie strategie
   pvInjStrategie: 'curtail_neg',  // 'geen' | 'curtail_neg' | 'bsp_actief'
   pvCurtailDrempel: 0,            // €/MWh, alleen relevant bij curtail_neg
+  // v1.20.7: laadpleinen (flexibele EV-laadvraag). Lijst van objecten, zie
+  // _laadpleinNieuw(). Leeg = geen laadplein (gedrag ongewijzigd).
+  laadpleinen: [],
   // v1.12: BSP-modus instellingen
   bspForecastModus: 'realistic',  // 'conservatief' | 'realistic' | 'optimistisch'
   // Stap 5 — batterij
@@ -646,6 +622,9 @@ var STATE = {
   resultaat: null,
   resultaatVarianten: null,  // v1.20.4: {geen, sturing, onbalans}
   kpiSturing: null,          // v1.20.4: meerwaarde-KPI's uit /api/nominatie-sim-3
+  opstellingen: null,        // v1.20.8: {verhogen, batterij} bij ontoereikend toegangsvermogen
+  capaciteit: null,          // v1.20.8: laadplein-capaciteits-oordeel
+  vergelijkingOpstellingen: null, // v1.20.8: batterij-besparing per sturing
   isRunning: false,
   // BaseCase (v1.14): gevuld na succesvolle factuur-extract via modal.
   // null = geen factuur gebruikt; anders het volledige baseCase object van /api/factuur-extract,
@@ -1767,7 +1746,7 @@ function _findFreshProjectName(baseName, attempt, callback){
 function _autoSaveScenarioNaFactuur(){
   var data = {};
   Object.keys(STATE).forEach(function(k){
-    if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='isRunning' && k!=='currentStep' && k!=='visited'){
+    if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited'){
       data[k] = STATE[k];
     }
   });
@@ -2617,6 +2596,119 @@ function updateProfielPreview(){
     '</div>';
 }
 
+// ---------- LAADPLEINEN (v1.20.7) ----------
+var LAADPLEIN_VOERTUIGEN = [
+  {naam:'Personenwagen',      kwh_per_km:0.16, km_per_jaar:15000},
+  {naam:'Bestelwagen',        kwh_per_km:0.25, km_per_jaar:25000},
+  {naam:'Lichte vrachtwagen', kwh_per_km:0.55, km_per_jaar:40000},
+  {naam:'Zware vrachtwagen',  kwh_per_km:1.30, km_per_jaar:50000},
+  {naam:'Bus',                kwh_per_km:1.40, km_per_jaar:50000}
+];
+var LAADPUNT_KW    = {AC22:22, DC160:160, DC300:300};
+var LAADPUNT_LABEL = {AC22:'AC 22 kW (stuks)', DC160:'DC 160 kW (stuks)', DC300:'DC 300 kW (stuks)'};
+var _LP_GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px';
+
+function _laadpleinNieuw(){
+  return { naam:'Laadplein '+((STATE.laadpleinen||[]).length+1), voertuigtype:'Personenwagen',
+    aantal:10, km_per_jaar:15000, kwh_per_km:0.16,
+    venster_start:8, venster_eind:18, dagen_per_week:5,
+    laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
+    bestaand:false };
+}
+function _lpEnergieMwh(lp){ return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000; }
+function _lpVermogenKw(lp){ return (lp.laadpunten||[]).reduce(function(s,x){return s+(x.aantal||0)*(LAADPUNT_KW[x.type]||0);},0); }
+
+function _lpNum(label, value, step, oninput){
+  var b=el('div',{class:'fdsim-row col'});
+  b.appendChild(el('label',{class:'fdsim-label'},label));
+  var i=el('input',{class:'fdsim-input',type:'number',step:step||'1',value:value});
+  i.oninput=function(){ oninput(parseFloat(i.value)); };
+  b.appendChild(i);
+  return b;
+}
+
+function _renderLaadpleinKaart(lp, idx){
+  var card=el('div',{style:'border:1px solid #D5DBE3;border-radius:6px;padding:14px;margin-bottom:12px;background:#FAFBFC'});
+  var top=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'});
+  top.appendChild(el('div',{style:'font-weight:700;color:#1F3864'}, lp.naam || ('Laadplein '+(idx+1))));
+  top.appendChild(el('button',{class:'fdsim-btn small',style:'background:#fff;color:#9E480E;border:1px solid #E8A33D',onclick:function(){
+    STATE.laadpleinen.splice(idx,1); _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting();
+  }},'Verwijderen'));
+  card.appendChild(top);
+
+  var g1=el('div',{style:_LP_GRID});
+  var vt=el('div',{class:'fdsim-row col'});
+  vt.appendChild(el('label',{class:'fdsim-label'},'Voertuigtype'));
+  var sel=el('select',{class:'fdsim-select'});
+  LAADPLEIN_VOERTUIGEN.forEach(function(v){ var o=el('option',{value:v.naam},v.naam); if(v.naam===lp.voertuigtype)o.selected=true; sel.appendChild(o); });
+  sel.onchange=function(){ var v=LAADPLEIN_VOERTUIGEN.find(function(x){return x.naam===sel.value;}); lp.voertuigtype=sel.value; if(v){lp.kwh_per_km=v.kwh_per_km; lp.km_per_jaar=v.km_per_jaar;} _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting(); };
+  vt.appendChild(sel); g1.appendChild(vt);
+  g1.appendChild(_lpNum('Aantal wagens', lp.aantal, '1', function(x){ lp.aantal=x||0; _updateLaadpleinSamenvatting(); }));
+  g1.appendChild(_lpNum('km/jaar', lp.km_per_jaar, '500', function(x){ lp.km_per_jaar=x||0; _updateLaadpleinSamenvatting(); }));
+  g1.appendChild(_lpNum('kWh/km', lp.kwh_per_km, '0.01', function(x){ lp.kwh_per_km=x||0; _updateLaadpleinSamenvatting(); }));
+  card.appendChild(g1);
+
+  var g2=el('div',{style:_LP_GRID+';margin-top:8px'});
+  g2.appendChild(_lpNum('Venster start (u)', lp.venster_start, '1', function(x){ lp.venster_start=x||0; }));
+  g2.appendChild(_lpNum('Venster eind (u)', lp.venster_eind, '1', function(x){ lp.venster_eind=x||0; }));
+  var dw=el('div',{class:'fdsim-row col'});
+  dw.appendChild(el('label',{class:'fdsim-label'},'Dagen/week'));
+  var dsel=el('select',{class:'fdsim-select'});
+  [{v:5,t:'5 (ma-vr)'},{v:6,t:'6 (+za)'},{v:7,t:'7 (+zo)'}].forEach(function(o){ var op=el('option',{value:String(o.v)},o.t); if(o.v===lp.dagen_per_week)op.selected=true; dsel.appendChild(op); });
+  dsel.onchange=function(){ lp.dagen_per_week=parseInt(dsel.value,10); _updateLaadpleinSamenvatting(); };
+  dw.appendChild(dsel); g2.appendChild(dw);
+  var bc=el('div',{class:'fdsim-row col'});
+  bc.appendChild(el('label',{class:'fdsim-label'},'Bestaand?'));
+  var bl=el('label',{style:'display:flex;align-items:center;gap:8px;font-size:13px;padding-top:6px'});
+  var cb=el('input',{type:'checkbox'}); if(lp.bestaand)cb.checked=true; cb.onchange=function(){ lp.bestaand=cb.checked; _vulLaadpleinen($('fdsim-lp-host')); };
+  bl.appendChild(cb); bl.appendChild(el('span',null,'Zit al in mijn factuur'));
+  bc.appendChild(bl); g2.appendChild(bc);
+  card.appendChild(g2);
+
+  card.appendChild(el('div',{class:'fdsim-hint',style:'margin:10px 0 4px'},'Laadpunten (bepalen het laadvermogen = ondergrens batterij):'));
+  var g3=el('div',{style:_LP_GRID});
+  ['AC22','DC160','DC300'].forEach(function(tp){
+    var rec=lp.laadpunten.find(function(x){return x.type===tp;}); if(!rec){ rec={type:tp,aantal:0}; lp.laadpunten.push(rec); }
+    g3.appendChild(_lpNum(LAADPUNT_LABEL[tp], rec.aantal, '1', function(x){ rec.aantal=x||0; _updateLaadpleinSamenvatting(); }));
+  });
+  card.appendChild(g3);
+
+  card.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:8px'},
+    'Energie: '+fmtNum(_lpEnergieMwh(lp),1)+' MWh/jaar · Laadvermogen: '+_lpVermogenKw(lp)+' kW'+(lp.bestaand?' · bestaand (wordt uit het basisverbruik gehaald en als stuurbaar laadplein herrekend)':'')));
+  return card;
+}
+
+function _vulLaadpleinen(host){
+  if(!host) return;
+  host.innerHTML='';
+  if(!STATE.laadpleinen || !STATE.laadpleinen.length){ host.appendChild(el('div',{class:'fdsim-hint'},'Nog geen laadplein toegevoegd.')); return; }
+  STATE.laadpleinen.forEach(function(lp, idx){ host.appendChild(_renderLaadpleinKaart(lp, idx)); });
+}
+
+function _updateLaadpleinSamenvatting(){
+  var host=$('fdsim-lp-samenvatting'); if(!host) return;
+  var eTot=0, capTot=0;
+  (STATE.laadpleinen||[]).forEach(function(lp){ eTot+=_lpEnergieMwh(lp); capTot+=_lpVermogenKw(lp); });
+  host.textContent = (STATE.laadpleinen && STATE.laadpleinen.length)
+    ? ('Totaal: '+fmtNum(eTot,1)+' MWh/jaar EV-laadvraag · '+capTot+' kW laadvermogen (= ondergrens batterij)') : '';
+}
+
+function _renderLaadpleinenSectie(){
+  var sec=el('div',{class:'fdsim-section',style:'margin-top:18px'});
+  sec.appendChild(el('h3',null,'Laadpleinen (EV) — optioneel'));
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},'Elk laadplein = 1 voertuigtype. De EV-laadvraag wordt flexibel binnen het venster gepland en meegenomen in de 3 sturingen (dom laden vs. slim op zelfconsumptie/spot/onbalans). "Bestaand" = al in je huidige factuur — dat verbruik wordt dan uit het basisverbruik gehaald en als stuurbaar laadplein herrekend.'));
+  var host=el('div',{id:'fdsim-lp-host'});
+  sec.appendChild(host);
+  _vulLaadpleinen(host);
+  sec.appendChild(el('button',{class:'fdsim-btn small',style:'margin-top:10px',onclick:function(){
+    if(!STATE.laadpleinen)STATE.laadpleinen=[];
+    STATE.laadpleinen.push(_laadpleinNieuw()); _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting();
+  }},'+ Laadplein toevoegen'));
+  sec.appendChild(el('div',{id:'fdsim-lp-samenvatting',class:'fdsim-hint',style:'margin-top:12px;font-weight:600;color:#1F3864'}));
+  setTimeout(_updateLaadpleinSamenvatting,0);
+  return sec;
+}
+
 // ---------- STAP 4: PV ----------
 function renderStep4PV(){
   var box=el('div');
@@ -2688,6 +2780,9 @@ function renderStep4PV(){
   stratBox.appendChild(bspBox);
 
   box.appendChild(stratBox);
+
+  // v1.20.7: laadpleinen-sectie (flexibele EV-laadvraag).
+  box.appendChild(_renderLaadpleinenSectie());
 
   // Toon strategie-sectie alleen als kWp > 0
   setTimeout(function(){
@@ -3824,6 +3919,58 @@ function _renderFactuurVergelijking(){
 
 // v1.20.4: meerwaarde-KPI-kaarten voor de 3 sturingen (geen / excl. onbalans /
 // incl. onbalans). Leest STATE.kpiSturing uit /api/nominatie-sim-3.
+// v1.20.8: laadplein-resultaat + capaciteits-advies (aansluiting verhogen vs batterij).
+function _renderLaadpleinResultaat(lp){
+  var sec=el('div',{class:'fdsim-section',style:'margin-bottom:14px'});
+  sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:6px'},'Laadpleinen (EV)'));
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
+    lp.aantal_pleinen+' laadplein(en) · EV-laadvraag '+fmtNum(lp.ev_last_mwh,1)+' MWh in deze periode · totaal laadvermogen '+fmtNum(lp.totaal_laadvermogen_kw,0)+' kW (= ondergrens batterij)'
+    + (lp.bestaand_afgetrokken_mwh>0 ? (' · '+fmtNum(lp.bestaand_afgetrokken_mwh,1)+' MWh bestaand uit basisverbruik gehaald') : '')));
+  var cap=lp.capaciteit;
+  if(cap && !cap.voldoende){
+    var w=el('div',{style:'background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;padding:12px 14px;font-size:13px;color:#7A3608;line-height:1.6'});
+    w.innerHTML='<b>⚠ Toegangsvermogen ontoereikend voor de laadvraag.</b> '+fmtNum(cap.tekort_mwh,2)+' MWh raakt niet geladen binnen het venster onder je huidige aansluiting ('+fmtNum(cap.huidig_toegangsvermogen_kw,0)+' kW). Twee opties:';
+    var g=el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px'});
+    var o1=el('div',{style:'background:#fff;border:1px solid #E8A33D;border-radius:5px;padding:10px'});
+    o1.innerHTML='<div style="font-weight:700;color:#1F3864">Opstelling 1 — toegangsvermogen verhogen</div><div style="margin-top:4px">+ '+fmtNum(cap.verhoging_kw,0)+' kW → '+fmtNum(cap.benodigd_toegangsvermogen_kw,0)+' kW</div>';
+    var o2=el('div',{style:'background:#fff;border:1px solid #05B050;border-radius:5px;padding:10px'});
+    o2.innerHTML='<div style="font-weight:700;color:#1F3864">Opstelling 2 — batterij</div><div style="margin-top:4px">± '+fmtNum(cap.advies_batterij_kw,0)+' kW / '+fmtNum(cap.advies_batterij_kwh,0)+' kWh (aansluiting blijft)</div>';
+    g.appendChild(o1); g.appendChild(o2); w.appendChild(g);
+    w.appendChild(el('div',{style:'margin-top:8px;font-size:12px'},'De volledige vergelijking van beide opstellingen × de 3 sturingen (en het financieel rapport) volgt in de volgende stap.'));
+    sec.appendChild(w);
+  } else if(cap){
+    sec.appendChild(el('div',{class:'fdsim-hint',style:'color:#05B050'},'✓ De laadvraag past binnen je huidige toegangsvermogen (met de gesimuleerde sturing/batterij).'));
+  }
+  return sec;
+}
+
+// v1.20.8: vergelijking van de twee opstellingen (aansluiting verhogen vs. batterij),
+// elk over de 3 sturingen, bij ontoereikend toegangsvermogen.
+function _renderOpstellingenVergelijking(){
+  var ops=STATE.opstellingen, cap=STATE.capaciteit||{};
+  if(!ops||!ops.verhogen||!ops.batterij) return null;
+  var sec=el('div',{class:'fdsim-section',style:'margin-bottom:14px;border-color:#9E480E;background:#FFF9F2'});
+  sec.appendChild(el('h3',{style:'color:#9E480E;font-size:14px;margin-bottom:4px'},'Toegangsvermogen ontoereikend — batterij vs. aansluiting verhogen'));
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:12px'},
+    'De laadvraag past niet binnen je aansluiting ('+fmtNum(cap.huidig_toegangsvermogen_kw,0)+' kW; tekort '+fmtNum(cap.tekort_mwh,2)+' MWh). Twee opstellingen, elk over de 3 sturingen. Bedragen = kost excl. btw over de periode.'));
+  var rijen=[['1 · Geen sturing','kost_geen_excl_btw'],['2 · Volledig excl. onbalans','kost_sturing_excl_btw'],['3 · Volledig incl. onbalans','kost_onbalans_excl_btw']];
+  var GC='display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;';
+  var tbl=el('div',{style:'font-size:12.5px'});
+  var head=el('div',{style:GC+'padding:6px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864'});
+  head.innerHTML='<span>Sturing</span><span style="text-align:right">Verhogen (+'+fmtNum(cap.verhoging_kw,0)+' kW)</span><span style="text-align:right">Batterij ('+fmtNum(cap.advies_batterij_kw,0)+' kW/'+fmtNum(cap.advies_batterij_kwh,0)+' kWh)</span><span style="text-align:right">Batterij bespaart</span>';
+  tbl.appendChild(head);
+  rijen.forEach(function(r){
+    var v=(ops.verhogen.kpi_sturing||{})[r[1]]||0, b=(ops.batterij.kpi_sturing||{})[r[1]]||0, d=v-b;
+    var row=el('div',{style:GC+'padding:6px 0;border-bottom:1px solid #EEF1F5'});
+    row.innerHTML='<span>'+r[0]+'</span><span style="text-align:right">'+fmtEur(v)+'</span><span style="text-align:right">'+fmtEur(b)+'</span><span style="text-align:right;font-weight:700;color:'+(d>=0?'#05B050':'#9E480E')+'">'+(d>=0?'+ ':'– ')+fmtEur(Math.abs(d))+'</span>';
+    tbl.appendChild(row);
+  });
+  sec.appendChild(tbl);
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:10px'},
+    'De batterij (opstelling 2) vermijdt de aansluitingsverhoging van '+fmtNum(cap.verhoging_kw,0)+' kW én levert de sturingsbesparing hierboven. In het financieel rapport (volgende stap) zetten we dit tegen: batterij-investering − vermeden kost van de aansluitingsverhoging.'));
+  return sec;
+}
+
 function _renderSturingKPIs(){
   var k = STATE.kpiSturing || {};
   var aantalMnd = (typeof _aantalMaandenPeriode==='function' && STATE.periodeVan && STATE.periodeTot)
@@ -3907,6 +4054,16 @@ function renderStep9Resultaat(){
   // v1.20.4: meerwaarde-KPI's van de 3 sturingen bovenaan het resultaat.
   if(STATE.kpiSturing && !R.error){
     box.appendChild(_renderSturingKPIs());
+  }
+
+  // v1.20.8: laadplein-resultaat + capaciteits-advies (aansluiting/batterij).
+  if(R.laadplein && R.laadplein.aantal_pleinen>0 && !R.error){
+    box.appendChild(_renderLaadpleinResultaat(R.laadplein));
+  }
+  // v1.20.8: bij ontoereikend toegangsvermogen — vergelijking van de 2 opstellingen.
+  if(STATE.opstellingen && !R.error){
+    var _ov=_renderOpstellingenVergelijking();
+    if(_ov) box.appendChild(_ov);
   }
 
   // Foutmelding (als error)
@@ -4418,6 +4575,8 @@ function runSimulatie(){
     // v1.17 sessie 5b: bij batterijId === 'CUSTOM' wordt batterijCustom doorgegeven.
     // server.js v15.12 detect dit in buildSimInput en stuurt de dict door zonder lookup.
     batterijCustom:(STATE.batterijId === 'CUSTOM' ? STATE.batterijCustom : null),
+    // v1.20.7: laadpleinen (flexibele EV-laadvraag) → simulator.py v1.8.
+    laadpleinen:(STATE.laadpleinen||[]),
     contract:contractBlock,
     aansluiting_kva:STATE.aansluitingKva,
     // v1.18 sessie 6: asymmetrie injectie ≠ afname. Wordt alleen meegestuurd
@@ -4438,16 +4597,28 @@ function runSimulatie(){
   };
 
   apiPost('/api/nominatie-sim-3',input).then(function(r){
-    // v1.20.4: 3-sturingen. Server geeft r.varianten = {geen, sturing, onbalans}
-    // en r.kpi_sturing. De DETAILFACTUUR gebruikt variant 2 (sturing, excl. onbalans).
-    var varianten = r.varianten || {};
-    var sim = varianten.sturing || r.result || r.resultaat || r;
+    // v1.20.8: twee response-modi.
+    //  - 'enkel': r.varianten {geen,sturing,onbalans} + r.kpi_sturing (detailfactuur = sturing).
+    //  - 'twee_opstellingen': r.opstellingen {verhogen, batterij} (elk varianten+kpi) +
+    //    r.capaciteit + r.vergelijking. Detailfactuur = opstelling 'batterij', sturing 2.
+    STATE.opstellingen = null; STATE.capaciteit = r.capaciteit || null; STATE.vergelijkingOpstellingen = null;
+    var varianten, sim;
+    if(r.modus === 'twee_opstellingen' && r.opstellingen){
+      STATE.opstellingen = r.opstellingen;
+      STATE.vergelijkingOpstellingen = r.vergelijking || null;
+      var aanbevolen = r.opstellingen.batterij || r.opstellingen.verhogen || {};
+      varianten = aanbevolen.varianten || {};
+      STATE.kpiSturing = aanbevolen.kpi_sturing || null;
+    }else{
+      varianten = r.varianten || {};
+      STATE.kpiSturing = r.kpi_sturing || null;
+    }
+    sim = varianten.sturing || r.result || r.resultaat || r;
     sim._serverLog = (sim && sim._serverLog) || r._serverLog || '';
     sim._buildErrors = r.build_errors || [];
     sim._elapsedMs = (r._meta && r._meta.elapsed_ms) || 0;
     STATE.resultaat = sim;
-    STATE.resultaatVarianten = varianten;         // {geen, sturing, onbalans}
-    STATE.kpiSturing = r.kpi_sturing || null;      // meerwaarde-KPI's
+    STATE.resultaatVarianten = varianten;
     STATE.isRunning=false;
     STATE._marktRetryCount=0;  // reset bij succes
     setStatus('Simulatie klaar','ok');
@@ -4800,7 +4971,7 @@ function _navigeerNaarSc4(sc4Data){
       console.log('[v1.17.3] Sc4 sim klaar — persisteer resultaat in fluctus-scenarios');
       var data = {};
       Object.keys(STATE).forEach(function(k){
-        if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='isRunning' && k!=='currentStep' && k!=='visited') data[k]=STATE[k];
+        if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited') data[k]=STATE[k];
       });
       data.resultaat_samenvatting = _buildResultaatSamenvattingExt(STATE.resultaat, STATE);
       apiPost('/api/scenario-bewaren', {
@@ -5286,7 +5457,7 @@ function bewaarScenario(){
   setStatus('waren...','info');
   var data={};
   Object.keys(STATE).forEach(function(k){
-    if(k!=='resultaat'&&k!=='resultaatVarianten'&&k!=='isRunning'&&k!=='currentStep'&&k!=='visited')data[k]=STATE[k];
+    if(k!=='resultaat'&&k!=='resultaatVarianten'&&k!=='opstellingen'&&k!=='isRunning'&&k!=='currentStep'&&k!=='visited')data[k]=STATE[k];
   });
   // v1.17.3: uitgebreide samenvatting (€ excl btw, alle financiële + fysieke velden)
   data.resultaat_samenvatting = _buildResultaatSamenvattingExt(STATE.resultaat, STATE);
@@ -5396,7 +5567,7 @@ function _fdsimInit(){
         setTimeout(function(){
           try { renderAll(); } catch(e){ /* niets */ }
         }, 250);
-        log('Fluctus Simulator v1.20.6 — initialisatie klaar (9b: factuur-parser + detail-modal "Alle factuurgegevens" in scan + stap 9)','ok');
+        log('Fluctus Simulator v1.20.9 — initialisatie klaar (fase 1.1: twee opstellingen × 3 sturingen bij ontoereikend toegangsvermogen)','ok');
       }catch(e){console.error('[fdsim] init error:',e);}
 }
 
@@ -5410,6 +5581,7 @@ if(document.readyState==='loading'){
 })();
 </script>
 
-</div></div>
+</div>
+</div>
 </body>
 </html>
