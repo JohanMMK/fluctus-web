@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.20.9</span>
+    <span class="fdsim-version">v1.20.10</span>
   </div>
 </div>
 
@@ -563,8 +563,8 @@ global.FluctusAppAuth = FluctusAppAuth;
 var API_BASE = 'https://lucid-amazement-production.up.railway.app';
 
 var STATE = {
-  currentStep: 0,        // 0..8 (= 9 stappen)
-  visited: [false,false,false,false,false,false,false,false,false],
+  currentStep: 0,        // 0..9 (= 10 stappen)
+  visited: [false,false,false,false,false,false,false,false,false,false],
   // Stap 1 — project & scenario
   project: '',
   scenario: '',
@@ -646,6 +646,7 @@ var STAP_NAMEN = [
   'Project',
   'Locatie',
   'Profiel',
+  'Laadplein',
   'PV',
   'Batterij',
   'Contract',
@@ -871,11 +872,11 @@ function applyBaseCaseToWizard(baseCase,options){
   var pvInjStrategie='geen';
   var kVA=aansluitOntbreekt?null:_bcRoundUp5(bc.aansluitVermogenKva);
   var profiel=null;
-  // gotoStep is 0-indexed.
-  // - aansluitVermogenKva ontbreekt → 6 = stap 7 (Aansluiting), verkoper vult kVA in
-  // - alles compleet → 7 = stap 8 (Periode), verkoper klikt "Run simulatie"
-  // We landen NOOIT op 8 (Resultaat) want die toont "nog geen resultaat" tot na run.
-  var gotoStep=aansluitOntbreekt?6:7;
+  // gotoStep is 0-indexed. v1.20.10: +1 door de nieuwe Laadplein-stap (index 3).
+  // - aansluitVermogenKva ontbreekt → 7 = stap 8 (Aansluiting), verkoper vult kVA in
+  // - alles compleet → 8 = stap 9 (Periode), verkoper klikt "Run simulatie"
+  // We landen NOOIT op 9 (Resultaat) want die toont "nog geen resultaat" tot na run.
+  var gotoStep=aansluitOntbreekt?7:8;
   var state={
     // Oude veldnamen (backwards-compat met sessie-3)
     project:project,scenario:scenario,postcode:postcode,gemeente:gemeente,
@@ -1934,16 +1935,16 @@ function renderSteps(){
     var b=el('button',{class:'fdsim-step'+(i===STATE.currentStep?' active':'')+(STATE.visited[i]?' done':''),onclick:function(){jumpToStep(i);}},(i+1)+'. '+naam);
     bar.appendChild(b);
   });
-  var ni=$('fdsim-navinfo');if(ni)ni.textContent='Stap '+(STATE.currentStep+1)+' / 9';
+  var ni=$('fdsim-navinfo');if(ni)ni.textContent='Stap '+(STATE.currentStep+1)+' / 10';
   var pb=$('fdsim-prev');if(pb)pb.disabled=STATE.currentStep===0;
   var next=$('fdsim-next');
   if(!next)return;
-  if(STATE.currentStep===7){
+  if(STATE.currentStep===8){
     next.textContent='Run simulatie ▶ ';
     next.disabled=false;
     next.classList.remove('ghost');
     next.classList.add('green');
-  }else if(STATE.currentStep===8){
+  }else if(STATE.currentStep===9){
     next.textContent='Klaar';
     next.disabled=true;
     next.classList.remove('green');
@@ -1966,11 +1967,13 @@ function jumpToStep(i){
 function nextStep(){
   if(!validateStep(STATE.currentStep))return;
   STATE.visited[STATE.currentStep]=true;
-  if(STATE.currentStep===7){
+  // v1.20.10: bij het verlaten van de Laadplein-stap PV + batterij vooraf invullen.
+  if(STATE.currentStep===3){ try{ _autoDimensioneerAssets(); }catch(e){ console.warn('auto-dim:',e); } }
+  if(STATE.currentStep===8){
     runSimulatie();
     return;
   }
-  if(STATE.currentStep<8){
+  if(STATE.currentStep<9){
     STATE.currentStep++;
     renderAll();
   }
@@ -2008,9 +2011,11 @@ function validateStep(i){
       if(!STATE.jaarverbruik||STATE.jaarverbruik<=0){alert('Jaarverbruik > 0 verplicht.');return false;}
       return true;
     case 3:
+      return true;  // v1.20.10: Laadplein — optioneel, geen validatie
+    case 4:
       if(STATE.pvKwp<0){alert('PV kWp kan niet negatief zijn.');return false;}
       return true;
-    case 4:
+    case 5:
       // v1.17 sessie 5b: bij Custom-modus moeten kw en kwh > 0 zijn.
       if(STATE.batterijId === 'CUSTOM'){
         var _bc = STATE.batterijCustom;
@@ -2024,14 +2029,14 @@ function validateStep(i){
         }
       }
       return true;  // batterij optioneel — Geen of Catalogus zonder selectie is OK
-    case 5:
-      return true;  // contract heeft defaults
     case 6:
+      return true;  // contract heeft defaults
+    case 7:
       if(!STATE.aansluitingKva||STATE.aansluitingKva<=0){
         alert('nsluitcapaciteit > 0 verplicht.');return false;
       }
       return true;
-    case 7:
+    case 8:
       if(STATE.jaar==='rolling12')return true;
       // v1.15 sessie 4: 'specifiek' is geldig zodra periodeVan/periodeTot zijn gezet
       // (gebeurt door factuur-apply via base-case-modal).
@@ -2062,12 +2067,13 @@ function renderStage(){
     case 0:s.appendChild(renderStep1Project());break;
     case 1:s.appendChild(renderStep2Locatie());break;
     case 2:s.appendChild(renderStep3Profiel());break;
-    case 3:s.appendChild(renderStep4PV());break;
-    case 4:s.appendChild(renderStep5Batterij());break;
-    case 5:s.appendChild(renderStep6Contract());break;
-    case 6:s.appendChild(renderStep7Aansluiting());break;
-    case 7:s.appendChild(renderStep8Periode());break;
-    case 8:s.appendChild(renderStep9Resultaat());break;
+    case 3:s.appendChild(renderStepLaadplein());break;
+    case 4:s.appendChild(renderStep4PV());break;
+    case 5:s.appendChild(renderStep5Batterij());break;
+    case 6:s.appendChild(renderStep6Contract());break;
+    case 7:s.appendChild(renderStep7Aansluiting());break;
+    case 8:s.appendChild(renderStep8Periode());break;
+    case 9:s.appendChild(renderStep9Resultaat());break;
   }
 }
 
@@ -2781,14 +2787,61 @@ function renderStep4PV(){
 
   box.appendChild(stratBox);
 
-  // v1.20.7: laadpleinen-sectie (flexibele EV-laadvraag).
-  box.appendChild(_renderLaadpleinenSectie());
+  // v1.20.10: laadplein-sectie is naar een eigen stap (vóór PV) verplaatst.
 
   // Toon strategie-sectie alleen als kWp > 0
   setTimeout(function(){
     updatePvHint();
     updatePvStrategieZichtbaar();
   },0);
+  return box;
+}
+
+// v1.20.10: auto-dimensionering. Vult PV en batterij VOORAF in op basis van het
+// laadplein (en de aansluiting), enkel als de verkoper ze nog niet zelf zette.
+// PV-productie ≈ jaarverbruik + laadplein-energie. Batterij = 2-uurs component:
+//   - met laadplein: kWh ≈ dagenergie boven de aansluiting, kW = kWh/2 (vloer = laadvermogen);
+//   - zonder laadplein: kW = toegangsvermogen, kWh = 2× (2 uur).
+// De simulator verfijnt dit nadien via de capaciteit-check (opstelling 2).
+function _autoDimensioneerAssets(){
+  var lpKwh=0, lpDpw=5, lpCap=0, vUren=10;
+  (STATE.laadpleinen||[]).forEach(function(p,idx){
+    lpKwh += (p.aantal||0)*(p.km_per_jaar||0)*(p.kwh_per_km||0);
+    lpDpw = Math.max(lpDpw, p.dagen_per_week||5);
+    (p.laadpunten||[]).forEach(function(x){ lpCap += (x.aantal||0)*(LAADPUNT_KW[x.type]||0); });
+    if(idx===0){ var vs=+p.venster_start||8, ve=+p.venster_eind||18; vUren=(ve<=vs)?((24-vs)+ve):(ve-vs); }
+  });
+  // PV-default (enkel als nog niet gezet)
+  if(!(STATE.pvKwp>0)){
+    var totKwh=(STATE.jaarverbruik||0)*1000 + lpKwh;
+    if(totKwh>0){ STATE.pvKwp=Math.round(totKwh/950); STATE.pvInjStrategie=STATE.pvInjStrategie||'geen'; }
+  }
+  // Batterij-default (enkel als nog geen batterij gekozen)
+  if(!STATE.batterijId){
+    var kw=0, kwh=0, aansl=+STATE.aansluitingKva||0;
+    if(lpKwh>0){
+      var eDag=lpKwh/(lpDpw*52);
+      var eBoven=Math.max(0, eDag - aansl*Math.max(0.25,vUren));  // energie die de aansluiting niet levert
+      kwh=Math.round(eBoven/0.90);
+      kw=Math.max(Math.round(kwh/2), 0);
+      kwh=2*kw;
+    }else if(aansl>0){
+      kw=Math.round(aansl); kwh=2*kw;
+    }
+    if(kw>0){
+      STATE.batterijId='CUSTOM';
+      STATE.batterijCustom={naam:'BESS3 voorstel '+kw+' kW / '+kwh+' kWh',kw:kw,kwh:kwh,dod_pct:90,rte_pct:92,max_cycli:8000,capex_eur:Math.round(kwh*350)};
+    }
+  }
+}
+
+// v1.20.10: Laadplein-stap (eigen stap, net vóór PV). Bevat enkel de
+// laadpleinen-sectie; de auto-dimensionering vult PV en batterij vooraf in.
+function renderStepLaadplein(){
+  var box=el('div',{class:'fdsim-stage'});
+  box.appendChild(el('h2',null,'Laadplein (EV)'));
+  box.appendChild(el('div',{class:'fdsim-help',style:'margin-bottom:8px'},'Definieer optioneel één of meer laadpleinen (elk = 1 voertuigtype). Op basis hiervan stellen we in de volgende stappen automatisch een PV- en batterijgrootte voor. Geen laadplein? Sla gerust over.'));
+  box.appendChild(_renderLaadpleinenSectie());
   return box;
 }
 
@@ -3917,6 +3970,41 @@ function _renderFactuurVergelijking(){
   return wrap;
 }
 
+// v1.20.10: assets (PV · batterij · laadplein) als tegels bovenaan het resultaat.
+function _renderAssetTegels(R){
+  var host=el('div',{class:'fdsim-kpis',style:'margin-bottom:16px'});
+  function tile(label,val,sub){
+    var k=el('div',{class:'fdsim-kpi'});
+    k.appendChild(el('div',{class:'fdsim-kpi-label'},label));
+    k.appendChild(el('div',{class:'fdsim-kpi-val'},val));
+    if(sub) k.appendChild(el('div',{class:'fdsim-kpi-sub'},sub));
+    return k;
+  }
+  // PV
+  var pvVal='Geen', pvSub='';
+  if(STATE.pvKwp>0){ pvVal=fmtNum(STATE.pvKwp,0)+' kWp'; pvSub='± '+fmtNum(STATE.pvKwp*950/1000,0)+' MWh/jaar'; }
+  host.appendChild(tile('PV', pvVal, pvSub));
+  // Batterij
+  var bKw=0,bKwh=0;
+  if(STATE.batterijId==='CUSTOM' && STATE.batterijCustom){ bKw=STATE.batterijCustom.kw||0; bKwh=STATE.batterijCustom.kwh||0; }
+  else if(STATE.batterijId && CACHE.batterijen){ var _b=CACHE.batterijen.find(function(x){return (x.id||x.naam)===STATE.batterijId;}); if(_b){bKw=_b.kw||0;bKwh=_b.kwh||0;} }
+  var bVal=(bKw>0||bKwh>0)?(fmtNum(bKw,0)+' kW / '+fmtNum(bKwh,0)+' kWh'):'Geen';
+  var bSub='';
+  if(bKw>0){ bSub=fmtNum(bKwh/bKw,1)+' u'; if(R.kpi&&R.kpi.cycli_verbruikt) bSub+=' · '+fmtNum(R.kpi.cycli_verbruikt,0)+' cycli'; }
+  host.appendChild(tile('Batterij', bVal, bSub));
+  // Laadplein — met korte definitie uit STATE.laadpleinen
+  var lpVal='Geen', lpSub='';
+  if(R.laadplein && R.laadplein.aantal_pleinen>0){
+    lpVal=fmtNum(R.laadplein.ev_last_mwh,1)+' MWh';
+    var _defs=(STATE.laadpleinen||[]).map(function(p){
+      return (p.aantal||0)+'× '+(p.voertuigtype||p.type||'wagen')+' · venster '+p.venster_start+'–'+p.venster_eind+'u · '+(p.dagen_per_week||5)+'d/w';
+    });
+    lpSub=_defs.length?_defs.join(' | '):(R.laadplein.aantal_pleinen+' plein(en) · '+fmtNum(R.laadplein.totaal_laadvermogen_kw,0)+' kW');
+  }
+  host.appendChild(tile('Laadplein (EV)', lpVal, lpSub));
+  return host;
+}
+
 // v1.20.4: meerwaarde-KPI-kaarten voor de 3 sturingen (geen / excl. onbalans /
 // incl. onbalans). Leest STATE.kpiSturing uit /api/nominatie-sim-3.
 // v1.20.8: laadplein-resultaat + capaciteits-advies (aansluiting verhogen vs batterij).
@@ -4049,6 +4137,11 @@ function renderStep9Resultaat(){
     var detBtn=el('button',{class:'fdsim-btn small',style:'background:#fff;color:#1F3864;border:1px solid #1F3864',onclick:function(){_toonFactuurDetailModal(STATE.baseCase);}},'📄 Alle factuurgegevens');
     detRow.appendChild(detBtn);
     box.appendChild(detRow);
+  }
+
+  // v1.20.10: assets (PV · batterij · laadplein) als tegels bovenaan.
+  if(!R.error){
+    box.appendChild(_renderAssetTegels(R));
   }
 
   // v1.20.4: meerwaarde-KPI's van de 3 sturingen bovenaan het resultaat.
@@ -4259,9 +4352,14 @@ function renderStep9Resultaat(){
   // v1.15.2: KPI €/MWh — bij specifiek-modus delen door werkelijke periode-volume
   // (= factuur-afname), niet door geprojecteerd jaarverbruik. Anders krijg je
   // de €/MWh van een vol-jaar-projectie wat misleidend is.
-  var _mwhVoorKpi = (STATE.jaar==='specifiek' && STATE.periodeVolumeMwh>0)
+  var _mwhGebouw = (STATE.jaar==='specifiek' && STATE.periodeVolumeMwh>0)
                     ? STATE.periodeVolumeMwh
                     : (STATE.jaarverbruik||1);
+  // v1.20.10: kost/MWh delen door het TOTALE verbruik = gebouw + laadplein-EV,
+  // niet enkel het gebouwverbruik. Anders lijkt de energie kunstmatig duur zodra
+  // er een laadplein bijkomt (grote noemer ontbreekt).
+  var _mwhLaadplein = (R.laadplein && R.laadplein.ev_last_mwh) || 0;
+  var _mwhVoorKpi = Math.max(1e-6, _mwhGebouw + _mwhLaadplein);
   var pmw=totaalKpi/_mwhVoorKpi;
   // v1.15 sessie 4: label-string voor KPI-context (factuurperiode i.p.v. ruwe 'specifiek')
   var _periodeKpi = STATE.jaar==='rolling12' ? 'rolling12' :
@@ -4300,8 +4398,11 @@ function renderStep9Resultaat(){
     var lpKleur, lpTitel, lpSub;
     if(verloren > 0){
       lpKleur = 'red';
-      lpTitel = 'LP rood';
-      lpSub = verloren + ' verloren dag' + (verloren===1?'':'en') + ' / ' + lpDiag.totaal_dagen;
+      lpTitel = 'Capaciteit ontoereikend';
+      // v1.20.10: duidelijker label. "Verloren dagen" = dagen waar de laadvraag
+      // (gebouw + laadplein) niet onder aansluiting + batterij paste, dus de
+      // slimme sturing viel weg. Actie: batterij vergroten of aansluiting verhogen.
+      lpSub = verloren + '/' + lpDiag.totaal_dagen + ' dagen: laadvraag past niet onder aansluiting + batterij';
       if(heeftMaandNiveau && verlorenM > 0){
         lpSub += ' (' + verlorenM + '/' + totaalM + ' maanden)';
       }
@@ -4514,10 +4615,10 @@ function renderStep9Resultaat(){
 //   SIMULATIE LANCEREN
 // ============================================================
 function runSimulatie(){
-  if(!validateStep(7))return;
+  if(!validateStep(8))return;
   STATE.isRunning=true;
-  STATE.currentStep=8;
-  STATE.visited[7]=true;
+  STATE.currentStep=9;
+  STATE.visited[8]=true;
   renderAll();
   setStatus('Simulatie loopt...','info');
 
@@ -4945,8 +5046,8 @@ function _navigeerNaarSc4(sc4Data){
   STATE.resultaat = null;
   STATE.isRunning = false;
   STATE.scenarioActie = 'staand';   // bestaand, want net bewaard
-  STATE.visited = [true,true,true,true,true,true,true,true,false];
-  STATE.currentStep = 7;   // stap 8 (= periode), klaar voor "Run simulatie"
+  STATE.visited = [true,true,true,true,true,true,true,true,true,false];
+  STATE.currentStep = 8;   // stap 9 (= periode), klaar voor "Run simulatie"
   renderAll();
   setStatus('Voorstel Sc4 geladen — start simulatie...','info');
   // Run-simulatie automatisch starten
