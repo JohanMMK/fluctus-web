@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.1</span>
+    <span class="fdsim-version">v1.21.2</span>
   </div>
 </div>
 
@@ -564,7 +564,7 @@ var API_BASE = 'https://lucid-amazement-production.up.railway.app';
 
 var STATE = {
   currentStep: 0,        // 0..9 (= 10 stappen)
-  visited: [false,false,false,false,false,false,false,false,false,false],
+  visited: [false,false,false,false,false,false,false,false,false,false,false],
   // Stap 1 — project & scenario
   project: '',
   scenario: '',
@@ -646,6 +646,7 @@ var STAP_NAMEN = [
   'Project',
   'Locatie',
   'Profiel',
+  'Factuuranalyse',
   'Laadplein',
   'PV',
   'Batterij',
@@ -836,10 +837,10 @@ function applyBaseCaseToWizard(baseCase,options){
   // ── WAARSCHUWING / INFO ──
   var aansluitOntbreekt=bc.aansluitVermogenKva==null;
   if(aansluitOntbreekt){
-    reasons.push({code:'W3',severity:'WAARSCHUWING',message:'Aansluitvermogen kon niet uit factuur worden afgeleid — vul handmatig in op stap 8.'});
+    reasons.push({code:'W3',severity:'WAARSCHUWING',message:'Aansluitvermogen kon niet uit factuur worden afgeleid — vul handmatig in op stap 9 (Aansluiting).'});
   }
   if(bc.spanningsniveau==null){
-    reasons.push({code:'W5',severity:'INFO',message:'Spanningsniveau niet bepaald — wordt afgeleid uit kVA op stap 8 (≥100 kW = MS).'});
+    reasons.push({code:'W5',severity:'INFO',message:'Spanningsniveau niet bepaald — wordt afgeleid uit kVA op stap 9 (≥100 kW = MS).'});
   }
   var cons=bc._consistentie||{};
   if(cons.status==='AFWIJKING'){
@@ -872,11 +873,12 @@ function applyBaseCaseToWizard(baseCase,options){
   var pvInjStrategie='geen';
   var kVA=aansluitOntbreekt?null:_bcRoundUp5(bc.aansluitVermogenKva);
   var profiel=null;
-  // gotoStep is 0-indexed. v1.20.10: +1 door de nieuwe Laadplein-stap (index 3).
-  // - aansluitVermogenKva ontbreekt → 7 = stap 8 (Aansluiting), verkoper vult kVA in
-  // - alles compleet → 8 = stap 9 (Periode), verkoper klikt "Run simulatie"
-  // We landen NOOIT op 9 (Resultaat) want die toont "nog geen resultaat" tot na run.
-  var gotoStep=aansluitOntbreekt?7:8;
+  // gotoStep is 0-indexed. v1.21.2: na een factuur-scan landen we op Profiel (index 2).
+  // Het profiel is nog niet gekozen (profiel=null); zodra de verkoper er één kiest en
+  // op "Volgende" klikt, volgt automatisch de Factuuranalyse-stap (index 3) met de
+  // maand- en jaarvergelijking. De aansluiting wordt later op de Aansluiting-stap
+  // (index 8 = stap 9) ingevuld indien ze uit de factuur ontbrak.
+  var gotoStep=2;
   var state={
     // Oude veldnamen (backwards-compat met sessie-3)
     project:project,scenario:scenario,postcode:postcode,gemeente:gemeente,
@@ -1935,16 +1937,16 @@ function renderSteps(){
     var b=el('button',{class:'fdsim-step'+(i===STATE.currentStep?' active':'')+(STATE.visited[i]?' done':''),onclick:function(){jumpToStep(i);}},(i+1)+'. '+naam);
     bar.appendChild(b);
   });
-  var ni=$('fdsim-navinfo');if(ni)ni.textContent='Stap '+(STATE.currentStep+1)+' / 10';
+  var ni=$('fdsim-navinfo');if(ni)ni.textContent='Stap '+(STATE.currentStep+1)+' / 11';
   var pb=$('fdsim-prev');if(pb)pb.disabled=STATE.currentStep===0;
   var next=$('fdsim-next');
   if(!next)return;
-  if(STATE.currentStep===8){
+  if(STATE.currentStep===9){
     next.textContent='Run simulatie ▶ ';
     next.disabled=false;
     next.classList.remove('ghost');
     next.classList.add('green');
-  }else if(STATE.currentStep===9){
+  }else if(STATE.currentStep===10){
     next.textContent='Klaar';
     next.disabled=true;
     next.classList.remove('green');
@@ -1967,13 +1969,13 @@ function jumpToStep(i){
 function nextStep(){
   if(!validateStep(STATE.currentStep))return;
   STATE.visited[STATE.currentStep]=true;
-  // v1.20.10: bij het verlaten van de Laadplein-stap PV + batterij vooraf invullen.
-  if(STATE.currentStep===3){ try{ _autoDimensioneerAssets(); }catch(e){ console.warn('auto-dim:',e); } }
-  if(STATE.currentStep===8){
+  // v1.20.10: bij het verlaten van de Laadplein-stap (nu index 4) PV + batterij vooraf invullen.
+  if(STATE.currentStep===4){ try{ _autoDimensioneerAssets(); }catch(e){ console.warn('auto-dim:',e); } }
+  if(STATE.currentStep===9){
     runSimulatie();
     return;
   }
-  if(STATE.currentStep<9){
+  if(STATE.currentStep<10){
     STATE.currentStep++;
     renderAll();
   }
@@ -2011,11 +2013,13 @@ function validateStep(i){
       if(!STATE.jaarverbruik||STATE.jaarverbruik<=0){alert('Jaarverbruik > 0 verplicht.');return false;}
       return true;
     case 3:
-      return true;  // v1.20.10: Laadplein — optioneel, geen validatie
+      return true;  // v1.21.2: Factuuranalyse — optioneel, geen validatie
     case 4:
+      return true;  // v1.20.10: Laadplein — optioneel, geen validatie
+    case 5:
       if(STATE.pvKwp<0){alert('PV kWp kan niet negatief zijn.');return false;}
       return true;
-    case 5:
+    case 6:
       // v1.17 sessie 5b: bij Custom-modus moeten kw en kwh > 0 zijn.
       if(STATE.batterijId === 'CUSTOM'){
         var _bc = STATE.batterijCustom;
@@ -2029,14 +2033,14 @@ function validateStep(i){
         }
       }
       return true;  // batterij optioneel — Geen of Catalogus zonder selectie is OK
-    case 6:
-      return true;  // contract heeft defaults
     case 7:
+      return true;  // contract heeft defaults
+    case 8:
       if(!STATE.aansluitingKva||STATE.aansluitingKva<=0){
         alert('nsluitcapaciteit > 0 verplicht.');return false;
       }
       return true;
-    case 8:
+    case 9:
       if(STATE.jaar==='rolling12')return true;
       // v1.15 sessie 4: 'specifiek' is geldig zodra periodeVan/periodeTot zijn gezet
       // (gebeurt door factuur-apply via base-case-modal).
@@ -2067,13 +2071,14 @@ function renderStage(){
     case 0:s.appendChild(renderStep1Project());break;
     case 1:s.appendChild(renderStep2Locatie());break;
     case 2:s.appendChild(renderStep3Profiel());break;
-    case 3:s.appendChild(renderStepLaadplein());break;
-    case 4:s.appendChild(renderStep4PV());break;
-    case 5:s.appendChild(renderStep5Batterij());break;
-    case 6:s.appendChild(renderStep6Contract());break;
-    case 7:s.appendChild(renderStep7Aansluiting());break;
-    case 8:s.appendChild(renderStep8Periode());break;
-    case 9:s.appendChild(renderStep9Resultaat());break;
+    case 3:s.appendChild(renderStepFactuuranalyse());break;
+    case 4:s.appendChild(renderStepLaadplein());break;
+    case 5:s.appendChild(renderStep4PV());break;
+    case 6:s.appendChild(renderStep5Batterij());break;
+    case 7:s.appendChild(renderStep6Contract());break;
+    case 8:s.appendChild(renderStep7Aansluiting());break;
+    case 9:s.appendChild(renderStep8Periode());break;
+    case 10:s.appendChild(renderStep9Resultaat());break;
   }
 }
 
@@ -2479,8 +2484,12 @@ function renderStep3Profiel(){
       log('Profielen load fail: '+e.message,'err');
     });
   }
-  // v1.20.13: onderhandelingsmarge-sectie (na scan + profielkeuze).
-  box.appendChild(_margeSectie());
+  // v1.21.2: de onderhandelingsmarge-analyse is verplaatst naar de eigen stap
+  // "Factuuranalyse" (volgende stap), met een échte energiesimulatie i.p.v. schatting.
+  if(STATE.baseCase && STATE.baseCase.totaalExclBtw>0){
+    box.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:14px;color:#05B050'},
+      '✓ Factuur ingelezen. Klik "Volgende" voor de Factuuranalyse: je maand- en jaarvergelijking op een scherp dynamisch tarief (gesimuleerd op je profiel × spotprijzen).'));
+  }
   return box;
 }
 
@@ -2514,9 +2523,25 @@ function _margeData(){
   var energie=bc.totaalEnergieExclBtw||0, distributie=bc.totaalDistributieExclBtw||0,
       capaciteit=bc.totaalCapaciteitExclBtw||0, heffingen=bc.totaalHeffingenExclBtw||0,
       subtot=bc.totaalExclBtw||(energie+distributie+heffingen);
-  var DYN_KORTING=0.12;  // indicatieve besparing op de energiecomponent bij dynamisch tarief
-  var energie_dyn=energie*(1-DYN_KORTING);
+  // v1.21.2: de dynamische energiepost komt uit een ECHTE simulatie (profiel × spot,
+  // GitHub-marktdata) via STATE.factuurSim. Zolang die (nog) niet gedraaid is, valt het
+  // terug op een indicatieve −12%-schatting.
+  var DYN_KORTING=0.12;
+  var _simE=_factuurSimEnergie();
+  var energie_dyn=(_simE!=null && _simE>0)?_simE:energie*(1-DYN_KORTING);
+  var energie_dyn_bron=(_simE!=null && _simE>0)?'simulatie':'schatting';
   var netto_overig=distributie+heffingen;  // distributie omvat capaciteit
+  // v1.21.1: alle NIET-energie-kosten worden verbatim van de factuur overgenomen en
+  // (op jaarbasis) geëxtrapoleerd — identiek in beide kolommen. Enkel de energiepost
+  // verschilt (huidig vs. dynamisch). De capaciteit wordt alléén apart getoond als de
+  // scan ze kon afsplitsen; anders één nette netbeheer-regel (geen misleidende € 0).
+  var _netItems=(capaciteit>0)
+    ? [['Capaciteit / maandpiek',capaciteit],['Distributie (overig)',distributie-capaciteit]]
+    : [['Netbeheer (distributie + capaciteit)',distributie]];
+  var _netPosten=[
+    {grp:'Netkosten (distributie + transport)', items:_netItems},
+    {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
+  ];
   var _dagen=_periodeDagen(bc.periodeVan,bc.periodeTot)||30;
   var factor=365/_dagen;
   var ean=(Array.isArray(bc.eanNrs)&&bc.eanNrs.length)?bc.eanNrs[0]:(bc.eanNrs||'—');
@@ -2536,17 +2561,15 @@ function _margeData(){
     leverancier:bc.leverancier||'', ean:ean,
     periode_van:bc.periodeVan||'', periode_tot:bc.periodeTot||'', periode_dagen:_dagen,
     scan:scan, btw_pct:21,
+    energie_bron:energie_dyn_bron,   // 'simulatie' (profiel × spot) of 'schatting' (−12%)
+    factuurSimProfielen:(STATE.factuurSimJaar&&STATE.factuurSimJaar.profielen)||(STATE.factuurSim&&STATE.factuurSim.profielen)||null,
     maand:{
-      bestaand:{ label:'Huidig contract', posten:[
-        {grp:'Energie (commodity)', items:[['Afname energie',energie]]},
-        {grp:'Netkosten (distributie + transport)', items:[['Capaciteit / maandpiek',capaciteit],['Distributie (overig)',distributie-capaciteit]]},
-        {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
-      ], subtotaal:subtot },
-      dynamisch:{ label:'Scherp dynamisch contract', posten:[
-        {grp:'Energie (commodity)', items:[['Afname energie (dynamisch, indicatief)',energie_dyn]]},
-        {grp:'Netkosten (distributie + transport)', items:[['Capaciteit / maandpiek',capaciteit],['Distributie (overig)',distributie-capaciteit]]},
-        {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
-      ], subtotaal:energie_dyn+netto_overig }
+      bestaand:{ label:'Huidig contract',
+        posten:[{grp:'Energie (commodity)', items:[['Afname energie',energie]]}].concat(_netPosten),
+        subtotaal:subtot },
+      dynamisch:{ label:'Scherp dynamisch contract',
+        posten:[{grp:'Energie (commodity)', items:[['Afname energie (dynamisch, '+(energie_dyn_bron==='simulatie'?'gesimuleerd op spot':'indicatief')+')',energie_dyn]]}].concat(_netPosten),
+        subtotaal:energie_dyn+netto_overig }
     },
     extrapolatie_factor:factor,
     jaar:{
@@ -2678,7 +2701,7 @@ function _financieelRapportData(){
   };
 }
 function _openFinancieelRapport(){
-  if(!_financieelRapportBeschikbaar()){ alert('Draai eerst een simulatie (stap 8) — dan kan het financieel rapport worden opgebouwd.'); return; }
+  if(!_financieelRapportBeschikbaar()){ alert('Draai eerst een simulatie (stap 10) — dan kan het financieel rapport worden opgebouwd.'); return; }
   try{ sessionStorage.setItem('FLUCTUS_RAPPORT', JSON.stringify(_financieelRapportData())); }catch(e){}
   window.open('/apps/financieel-rapport.html','_blank');
 }
@@ -3554,7 +3577,7 @@ function renderStep7Aansluiting(){
   box.appendChild(el('h3',{style:'margin-top:18px;margin-bottom:6px;color:#1F3864'},'B. Injectie (fysiek)'));
   box.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:8px'},
     'De maximale injectie wordt fysiek bepaald door de som van de inverter-vermogens (PV-omvormer + BESS-omvormer). ' +
-    'Laat op 0 staan voor automatische berekening op basis van stap 4 (PV) en stap 5 (BESS).'));
+    'Laat op 0 staan voor automatische berekening op basis van stap 6 (PV) en stap 7 (BESS).'));
   var gridB = el('div',{class:'fdsim-grid2'});
   var injBox = el('div',{class:'fdsim-row col'});
   injBox.appendChild(el('label',{class:'fdsim-label'},'Max injectie (kW)'));
@@ -4325,7 +4348,7 @@ function renderStep9Resultaat(){
   }
 
   if(!STATE.resultaat){
-    box.appendChild(el('div',{class:'fdsim-help'},'Nog geen resultaat. Ga terug naar stap 8 en klik "Run simulatie".'));
+    box.appendChild(el('div',{class:'fdsim-help'},'Nog geen resultaat. Ga terug naar stap 10 (Periode) en klik "Run simulatie".'));
     return box;
   }
 
@@ -4840,11 +4863,123 @@ function _gecontracteerdToegangsvermogenKw(){
   var v=br.toegangsvermogenKw || br.maandpiekKw || bc.toegangsvermogenKw || 0;
   return (v>0)?v:0;
 }
+
+// ============================================================
+//   FACTUURANALYSE — echte energiesimulatie (profiel × spot)  [v1.21.2]
+// ============================================================
+// Bouwt een KALE sim-input: gekozen profiel + verbruik uit de factuur op een
+// dynamisch spot-tarief, ZONDER pv/batterij/laadplein. De energiepost komt zo uit
+// de werkelijke spotprijzen (GitHub-marktdata) × het profiel. Alle overige kosten
+// worden in de vergelijking verbatim van de factuur overgenomen.
+//   mode 'specifiek' → invoice-periode (exacte maand); 'rolling12' → vol jaar (heatmap)
+function _bareSimInput(mode){
+  var periode=getPeriodeRange();
+  var specifiek=(mode!=='rolling12') && STATE.jaar==='specifiek' && STATE.periodeVan && STATE.periodeTot;
+  var verbruik=specifiek ? (STATE.periodeVolumeMwh||STATE.jaarverbruik) : STATE.jaarverbruik;
+  return {
+    project:STATE.project, scenario:(STATE.scenario||'sc')+'_factuuranalyse',
+    postcode:STATE.postcode, grd:STATE.grd, spanning:STATE.spanning,
+    profielNaam:STATE.profielNaam, jaarverbruik_mwh:verbruik,
+    pv_kwp:0, pv_curtailment:{actief:false}, bsp:{actief:false},
+    batterijId:null, batterijCustom:null, laadpleinen:[],
+    contract:{ leverancier:STATE.leverancier||'Enwyse', modus:'passthrough',
+      staffel:STATE.contractStaffel||[], vergroening_eur_per_mwh:STATE.contractVergroening,
+      vaste_kost_eur_maand:STATE.contractVastMaand, injectie_toegelaten:true, gsc_eur_mwh:0, wkk_eur_mwh:0 },
+    aansluiting_kva:STATE.aansluitingKva||100,
+    toegangsvermogen_kw:_gecontracteerdToegangsvermogenKw(),
+    max_injectie_kw:0, jaar: specifiek?'specifiek':'rolling12',
+    periodeVan: specifiek?STATE.periodeVan:null, periodeTot: specifiek?STATE.periodeTot:null,
+    simulatieperiode:{ van:periode.van, tot:periode.tot, type: specifiek?'specifiek':'kalenderjaar' }
+  };
+}
+function _factuurSimEnergie(){
+  var s=STATE.factuurSim; if(!s) return null;
+  var jf=s.jaarfactuur||s.factuur||{}, gr=jf.groepen||{};
+  var A=gr.A_energiekost||gr.A||{};
+  return (A._subtotaal!=null)?(+A._subtotaal||0):null;
+}
+function _runFactuurAnalyse(mode, cb){
+  var key=(mode==='rolling12')?'factuurSimJaar':'factuurSim';
+  if(mode!=='rolling12'){ STATE._factuurAnalyseBezig=true; STATE._factuurAnalyseFout=null; }
+  apiPost('/api/nominatie-sim', _bareSimInput(mode)).then(function(r){
+    STATE[key]=r;
+    if(mode!=='rolling12'){ STATE._factuurAnalyseBezig=false; }
+    if(cb){ cb(r); } else if(mode!=='rolling12'){ renderAll(); }
+  }).catch(function(e){
+    if(mode!=='rolling12'){ STATE._factuurAnalyseBezig=false; STATE._factuurAnalyseFout=e.message; renderAll(); }
+    if(cb)cb(null);
+  });
+}
+function _vglTabelSubtotaal(titel, best, dyn){
+  var marge=best.subtotaal-dyn.subtotaal;
+  var sec=el('div',{class:'fdsim-section',style:'margin-top:10px'});
+  sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:6px'},titel));
+  var t=el('table',{style:'width:100%;font-size:13px;border-collapse:collapse'});
+  t.innerHTML='<tr style="color:#666"><th style="text-align:left;padding:3px 0">&nbsp;</th>'+
+    '<th style="text-align:right;padding:3px 8px">Huidig contract</th>'+
+    '<th style="text-align:right;padding:3px 0">Scherp dynamisch</th></tr>'+
+    '<tr><td style="padding:3px 0">Subtotaal (excl. btw)</td>'+
+    '<td style="text-align:right;padding:3px 8px">'+_eurM(best.subtotaal)+'</td>'+
+    '<td style="text-align:right;padding:3px 0;color:#05B050;font-weight:700">'+_eurM(dyn.subtotaal)+'</td></tr>'+
+    '<tr><td style="padding:3px 0;color:#05B050">Marge</td>'+
+    '<td></td><td style="text-align:right;padding:3px 0;color:#05B050;font-weight:700">'+_eurM(marge)+'</td></tr>';
+  sec.appendChild(t);
+  return sec;
+}
+function renderStepFactuuranalyse(){
+  var box=el('div');
+  box.appendChild(el('h2',null,'Factuuranalyse'));
+  var bc=STATE.baseCase;
+  if(!bc || !(bc.totaalExclBtw>0)){
+    box.appendChild(el('div',{class:'fdsim-help'},'Laad eerst een factuur op (stap 1). Dan simuleren we hier je verbruik op een scherp dynamisch tarief en tonen we de maand- en jaarvergelijking.'));
+    return box;
+  }
+  if(!STATE.profielNaam){
+    box.appendChild(el('div',{class:'fdsim-help'},'Kies eerst een profiel op de vorige stap (Profiel). Daarna simuleren we hier de energiepost op de werkelijke spotprijzen.'));
+    return box;
+  }
+  box.appendChild(el('div',{class:'fdsim-help'},'Zelfde verbruik, ander contract: we simuleren je factuur op een scherp dynamisch tarief met je gekozen profiel en de werkelijke spotprijzen (GitHub-marktdata). Alle kosten buiten energie nemen we verbatim over van je factuur.'));
+  if(!STATE.factuurSim && !STATE._factuurAnalyseBezig && !STATE._factuurAnalyseFout){
+    _runFactuurAnalyse('specifiek', function(r){
+      // achtergrond: vol jaar voor de 12-maand-heatmap in het rapport
+      if(r && !STATE.factuurSimJaar){ _runFactuurAnalyse('rolling12'); }
+      renderAll();
+    });
+  }
+  if(STATE._factuurAnalyseBezig){
+    box.appendChild(el('div',{style:'text-align:center;padding:30px 0'},[
+      el('div',{class:'fdsim-spin'}),
+      el('span',{style:'margin-left:10px;color:#1F3864'},'Energiesimulatie loopt (profiel × spot)…')]));
+    return box;
+  }
+  if(STATE._factuurAnalyseFout){
+    box.appendChild(el('div',{class:'fdsim-section',style:'background:#FEE;border-color:#C00;color:#900'},'Simulatie mislukt: '+STATE._factuurAnalyseFout));
+    var rt=el('button',{class:'fdsim-btn small'},'Opnieuw proberen');
+    rt.onclick=function(){ STATE._factuurAnalyseFout=null; renderAll(); };
+    box.appendChild(rt);
+    return box;
+  }
+  var d=_margeData();
+  var margeJ=d.jaar.bestaand.subtotaal-d.jaar.dynamisch.subtotaal;
+  var margeM=d.maand.bestaand.subtotaal-d.maand.dynamisch.subtotaal;
+  var kpis=el('div',{class:'fdsim-kpis',style:'margin:12px 0'});
+  function kpi(l,v,s){ var k=el('div',{class:'fdsim-kpi'}); k.appendChild(el('div',{class:'fdsim-kpi-label'},l)); k.appendChild(el('div',{class:'fdsim-kpi-val'},v)); if(s)k.appendChild(el('div',{class:'fdsim-kpi-sub'},s)); return k; }
+  kpis.appendChild(kpi('Marge / maand',_eurM(margeM),'op deze factuurperiode'));
+  kpis.appendChild(kpi('Marge / jaar',_eurM(margeJ),'geëxtrapoleerd'));
+  kpis.appendChild(kpi('Energie nu → dynamisch',_eurM(d.maand.bestaand.posten[0].items[0][1])+' → '+_eurM(d.maand.dynamisch.posten[0].items[0][1]),'enkel de energiepost verandert'));
+  box.appendChild(kpis);
+  box.appendChild(_vglTabelSubtotaal('Maandvergelijking ('+(bc.periodeVan||'?')+' – '+(bc.periodeTot||'?')+')', d.maand.bestaand, d.maand.dynamisch));
+  box.appendChild(_vglTabelSubtotaal('Jaarvergelijking (extrapolatie ×'+new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(d.extrapolatie_factor)+')', d.jaar.bestaand, d.jaar.dynamisch));
+  var btn=el('button',{class:'fdsim-btn green',style:'margin-top:12px'},'📄 Onderhandelingsmarge-rapport openen');
+  btn.onclick=function(){ _openFactuurrapport(); };
+  box.appendChild(btn);
+  return box;
+}
 function runSimulatie(){
-  if(!validateStep(8))return;
+  if(!validateStep(9))return;
   STATE.isRunning=true;
-  STATE.currentStep=9;
-  STATE.visited[8]=true;
+  STATE.currentStep=10;
+  STATE.visited[9]=true;
   renderAll();
   setStatus('Simulatie loopt...','info');
 
@@ -5276,8 +5411,8 @@ function _navigeerNaarSc4(sc4Data){
   STATE.resultaat = null;
   STATE.isRunning = false;
   STATE.scenarioActie = 'staand';   // bestaand, want net bewaard
-  STATE.visited = [true,true,true,true,true,true,true,true,true,false];
-  STATE.currentStep = 8;   // stap 9 (= periode), klaar voor "Run simulatie"
+  STATE.visited = [true,true,true,true,true,true,true,true,true,true,false];
+  STATE.currentStep = 9;   // Periode (index 9), klaar voor "Run simulatie"
   renderAll();
   setStatus('Voorstel Sc4 geladen — start simulatie...','info');
   // Run-simulatie automatisch starten

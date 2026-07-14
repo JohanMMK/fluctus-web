@@ -246,6 +246,34 @@ pagina(5, `
   <div class="box groen"><b>Onderhandelingsmarge: ${eur(marge_jaar)}/jaar</b> (−${new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(marge_pct)}%). Gebruik dit cijfer om samen met uw leverancier een <b>beter contract</b> te vinden — bij een partner waar u zich goed bij voelt. En dit is nog vóór PV, batterij of slimme sturing: die komen in het uitgebreide ontwerprapport.</div>
   <p class="note">Extrapolatie op basis van uw maandfactuur × seizoensprofiel. De vier facturen (maand bestaand/dynamisch, jaar bestaand/dynamisch) dragen een vaste benaming die in het uitgebreide rapport terugkomt.</p>
 `);
+
+// ==================== PAGINA 6 — 12-MAAND HEATMAP (factuursimulatie) ====================
+(function(){
+  var pr=D.factuurSimProfielen;
+  var vals=pr && (pr.kost_eur_mwh || pr.spot_prijs_eur_mwh);
+  if(!pr || !Array.isArray(vals) || vals.length<96) return;
+  var bron = pr.kost_eur_mwh ? 'all-in energiekost (€/MWh)' : 'spotprijs (€/MWh)';
+  pagina(6, `
+    <div class="eyebrow">Factuursimulatie · dynamisch tarief</div>
+    <h2>Uw verbruik × de spotprijzen — 12 maanden</h2>
+    <p class="lead">Elke kolom is een dag, elke rij een uur van de dag. De kleur toont de ${bron} die u op een dynamisch tarief zou betalen — zo ziet u wanneer energie duur (rood) en goedkoop (blauw) was.</p>
+    <div style="text-align:center;margin:12px 0"><canvas id="fs-heat" width="720" height="240" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>
+    <div id="fs-heat-legend" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:11px;color:var(--grijs)"></div>
+    <p class="note">Berekend op uw gekozen verbruiksprofiel × de werkelijke day-ahead spotprijzen (marktdata). Dit is de basis van de energiepost in de dynamische factuur op de vorige pagina's — geen schatting, maar een echte simulatie.</p>
+  `);
+  setTimeout(function(){ tekenFactuurHeat(vals); }, 30);
+})();
+function tekenFactuurHeat(vals){
+  var cv=document.getElementById('fs-heat'); if(!cv) return;
+  var ctx=cv.getContext('2d'), W=cv.width, H=cv.height, perDag=96;
+  var dagen=Math.floor(vals.length/perDag), uren=24, grid=[], mn=1e9, mx=-1e9;
+  for(var d=0; d<dagen; d++){ grid[d]=[]; for(var u=0; u<uren; u++){ var s=0,c=0; for(var q=0;q<4;q++){ var idx=d*perDag+u*4+q; if(idx<vals.length){ s+=vals[idx]; c++; } } var v=c?s/c:0; grid[d][u]=v; if(v<mn)mn=v; if(v>mx)mx=v; } }
+  var cw=W/dagen, ch=H/uren;
+  function kleur(t){ t=Math.max(0,Math.min(1,t)); var r,g,b; if(t<0.5){ var k=t/0.5; r=Math.round(30+k*225); g=Math.round(90+k*165); b=Math.round(200-k*160); } else { var k2=(t-0.5)/0.5; r=255; g=Math.round(255-k2*200); b=Math.round(40-k2*40); } return 'rgb('+r+','+g+','+b+')'; }
+  for(var d2=0; d2<dagen; d2++){ for(var u2=0; u2<uren; u2++){ var t=(mx>mn)?(grid[d2][u2]-mn)/(mx-mn):0.5; ctx.fillStyle=kleur(t); ctx.fillRect(d2*cw, u2*ch, Math.ceil(cw), Math.ceil(ch)); } }
+  var lg=document.getElementById('fs-heat-legend');
+  if(lg){ lg.innerHTML='<span>'+Math.round(mn)+' €/MWh</span>'; var bar=document.createElement('span'); bar.style.cssText='display:inline-block;width:160px;height:10px;border-radius:3px;background:linear-gradient(to right,rgb(30,90,200),rgb(255,255,40),rgb(255,55,0))'; lg.appendChild(bar); var hi=document.createElement('span'); hi.textContent=Math.round(mx)+' €/MWh'; lg.appendChild(hi); }
+}
 </script>
 </body>
 </html>
