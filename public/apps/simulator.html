@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.20.11</span>
+    <span class="fdsim-version">v1.21.0</span>
   </div>
 </div>
 
@@ -2479,7 +2479,208 @@ function renderStep3Profiel(){
       log('Profielen load fail: '+e.message,'err');
     });
   }
+  // v1.20.13: onderhandelingsmarge-sectie (na scan + profielkeuze).
+  box.appendChild(_margeSectie());
   return box;
+}
+
+// v1.20.13: toont, zodra er een factuurscan (base case) is, de 4-factuur-
+// vergelijking + knop naar het onderhandelingsmarge-rapport. Zo wordt alles
+// automatisch geïdentificeerd zonder handmatige config.
+function _margeSectie(){
+  var sec=el('div',{class:'fdsim-section',style:'margin-top:16px'});
+  sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:6px'},'Onderhandelingsmarge (factuurrapport)'));
+  var bc=STATE.baseCase;
+  if(!bc || !(bc.totaalExclBtw>0)){
+    sec.appendChild(el('div',{class:'fdsim-hint'},'Laad een factuur op (stap 1) en kies een profiel om je onderhandelingsmarge te berekenen en er een rapport van te maken.'));
+    return sec;
+  }
+  var d=_margeData();
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:8px'},
+    'Zelfde verbruik, ander contract: je factuur op een scherp dynamisch tarief. Maand '+_eurM(d.maand.bestaand.subtotaal)+' → '+_eurM(d.maand.dynamisch.subtotaal)+' · op jaarbasis '+_eurM(d.jaar.bestaand.subtotaal)+' → '+_eurM(d.jaar.dynamisch.subtotaal)+'.'));
+  var margeJ=d.jaar.bestaand.subtotaal-d.jaar.dynamisch.subtotaal;
+  var kaart=el('div',{style:'background:#05B0500f;border:1px solid #05B05040;border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px'});
+  kaart.innerHTML='<b>Geschatte onderhandelingsmarge: '+_eurM(margeJ)+'/jaar</b> — indicatief (energiecomponent op dynamisch tarief). Het definitieve cijfer volgt uit de simulatie.';
+  sec.appendChild(kaart);
+  var btn=el('button',{class:'fdsim-btn green'},'📄 Onderhandelingsmarge-rapport openen');
+  btn.onclick=function(){ _openFactuurrapport(); };
+  sec.appendChild(btn);
+  return sec;
+}
+function _eurM(v){ return '€ '+new Intl.NumberFormat('nl-BE',{maximumFractionDigits:0}).format(Math.round(v)); }
+// Bouw de FLUCTUS_FACTUURRAPPORT_DATA uit de base case (scan) + dynamische schatting.
+function _margeData(){
+  var bc=STATE.baseCase||{};
+  var energie=bc.totaalEnergieExclBtw||0, distributie=bc.totaalDistributieExclBtw||0,
+      capaciteit=bc.totaalCapaciteitExclBtw||0, heffingen=bc.totaalHeffingenExclBtw||0,
+      subtot=bc.totaalExclBtw||(energie+distributie+heffingen);
+  var DYN_KORTING=0.12;  // indicatieve besparing op de energiecomponent bij dynamisch tarief
+  var energie_dyn=energie*(1-DYN_KORTING);
+  var netto_overig=distributie+heffingen;  // distributie omvat capaciteit
+  var _dagen=_periodeDagen(bc.periodeVan,bc.periodeTot)||30;
+  var factor=365/_dagen;
+  var ean=(Array.isArray(bc.eanNrs)&&bc.eanNrs.length)?bc.eanNrs[0]:(bc.eanNrs||'—');
+  var scan={
+    'Factuurnummer':bc.factuurNummer||'—','Klant / BTW':(bc.klantNaam||'—')+' · '+(bc.klantBtw||'—'),
+    'Leveringsadres':bc.leveringsadres||bc.klantAdres||'—','EAN afname':ean,
+    'Netbeheerder':bc.dnb||STATE.grd||'—','Spanningsniveau':(STATE.spanning==='MS'?'Middenspanning (MS)':'Laagspanning (LS)'),
+    'Aansluitvermogen':(bc.aansluitVermogenKva||STATE.aansluitingKva||'—')+' kVA',
+    'Factuurperiode':(bc.periodeVan||'?')+' – '+(bc.periodeTot||'?')+' ('+_dagen+' dagen)',
+    'Afname (kWh)':new Intl.NumberFormat('nl-BE').format(bc.afnameKwh||0),
+    'Injectie (kWh)':new Intl.NumberFormat('nl-BE').format(bc.injectieKwh||0),
+    'Leverancier':bc.leverancier||'—','Contractformule':bc.leverancierTariefformule||'—'
+  };
+  return {
+    klant:bc.klantNaam||STATE.klantNaam||'', locatie:(STATE.postcode||'')+' '+(bc.dnb||STATE.grd||''),
+    datum:new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}),
+    leverancier:bc.leverancier||'', ean:ean,
+    periode_van:bc.periodeVan||'', periode_tot:bc.periodeTot||'', periode_dagen:_dagen,
+    scan:scan, btw_pct:21,
+    maand:{
+      bestaand:{ label:'Huidig contract', posten:[
+        {grp:'Energie (commodity)', items:[['Afname energie',energie]]},
+        {grp:'Netkosten (distributie + transport)', items:[['Capaciteit / maandpiek',capaciteit],['Distributie (overig)',distributie-capaciteit]]},
+        {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
+      ], subtotaal:subtot },
+      dynamisch:{ label:'Scherp dynamisch contract', posten:[
+        {grp:'Energie (commodity)', items:[['Afname energie (dynamisch, indicatief)',energie_dyn]]},
+        {grp:'Netkosten (distributie + transport)', items:[['Capaciteit / maandpiek',capaciteit],['Distributie (overig)',distributie-capaciteit]]},
+        {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
+      ], subtotaal:energie_dyn+netto_overig }
+    },
+    extrapolatie_factor:factor,
+    jaar:{
+      bestaand:{ label:'Huidig contract — jaar', subtotaal:subtot*factor },
+      dynamisch:{ label:'Scherp dynamisch — jaar', subtotaal:(energie_dyn+netto_overig)*factor }
+    }
+  };
+}
+function _periodeDagen(v,t){ try{ var a=_parseBEdate(v),b=_parseBEdate(t); if(a&&b) return Math.max(1,Math.round((b-a)/86400000)+1);}catch(e){} return null; }
+function _parseBEdate(s){ if(!s)return null; var m=String(s).match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/); if(m)return new Date(+m[3],+m[2]-1,+m[1]); var d=new Date(s); return isNaN(d)?null:d; }
+function _openFactuurrapport(){
+  try{ sessionStorage.setItem('FLUCTUS_FACTUURRAPPORT', JSON.stringify(_margeData())); }catch(e){}
+  window.open('/apps/factuurrapport.html','_blank');
+}
+
+// ============================================================
+//   FINANCIEEL RAPPORT — client-side data-opbouw
+//   Port van rapport_generator.bouw_inv → INV voor fluctus-financieel-rapport.
+//   beter  = voorstel PV+batterij+laadplein, variant 2 (sturing)
+//   minder = basis: aansluiting verhoogd, geen batterij, variant 2
+//   windfall = variant 3 (onbalans) − variant 2 op het betere ontwerp
+// ============================================================
+function _frR1(v){ return Math.round((v||0)*10)/10; }
+function _frComp(sim){
+  var jf=(sim&&(sim.jaarfactuur||sim.factuur))||{}, gr=jf.groepen||{};
+  function g(o,k){ o=o||{}; return (o[k]!=null)?(+o[k]||0):0; }
+  var A=g(gr.A_energiekost||gr.A,'_subtotaal'), B=g(gr.B_netgebruik_afname||gr.B,'_subtotaal'),
+      C=g(gr.C_netgebruik_injectie||gr.C,'_subtotaal'), D=g(gr.D_transport||gr.D,'_subtotaal'),
+      E=g(gr.E_heffingen||gr.E,'_subtotaal');
+  var Bd=gr.B_netgebruik_afname||{}, Dd=gr.D_transport||{};
+  var cap=g(Bd,'toegangsvermogen')+g(Bd,'maandpiek')+g(Bd,'overschrijding_toegangsvermogen')
+         +g(Dd,'beschikbaar_vermogen')+g(Dd,'maandpiek_transport')+g(Dd,'jaarpiek_transport');
+  return { energie:A, distributie:B+C+D, capaciteit:cap, heffingen:E,
+           subtotaal:(+jf.subtotaal_excl_btw||0) };
+}
+function _frEnergie(sim,factor){
+  var kpi=(sim&&sim.kpi)||{}, lp=(sim&&sim.laadplein)||{}, jf=(sim&&(sim.jaarfactuur||sim.factuur))||{};
+  var f=factor||1;
+  var pvZelf=(kpi.pv_naar_eigen_verbruik_mwh!=null)?kpi.pv_naar_eigen_verbruik_mwh:((kpi.totaal_pv_mwh||0)*(kpi.pct_zelfconsumptie||0)/100);
+  return {
+    jaarverbruik_gebouw_mwh:_frR1((STATE.jaarverbruik||0)),
+    laadplein_mwh:_frR1((lp.ev_last_mwh||0)*f),
+    pv_productie_mwh:_frR1((kpi.totaal_pv_mwh||0)*f), pv_zelfverbruik_mwh:_frR1(pvZelf*f),
+    pv_via_batterij_mwh:_frR1((kpi.pv_via_batterij_mwh||0)*f), pv_naar_gebouw_mwh:_frR1((kpi.pv_naar_gebouw_mwh||0)*f),
+    pv_naar_laadplein_mwh:_frR1((kpi.pv_naar_laadplein_mwh||0)*f), batterij_doorzet_mwh:_frR1((kpi.energie_ontladen_mwh||0)*f),
+    aansluiting_kw:Math.round(jf.toegangsvermogen_kw||0),
+    sitepiek_zonder_batterij_kw:Math.round((lp.capaciteit&&lp.capaciteit.benodigd_toegangsvermogen_kw)||jf.jaarpiek_afname_kw||0),
+    sitepiek_met_batterij_kw:Math.round(jf.jaarpiek_afname_kw||0),
+    spot_afname_mwh:_frR1((kpi.totaal_afname_mwh||0)*f), spot_injectie_mwh:_frR1(((kpi.totaal_pv_mwh||0)-pvZelf)*f)
+  };
+}
+function _frBatterij(){
+  var kw=0,kwh=0;
+  if(STATE.batterijId==='CUSTOM' && STATE.batterijCustom){ kw=STATE.batterijCustom.kw||0; kwh=STATE.batterijCustom.kwh||0; }
+  else if(STATE.batterijId && CACHE.batterijen){ var b=CACHE.batterijen.find(function(x){return (x.id||x.naam)===STATE.batterijId;}); if(b){kw=b.kw||0;kwh=b.kwh||0;} }
+  return {kw:kw,kwh:kwh};
+}
+function _frLaadpalen(){
+  var lp={ac:0,dc160:0,dc400:0};
+  (STATE.laadpleinen||[]).forEach(function(p){ (p.laadpunten||[]).forEach(function(x){
+    if(x.type==='AC22') lp.ac+=x.aantal||0;
+    else if(x.type==='DC160') lp.dc160+=x.aantal||0;
+    else if(x.type==='DC300'||x.type==='DC400') lp.dc400+=x.aantal||0;
+  }); });
+  return lp;
+}
+function _financieelRapportBeschikbaar(){
+  var V=STATE.resultaatVarianten||{};
+  return !!((STATE.opstellingen&&(STATE.opstellingen.batterij||STATE.opstellingen.verhogen))||V.sturing||STATE.resultaat);
+}
+function _financieelRapportData(){
+  var beter=null, minder=null, betterOnb=null;
+  if(STATE.opstellingen){
+    var bat=STATE.opstellingen.batterij||{}, verh=STATE.opstellingen.verhogen||{};
+    beter=(bat.varianten&&bat.varianten.sturing)||null;
+    minder=(verh.varianten&&verh.varianten.sturing)||null;
+    betterOnb=(bat.varianten&&bat.varianten.onbalans)||null;
+  }
+  var V=STATE.resultaatVarianten||{};
+  if(!beter) beter=V.sturing||STATE.resultaat;
+  if(!minder) minder=V.geen||beter;
+  if(!betterOnb) betterOnb=V.onbalans||null;
+
+  // annualisatie-factor: sim in 'specifiek'-modus geeft periode-bedragen
+  var factor=1, _dg=null;
+  if(STATE.jaar==='specifiek'){ _dg=_periodeDagen((STATE.baseCase||{}).periodeVan,(STATE.baseCase||{}).periodeTot); if(_dg) factor=365/_dg; }
+  function annC(c){ return { energie:Math.round(c.energie*factor), distributie:Math.round(c.distributie*factor),
+    capaciteit:Math.round(c.capaciteit*factor), heffingen:Math.round(c.heffingen*factor), subtotaal:Math.round(c.subtotaal*factor) }; }
+  var cB=annC(_frComp(beter)), cM=annC(_frComp(minder));
+  var windfall=0; if(betterOnb){ var cO=annC(_frComp(betterOnb)); windfall=cB.subtotaal-cO.subtotaal; }
+
+  var bt=_frBatterij();
+  var cycliJaar=Math.round((beter&&beter.kpi&&beter.kpi.cycli_verbruikt)||0)||500;
+
+  // facturen uit de scan (indien base case), anders uit het minder-scenario
+  var bc=STATE.baseCase||{};
+  var m=(bc.totaalExclBtw>0)?_margeData():null;
+  var bestaandJaar = m?Math.round(m.jaar.bestaand.subtotaal):cM.subtotaal;
+  var scherpDynJaar= m?Math.round(m.jaar.dynamisch.subtotaal):cM.subtotaal;
+  var afrekBedrag  = m?Math.round(m.maand.bestaand.subtotaal):Math.round(bc.totaalExclBtw||0);
+  var afrekMnd     = (m&&m.periode_dagen)?Math.max(1,Math.round(m.periode_dagen/30.4)):1;
+
+  return {
+    klant:bc.klantNaam||STATE.klantNaam||'', locatie:(STATE.postcode||'')+' · '+(bc.dnb||STATE.grd||'')+' · '+(STATE.spanning||'LS'),
+    datum:new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}),
+    profielen:(beter&&beter.profielen)||null,
+    ontwerp:{
+      pv_kwp:STATE.pvKwp||0, batterij_kw:bt.kw, batterij_kwh:bt.kwh,
+      laadpalen:_frLaadpalen(),
+      batterij_cycli_jaar:cycliJaar, batterij_max_cycli:8000,
+      contract:'Dynamisch (spot)', sturing:'Variant 2 (arbitrage, excl. onbalans)'
+    },
+    energie:_frEnergie(beter,factor),
+    facturen:{
+      afrekening_periode_mnd:afrekMnd, afrekening_bedrag:afrekBedrag,
+      bestaand_jaar:bestaandJaar, scherp_dynamisch_jaar:scherpDynJaar,
+      minder_scenario_jaar:cM.subtotaal, minder_scenario_label:'Basis: dynamisch contract zonder batterij, laadplein → aansluiting verhoogd (variant 2)',
+      beter_scenario_jaar:cB.subtotaal, beter_scenario_label:'Voorstel: PV + batterij + laadplein (variant 2)'
+    },
+    componenten:{
+      energie:{ minder:cM.energie, beter:cB.energie },
+      distributie:{ minder:cM.distributie, beter:cB.distributie },
+      waarvan_capaciteit:{ minder:cM.capaciteit, beter:cB.capaciteit },
+      heffingen:{ minder:cM.heffingen, beter:cB.heffingen }
+    },
+    besparing_jaar1:cM.subtotaal-cB.subtotaal,
+    besparing_energie_deel:0.72,
+    onbalans_windfall_jaar1:Math.max(0,windfall)
+  };
+}
+function _openFinancieelRapport(){
+  if(!_financieelRapportBeschikbaar()){ alert('Draai eerst een simulatie (stap 8) — dan kan het financieel rapport worden opgebouwd.'); return; }
+  try{ sessionStorage.setItem('FLUCTUS_RAPPORT', JSON.stringify(_financieelRapportData())); }catch(e){}
+  window.open('/apps/financieel-rapport.html','_blank');
 }
 
 function fillProfielSelect(){
@@ -4054,8 +4255,16 @@ function _renderOpstellingenVergelijking(){
 
 function _renderSturingKPIs(){
   var k = STATE.kpiSturing || {};
-  var aantalMnd = (typeof _aantalMaandenPeriode==='function' && STATE.periodeVan && STATE.periodeTot)
-      ? _aantalMaandenPeriode(STATE.periodeVan, STATE.periodeTot) : 12;
+  // v1.20.12 FIX: aantalMnd (voor de /jaar-extrapolatie) mag ENKEL uit de
+  // factuur-datums komen in 'specifiek'-modus. Bij rolling12/kalenderjaar draaide
+  // de sim al op een vol jaar → aantalMnd = 12 (géén ×12). Voorheen werden de
+  // factuur-datums (bv. 1 maand) óók bij rolling12 gebruikt, waardoor een reeds-
+  // jaarlijks bedrag nog eens ×12 ging → absurde bedragen (tot >€1M).
+  var aantalMnd = 12;
+  if(STATE.jaar==='specifiek' && typeof _aantalMaandenPeriode==='function'
+     && STATE.periodeVan && STATE.periodeTot){
+    aantalMnd = _aantalMaandenPeriode(STATE.periodeVan, STATE.periodeTot) || 12;
+  }
   var perJaar = aantalMnd>0 ? (12/aantalMnd) : 1;
   var kg = k.kost_geen_excl_btw||0, ks = k.kost_sturing_excl_btw||0, ko = k.kost_onbalans_excl_btw||0;
   var mSt = k.meerwaarde_sturing_excl_btw||0;    // kg - ks (>0 = besparing)
@@ -4135,6 +4344,19 @@ function renderStep9Resultaat(){
   // v1.20.10: assets (PV · batterij · laadplein) als tegels bovenaan.
   if(!R.error){
     box.appendChild(_renderAssetTegels(R));
+  }
+
+  // v1.21: knop naar het volledige financieel rapport (client-side opgebouwd uit
+  // de sim-resultaten: beter=voorstel, minder=basis, windfall=onbalans).
+  if(!R.error && _financieelRapportBeschikbaar()){
+    var frSec=el('div',{class:'fdsim-section',style:'margin-bottom:16px;background:#1F386408;border-color:#1F386430'});
+    frSec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Financieel rapport'));
+    frSec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
+      'Het volledige investeringsrapport: facturen, besparing over de batterijlevensduur, 3 kostenscenario\'s, capex/opex, rendement & terugverdientijd en 5 financieringsmodellen — opgebouwd uit deze simulatie.'));
+    var frBtn=el('button',{class:'fdsim-btn green'},'📊 Genereer financieel rapport');
+    frBtn.onclick=function(){ _openFinancieelRapport(); };
+    frSec.appendChild(frBtn);
+    box.appendChild(frSec);
   }
 
   // v1.20.4: meerwaarde-KPI's van de 3 sturingen bovenaan het resultaat.
