@@ -247,61 +247,72 @@ pagina(5, `
   <p class="note">Extrapolatie op basis van uw maandfactuur × seizoensprofiel. De vier facturen (maand bestaand/dynamisch, jaar bestaand/dynamisch) dragen een vaste benaming die in het uitgebreide rapport terugkomt.</p>
 `);
 
-// ==================== PAGINA 6 — 12-MAAND HEATMAP (factuursimulatie) ====================
+// ==================== PAGINA 6 — DRIE HEATMAPS (12 maanden, per kwartier) ====================
+var MND_START=[[0,'jan'],[31,'feb'],[59,'mrt'],[90,'apr'],[120,'mei'],[151,'jun'],[181,'jul'],[212,'aug'],[243,'sep'],[273,'okt'],[304,'nov'],[334,'dec']];
 (function(){
   var pr=D.factuurSimProfielen;
-  var vals=pr && (pr.kost_eur_mwh || pr.spot_prijs_eur_mwh);
-  if(!pr || !Array.isArray(vals) || vals.length<96) return;
-  var bron = pr.kost_eur_mwh ? 'all-in energiekost (€/MWh)' : 'spotprijs (€/MWh)';
+  if(!pr || !Array.isArray(pr.spot_prijs_eur_mwh) || pr.spot_prijs_eur_mwh.length<96) return;
+  var n=pr.spot_prijs_eur_mwh.length;
+  var spot=pr.spot_prijs_eur_mwh, verbruik=pr.vermogen_aansluiting_kw||[], kostM=pr.kost_eur_mwh||[];
+  // totaal betaald per kwartier (€) = kW × 0,25 h × (€/MWh) / 1000
+  var betaald=[]; for(var i=0;i<n;i++){ var kw=Math.max(0,verbruik[i]||0); betaald.push(kw*0.25/1000*(kostM[i]||0)); }
+  function blok(id,titel,sub){ return '<h3 style="margin:14px 0 3px">'+titel+'</h3>'+
+    '<div style="font-size:11px;color:var(--grijs);margin-bottom:3px">'+sub+'</div>'+
+    '<div style="text-align:center"><canvas id="'+id+'" width="720" height="196" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>'+
+    '<div id="'+id+'-lg" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:10px;color:var(--grijs);margin-top:3px"></div>'; }
   pagina(6, `
     <div class="eyebrow">Factuursimulatie · dynamisch tarief</div>
-    <h2>Uw verbruik × de spotprijzen — 12 maanden</h2>
-    <p class="lead">Elke kolom is een dag (1 januari links → 31 december rechts), elke rij een uur (middernacht onderaan → 24u bovenaan). De kleur toont de ${bron} op een dynamisch tarief: <b>groen = goedkoop</b>, <b>rood = duur</b>.</p>
-    <div style="text-align:center;margin:12px 0"><canvas id="fs-heat" width="780" height="320" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>
-    <div id="fs-heat-legend" style="display:flex;align-items:center;gap:10px;justify-content:center;font-size:11px;color:var(--grijs)"></div>
-    <p class="note">Berekend op uw gekozen verbruiksprofiel × de werkelijke day-ahead spotprijzen (marktdata). Dit is de basis van de energiepost in de dynamische factuur op de vorige pagina's — geen schatting, maar een echte simulatie. De kleurschaal is afgekapt op de 2%- en 98%-waarden zodat enkele extreme uren de rest niet vervlakken.</p>
+    <h2>Uw jaar in drie beelden</h2>
+    <p class="lead">Elke kolom is een dag (1 januari links → 31 december rechts), elke rij een uur (0u onderaan → 24u bovenaan). Elke cel vat de 4 kwartieren van dat uur samen.</p>
+    ${blok('fs-h1','1 · Spotprijs','De marktprijs per uur — groen = goedkoop, rood = duur (€/MWh)')}
+    ${blok('fs-h2','2 · Uw verbruik','Hoeveel u afnam — licht = weinig, donkerblauw = veel (kW)')}
+    ${blok('fs-h3','3 · Totaal betaald','Verbruik × prijs — waar het geld ging, groen = weinig, rood = veel (€/uur)')}
+    <p class="note">Berekend op uw verbruiksprofiel × de werkelijke day-ahead spotprijzen (marktdata). Kleurschalen afgekapt op p2–p98 zodat extreme uren de rest niet vervlakken.</p>
   `);
-  setTimeout(function(){ tekenFactuurHeat(vals, pr.van); }, 30);
+  setTimeout(function(){
+    tekenHeat('fs-h1', spot,     pr.van, {agg:'mean', palet:'traffic', eenheid:'€/MWh'});
+    tekenHeat('fs-h2', verbruik, pr.van, {agg:'mean', palet:'blauw',   eenheid:'kW', posOnly:true});
+    tekenHeat('fs-h3', betaald,  pr.van, {agg:'sum',  palet:'traffic', eenheid:'€'});
+  }, 40);
 })();
-function tekenFactuurHeat(vals, vanISO){
-  var cv=document.getElementById('fs-heat'); if(!cv) return;
-  var ctx=cv.getContext('2d'), W=cv.width, H=cv.height, perDag=96;
-  var dagen=Math.floor(vals.length/perDag), uren=24;
-  var mL=44, mR=12, mT=10, mB=42, pW=W-mL-mR, pH=H-mT-mB, cw=pW/dagen, ch=pH/uren;
-  // aggregeer per dag × uur
-  var grid=[], flat=[];
-  for(var d=0; d<dagen; d++){ grid[d]=[]; for(var u=0; u<uren; u++){ var s=0,c=0; for(var q=0;q<4;q++){ var idx=d*perDag+u*4+q; if(idx<vals.length){ s+=vals[idx]; c++; } } var v=c?s/c:0; grid[d][u]=v; flat.push(v); } }
-  // percentiel-clip (p2..p98) → volle kleurspreiding voor de gros van de waarden
-  flat.sort(function(a,b){return a-b;});
+// bin per KALENDER-positie: dag-van-het-jaar × uur, uit de echte timestamps (start = pr.van).
+// Zo staat 1 januari links, ongeacht waar het simulatievenster begint.
+function _binKalender(vals, vanISO, agg){
+  var startMs=(vanISO?new Date(vanISO):new Date(2025,0,1)).getTime(), DAGEN=366, UREN=24;
+  var sum=[], cnt=[]; for(var d=0;d<DAGEN;d++){ sum[d]=[]; cnt[d]=[]; for(var u=0;u<UREN;u++){ sum[d][u]=0; cnt[d][u]=0; } }
+  for(var i=0;i<vals.length;i++){ var dt=new Date(startMs+i*900000);
+    var doy=Math.floor((dt-new Date(dt.getFullYear(),0,1))/86400000); if(doy<0)doy=0; if(doy>365)doy=365;
+    var h=dt.getHours(); sum[doy][h]+=vals[i]; cnt[doy][h]++; }
+  var grid=[]; for(var d2=0;d2<DAGEN;d2++){ grid[d2]=[]; for(var u2=0;u2<UREN;u2++){ var c=cnt[d2][u2]; grid[d2][u2]=c?(agg==='sum'?sum[d2][u2]:sum[d2][u2]/c):null; } }
+  return {grid:grid, DAGEN:DAGEN, UREN:UREN};
+}
+function tekenHeat(id, vals, vanISO, opts){
+  var cv=document.getElementById(id); if(!cv||!vals||!vals.length) return;
+  opts=opts||{}; var ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  var src=opts.posOnly?vals.map(function(v){return Math.max(0,v||0);}):vals;
+  var b=_binKalender(src, vanISO, opts.agg||'mean'), grid=b.grid, DAGEN=b.DAGEN, UREN=b.UREN;
+  var mL=40, mR=10, mT=8, mB=26, pW=W-mL-mR, pH=H-mT-mB, cw=pW/DAGEN, ch=pH/UREN;
+  var flat=[]; for(var d=0;d<DAGEN;d++)for(var u=0;u<UREN;u++){ if(grid[d][u]!=null) flat.push(grid[d][u]); }
+  if(!flat.length) return; flat.sort(function(a,b){return a-b;});
   function pctl(p){ var i=Math.max(0,Math.min(flat.length-1,Math.round(p*(flat.length-1)))); return flat[i]; }
   var lo=pctl(0.02), hi=pctl(0.98); if(hi<=lo){ lo=flat[0]; hi=(flat[flat.length-1]||lo)+1; }
-  // traffic-light: groen (goedkoop) → geel → rood (duur)
-  function kleur(v){ var t=Math.max(0,Math.min(1,(v-lo)/(hi-lo))), r,g,b;
-    if(t<0.5){ var k=t/0.5; r=Math.round(43+k*212); g=Math.round(158+k*47); b=Math.round(74-k*34); }
-    else{ var k2=(t-0.5)/0.5; r=Math.round(255-k2*43); g=Math.round(205-k2*163); b=Math.round(40-k2*4); }
-    return 'rgb('+r+','+g+','+b+')'; }
-  // cellen — uur 0 ONDERAAN, dag 0 LINKS
-  for(var d2=0; d2<dagen; d2++){ for(var u2=0; u2<uren; u2++){ ctx.fillStyle=kleur(grid[d2][u2]); ctx.fillRect(mL+d2*cw, mT+(uren-1-u2)*ch, Math.ceil(cw), Math.ceil(ch)+0.5); } }
-  // kader
+  var palet=opts.palet||'traffic';
+  function kleur(v){ var t=Math.max(0,Math.min(1,(v-lo)/(hi-lo))), r,g,bl;
+    if(palet==='blauw'){ r=Math.round(234-t*214); g=Math.round(241-t*181); bl=Math.round(250-t*110); }
+    else if(t<0.5){ var k=t/0.5; r=Math.round(43+k*212); g=Math.round(158+k*47); bl=Math.round(74-k*34); }
+    else { var k2=(t-0.5)/0.5; r=Math.round(255-k2*43); g=Math.round(205-k2*163); bl=Math.round(40-k2*4); }
+    return 'rgb('+r+','+g+','+bl+')'; }
+  for(var d3=0; d3<DAGEN; d3++){ for(var u3=0; u3<UREN; u3++){ var v=grid[d3][u3];
+    ctx.fillStyle=(v==null)?'#F0F2F6':kleur(v); ctx.fillRect(mL+d3*cw, mT+(UREN-1-u3)*ch, Math.ceil(cw), Math.ceil(ch)+0.5); } }
   ctx.strokeStyle='#AEB8C6'; ctx.lineWidth=1; ctx.strokeRect(mL+0.5, mT+0.5, pW, pH);
   ctx.fillStyle='#5A6577'; ctx.font='9px Helvetica,Arial,sans-serif';
-  // verticale as: uur-labels (0 onder → 24 boven)
   ctx.textAlign='right'; ctx.textBaseline='middle';
-  [0,6,12,18,24].forEach(function(hh){ var y=mT+pH-(hh/24)*pH; ctx.fillText(String(hh)+'u', mL-5, y); });
-  ctx.save(); ctx.translate(10, mT+pH/2); ctx.rotate(-Math.PI/2); ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText('uur van de dag', 0, 0); ctx.restore();
-  // horizontale as: maandlabels vanaf de startdatum
-  var start=vanISO?new Date(vanISO):new Date(2025,0,1);
-  var mnd=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
-  ctx.textAlign='left'; ctx.textBaseline='top'; var vorige=-1;
-  for(var d3=0; d3<dagen; d3++){ var dt=new Date(start.getTime()+d3*86400000), m=dt.getMonth();
-    if(m!==vorige){ var xx=mL+d3*cw; ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(xx+0.5,mT+pH); ctx.lineTo(xx+0.5,mT+pH+4); ctx.stroke(); ctx.fillText(mnd[m], xx+2, mT+pH+6); vorige=m; } }
-  ctx.textAlign='center'; ctx.fillText('maand van het jaar', mL+pW/2, mT+pH+24);
-  // legende
-  var lg=document.getElementById('fs-heat-legend');
-  if(lg){ lg.innerHTML=''; var a=document.createElement('span'); a.textContent='goedkoop · '+Math.round(lo)+' €/MWh';
-    var bar=document.createElement('span'); bar.style.cssText='display:inline-block;width:180px;height:11px;border-radius:3px;background:linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
-    var b=document.createElement('span'); b.textContent=Math.round(hi)+' €/MWh · duur';
-    lg.appendChild(a); lg.appendChild(bar); lg.appendChild(b); }
+  [0,6,12,18,24].forEach(function(hh){ ctx.fillText(hh+'u', mL-4, mT+pH-(hh/24)*pH); });
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  MND_START.forEach(function(mm){ var x=mL+(mm[0]/DAGEN)*pW; ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(x+0.5,mT+pH); ctx.lineTo(x+0.5,mT+pH+3); ctx.stroke(); ctx.fillText(mm[1], x+1, mT+pH+5); });
+  var lg=document.getElementById(id+'-lg');
+  if(lg){ var grad=(palet==='blauw')?'linear-gradient(to right,rgb(234,241,250),rgb(20,60,140))':'linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
+    lg.innerHTML='<span>'+Math.round(lo)+' '+opts.eenheid+'</span><span style="display:inline-block;width:150px;height:9px;border-radius:3px;background:'+grad+'"></span><span>'+Math.round(hi)+' '+opts.eenheid+'</span>'; }
 }
 </script>
 </body>
