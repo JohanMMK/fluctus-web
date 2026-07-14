@@ -256,23 +256,52 @@ pagina(5, `
   pagina(6, `
     <div class="eyebrow">Factuursimulatie · dynamisch tarief</div>
     <h2>Uw verbruik × de spotprijzen — 12 maanden</h2>
-    <p class="lead">Elke kolom is een dag, elke rij een uur van de dag. De kleur toont de ${bron} die u op een dynamisch tarief zou betalen — zo ziet u wanneer energie duur (rood) en goedkoop (blauw) was.</p>
-    <div style="text-align:center;margin:12px 0"><canvas id="fs-heat" width="720" height="240" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>
-    <div id="fs-heat-legend" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:11px;color:var(--grijs)"></div>
-    <p class="note">Berekend op uw gekozen verbruiksprofiel × de werkelijke day-ahead spotprijzen (marktdata). Dit is de basis van de energiepost in de dynamische factuur op de vorige pagina's — geen schatting, maar een echte simulatie.</p>
+    <p class="lead">Elke kolom is een dag (1 januari links → 31 december rechts), elke rij een uur (middernacht onderaan → 24u bovenaan). De kleur toont de ${bron} op een dynamisch tarief: <b>groen = goedkoop</b>, <b>rood = duur</b>.</p>
+    <div style="text-align:center;margin:12px 0"><canvas id="fs-heat" width="780" height="320" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>
+    <div id="fs-heat-legend" style="display:flex;align-items:center;gap:10px;justify-content:center;font-size:11px;color:var(--grijs)"></div>
+    <p class="note">Berekend op uw gekozen verbruiksprofiel × de werkelijke day-ahead spotprijzen (marktdata). Dit is de basis van de energiepost in de dynamische factuur op de vorige pagina's — geen schatting, maar een echte simulatie. De kleurschaal is afgekapt op de 2%- en 98%-waarden zodat enkele extreme uren de rest niet vervlakken.</p>
   `);
-  setTimeout(function(){ tekenFactuurHeat(vals); }, 30);
+  setTimeout(function(){ tekenFactuurHeat(vals, pr.van); }, 30);
 })();
-function tekenFactuurHeat(vals){
+function tekenFactuurHeat(vals, vanISO){
   var cv=document.getElementById('fs-heat'); if(!cv) return;
   var ctx=cv.getContext('2d'), W=cv.width, H=cv.height, perDag=96;
-  var dagen=Math.floor(vals.length/perDag), uren=24, grid=[], mn=1e9, mx=-1e9;
-  for(var d=0; d<dagen; d++){ grid[d]=[]; for(var u=0; u<uren; u++){ var s=0,c=0; for(var q=0;q<4;q++){ var idx=d*perDag+u*4+q; if(idx<vals.length){ s+=vals[idx]; c++; } } var v=c?s/c:0; grid[d][u]=v; if(v<mn)mn=v; if(v>mx)mx=v; } }
-  var cw=W/dagen, ch=H/uren;
-  function kleur(t){ t=Math.max(0,Math.min(1,t)); var r,g,b; if(t<0.5){ var k=t/0.5; r=Math.round(30+k*225); g=Math.round(90+k*165); b=Math.round(200-k*160); } else { var k2=(t-0.5)/0.5; r=255; g=Math.round(255-k2*200); b=Math.round(40-k2*40); } return 'rgb('+r+','+g+','+b+')'; }
-  for(var d2=0; d2<dagen; d2++){ for(var u2=0; u2<uren; u2++){ var t=(mx>mn)?(grid[d2][u2]-mn)/(mx-mn):0.5; ctx.fillStyle=kleur(t); ctx.fillRect(d2*cw, u2*ch, Math.ceil(cw), Math.ceil(ch)); } }
+  var dagen=Math.floor(vals.length/perDag), uren=24;
+  var mL=44, mR=12, mT=10, mB=42, pW=W-mL-mR, pH=H-mT-mB, cw=pW/dagen, ch=pH/uren;
+  // aggregeer per dag × uur
+  var grid=[], flat=[];
+  for(var d=0; d<dagen; d++){ grid[d]=[]; for(var u=0; u<uren; u++){ var s=0,c=0; for(var q=0;q<4;q++){ var idx=d*perDag+u*4+q; if(idx<vals.length){ s+=vals[idx]; c++; } } var v=c?s/c:0; grid[d][u]=v; flat.push(v); } }
+  // percentiel-clip (p2..p98) → volle kleurspreiding voor de gros van de waarden
+  flat.sort(function(a,b){return a-b;});
+  function pctl(p){ var i=Math.max(0,Math.min(flat.length-1,Math.round(p*(flat.length-1)))); return flat[i]; }
+  var lo=pctl(0.02), hi=pctl(0.98); if(hi<=lo){ lo=flat[0]; hi=(flat[flat.length-1]||lo)+1; }
+  // traffic-light: groen (goedkoop) → geel → rood (duur)
+  function kleur(v){ var t=Math.max(0,Math.min(1,(v-lo)/(hi-lo))), r,g,b;
+    if(t<0.5){ var k=t/0.5; r=Math.round(43+k*212); g=Math.round(158+k*47); b=Math.round(74-k*34); }
+    else{ var k2=(t-0.5)/0.5; r=Math.round(255-k2*43); g=Math.round(205-k2*163); b=Math.round(40-k2*4); }
+    return 'rgb('+r+','+g+','+b+')'; }
+  // cellen — uur 0 ONDERAAN, dag 0 LINKS
+  for(var d2=0; d2<dagen; d2++){ for(var u2=0; u2<uren; u2++){ ctx.fillStyle=kleur(grid[d2][u2]); ctx.fillRect(mL+d2*cw, mT+(uren-1-u2)*ch, Math.ceil(cw), Math.ceil(ch)+0.5); } }
+  // kader
+  ctx.strokeStyle='#AEB8C6'; ctx.lineWidth=1; ctx.strokeRect(mL+0.5, mT+0.5, pW, pH);
+  ctx.fillStyle='#5A6577'; ctx.font='9px Helvetica,Arial,sans-serif';
+  // verticale as: uur-labels (0 onder → 24 boven)
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  [0,6,12,18,24].forEach(function(hh){ var y=mT+pH-(hh/24)*pH; ctx.fillText(String(hh)+'u', mL-5, y); });
+  ctx.save(); ctx.translate(10, mT+pH/2); ctx.rotate(-Math.PI/2); ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText('uur van de dag', 0, 0); ctx.restore();
+  // horizontale as: maandlabels vanaf de startdatum
+  var start=vanISO?new Date(vanISO):new Date(2025,0,1);
+  var mnd=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  ctx.textAlign='left'; ctx.textBaseline='top'; var vorige=-1;
+  for(var d3=0; d3<dagen; d3++){ var dt=new Date(start.getTime()+d3*86400000), m=dt.getMonth();
+    if(m!==vorige){ var xx=mL+d3*cw; ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(xx+0.5,mT+pH); ctx.lineTo(xx+0.5,mT+pH+4); ctx.stroke(); ctx.fillText(mnd[m], xx+2, mT+pH+6); vorige=m; } }
+  ctx.textAlign='center'; ctx.fillText('maand van het jaar', mL+pW/2, mT+pH+24);
+  // legende
   var lg=document.getElementById('fs-heat-legend');
-  if(lg){ lg.innerHTML='<span>'+Math.round(mn)+' €/MWh</span>'; var bar=document.createElement('span'); bar.style.cssText='display:inline-block;width:160px;height:10px;border-radius:3px;background:linear-gradient(to right,rgb(30,90,200),rgb(255,255,40),rgb(255,55,0))'; lg.appendChild(bar); var hi=document.createElement('span'); hi.textContent=Math.round(mx)+' €/MWh'; lg.appendChild(hi); }
+  if(lg){ lg.innerHTML=''; var a=document.createElement('span'); a.textContent='goedkoop · '+Math.round(lo)+' €/MWh';
+    var bar=document.createElement('span'); bar.style.cssText='display:inline-block;width:180px;height:11px;border-radius:3px;background:linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
+    var b=document.createElement('span'); b.textContent=Math.round(hi)+' €/MWh · duur';
+    lg.appendChild(a); lg.appendChild(bar); lg.appendChild(b); }
 }
 </script>
 </body>
