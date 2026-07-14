@@ -54,6 +54,21 @@
   table.vgl .grp td{font-weight:700;color:var(--blauw);padding-top:8px}
   table.vgl .tot td{font-weight:800;border-top:2px solid var(--blauw);padding-top:6px}
 
+  /* ---- UITGELIJNDE 2-koloms factuurvergelijking (zelfde items op zelfde hoogte) ---- */
+  .fv-kop{display:grid;grid-template-columns:1fr 1fr}
+  .fv-kop > div{padding:12px 16px 8px;font-weight:800;font-size:13px;display:flex;justify-content:space-between;align-items:baseline}
+  .fv-kop > div:first-child{border-right:1px solid var(--lijn)}
+  .fv-kop .bedrag{font-size:16px;color:var(--blauw)}
+  .fv-kop .beter .bedrag,.fv-kop > div.beter .bedrag{color:var(--groen-d)}
+  .fv-grid{display:grid;grid-template-columns:1fr 1fr;font-size:12px}
+  .fv-grid > div{padding:5px 16px;border-bottom:1px solid #eceff4;display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+  .fv-grid > div:nth-child(odd){border-right:1px solid var(--lijn)}
+  .fv-grid .fv-grp{font-weight:700;color:var(--blauw);border-bottom:1px solid var(--lijn);padding-top:9px;display:block}
+  .fv-grid .fv-it > span:first-child{color:var(--grijs);padding-left:12px}
+  .fv-grid .fv-eur{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right;flex:0 0 auto}
+  .fv-grid .fv-tot{font-weight:800;border-top:2px solid var(--blauw);border-bottom:none;padding-top:7px;font-size:13px}
+  .fv-grid .fv-btw{color:var(--grijs)}
+
   .box{border:1px solid var(--lijn);border-radius:6px;padding:14px;margin:12px 0;background:var(--bg)}
   .box.groen{background:#05B0500f;border-color:#05B05040}
   .note{font-size:11px;color:var(--grijs);font-style:italic}
@@ -147,6 +162,36 @@ function factuurBody(fac, btw_pct){
   return body;
 }
 
+// v1.21.3: gezipte 2-koloms vergelijking — links en rechts delen per rij dezelfde
+// hoogte (CSS-grid), zodat dezelfde items en bedragen exact op dezelfde hoogte staan.
+// Geen drift meer door wrappende labels of afbrekende bedragen.
+function _fvEur(v){ return '<span class="fv-eur">'+eur2(v)+'</span>'; }
+function factuurVergelijking(facL, facR, btw){
+  var rows='', subL=0, subR=0;
+  var nG=Math.max(facL.posten.length, facR.posten.length);
+  for(var gi=0; gi<nG; gi++){
+    var gL=facL.posten[gi]||{grp:'',items:[]}, gR=facR.posten[gi]||{grp:'',items:[]};
+    rows+='<div class="fv-grp">'+(gL.grp||'&nbsp;')+'</div><div class="fv-grp">'+(gR.grp||gL.grp||'&nbsp;')+'</div>';
+    var nI=Math.max(gL.items.length, gR.items.length);
+    for(var i=0;i<nI;i++){
+      var il=gL.items[i], ir=gR.items[i];
+      if(il)subL+=il[1]; if(ir)subR+=ir[1];
+      rows+='<div class="fv-it">'+(il?'<span>'+il[0]+'</span>'+_fvEur(il[1]):'<span>&nbsp;</span>')+'</div>';
+      rows+='<div class="fv-it">'+(ir?'<span>'+ir[0]+'</span>'+_fvEur(ir[1]):'<span>&nbsp;</span>')+'</div>';
+    }
+  }
+  var btwL=subL*btw/100, btwR=subR*btw/100;
+  function rij(cls,label,vL,vR){ return '<div class="'+cls+'"><span>'+label+'</span>'+_fvEur(vL)+'</div><div class="'+cls+'"><span>'+label+'</span>'+_fvEur(vR)+'</div>'; }
+  rows+=rij('fv-tot','Subtotaal (excl. btw)',subL,subR);
+  rows+=rij('fv-btw','Btw '+btw+'%',btwL,btwR);
+  rows+=rij('fv-tot','Totaal (incl. btw)',subL+btwL,subR+btwR);
+  return '<div class="fv-grid">'+rows+'</div>';
+}
+function scaleFactuur(fac, factor){
+  return { label:fac.label, subtotaal:(fac.subtotaal||0)*factor,
+    posten:(fac.posten||[]).map(function(g){ return {grp:g.grp, items:g.items.map(function(it){return [it[0], it[1]*factor];})}; }) };
+}
+
 // ---- Berekende cijfers ----
 var marge_maand = D.maand.bestaand.subtotaal - D.maand.dynamisch.subtotaal;
 var marge_jaar = D.jaar.bestaand.subtotaal - D.jaar.dynamisch.subtotaal;
@@ -212,36 +257,29 @@ pagina(4, `
   <p class="lead">Dezelfde maand (${D.periode_van} – ${D.periode_tot}), hetzelfde verbruik — enkel het contract verschilt.</p>
   <div class="factuur-kader vgl">
     <div class="fk-titel"><span>Maandfactuur — ${D.periode_van} – ${D.periode_tot}</span><span class="badge">excl. btw = subtotaal</span></div>
-    <div class="vgl-grid">
-      <div><div class="vgl-kop"><span>${D.maand.bestaand.label}</span><span class="bedrag">${eur(D.maand.bestaand.subtotaal)}</span></div>${factuurBody(D.maand.bestaand, D.btw_pct)}</div>
-      <div><div class="vgl-kop beter"><span>${D.maand.dynamisch.label}</span><span class="bedrag">${eur(D.maand.dynamisch.subtotaal)}</span></div>${factuurBody(D.maand.dynamisch, D.btw_pct)}</div>
+    <div class="fv-kop">
+      <div><span>${D.maand.bestaand.label}</span><span class="bedrag">${eur(D.maand.bestaand.subtotaal)}</span></div>
+      <div class="beter"><span>${D.maand.dynamisch.label}</span><span class="bedrag">${eur(D.maand.dynamisch.subtotaal)}</span></div>
     </div>
+    ${factuurVergelijking(D.maand.bestaand, D.maand.dynamisch, D.btw_pct)}
   </div>
   <div class="box groen"><b>Verschil deze maand: ${eur(marge_maand)}</b> goedkoper op een scherp dynamisch contract. De netkosten en heffingen blijven gelijk (die hangen niet van uw leverancier af); het verschil zit volledig in de <b>energiecomponent</b>.</div>
 `);
 
 // ==================== PAGINA 5 — JAARFACTUREN (EXTRAPOLATIE) ====================
-function jaarKolom(fac, maandFac, beter){
-  var factor=D.extrapolatie_factor;
-  var body='<table class="vgl">';
-  maandFac.posten.forEach(function(g){
-    body+='<tr class="grp"><td>'+g.grp+'</td><td></td></tr>';
-    g.items.forEach(function(it){ body+='<tr><td>'+it[0]+'</td><td>'+eur(it[1]*factor)+'</td></tr>'; });
-  });
-  body+='<tr class="tot"><td>Subtotaal / jaar (excl. btw)</td><td>'+eur(fac.subtotaal)+'</td></tr>';
-  body+='</table>';
-  return '<div class="vgl-kop'+(beter?' beter':'')+'"><span>'+fac.label+'</span><span class="bedrag">'+eur(fac.subtotaal)+'</span></div>'+body;
-}
+var _jaarB=scaleFactuur(D.maand.bestaand, D.extrapolatie_factor);
+var _jaarD=scaleFactuur(D.maand.dynamisch, D.extrapolatie_factor);
 pagina(5, `
   <div class="eyebrow">Factuurdetail — jaar</div>
   <h2>Geëxtrapoleerd naar een volledig jaar</h2>
   <p class="lead">Dezelfde twee contracten, nu over 12 maanden — zo ziet u de jaarlijkse impact.</p>
   <div class="factuur-kader vgl">
     <div class="fk-titel"><span>Jaarfactuur — extrapolatie (×${new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(D.extrapolatie_factor)}, seizoensgecorrigeerd)</span><span class="badge">excl. btw</span></div>
-    <div class="vgl-grid">
-      <div>${jaarKolom(D.jaar.bestaand, D.maand.bestaand, false)}</div>
-      <div>${jaarKolom(D.jaar.dynamisch, D.maand.dynamisch, true)}</div>
+    <div class="fv-kop">
+      <div><span>${D.jaar.bestaand.label}</span><span class="bedrag">${eur(D.jaar.bestaand.subtotaal)}</span></div>
+      <div class="beter"><span>${D.jaar.dynamisch.label}</span><span class="bedrag">${eur(D.jaar.dynamisch.subtotaal)}</span></div>
     </div>
+    ${factuurVergelijking(_jaarB, _jaarD, D.btw_pct)}
   </div>
   <div class="box groen"><b>Onderhandelingsmarge: ${eur(marge_jaar)}/jaar</b> (−${new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(marge_pct)}%). Gebruik dit cijfer om samen met uw leverancier een <b>beter contract</b> te vinden — bij een partner waar u zich goed bij voelt. En dit is nog vóór PV, batterij of slimme sturing: die komen in het uitgebreide ontwerprapport.</div>
   <p class="note">Extrapolatie op basis van uw maandfactuur × seizoensprofiel. De vier facturen (maand bestaand/dynamisch, jaar bestaand/dynamisch) dragen een vaste benaming die in het uitgebreide rapport terugkomt.</p>
