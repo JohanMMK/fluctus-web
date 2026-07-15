@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.5</span>
+    <span class="fdsim-version">v1.22.7</span>
   </div>
 </div>
 
@@ -3270,11 +3270,11 @@ function _autoDimensioneerAssets(){
     (p.laadpunten||[]).forEach(function(x){ lpCap += (x.aantal||0)*(LAADPUNT_KW[x.type]||0); });
     if(idx===0){ var vs=+p.venster_start||8, ve=+p.venster_eind||18; vUren=(ve<=vs)?((24-vs)+ve):(ve-vs); }
   });
-  // PV-default (enkel als nog niet gezet)
-  if(!(STATE.pvKwp>0)){
-    var totKwh=(STATE.jaarverbruik||0)*1000 + lpKwh;
-    if(totKwh>0){ STATE.pvKwp=Math.round(totKwh/950); STATE.pvInjStrategie=STATE.pvInjStrategie||'geen'; }
-  }
+  // v1.22.7: GEEN PV-auto-default meer. PV start op 0 en wordt bewust door de verkoper
+  // ingegeven. De oude regel (jaarverbruik + laadplein ÷ 950) gaf bij een laadplein al
+  // snel 400+ kWp — goed voor twee derde van de investering, terwijl niemand had
+  // gecontroleerd of dat dak er überhaupt is. Beter een expliciete keuze dan een
+  // aanname die stil de hele business case draagt.
   // Batterij-default (enkel als nog geen batterij gekozen)
   // v1.22: dimensionering volgens de vaste regel — zie _batterijDimensionering().
   // Vervangt de oude heuristiek (energie bóven de aansluiting / 0.90), die de
@@ -4543,21 +4543,39 @@ function _renderOpstellingenVergelijking(){
 var INV_CABINE_EUR      = 90000;   // LS→MS: cabine + aansluitwerken (schatting)
 var INV_EUR_PER_KVA     = 100;     // verzwaring toegangsvermogen: netaanpassingen
 var INV_BATT_EUR_PER_KWH= 350;     // batterij-capex (zelfde basis als het financieel rapport)
+var INV_PV_EUR_PER_KWP  = 450;     // PV-capex
+var INV_LAADPAAL_EUR    = { ac:2500, dc160:40000, dc400:70000 };
+var INV_KABEL_PCT       = 0.20;    // opslag kabeltracés op de volledige installatie
 function _opstellingInvestering(){
   var ops=STATE.opstellingen, cap=STATE.capaciteit||{};
   if(!ops||!ops.verhogen||!ops.batterij) return null;
   var cfgV=ops.verhogen.config||{};
+  // Gemeenschappelijk in BEIDE opstellingen: PV + laadpalen. Ze vallen weg in het
+  // verschil, maar horen wél in de totale investering die de klant betaalt.
+  var lp=_frLaadpalen();
+  var laadpalen = lp.ac*INV_LAADPAAL_EUR.ac + lp.dc160*INV_LAADPAAL_EUR.dc160 + lp.dc400*INV_LAADPAAL_EUR.dc400;
+  var pv = (+STATE.pvKwp||0) * INV_PV_EUR_PER_KWP;
+  var gemeenschappelijk = pv + laadpalen;
+  // Wat de opstellingen ONDERSCHEIDT
   var cabine = cfgV.spanning_omgezet ? INV_CABINE_EUR : 0;
   var kvaKost = Math.max(0, +cap.verhoging_kw||0) * INV_EUR_PER_KVA;
-  var inv1 = cabine + kvaKost;
+  var spec1 = cabine + kvaKost;
   var battKwh = +cap.advies_batterij_kwh||0;
-  var inv2 = battKwh * INV_BATT_EUR_PER_KWH;
-  var netto = inv2 - inv1;
+  var spec2 = battKwh * INV_BATT_EUR_PER_KWH;
+  // Kabeltracés als opslag op de hele installatie — dus óók op het verschil, waardoor
+  // de netto investering 20% hoger uitvalt dan het kale verschil in materiaal.
+  var sub1=gemeenschappelijk+spec1, sub2=gemeenschappelijk+spec2;
+  var kab1=sub1*INV_KABEL_PCT,      kab2=sub2*INV_KABEL_PCT;
+  var tot1=sub1+kab1,               tot2=sub2+kab2;
+  var netto = tot2 - tot1;
   var k1=(ops.verhogen.kpi_sturing||{}).kost_geen_excl_btw||0;      // opstelling 1, geen sturing
   var k2=(ops.batterij.kpi_sturing||{}).kost_sturing_excl_btw||0;   // opstelling 2, sturing 2
   var winst = k1 - k2;
-  return { cabine:cabine, kvaKost:kvaKost, verhoging_kw:+cap.verhoging_kw||0, inv1:inv1,
-           battKwh:battKwh, inv2:inv2, netto:netto, k1:k1, k2:k2, winst:winst,
+  return { pv:pv, pvKwp:+STATE.pvKwp||0, laadpalen:laadpalen, lp:lp, gemeenschappelijk:gemeenschappelijk,
+           cabine:cabine, kvaKost:kvaKost, verhoging_kw:+cap.verhoging_kw||0, spec1:spec1,
+           battKwh:battKwh, spec2:spec2,
+           sub1:sub1, sub2:sub2, kab1:kab1, kab2:kab2, tot1:tot1, tot2:tot2,
+           netto:netto, k1:k1, k2:k2, winst:winst,
            rendement:(netto>0 && winst>0) ? (winst/netto*100) : null,
            payback:(netto>0 && winst>0) ? (netto/winst) : null,
            omgezet:!!cfgV.spanning_omgezet };
@@ -4568,18 +4586,30 @@ function _renderOpstellingInvestering(){
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #D5DBE3;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:13px;margin-bottom:8px'},
     'Investering en rendement — batterij t.o.v. verzwaren'));
-  var rows=
-    '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;font-size:12.5px">'+
-      '<span style="font-weight:700;color:#1F3864">Opstelling 1 — toegangsvermogen verhogen</span><span></span>'+
-      (v.omgezet ? '<span style="padding-left:12px;color:#9E480E">Cabine + aansluitwerken (LS → MS)</span><span style="text-align:right;color:#9E480E">'+fmtEur(v.cabine)+'</span>' : '')+
-      '<span style="padding-left:12px">Netaanpassingen '+fmtNum(v.verhoging_kw,0)+' kVA × € '+INV_EUR_PER_KVA+'</span><span style="text-align:right">'+fmtEur(v.kvaKost)+'</span>'+
-      '<span style="font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px">Investering opstelling 1</span><span style="text-align:right;font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px">'+fmtEur(v.inv1)+'</span>'+
-      '<span style="font-weight:700;color:#1F3864;padding-top:10px">Opstelling 2 — batterij</span><span></span>'+
-      '<span style="padding-left:12px">Batterij '+fmtNum(v.battKwh,0)+' kWh × € '+INV_BATT_EUR_PER_KWH+'</span><span style="text-align:right">'+fmtEur(v.inv2)+'</span>'+
-      '<span style="font-weight:800;border-top:2px solid #1F3864;padding-top:6px">Netto investering (2 − 1)</span>'+
-      '<span style="text-align:right;font-weight:800;border-top:2px solid #1F3864;padding-top:6px;color:'+(v.netto>0?'#1A1F2B':'#05B050')+'">'+fmtEur(v.netto)+'</span>'+
-    '</div>';
-  sec.innerHTML+=rows;
+  var GC3='display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;font-size:12.5px';
+  var lpTxt=[]; if(v.lp.ac)lpTxt.push(v.lp.ac+'× AC22'); if(v.lp.dc160)lpTxt.push(v.lp.dc160+'× DC160'); if(v.lp.dc400)lpTxt.push(v.lp.dc400+'× DC300');
+  function r3(label,a,b,st){ return '<span style="'+(st||'')+'">'+label+'</span>'+
+    '<span style="text-align:right;'+(st||'')+'">'+(a===null?'—':fmtEur(a))+'</span>'+
+    '<span style="text-align:right;'+(st||'')+'">'+(b===null?'—':fmtEur(b))+'</span>'; }
+  var vet='font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px';
+  sec.innerHTML+=
+    '<div style="'+GC3+'">'+
+      '<span style="font-weight:700;color:#1F3864">Post</span>'+
+      '<span style="text-align:right;font-weight:700;color:#1F3864">1 · Verhogen</span>'+
+      '<span style="text-align:right;font-weight:700;color:#1F3864">2 · Batterij</span>'+
+      r3('PV '+fmtNum(v.pvKwp,0)+' kWp × € '+INV_PV_EUR_PER_KWP, v.pv, v.pv)+
+      r3('Laadpalen'+(lpTxt.length?' ('+lpTxt.join(' + ')+')':''), v.laadpalen, v.laadpalen)+
+      (v.omgezet ? r3('Cabine + aansluitwerken (LS → MS)', v.cabine, 0, 'color:#9E480E') : '')+
+      r3('Netaanpassingen '+fmtNum(v.verhoging_kw,0)+' kVA × € '+INV_EUR_PER_KVA, v.kvaKost, 0)+
+      r3('Batterij '+fmtNum(v.battKwh,0)+' kWh × € '+INV_BATT_EUR_PER_KWH, 0, v.spec2)+
+      r3('Subtotaal', v.sub1, v.sub2, vet)+
+      r3('Kabeltracés (+'+Math.round(INV_KABEL_PCT*100)+'%)', v.kab1, v.kab2)+
+      r3('Totale investering', v.tot1, v.tot2, 'font-weight:800;border-top:2px solid #1F3864;padding-top:6px')+
+    '</div>'+
+    '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:baseline;padding:8px 10px;'+
+      'background:'+(v.netto>0?'#F5F7FA':'#05B0500f')+';border-radius:6px">'+
+      '<b>Netto investering (2 − 1)</b>'+
+      '<b style="font-size:16px;color:'+(v.netto>0?'#1A1F2B':'#05B050')+'">'+fmtEur(v.netto)+'</b></div>';
   sec.innerHTML+=
     '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #E3E8EF;font-size:12.5px;line-height:1.7">'+
       'Winst '+perLabel+' = opstelling 1 <b>zonder sturing</b> ('+fmtEur(v.k1)+') − opstelling 2 <b>sturing 2</b> ('+fmtEur(v.k2)+') = '+
@@ -4608,8 +4638,8 @@ function _renderOpstellingInvestering(){
       '</div>';
   }
   sec.innerHTML+='<div style="margin-top:8px;font-size:11px;color:#5A6577;font-style:italic">'+
-    'Indicatief. De cabine (€ '+INV_CABINE_EUR.toLocaleString('nl-BE')+') en € '+INV_EUR_PER_KVA+'/kVA zijn schattingen — vraag offertes op. '+
-    'Laadpalen zitten in beide opstellingen en vallen weg in het verschil.'+
+    'Indicatief. De cabine (€ '+INV_CABINE_EUR.toLocaleString('nl-BE')+'), € '+INV_EUR_PER_KVA+'/kVA en de '+Math.round(INV_KABEL_PCT*100)+'% kabeltracés zijn schattingen — vraag offertes op. '+
+    'PV en laadpalen zitten in beide opstellingen en vallen dus weg in het verschil; de kabelopslag werkt wél door op dat verschil.'+
     (STATE.jaar==='specifiek'?' LET OP: de sim draait op de factuurperiode, niet op een vol jaar — rendement en payback zijn dan niet op jaarbasis.':'')+'</div>';
   return sec;
 }
