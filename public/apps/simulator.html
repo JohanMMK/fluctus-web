@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.8</span>
+    <span class="fdsim-version">v1.21.9</span>
   </div>
 </div>
 
@@ -2585,9 +2585,38 @@ function _margeData(){
 }
 function _periodeDagen(v,t){ try{ var a=_parseBEdate(v),b=_parseBEdate(t); if(a&&b) return Math.max(1,Math.round((b-a)/86400000)+1);}catch(e){} return null; }
 function _parseBEdate(s){ if(!s)return null; var m=String(s).match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/); if(m)return new Date(+m[3],+m[2]-1,+m[1]); var d=new Date(s); return isNaN(d)?null:d; }
-function _openFactuurrapport(){
-  try{ sessionStorage.setItem('FLUCTUS_FACTUURRAPPORT', JSON.stringify(_margeData())); }catch(e){}
+// v1.21.9: het onderhandelingsmarge-rapport moet bij hérgebruik IDENTIEK zijn aan het
+// origineel. Drie paden, in deze volgorde:
+//   1) live sessie  → sim-data zit in het geheugen, gebruik _margeData()
+//   2) herladen     → haal de bewaarde analyse (incl. profielen) uit Storage op
+//   3) niets        → eerlijk melden. NOOIT stil terugvallen op de −12%-schatting:
+//                     dat zou een ander cijfer tonen dan het bewaarde rapport.
+function _openFactuurrapportMet(data){
+  try{ sessionStorage.setItem('FLUCTUS_FACTUURRAPPORT', JSON.stringify(data)); }catch(e){
+    alert('De analyse is te groot voor de browseropslag — rapport kan niet geopend worden.'); return;
+  }
   window.open('/apps/factuurrapport.html','_blank');
+}
+function _factuuranalysePad(){
+  return (STATE.baseCase && STATE.baseCase._factuuranalyse_pad) || STATE._factuuranalyse_pad || null;
+}
+function _openFactuurrapport(){
+  if(STATE.factuurSim){ _openFactuurrapportMet(_margeData()); return; }
+  var pad=_factuuranalysePad();
+  if(pad){
+    apiGet('/api/factuuranalyse?pad='+encodeURIComponent(pad))
+      .then(function(d){ _openFactuurrapportMet(d); })
+      .catch(function(e){ alert('Kon de bewaarde factuuranalyse niet ophalen: '+e.message); });
+    return;
+  }
+  alert('Geen factuuranalyse beschikbaar. Ga naar stap 4 (Factuuranalyse) om ze te berekenen.');
+}
+// Volledige analyse (MET de profielen-arrays) naar Storage. Best-effort: faalt dit,
+// dan blijft de sessie werken — enkel het later heropbouwen van het rapport valt weg.
+function _bewaarFactuuranalyseBlob(){
+  return apiPost('/api/factuuranalyse',{ klant:_klantSlug(), stempel:_factuurStempel(), data:_margeData() })
+    .then(function(r){ return (r && r.pad) ? r.pad : null; })
+    .catch(function(e){ log('Factuuranalyse bewaren faalde (niet-blokkerend): '+e.message,'warn'); return null; });
 }
 
 // ============================================================
@@ -4995,7 +5024,7 @@ function _margeDataLean(){
   out._profielen_weggelaten = true;
   return out;
 }
-function _buildFactuurScenarios(){
+function _buildFactuurScenarios(analysePad){
   var d=_margeDataLean();
   var stempel=_factuurStempel(), klant=_klantSlug(), nu=new Date().toISOString();
   function snapshot(){
@@ -5020,7 +5049,11 @@ function _buildFactuurScenarios(){
       label:label, periode:periodeType, subtotaal_excl_btw:fac.subtotaal,
       posten:fac.posten||null, energie_bron:d.energie_bron, bewaard_op:nu
     };
-    s._factuuranalyse = d;            // slank: zonder profielen
+    s._factuuranalyse = d;            // slank: zonder profielen (voor snelle weergave)
+    // v1.21.9: verwijzing naar de VOLLEDIGE analyse (incl. profielen) in Storage.
+    // Bytes in Storage, ref in het scenario — zo blijft de repo klein én is het
+    // heropende rapport identiek aan het origineel.
+    s._factuuranalyse_pad = analysePad || null;
     return { scenario:s.scenario, data:s };
   }
   return [
@@ -5031,11 +5064,17 @@ function _buildFactuurScenarios(){
   ];
 }
 function _bewaarFacturenEnGaVerder(btn){
+  btn.disabled=true; btn.textContent='Analyse bewaren…';
+  // Eerst de VOLLEDIGE analyse (incl. profielen) naar Storage, daarna de scenario's
+  // met enkel de verwijzing. Zo kan het rapport later identiek heropgebouwd worden.
+  _bewaarFactuuranalyseBlob().then(function(analysePad){
+  if(analysePad){ STATE._factuuranalyse_pad=analysePad; if(STATE.baseCase) STATE.baseCase._factuuranalyse_pad=analysePad; }
+  else { log('Let op: de volledige analyse kon niet bewaard worden — het rapport is later enkel met een nieuwe berekening op te bouwen.','warn'); }
   var scenarios;
-  try{ scenarios=_buildFactuurScenarios(); }
-  catch(e){ alert('Kon de factuur-scenario\'s niet opbouwen: '+e.message); return; }
-  btn.disabled=true; btn.textContent='Bewaren…';
-  apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:scenarios })
+  try{ scenarios=_buildFactuurScenarios(analysePad); }
+  catch(e){ btn.disabled=false; btn.textContent='✅ Bewaar de 4 facturen en ga verder'; alert('Kon de factuur-scenario\'s niet opbouwen: '+e.message); return; }
+  btn.textContent='Scenario\'s bewaren…';
+  return apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:scenarios })
     .then(function(r){
       var s=r.summary||{};
       log('Factuuranalyse afgesloten: '+(s.github||0)+'/'+(s.totaal||scenarios.length)+' factuur-scenario\'s bewaard','ok');
@@ -5064,6 +5103,7 @@ function _bewaarFacturenEnGaVerder(btn){
       btn.disabled=false; btn.textContent='✅ Bewaar de 4 facturen en ga verder';
       alert('Bewaren mislukt: '+e.message);
     });
+  });
 }
 function _factuurSimEnergie(){
   var s=STATE.factuurSim; if(!s) return null;
