@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.5</span>
+    <span class="fdsim-version">v1.21.7</span>
   </div>
 </div>
 
@@ -4901,6 +4901,65 @@ function _bareSimInput(mode){
     simulatieperiode:{ van:periode.van, tot:periode.tot, type: specifiek?'specifiek':'kalenderjaar' }
   };
 }
+// v1.21.6: CONSISTENTIE-GUARD op de factuurscan. De ingelezen componenten
+// (energie + distributie + heffingen) MOETEN optellen tot het ingelezen factuurtotaal.
+// Zo niet, dan heeft de AI-extractie de factuur verkeerd gelezen en is elke marge die
+// erop gebouwd wordt onbetrouwbaar. Voorheen liep dat stil door (bv. componenten
+// € 3.180,44 vs totaal € 3.600 → marge € 246 te hoog).
+function _scanConsistentie(){
+  var bc=STATE.baseCase||{};
+  var e=+bc.totaalEnergieExclBtw||0, d=+bc.totaalDistributieExclBtw||0, h=+bc.totaalHeffingenExclBtw||0;
+  var som=e+d+h, tot=+bc.totaalExclBtw||0;
+  if(!(tot>0) || !(som>0)) return null;
+  var afw=Math.abs(tot-som);
+  return { som:som, totaal:tot, afwijking:afw, pct:afw/tot*100, ok:(afw/tot*100)<=1.0 };
+}
+// v1.21.7: originele factuur openen via een KORTLEVENDE signed URL. De bucket is
+// privaat; de browser krijgt nooit de service-key. Zo kan de verkoper (en de klant)
+// onze uitgelezen regels naast de échte factuur leggen — verifiëren i.p.v. geloven.
+function _factuurBestanden(){
+  var bc=STATE.baseCase||{};
+  return Array.isArray(bc.factuur_bestanden)?bc.factuur_bestanden:[];
+}
+function _openOrigineleFactuur(pad){
+  apiGet('/api/factuur-bestand?pad='+encodeURIComponent(pad)).then(function(r){
+    if(r && r.url){ window.open(r.url,'_blank'); }
+    else alert('Kon de factuur niet openen.');
+  }).catch(function(e){ alert('Kon de factuur niet openen: '+e.message); });
+}
+// v1.21.7: de uitgelezen factuurregels tonen mét de rekencontrole (aantal × prijs =
+// bedrag). Zo ziet de lezer regel per regel of de scan klopt, en een fout regelt zich
+// niet weg: ze wordt rood aangewezen.
+function _renderFactuurRegels(){
+  var bc=STATE.baseCase||{};
+  var R=Array.isArray(bc._factuurRegels)?bc._factuurRegels:[];
+  if(!R.length) return null;
+  var rc=bc._regelcontrole||{};
+  var foutIdx={}; (rc.foute_regels||[]).forEach(function(f){ foutIdx[f.i]=f; });
+  var sec=el('div',{class:'fdsim-section',style:'margin-top:14px'});
+  sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Uitgelezen factuurregels'));
+  sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:8px'},
+    'Elke regel zoals wij ze uit je factuur lazen, met de rekencontrole aantal × eenheidsprijs = bedrag. Zo kan je ze naast de originele factuur leggen.'));
+  var rows='';
+  R.forEach(function(r,i){
+    var f=foutIdx[i];
+    var kleur=f?'background:#FEE;color:#900':'';
+    rows+='<tr style="'+kleur+'"><td style="padding:3px 6px">'+(r.omschrijving||'?')+'</td>'+
+      '<td style="padding:3px 6px;text-align:right">'+(r.aantal!=null?fmtNum(r.aantal,2):'—')+' '+(r.eenheid||'')+'</td>'+
+      '<td style="padding:3px 6px;text-align:right">'+(r.eenheidsprijs!=null?r.eenheidsprijs:'—')+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;font-weight:600">'+_eurM(r.bedrag_excl)+'</td>'+
+      '<td style="padding:3px 6px;font-size:11px">'+(r.groep||'')+(r.is_capaciteit?' · cap':'')+'</td>'+
+      '<td style="padding:3px 6px;font-size:11px">'+(f?('⚠ verwacht '+_eurM(f.verwacht)):'✓')+'</td></tr>';
+  });
+  var t=el('table',{style:'width:100%;border-collapse:collapse;font-size:12px'});
+  t.innerHTML='<tr style="color:#666;text-align:left"><th style="padding:3px 6px">Omschrijving</th><th style="padding:3px 6px;text-align:right">Aantal</th>'+
+    '<th style="padding:3px 6px;text-align:right">Eenheidsprijs</th><th style="padding:3px 6px;text-align:right">Bedrag</th>'+
+    '<th style="padding:3px 6px">Groep</th><th style="padding:3px 6px">Check</th></tr>'+rows+
+    '<tr style="border-top:2px solid #1F3864;font-weight:800"><td style="padding:5px 6px">Som van de regels</td><td></td><td></td>'+
+    '<td style="padding:5px 6px;text-align:right">'+_eurM(rc.som_regels||0)+'</td><td colspan="2"></td></tr>';
+  sec.appendChild(t);
+  return sec;
+}
 function _factuurSimEnergie(){
   var s=STATE.factuurSim; if(!s) return null;
   var jf=s.jaarfactuur||s.factuur||{}, gr=jf.groepen||{};
@@ -4959,6 +5018,15 @@ function renderStepFactuuranalyse(){
     return box;
   }
   box.appendChild(el('div',{class:'fdsim-help'},'Zelfde verbruik, ander contract: we simuleren je factuur op een scherp dynamisch tarief met je gekozen profiel en de werkelijke spotprijzen (GitHub-marktdata). Alle kosten buiten energie nemen we verbatim over van je factuur.'));
+  // v1.21.6: blokkeer stille fouten — een inconsistente scan geeft een foute marge.
+  var _cons=_scanConsistentie();
+  if(_cons && !_cons.ok){
+    var _w=el('div',{class:'fdsim-section',style:'background:#FEE;border-color:#C00;color:#900;margin-bottom:12px'});
+    _w.innerHTML='<b>⚠ Factuurscan is niet consistent — de marge hieronder is onbetrouwbaar.</b><br>'+
+      'De ingelezen componenten (energie + netkosten + heffingen = <b>'+_eurM(_cons.som)+'</b>) tellen niet op tot het ingelezen factuurtotaal (<b>'+_eurM(_cons.totaal)+'</b>) — een afwijking van '+_eurM(_cons.afwijking)+' ('+_cons.pct.toFixed(1)+'%).<br>'+
+      'De AI-extractie heeft de factuur verkeerd gelezen. Laad de factuur opnieuw in op stap 1 en controleer de scanwaarden vóór je deze cijfers gebruikt.';
+    box.appendChild(_w);
+  }
   // v1.21.4: her-simuleer zodra een relevante input wijzigt (profiel, verbruik,
   // periode, spanning, netbeheerder, toegangsvermogen, contract). Zonder deze
   // signatuur-check bleef een oude besparing hangen na een profielwissel, en kon
@@ -4997,9 +5065,21 @@ function renderStepFactuuranalyse(){
   box.appendChild(kpis);
   box.appendChild(_vglTabelSubtotaal('Maandvergelijking ('+(bc.periodeVan||'?')+' – '+(bc.periodeTot||'?')+')', d.maand.bestaand, d.maand.dynamisch));
   box.appendChild(_vglTabelSubtotaal('Jaarvergelijking (extrapolatie ×'+new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(d.extrapolatie_factor)+')', d.jaar.bestaand, d.jaar.dynamisch));
-  var btn=el('button',{class:'fdsim-btn green',style:'margin-top:12px'},'📄 Onderhandelingsmarge-rapport openen');
+  // v1.21.7: de uitgelezen regels + de originele factuur ernaast — verifieerbaar.
+  var _reg=_renderFactuurRegels();
+  if(_reg) box.appendChild(_reg);
+
+  var knoppen=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'});
+  var btn=el('button',{class:'fdsim-btn green'},'📄 Onderhandelingsmarge-rapport openen');
   btn.onclick=function(){ _openFactuurrapport(); };
-  box.appendChild(btn);
+  knoppen.appendChild(btn);
+  _factuurBestanden().forEach(function(fb,i){
+    var b=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},
+      '📎 Bekijk originele factuur'+(_factuurBestanden().length>1?(' ('+(i+1)+')'):''));
+    b.onclick=function(){ _openOrigineleFactuur(fb.pad); };
+    knoppen.appendChild(b);
+  });
+  box.appendChild(knoppen);
   return box;
 }
 function runSimulatie(){
