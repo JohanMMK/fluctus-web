@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.7</span>
+    <span class="fdsim-version">v1.21.8</span>
   </div>
 </div>
 
@@ -2702,11 +2702,11 @@ function _financieelRapportData(){
     },
     besparing_jaar1:cM.subtotaal-cB.subtotaal,
     besparing_energie_deel:0.72,
-    onbalans_windfall_jaar1:Math.max(0,windfall),
-    // v1.21.5: volledige factuuranalyse-data (zelfde als het factuurrapport) zodat het
-    // financieel rapport de uitgelijnde maand/jaar-vergelijking + de 3 heatmaps integraal
-    // toont i.p.v. de lichte 4-facturen-tabel. Null wanneer er geen factuur is.
-    factuuranalyse:(STATE.baseCase && STATE.baseCase.totaalExclBtw>0)?_margeData():null
+    onbalans_windfall_jaar1:Math.max(0,windfall)
+    // v1.21.8: de factuuranalyse zit BEWUST NIET in het financieel rapport. Dat rapport
+    // gaat over het ontwerp; de factuurvergelijking is een aparte, afgesloten fase met
+    // een eigen rapport. Zo kleurt een herbouw van het onderhandelingsmarge-rapport niet
+    // mee met het ontwerp (geen bias). De aparte knop op de resultaatstap roept het op.
   };
 }
 function _openFinancieelRapport(){
@@ -4385,9 +4385,20 @@ function renderStep9Resultaat(){
     frSec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Financieel rapport'));
     frSec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
       'Het volledige investeringsrapport: facturen, besparing over de batterijlevensduur, 3 kostenscenario\'s, capex/opex, rendement & terugverdientijd en 5 financieringsmodellen — opgebouwd uit deze simulatie.'));
+    var frKnoppen=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'});
     var frBtn=el('button',{class:'fdsim-btn green'},'📊 Genereer financieel rapport');
     frBtn.onclick=function(){ _openFinancieelRapport(); };
-    frSec.appendChild(frBtn);
+    frKnoppen.appendChild(frBtn);
+    // v1.21.8: het onderhandelingsmarge-rapport blijft een APART rapport (bewust niet
+    // in het financieel rapport, om bias bij herbouw te vermijden). Deze knop roept het
+    // op uit de bewaarde factuuranalyse — ook nadat we al in de klassieke analyse zitten.
+    if(STATE.baseCase && STATE.baseCase.totaalExclBtw>0){
+      var fmBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},
+        '📄 Onderhandelingsmarge-rapport');
+      fmBtn.onclick=function(){ _openFactuurrapport(); };
+      frKnoppen.appendChild(fmBtn);
+    }
+    frSec.appendChild(frKnoppen);
     box.appendChild(frSec);
   }
 
@@ -4960,6 +4971,100 @@ function _renderFactuurRegels(){
   sec.appendChild(t);
   return sec;
 }
+// ============================================================
+//   v1.21.8 — FACTUURANALYSE AFSLUITEN
+//   Bewaart de 4 facturen als scenario's en schakelt de wizard door naar de
+//   KLASSIEKE analyse: periode terug op de dropdown met rolling 12 maanden als
+//   default. Vanaf dan verwijst niets meer naar de factuurmaand.
+// ============================================================
+function _factuurStempel(){            // YYMMDD van de uploaddatum (= vandaag)
+  var d=new Date(), p=function(n){ return (n<10?'0':'')+n; };
+  return String(d.getFullYear()).slice(2)+p(d.getMonth()+1)+p(d.getDate());
+}
+function _klantSlug(){
+  var bc=STATE.baseCase||{};
+  var n=bc.klantNaam||STATE.klantNaam||STATE.project||'Klant';
+  return (String(n).replace(/[^A-Za-z0-9]+/g,'')||'Klant').slice(0,28);
+}
+// Slanke marge-data voor opslag: ZONDER de profielen-arrays (3 × 35.040 waarden).
+// Die horen niet in een scenario-JSON — elke auto-save zou anders megabytes naar de
+// GitHub-repo committen (en git-historiek is onuitwisbaar).
+function _margeDataLean(){
+  var d=_margeData(), out={};
+  Object.keys(d).forEach(function(k){ if(k!=='factuurSimProfielen') out[k]=d[k]; });
+  out._profielen_weggelaten = true;
+  return out;
+}
+function _buildFactuurScenarios(){
+  var d=_margeDataLean();
+  var stempel=_factuurStempel(), klant=_klantSlug(), nu=new Date().toISOString();
+  function snapshot(){
+    var out={};
+    Object.keys(STATE).forEach(function(k){
+      // runtime-state en zware sim-objecten horen niet in een scenario
+      if(k==='resultaat'||k==='isRunning'||k==='currentStep'||k==='visited'||
+         k==='resultaatVarianten'||k==='opstellingen'||k==='factuurSim'||
+         k==='factuurSimJaar'||k==='kpiSturing'||k==='vergelijkingOpstellingen') return;
+      out[k]=STATE[k];
+    });
+    return out;
+  }
+  function mk(suffix, label, fac, periodeType){
+    var s=snapshot();
+    s.scenario   = klant+'_'+suffix+'_'+stempel;
+    s.scenarioActie='nieuw';
+    s.jaar='specifiek';               // deze 4 zijn factuur-records, geen ontwerpen
+    // Zelfstandig record: hiermee kan het onderhandelingsmarge-rapport later
+    // volledig heropgebouwd worden zonder de simulatie opnieuw te draaien.
+    s._factuurScenario = {
+      label:label, periode:periodeType, subtotaal_excl_btw:fac.subtotaal,
+      posten:fac.posten||null, energie_bron:d.energie_bron, bewaard_op:nu
+    };
+    s._factuuranalyse = d;            // slank: zonder profielen
+    return { scenario:s.scenario, data:s };
+  }
+  return [
+    mk('Factuur',           'Huidig contract — maand',  d.maand.bestaand,  'maand'),
+    mk('BetereFactuur',     'Scherp dynamisch — maand', d.maand.dynamisch, 'maand'),
+    mk('JaarFactuur',       'Huidig contract — jaar',   d.jaar.bestaand,   'jaar'),
+    mk('BetereJaarFactuur', 'Scherp dynamisch — jaar',  d.jaar.dynamisch,  'jaar')
+  ];
+}
+function _bewaarFacturenEnGaVerder(btn){
+  var scenarios;
+  try{ scenarios=_buildFactuurScenarios(); }
+  catch(e){ alert('Kon de factuur-scenario\'s niet opbouwen: '+e.message); return; }
+  btn.disabled=true; btn.textContent='Bewaren…';
+  apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:scenarios })
+    .then(function(r){
+      var s=r.summary||{};
+      log('Factuuranalyse afgesloten: '+(s.github||0)+'/'+(s.totaal||scenarios.length)+' factuur-scenario\'s bewaard','ok');
+      if(!r.ok){ alert('Let op: '+(s.cacheOnly||0)+' scenario(s) konden niet naar GitHub — ze staan wel in het geheugen.'); }
+      // v1.21.8: overschakelen naar de KLASSIEKE analyse.
+      // Het basisscenario zonder laadplein = de betere jaarfactuur: de contractwinst
+      // is dan al weggegeven, zodat PV/batterij/laadplein hun waarde BOVENOP een goed
+      // contract moeten bewijzen (geen dubbeltelling van de onderhandelingsmarge).
+      STATE.basisScenario = {
+        naam: _klantSlug()+'_BetereJaarFactuur_'+_factuurStempel(),
+        label: 'Scherp dynamisch — jaar (geen assets)',
+        subtotaal_excl_btw: _margeData().jaar.dynamisch.subtotaal,
+        bron: 'factuuranalyse'
+      };
+      STATE.factuurScenariosBewaard = scenarios.map(function(x){ return x.scenario; });
+      STATE.jaar = 'rolling12';
+      STATE.baseCaseLoskoppeld = true;   // Periode-stap toont weer de dropdown
+      STATE.periodeVan = null; STATE.periodeTot = null;
+      STATE.scenario = _klantSlug()+'_Ontwerp_'+_factuurStempel();
+      STATE.scenarioActie = 'nieuw';
+      STATE.currentStep = 4;             // door naar Laadplein
+      STATE.visited[3] = true;
+      renderAll();
+    })
+    .catch(function(e){
+      btn.disabled=false; btn.textContent='✅ Bewaar de 4 facturen en ga verder';
+      alert('Bewaren mislukt: '+e.message);
+    });
+}
 function _factuurSimEnergie(){
   var s=STATE.factuurSim; if(!s) return null;
   var jf=s.jaarfactuur||s.factuur||{}, gr=jf.groepen||{};
@@ -5070,7 +5175,7 @@ function renderStepFactuuranalyse(){
   if(_reg) box.appendChild(_reg);
 
   var knoppen=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'});
-  var btn=el('button',{class:'fdsim-btn green'},'📄 Onderhandelingsmarge-rapport openen');
+  var btn=el('button',{class:'fdsim-btn'},'📄 Onderhandelingsmarge-rapport openen');
   btn.onclick=function(){ _openFactuurrapport(); };
   knoppen.appendChild(btn);
   _factuurBestanden().forEach(function(fb,i){
@@ -5080,6 +5185,17 @@ function renderStepFactuuranalyse(){
     knoppen.appendChild(b);
   });
   box.appendChild(knoppen);
+
+  // v1.21.8: de factuuranalyse afsluiten → 4 scenario's bewaren en over naar de
+  // klassieke analyse (rolling 12 maanden).
+  var afsluit=el('div',{class:'fdsim-section',style:'margin-top:16px;background:#05B0500f;border-color:#05B05040'});
+  afsluit.appendChild(el('div',{style:'font-size:13px;margin-bottom:8px'},
+    'Klaar met de factuuranalyse? We bewaren de vier facturen als scenario\'s ('+_klantSlug()+'_Factuur / _BetereFactuur / _JaarFactuur / _BetereJaarFactuur_'+_factuurStempel()+
+    ') en gaan verder met het ontwerp. Vanaf dan rekenen we standaard op de laatste 12 maanden — niet meer op de factuurmaand. De betere jaarfactuur blijft het ijkpunt waartegen we elk ontwerp afzetten.'));
+  var okBtn=el('button',{class:'fdsim-btn green'},'✅ Bewaar de 4 facturen en ga verder');
+  okBtn.onclick=function(){ _bewaarFacturenEnGaVerder(okBtn); };
+  afsluit.appendChild(okBtn);
+  box.appendChild(afsluit);
   return box;
 }
 function runSimulatie(){
