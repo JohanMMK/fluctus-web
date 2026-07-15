@@ -69,6 +69,19 @@
   .vgl-grid > div:first-child{border-right:1px solid var(--lijn)}
   .vgl-kop{font-weight:800;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline}
   .vgl-kop .bedrag{font-size:16px;color:var(--blauw)}.vgl-kop.beter .bedrag{color:var(--groen-d)}
+  /* uitgelijnde 2-koloms factuurvergelijking (zelfde items op zelfde hoogte) */
+  .fv-kop{display:grid;grid-template-columns:1fr 1fr}
+  .fv-kop > div{padding:12px 16px 8px;font-weight:800;font-size:13px;display:flex;justify-content:space-between;align-items:baseline}
+  .fv-kop > div:first-child{border-right:1px solid var(--lijn)}
+  .fv-kop .bedrag{font-size:16px;color:var(--blauw)}.fv-kop > div.beter .bedrag{color:var(--groen-d)}
+  .fv-grid{display:grid;grid-template-columns:1fr 1fr;font-size:12px}
+  .fv-grid > div{padding:5px 16px;border-bottom:1px solid #eceff4;display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+  .fv-grid > div:nth-child(odd){border-right:1px solid var(--lijn)}
+  .fv-grid .fv-grp{font-weight:700;color:var(--blauw);border-bottom:1px solid var(--lijn);padding-top:9px;display:block}
+  .fv-grid .fv-it > span:first-child{color:var(--grijs);padding-left:12px}
+  .fv-grid .fv-eur{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right;flex:0 0 auto}
+  .fv-grid .fv-tot{font-weight:800;border-top:2px solid var(--blauw);border-bottom:none;padding-top:7px;font-size:13px}
+  .fv-grid .fv-btw{color:var(--grijs)}
   table.vgl{width:100%;border-collapse:collapse;font-size:11.5px}
   table.vgl td{padding:4px 2px;border-bottom:1px solid #eceff4}table.vgl td:last-child{text-align:right}
   table.vgl .grp td{font-weight:700;color:var(--blauw);padding-top:8px}
@@ -334,6 +347,68 @@ function pagina(nr, inner){
   return p;
 }
 
+// ===== v1.5: geïntegreerde factuuranalyse (zelfde helpers als het factuurrapport) =====
+function eur2(v){ return '€ '+new Intl.NumberFormat('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v); }
+function _fvEur(v){ return '<span class="fv-eur">'+eur2(v)+'</span>'; }
+function factuurVergelijking(facL, facR, btw){
+  var rows='', subL=0, subR=0, nG=Math.max(facL.posten.length, facR.posten.length);
+  for(var gi=0; gi<nG; gi++){
+    var gL=facL.posten[gi]||{grp:'',items:[]}, gR=facR.posten[gi]||{grp:'',items:[]};
+    rows+='<div class="fv-grp">'+(gL.grp||'&nbsp;')+'</div><div class="fv-grp">'+(gR.grp||gL.grp||'&nbsp;')+'</div>';
+    var nI=Math.max(gL.items.length, gR.items.length);
+    for(var i=0;i<nI;i++){ var il=gL.items[i], ir=gR.items[i]; if(il)subL+=il[1]; if(ir)subR+=ir[1];
+      rows+='<div class="fv-it">'+(il?'<span>'+il[0]+'</span>'+_fvEur(il[1]):'<span>&nbsp;</span>')+'</div>';
+      rows+='<div class="fv-it">'+(ir?'<span>'+ir[0]+'</span>'+_fvEur(ir[1]):'<span>&nbsp;</span>')+'</div>'; } }
+  var btwL=subL*btw/100, btwR=subR*btw/100;
+  function rij(cls,label,vL,vR){ return '<div class="'+cls+'"><span>'+label+'</span>'+_fvEur(vL)+'</div><div class="'+cls+'"><span>'+label+'</span>'+_fvEur(vR)+'</div>'; }
+  rows+=rij('fv-tot','Subtotaal (excl. btw)',subL,subR);
+  rows+=rij('fv-btw','Btw '+btw+'%',btwL,btwR);
+  rows+=rij('fv-tot','Totaal (incl. btw)',subL+btwL,subR+btwR);
+  return '<div class="fv-grid">'+rows+'</div>';
+}
+function scaleFactuur(fac, factor){
+  return { label:fac.label, subtotaal:(fac.subtotaal||0)*factor,
+    posten:(fac.posten||[]).map(function(g){ return {grp:g.grp, items:g.items.map(function(it){return [it[0], it[1]*factor];})}; }) };
+}
+var _FV_MND=[[0,'jan'],[31,'feb'],[59,'mrt'],[90,'apr'],[120,'mei'],[151,'jun'],[181,'jul'],[212,'aug'],[243,'sep'],[273,'okt'],[304,'nov'],[334,'dec']];
+function _fvBinKalender(vals, vanISO, agg){
+  var startMs=(vanISO?new Date(vanISO):new Date(2025,0,1)).getTime(), DAGEN=366, UREN=24;
+  var sum=[], cnt=[]; for(var d=0;d<DAGEN;d++){ sum[d]=[]; cnt[d]=[]; for(var u=0;u<UREN;u++){ sum[d][u]=0; cnt[d][u]=0; } }
+  for(var i=0;i<vals.length;i++){ var dt=new Date(startMs+i*900000);
+    var doy=Math.floor((dt-new Date(dt.getFullYear(),0,1))/86400000); if(doy<0)doy=0; if(doy>365)doy=365;
+    var h=dt.getHours(); sum[doy][h]+=vals[i]; cnt[doy][h]++; }
+  var grid=[]; for(var d2=0;d2<DAGEN;d2++){ grid[d2]=[]; for(var u2=0;u2<UREN;u2++){ var c=cnt[d2][u2]; grid[d2][u2]=c?(agg==='sum'?sum[d2][u2]:sum[d2][u2]/c):null; } }
+  return {grid:grid, DAGEN:DAGEN, UREN:UREN};
+}
+function _fvTekenHeat(id, vals, vanISO, opts){
+  var cv=document.getElementById(id); if(!cv||!vals||!vals.length) return;
+  opts=opts||{}; var ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  var src=opts.posOnly?vals.map(function(v){return Math.max(0,v||0);}):vals;
+  var b=_fvBinKalender(src, vanISO, opts.agg||'mean'), grid=b.grid, DAGEN=b.DAGEN, UREN=b.UREN;
+  var mL=40, mR=10, mT=8, mB=26, pW=W-mL-mR, pH=H-mT-mB, cw=pW/DAGEN, ch=pH/UREN;
+  var flat=[]; for(var d=0;d<DAGEN;d++)for(var u=0;u<UREN;u++){ if(grid[d][u]!=null) flat.push(grid[d][u]); }
+  if(!flat.length) return; flat.sort(function(a,b){return a-b;});
+  function pctl(p){ var i=Math.max(0,Math.min(flat.length-1,Math.round(p*(flat.length-1)))); return flat[i]; }
+  var lo=pctl(0.02), hi=pctl(0.98); if(hi<=lo){ lo=flat[0]; hi=(flat[flat.length-1]||lo)+1; }
+  var palet=opts.palet||'traffic';
+  function kleur(v){ var t=Math.max(0,Math.min(1,(v-lo)/(hi-lo))), r,g,bl;
+    if(palet==='blauw'){ r=Math.round(234-t*214); g=Math.round(241-t*181); bl=Math.round(250-t*110); }
+    else if(t<0.5){ var k=t/0.5; r=Math.round(43+k*212); g=Math.round(158+k*47); bl=Math.round(74-k*34); }
+    else { var k2=(t-0.5)/0.5; r=Math.round(255-k2*43); g=Math.round(205-k2*163); bl=Math.round(40-k2*4); }
+    return 'rgb('+r+','+g+','+bl+')'; }
+  for(var d3=0; d3<DAGEN; d3++){ for(var u3=0; u3<UREN; u3++){ var v=grid[d3][u3];
+    ctx.fillStyle=(v==null)?'#F0F2F6':kleur(v); ctx.fillRect(mL+d3*cw, mT+(UREN-1-u3)*ch, Math.ceil(cw), Math.ceil(ch)+0.5); } }
+  ctx.strokeStyle='#AEB8C6'; ctx.lineWidth=1; ctx.strokeRect(mL+0.5, mT+0.5, pW, pH);
+  ctx.fillStyle='#5A6577'; ctx.font='9px Helvetica,Arial,sans-serif';
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  [0,6,12,18,24].forEach(function(hh){ ctx.fillText(hh+'u', mL-4, mT+pH-(hh/24)*pH); });
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  _FV_MND.forEach(function(mm){ var x=mL+(mm[0]/DAGEN)*pW; ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(x+0.5,mT+pH); ctx.lineTo(x+0.5,mT+pH+3); ctx.stroke(); ctx.fillText(mm[1], x+1, mT+pH+5); });
+  var lg=document.getElementById(id+'-lg');
+  if(lg){ var grad=(palet==='blauw')?'linear-gradient(to right,rgb(234,241,250),rgb(20,60,140))':'linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
+    lg.innerHTML='<span>'+Math.round(lo)+' '+opts.eenheid+'</span><span style="display:inline-block;width:150px;height:9px;border-radius:3px;background:'+grad+'"></span><span>'+Math.round(hi)+' '+opts.eenheid+'</span>'; }
+}
+
 // ---- Berekende kerncijfers ----
 var e=INV.energie;
 var zelfcons_pct = e.pv_productie_mwh>0 ? e.pv_zelfverbruik_mwh/e.pv_productie_mwh*100 : 0;
@@ -535,7 +610,7 @@ pagina(8, `
   <div class="box" style="background:#FFF3E0;border-color:#9E480E55">
     <b>Onderhandel niet tot op het bot.</b> Die ${eur(f_marge)}/jaar is uw ankerpunt, niet uw eindpunt. Uw relatie met uw leverancier is óók belangrijk: straks vertrouwt u op hem om samen met uw batterij en laadinfrastructuur op intraday en onbalans waarde te organiseren. Veel belangrijker dan een paar euro extra korting is dat uw leverancier beseft dat u een <b>actieve, betrokken gebruiker</b> wordt — dat hebben goede leveranciers het liefst, en dat brengt jullie samen verder.
   </div>
-  <p class="note">Het volledige factuurdetail (beide contracten, maand én jaar, met alle gescande gegevens ter verificatie) staat in het aparte factuurrapport dat aan dit dossier voorafgaat.</p>
+  <p class="note">${INV.factuuranalyse ? 'Het volledige factuurdetail (beide contracten, maand én jaar, uitgelijnd) en de heatmaps van de factuursimulatie volgen hierna in dit rapport.' : 'Het volledige factuurdetail staat in het aparte factuurrapport dat aan dit dossier voorafgaat.'}</p>
   <h3>2 → 3 · Waarom het basis scenario afwijkt</h3>
   <p>${(Math.abs(f_scherp_vs_minder)<1)
       ? 'Het basis scenario ís de scherpe factuur — er is geen bijkomende uitleg nodig.'
@@ -543,6 +618,49 @@ pagina(8, `
   <h3>3 → 4 · De verbetering die we voorstellen</h3>
   <p>Van basis (${eur(f.minder_scenario_jaar)}) naar het betere scenario (${eur(f.beter_scenario_jaar)}) bespaart u <b>${eur(INV.besparing_jaar1)}/jaar</b> — de opbrengst van PV, batterij en slimme sturing (variant 2). De volgende pagina ontleedt dat verschil per component.</p>
 `);
+
+// ==================== PAGINA 8b/8c — GEÏNTEGREERDE FACTUURANALYSE ====================
+(function(){
+  var FA=INV.factuuranalyse; if(!FA) return;
+  var _f=FA.extrapolatie_factor||12;
+  var _jb=scaleFactuur(FA.maand.bestaand,_f), _jd=scaleFactuur(FA.maand.dynamisch,_f);
+  var mJaar=FA.jaar.bestaand.subtotaal-FA.jaar.dynamisch.subtotaal;
+  pagina('8b', `
+    <div class="eyebrow">Factuurdetail — zelfde verbruik, ander contract</div>
+    <h2>Uw factuur op een scherp dynamisch tarief</h2>
+    <p class="lead">De energiepost is een echte simulatie van uw verbruiksprofiel × de spotprijzen; alle overige kosten zijn verbatim uit uw factuur overgenomen — enkel het contract verschilt.</p>
+    <div class="factuur-kader">
+      <div class="fk-titel"><span>Maandfactuur — ${FA.periode_van} – ${FA.periode_tot}</span><span class="badge">excl. btw = subtotaal</span></div>
+      <div class="fv-kop"><div><span>${FA.maand.bestaand.label}</span><span class="bedrag">${eur(FA.maand.bestaand.subtotaal)}</span></div><div class="beter"><span>${FA.maand.dynamisch.label}</span><span class="bedrag">${eur(FA.maand.dynamisch.subtotaal)}</span></div></div>
+      ${factuurVergelijking(FA.maand.bestaand, FA.maand.dynamisch, FA.btw_pct)}
+    </div>
+    <div class="factuur-kader">
+      <div class="fk-titel"><span>Jaarfactuur — extrapolatie (×${new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(_f)})</span><span class="badge">excl. btw</span></div>
+      <div class="fv-kop"><div><span>${FA.jaar.bestaand.label}</span><span class="bedrag">${eur(FA.jaar.bestaand.subtotaal)}</span></div><div class="beter"><span>${FA.jaar.dynamisch.label}</span><span class="bedrag">${eur(FA.jaar.dynamisch.subtotaal)}</span></div></div>
+      ${factuurVergelijking(_jb, _jd, FA.btw_pct)}
+    </div>
+    <div class="box groen"><b>Onderhandelingsmarge: ${eur(mJaar)}/jaar</b> — enkel de energiecomponent verschilt; netkosten en heffingen blijven gelijk.</div>
+  `);
+  var pr=FA.factuurSimProfielen;
+  if(pr && Array.isArray(pr.spot_prijs_eur_mwh) && pr.spot_prijs_eur_mwh.length>=96){
+    var n=pr.spot_prijs_eur_mwh.length, spot=pr.spot_prijs_eur_mwh, verbruik=pr.vermogen_aansluiting_kw||[], kostM=pr.kost_eur_mwh||[];
+    var betaald=[]; for(var i=0;i<n;i++){ var kw=Math.max(0,verbruik[i]||0); betaald.push(kw*0.25/1000*(kostM[i]||0)); }
+    function blok(id,titel,sub){ return '<h3 style="margin:14px 0 3px">'+titel+'</h3><div style="font-size:11px;color:var(--grijs);margin-bottom:3px">'+sub+'</div><div style="text-align:center"><canvas id="'+id+'" width="720" height="196" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div><div id="'+id+'-lg" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:10px;color:var(--grijs);margin-top:3px"></div>'; }
+    pagina('8c', `
+      <div class="eyebrow">Factuursimulatie · dynamisch tarief</div>
+      <h2>Uw jaar in drie beelden</h2>
+      <p class="lead">Elke kolom is een dag (1 jan links → 31 dec rechts), elke rij een uur (0u onderaan → 24u bovenaan).</p>
+      ${blok('fi-h1','1 · Spotprijs','groen = goedkoop, rood = duur (€/MWh)')}
+      ${blok('fi-h2','2 · Uw verbruik','licht = weinig, donkerblauw = veel (kW)')}
+      ${blok('fi-h3','3 · Totaal betaald','verbruik × prijs (€/uur)')}
+    `);
+    setTimeout(function(){
+      _fvTekenHeat('fi-h1', spot, pr.van, {agg:'mean',palet:'traffic',eenheid:'€/MWh'});
+      _fvTekenHeat('fi-h2', verbruik, pr.van, {agg:'mean',palet:'blauw',eenheid:'kW',posOnly:true});
+      _fvTekenHeat('fi-h3', betaald, pr.van, {agg:'sum',palet:'traffic',eenheid:'€'});
+    }, 60);
+  }
+})();
 
 // ==================== PAGINA 9 — MINDER VS BETER ====================
 var c=INV.componenten;

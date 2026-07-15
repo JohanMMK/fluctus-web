@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.2</span>
+    <span class="fdsim-version">v1.21.5</span>
   </div>
 </div>
 
@@ -1966,6 +1966,8 @@ function jumpToStep(i){
   renderAll();
 }
 
+// v1.21.5: Factuuranalyse (index 3) is enkel zinvol met een ingeladen factuur.
+function _heeftFactuur(){ return !!(STATE.baseCase && STATE.baseCase.totaalExclBtw>0); }
 function nextStep(){
   if(!validateStep(STATE.currentStep))return;
   STATE.visited[STATE.currentStep]=true;
@@ -1977,12 +1979,15 @@ function nextStep(){
   }
   if(STATE.currentStep<10){
     STATE.currentStep++;
+    // v1.21.5: geen factuur → Factuuranalyse-stap overslaan (nieuw scenario).
+    if(STATE.currentStep===3 && !_heeftFactuur()){ STATE.currentStep=4; }
     renderAll();
   }
 }
 function prevStep(){
   if(STATE.currentStep>0){
     STATE.currentStep--;
+    if(STATE.currentStep===3 && !_heeftFactuur()){ STATE.currentStep=2; }
     renderAll();
   }
 }
@@ -2697,7 +2702,11 @@ function _financieelRapportData(){
     },
     besparing_jaar1:cM.subtotaal-cB.subtotaal,
     besparing_energie_deel:0.72,
-    onbalans_windfall_jaar1:Math.max(0,windfall)
+    onbalans_windfall_jaar1:Math.max(0,windfall),
+    // v1.21.5: volledige factuuranalyse-data (zelfde als het factuurrapport) zodat het
+    // financieel rapport de uitgelijnde maand/jaar-vergelijking + de 3 heatmaps integraal
+    // toont i.p.v. de lichte 4-facturen-tabel. Null wanneer er geen factuur is.
+    factuuranalyse:(STATE.baseCase && STATE.baseCase.totaalExclBtw>0)?_margeData():null
   };
 }
 function _openFinancieelRapport(){
@@ -3629,8 +3638,8 @@ function renderStep8Periode(){
       _multiMaandPillHtml(STATE.periodeVan, STATE.periodeTot)+
       (factuurId?'<br><span style="font-size:12px;color:#5A6270">'+escapeHtml(factuurId)+'</span>':'');
     badge.appendChild(badgeText);
-    var loskoppelBtn=el('button',{class:'fdsim-btn small',style:'background:#fff;color:#1F3864;border:1px solid #1F3864',onclick:loskoppelPeriode},'Loskoppelen');
-    badge.appendChild(loskoppelBtn);
+    // v1.21.5: 'Loskoppelen' verwijderd — de factuurvergelijking gebeurt nu in stap 4
+    // (Factuuranalyse); de simulatieperiode volgt vast uit de factuur.
     bcBox.appendChild(badge);
     grid.appendChild(bcBox);
   } else {
@@ -4898,6 +4907,17 @@ function _factuurSimEnergie(){
   var A=gr.A_energiekost||gr.A||{};
   return (A._subtotaal!=null)?(+A._subtotaal||0):null;
 }
+// v1.21.5: signatuur van enkel de BASELINE-inputs die de factuurvergelijking bepalen
+// (zelfde verbruik, ander contract). BEWUST zonder PV/batterij/laadplein/aansluiting/
+// toegangsvermogen: die horen bij het ontwerp-scenario en mogen de 4 factuur-scenario's
+// NIET herberekenen. De factuur-sim is een kale sim (profiel × spot) + netkosten uit de
+// factuur; enkel profiel, verbruik, periode, spanning, netbeheerder en contract tellen.
+function _factuurSimSignatuur(){
+  var s=STATE, c=s.contractStaffel;
+  return [s.profielNaam, s.jaarverbruik, s.periodeVolumeMwh, s.periodeVan, s.periodeTot,
+    s.spanning, s.grd, s.contractVergroening, s.contractVastMaand,
+    (Array.isArray(c)?c.length:0)].join('|');
+}
 function _runFactuurAnalyse(mode, cb){
   var key=(mode==='rolling12')?'factuurSimJaar':'factuurSim';
   if(mode!=='rolling12'){ STATE._factuurAnalyseBezig=true; STATE._factuurAnalyseFout=null; }
@@ -4939,7 +4959,14 @@ function renderStepFactuuranalyse(){
     return box;
   }
   box.appendChild(el('div',{class:'fdsim-help'},'Zelfde verbruik, ander contract: we simuleren je factuur op een scherp dynamisch tarief met je gekozen profiel en de werkelijke spotprijzen (GitHub-marktdata). Alle kosten buiten energie nemen we verbatim over van je factuur.'));
-  if(!STATE.factuurSim && !STATE._factuurAnalyseBezig && !STATE._factuurAnalyseFout){
+  // v1.21.4: her-simuleer zodra een relevante input wijzigt (profiel, verbruik,
+  // periode, spanning, netbeheerder, toegangsvermogen, contract). Zonder deze
+  // signatuur-check bleef een oude besparing hangen na een profielwissel, en kon
+  // dezelfde input schijnbaar verschillende cijfers geven (stale cache).
+  var _sig=_factuurSimSignatuur();
+  if(!STATE._factuurAnalyseBezig && STATE._factuurSimSig!==_sig){
+    STATE._factuurSimSig=_sig;
+    STATE.factuurSim=null; STATE.factuurSimJaar=null; STATE._factuurAnalyseFout=null;
     _runFactuurAnalyse('specifiek', function(r){
       // achtergrond: vol jaar voor de 12-maand-heatmap in het rapport
       if(r && !STATE.factuurSimJaar){ _runFactuurAnalyse('rolling12'); }
@@ -4955,7 +4982,7 @@ function renderStepFactuuranalyse(){
   if(STATE._factuurAnalyseFout){
     box.appendChild(el('div',{class:'fdsim-section',style:'background:#FEE;border-color:#C00;color:#900'},'Simulatie mislukt: '+STATE._factuurAnalyseFout));
     var rt=el('button',{class:'fdsim-btn small'},'Opnieuw proberen');
-    rt.onclick=function(){ STATE._factuurAnalyseFout=null; renderAll(); };
+    rt.onclick=function(){ STATE._factuurAnalyseFout=null; STATE._factuurSimSig=null; renderAll(); };
     box.appendChild(rt);
     return box;
   }
