@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.0</span>
+    <span class="fdsim-version">v1.22.1</span>
   </div>
 </div>
 
@@ -2843,7 +2843,14 @@ function updateProfielPreview(){
 
   // v1.13: auto-update aansluiting naar profielpiek + 1 (afgerond op 5 kVA)
   var nieuweAansluiting=Math.ceil((toegang+1)/5)*5;
-  if(!STATE._aansluitingManueel){STATE.aansluitingKva=nieuweAansluiting;}
+  // v1.22 FIX: na een factuuranalyse mag de PROFIELPIEK de aansluiting NIET meer
+  // overschrijven. De factuur geeft werkelijk gefactureerde waarden (capaciteit LS /
+  // toegangsvermogen MS / maandpiek MS); de grootste daarvan is het piekvermogen en
+  // staat al in STATE.aansluitingKva. De profielpiek is maar een modelwaarde en zette
+  // hier stil een verkeerde basis voor opstelling 1 (hoeveel moet erbij) en 2 (batterij).
+  if(!STATE._aansluitingManueel && !(_piekvermogenKw()>0)){
+    STATE.aansluitingKva=nieuweAansluiting;
+  }
   prevBox.style.display='block';
   content.innerHTML=
     '<div style="display:flex;justify-content:space-between;border-bottom:1px solid #1F386420;padding:3px 0">'+
@@ -2885,6 +2892,56 @@ function _laadpleinNieuw(){
 }
 function _lpEnergieMwh(lp){ return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000; }
 function _lpVermogenKw(lp){ return (lp.laadpunten||[]).reduce(function(s,x){return s+(x.aantal||0)*(LAADPUNT_KW[x.type]||0);},0); }
+
+// ─── v1.22: PIEKVERMOGEN uit de FACTUUR ──────────────────────────────────────
+// De grootste van de drie werkelijk gefactureerde vermogens:
+//   capaciteit (LS) · toegangsvermogen (MS) · maandpiek (MS)
+// NIET de profielpiek: die is een modelwaarde. Dit piekvermogen is de basis voor
+// opstelling 1 (hoeveel toegangsvermogen moet erbij) en voor opstelling 2 (wat de
+// batterij moet opvangen). Geen factuur → 0; de wizard valt dan terug op de profielpiek.
+function _piekvermogenKw(){
+  var br=(STATE.baseCase && STATE.baseCase._aansluitvermogenBron) || {};
+  var k=[br.toegangsvermogenKw, br.maandpiekKw, br.capaciteitKw]
+        .filter(function(v){ return typeof v==='number' && v>0; });
+  return k.length ? Math.max.apply(null,k) : 0;
+}
+// Welke van de drie is bepalend? (voor uitleg aan de verkoper)
+function _piekvermogenBron(){
+  var br=(STATE.baseCase && STATE.baseCase._aansluitvermogenBron) || {};
+  var p=_piekvermogenKw(); if(!(p>0)) return null;
+  if(br.toegangsvermogenKw===p) return 'toegangsvermogen (MS)';
+  if(br.maandpiekKw===p)        return 'maandpiek (MS)';
+  if(br.capaciteitKw===p)       return 'capaciteit (LS)';
+  return null;
+}
+
+// ─── v1.22: BATTERIJ-DIMENSIONERING (eerste run na de factuuranalyse) ────────
+// Geen laadplein : kW = piekvermogen, kWh = 2 × kW  (2-uurs standaard)
+// Wel laadplein  : kWh = max( 2 × piekvermogen ; kW-totaal laadpalen ; kWh dagverbruik )
+//                  kW  = kWh / 2
+// LET OP — BEWUSTE KEUZE (bevestigd door Johan): de middelste term neemt het
+// kW-GETAL van de laadpalen letterlijk over als kWh-ondergrens. Dat is dimensioneel
+// los (kW in een kWh-max), maar zo bedoeld als vuistregel: bij 300 kW laadpalen
+// minstens 300 kWh batterij. NIET "corrigeren" naar kW × uren — dat verandert de
+// dimensionering stilzwijgend.
+function _batterijDimensionering(){
+  var piek=_piekvermogenKw();
+  if(!(piek>0)) piek=+STATE.aansluitingKva||0;
+  var pleinen=STATE.laadpleinen||[];
+  if(!pleinen.length){
+    var kw=Math.round(piek);
+    return { kw:kw, kwh:Math.round(2*kw), bron:'geen laadplein: kW = piekvermogen, kWh = 2 × kW' };
+  }
+  var lpKw=0, lpDagKwh=0;
+  pleinen.forEach(function(lp){ lpKw+=_lpVermogenKw(lp); lpDagKwh+=_lpEnergiePerLaaddagKwh(lp); });
+  var kandidaten=[2*piek, lpKw, lpDagKwh];
+  var kwh=Math.round(Math.max.apply(null,kandidaten));
+  var welke=(kwh===Math.round(2*piek)) ? '2 × piekvermogen'
+          : (kwh===Math.round(lpKw))   ? 'kW-totaal laadpalen (als getal)'
+          : 'kWh dagverbruik laadplein';
+  return { kw:Math.round(kwh/2), kwh:kwh, bron:'laadplein: kWh = max(2×piek '+Math.round(2*piek)+
+          '; laadpalen '+Math.round(lpKw)+'; dagverbruik '+Math.round(lpDagKwh)+') → '+welke };
+}
 
 // ─── v1.22: MINIMAAL VEREIST laadvermogen per plein ──────────────────────────
 // De laadinfra moet minstens volstaan om de dagelijkse energie binnen het venster
@@ -3122,17 +3179,12 @@ function _autoDimensioneerAssets(){
     if(totKwh>0){ STATE.pvKwp=Math.round(totKwh/950); STATE.pvInjStrategie=STATE.pvInjStrategie||'geen'; }
   }
   // Batterij-default (enkel als nog geen batterij gekozen)
+  // v1.22: dimensionering volgens de vaste regel — zie _batterijDimensionering().
+  // Vervangt de oude heuristiek (energie bóven de aansluiting / 0.90), die de
+  // profielpiek als basis nam i.p.v. het werkelijk gefactureerde piekvermogen.
   if(!STATE.batterijId){
-    var kw=0, kwh=0, aansl=+STATE.aansluitingKva||0;
-    if(lpKwh>0){
-      var eDag=lpKwh/(lpDpw*52);
-      var eBoven=Math.max(0, eDag - aansl*Math.max(0.25,vUren));  // energie die de aansluiting niet levert
-      kwh=Math.round(eBoven/0.90);
-      kw=Math.max(Math.round(kwh/2), 0);
-      kwh=2*kw;
-    }else if(aansl>0){
-      kw=Math.round(aansl); kwh=2*kw;
-    }
+    var _bd=_batterijDimensionering();
+    var kw=_bd.kw, kwh=_bd.kwh;
     if(kw>0){
       STATE.batterijId='CUSTOM';
       STATE.batterijCustom={naam:'BESS3 voorstel '+kw+' kW / '+kwh+' kWh',kw:kw,kwh:kwh,dod_pct:90,rte_pct:92,max_cycli:8000,capex_eur:Math.round(kwh*350)};
