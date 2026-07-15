@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.3</span>
+    <span class="fdsim-version">v1.22.5</span>
   </div>
 </div>
 
@@ -2687,6 +2687,18 @@ function _financieelRapportData(){
   if(!minder) minder=V.geen||beter;
   if(!betterOnb) betterOnb=V.onbalans||null;
 
+  // v1.22.4 (#41): het BASISSCENARIO is het vastgezette ijkpunt, niet de live run.
+  // Met laadplein  = opstelling 1 (toegangsvermogen verhogen), zoals bewaard.
+  // Zonder laadplein = de betere jaarfactuur (dynamisch contract, geen assets).
+  // Zo wordt élke optimalisatie van PV/batterij/toegangsvermogen tegen hetzelfde
+  // ijkpunt afgezet, en niet tegen je vorige poging — anders schuift de besparing
+  // stilletjes mee met wat je net veranderd hebt.
+  var _basisLabel=null;
+  if(STATE.basisScenario){
+    if(STATE.basisScenario.resultaat){ minder=STATE.basisScenario.resultaat; }
+    _basisLabel=STATE.basisScenario.label||STATE.basisScenario.naam||null;
+  }
+
   // annualisatie-factor: sim in 'specifiek'-modus geeft periode-bedragen
   var factor=1, _dg=null;
   if(STATE.jaar==='specifiek'){ _dg=_periodeDagen((STATE.baseCase||{}).periodeVan,(STATE.baseCase||{}).periodeTot); if(_dg) factor=365/_dg; }
@@ -2720,7 +2732,9 @@ function _financieelRapportData(){
     facturen:{
       afrekening_periode_mnd:afrekMnd, afrekening_bedrag:afrekBedrag,
       bestaand_jaar:bestaandJaar, scherp_dynamisch_jaar:scherpDynJaar,
-      minder_scenario_jaar:cM.subtotaal, minder_scenario_label:'Basis: dynamisch contract zonder batterij, laadplein → aansluiting verhoogd (variant 2)',
+      minder_scenario_jaar:cM.subtotaal, minder_scenario_label:_basisLabel
+        ? ('Basis (vastgezet ijkpunt): '+_basisLabel)
+        : 'Basis: dynamisch contract zonder batterij, laadplein → aansluiting verhoogd (variant 2)',
       beter_scenario_jaar:cB.subtotaal, beter_scenario_label:'Voorstel: PV + batterij + laadplein (variant 2)'
     },
     componenten:{
@@ -4495,7 +4509,193 @@ function _renderOpstellingenVergelijking(){
   sec.appendChild(tbl);
   sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:10px'},
     'De batterij (opstelling 2) vermijdt de aansluitingsverhoging van '+fmtNum(cap.verhoging_kw,0)+' kW én levert de sturingsbesparing hierboven. In het financieel rapport (volgende stap) zetten we dit tegen: batterij-investering − vermeden kost van de aansluitingsverhoging.'));
+
+  // v1.22.4: waarschuw wanneer opstelling 1 op een ANDERE tariefkaart rekent.
+  var cfgV=(ops.verhogen&&ops.verhogen.config)||{};
+  if(cfgV.spanning_omgezet){
+    sec.appendChild(el('div',{style:'margin-top:10px;padding:9px 12px;background:#FFF3E0;border:1px solid #9E480E55;border-radius:6px;font-size:12.5px'},
+      '⚠ Let op — je vergelijkt twee verschillende tariefkaarten. De verhoging naar '+
+      fmtNum(cap.benodigd_toegangsvermogen_kw,0)+' kVA gaat boven de LS-grens van 100 kVA, dus opstelling 1 rekent op '+
+      'MIDDENSPANNING (was '+(cfgV.spanning_origineel||'LS')+'). Dat brengt niet alleen andere tarieven mee, maar in de praktijk ook een '+
+      'cabine en aansluitkosten die hier NIET in zitten. Opstelling 2 blijft op '+((ops.batterij.config||{}).spanning||'LS')+'.'));
+  }
+
+  // v1.22.4: de twee facturen naast elkaar — opstelling 1 links, opstelling 2 rechts.
+  var fb=_renderOpstellingFacturen();
+  if(fb) sec.appendChild(fb);
+
+  // v1.22.5: investering, rendement en terugverdientijd van de batterijroute.
+  var iv=_renderOpstellingInvestering();
+  if(iv) sec.appendChild(iv);
+
+  // v1.22.4: opstelling 1 als scenario bewaren, met aanpasbare naam.
+  sec.appendChild(_renderOpstelling1Opslaan());
   return sec;
+}
+
+// ─── v1.22.5: INVESTERINGSVERGELIJKING opstelling 1 vs 2 ─────────────────────
+// Opstelling 1 (verzwaren): cabine bij LS→MS + netaanpassingen per kVA.
+// Opstelling 2 (batterij) : batterij-capex.
+// Netto investering = opstelling 2 − opstelling 1 → wat de batterijroute EXTRA kost.
+// Winst = opstelling 1 ZONDER sturing  −  opstelling 2 MET sturing 2.
+// Rendement = winst / netto investering · Payback = netto investering / winst.
+// De laadpalen zitten in beide opstellingen en vallen dus weg in het verschil.
+var INV_CABINE_EUR      = 90000;   // LS→MS: cabine + aansluitwerken (schatting)
+var INV_EUR_PER_KVA     = 100;     // verzwaring toegangsvermogen: netaanpassingen
+var INV_BATT_EUR_PER_KWH= 350;     // batterij-capex (zelfde basis als het financieel rapport)
+function _opstellingInvestering(){
+  var ops=STATE.opstellingen, cap=STATE.capaciteit||{};
+  if(!ops||!ops.verhogen||!ops.batterij) return null;
+  var cfgV=ops.verhogen.config||{};
+  var cabine = cfgV.spanning_omgezet ? INV_CABINE_EUR : 0;
+  var kvaKost = Math.max(0, +cap.verhoging_kw||0) * INV_EUR_PER_KVA;
+  var inv1 = cabine + kvaKost;
+  var battKwh = +cap.advies_batterij_kwh||0;
+  var inv2 = battKwh * INV_BATT_EUR_PER_KWH;
+  var netto = inv2 - inv1;
+  var k1=(ops.verhogen.kpi_sturing||{}).kost_geen_excl_btw||0;      // opstelling 1, geen sturing
+  var k2=(ops.batterij.kpi_sturing||{}).kost_sturing_excl_btw||0;   // opstelling 2, sturing 2
+  var winst = k1 - k2;
+  return { cabine:cabine, kvaKost:kvaKost, verhoging_kw:+cap.verhoging_kw||0, inv1:inv1,
+           battKwh:battKwh, inv2:inv2, netto:netto, k1:k1, k2:k2, winst:winst,
+           rendement:(netto>0 && winst>0) ? (winst/netto*100) : null,
+           payback:(netto>0 && winst>0) ? (netto/winst) : null,
+           omgezet:!!cfgV.spanning_omgezet };
+}
+function _renderOpstellingInvestering(){
+  var v=_opstellingInvestering(); if(!v) return null;
+  var perLabel = (STATE.jaar==='specifiek') ? 'over de simulatieperiode' : 'per jaar';
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #D5DBE3;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:13px;margin-bottom:8px'},
+    'Investering en rendement — batterij t.o.v. verzwaren'));
+  var rows=
+    '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;font-size:12.5px">'+
+      '<span style="font-weight:700;color:#1F3864">Opstelling 1 — toegangsvermogen verhogen</span><span></span>'+
+      (v.omgezet ? '<span style="padding-left:12px;color:#9E480E">Cabine + aansluitwerken (LS → MS)</span><span style="text-align:right;color:#9E480E">'+fmtEur(v.cabine)+'</span>' : '')+
+      '<span style="padding-left:12px">Netaanpassingen '+fmtNum(v.verhoging_kw,0)+' kVA × € '+INV_EUR_PER_KVA+'</span><span style="text-align:right">'+fmtEur(v.kvaKost)+'</span>'+
+      '<span style="font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px">Investering opstelling 1</span><span style="text-align:right;font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px">'+fmtEur(v.inv1)+'</span>'+
+      '<span style="font-weight:700;color:#1F3864;padding-top:10px">Opstelling 2 — batterij</span><span></span>'+
+      '<span style="padding-left:12px">Batterij '+fmtNum(v.battKwh,0)+' kWh × € '+INV_BATT_EUR_PER_KWH+'</span><span style="text-align:right">'+fmtEur(v.inv2)+'</span>'+
+      '<span style="font-weight:800;border-top:2px solid #1F3864;padding-top:6px">Netto investering (2 − 1)</span>'+
+      '<span style="text-align:right;font-weight:800;border-top:2px solid #1F3864;padding-top:6px;color:'+(v.netto>0?'#1A1F2B':'#05B050')+'">'+fmtEur(v.netto)+'</span>'+
+    '</div>';
+  sec.innerHTML+=rows;
+  sec.innerHTML+=
+    '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #E3E8EF;font-size:12.5px;line-height:1.7">'+
+      'Winst '+perLabel+' = opstelling 1 <b>zonder sturing</b> ('+fmtEur(v.k1)+') − opstelling 2 <b>sturing 2</b> ('+fmtEur(v.k2)+') = '+
+      '<b style="color:'+(v.winst>=0?'#05B050':'#9E480E')+'">'+fmtEur(v.winst)+'</b></div>';
+  // Eerlijk omgaan met de randgevallen i.p.v. delen door (bijna) nul.
+  if(v.netto<=0){
+    sec.innerHTML+='<div style="margin-top:8px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px">'+
+      '<b>De batterij is meteen goedkoper dan verzwaren</b> — '+fmtEur(Math.abs(v.netto))+' minder investering'+
+      (v.winst>0?', én '+fmtEur(v.winst)+' lagere kost '+perLabel:'')+'. Rendement en terugverdientijd zijn hier niet van toepassing: '+
+      'de batterijroute is vanaf dag één voordeliger.</div>';
+  } else if(!(v.winst>0)){
+    sec.innerHTML+='<div style="margin-top:8px;padding:9px 12px;background:#FFF3E0;border:1px solid #9E480E55;border-radius:6px;font-size:12.5px">'+
+      '⚠ Opstelling 2 levert geen lagere kost dan opstelling 1 zonder sturing. Rendement en terugverdientijd zijn dan niet zinvol — '+
+      'de batterij verdient zich in deze configuratie niet terug.</div>';
+  } else {
+    sec.innerHTML+=
+      '<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+        '<div style="padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
+          '<div style="font-size:10px;color:#5A6577;text-transform:uppercase;letter-spacing:.05em">Rendement</div>'+
+          '<div style="font-size:20px;font-weight:800;color:#05B050">'+fmtNum(v.rendement,1)+' %</div>'+
+          '<div style="font-size:11px;color:#5A6577">winst / netto investering</div></div>'+
+        '<div style="padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
+          '<div style="font-size:10px;color:#5A6577;text-transform:uppercase;letter-spacing:.05em">Terugverdientijd</div>'+
+          '<div style="font-size:20px;font-weight:800;color:#05B050">'+fmtNum(v.payback,1)+' jaar</div>'+
+          '<div style="font-size:11px;color:#5A6577">netto investering / winst</div></div>'+
+      '</div>';
+  }
+  sec.innerHTML+='<div style="margin-top:8px;font-size:11px;color:#5A6577;font-style:italic">'+
+    'Indicatief. De cabine (€ '+INV_CABINE_EUR.toLocaleString('nl-BE')+') en € '+INV_EUR_PER_KVA+'/kVA zijn schattingen — vraag offertes op. '+
+    'Laadpalen zitten in beide opstellingen en vallen weg in het verschil.'+
+    (STATE.jaar==='specifiek'?' LET OP: de sim draait op de factuurperiode, niet op een vol jaar — rendement en payback zijn dan niet op jaarbasis.':'')+'</div>';
+  return sec;
+}
+
+// Twee facturen naast elkaar uit de sim-resultaten (sturing 2 = de detailfactuur).
+function _renderOpstellingFacturen(){
+  var ops=STATE.opstellingen;
+  var L=ops&&ops.verhogen&&ops.verhogen.varianten&&ops.verhogen.varianten.sturing;
+  var R=ops&&ops.batterij&&ops.batterij.varianten&&ops.batterij.varianten.sturing;
+  if(!L||!R) return null;
+  var cL=_frComp(L), cR=_frComp(R);
+  var box=el('div',{style:'margin-top:14px'});
+  box.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:13px;margin-bottom:6px'},
+    'De twee facturen naast elkaar (sturing 2, excl. btw)'));
+  function rij(label, a, b, vet){
+    var d=a-b;
+    return '<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;padding:5px 0;border-bottom:1px solid #EEF1F5'+
+      (vet?';font-weight:800;border-top:2px solid #1F3864':'')+'">'+
+      '<span>'+label+'</span>'+
+      '<span style="text-align:right">'+fmtEur(a)+'</span>'+
+      '<span style="text-align:right">'+fmtEur(b)+'</span>'+
+      '<span style="text-align:right;color:'+(d>=0?'#05B050':'#9E480E')+'">'+(d>=0?'− ':'+ ')+fmtEur(Math.abs(d))+'</span></div>';
+  }
+  var t=el('div',{style:'font-size:12.5px'});
+  t.innerHTML=
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;padding:6px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864">'+
+      '<span>Component</span><span style="text-align:right">1 · Verhogen</span><span style="text-align:right">2 · Batterij</span><span style="text-align:right">Batterij bespaart</span></div>'+
+    rij('Energie (commodity)', cL.energie, cR.energie)+
+    rij('Distributie + transport', cL.distributie, cR.distributie)+
+    rij('&nbsp;&nbsp;waarvan capaciteit', cL.capaciteit, cR.capaciteit)+
+    rij('Heffingen + accijnzen', cL.heffingen, cR.heffingen)+
+    rij('Subtotaal', cL.subtotaal, cR.subtotaal, true);
+  box.appendChild(t);
+  return box;
+}
+
+// Opstelling 1 bewaren als scenario — dit is meteen het IJKPUNT waartegen elke latere
+// configuratie wordt afgezet. Naam vooraf ingevuld, maar aanpasbaar.
+function _renderOpstelling1Opslaan(){
+  var wrap=el('div',{style:'margin-top:14px;padding:10px 12px;background:#fff;border:1px solid #D5DBE3;border-radius:6px'});
+  wrap.appendChild(el('div',{style:'font-size:12.5px;margin-bottom:8px'},
+    'Bewaar opstelling 1 (toegangsvermogen verhogen) als scenario. Dit blijft je basisscenario: elke optimalisatie van PV, batterij of toegangsvermogen wordt hiertegen vergeleken — niet tegen je vorige poging.'));
+  var rij=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center'});
+  var naam=el('input',{class:'fdsim-input',type:'text',style:'flex:1;min-width:280px',
+    value:_klantSlug()+'_JaarfactuurLP1_'+_factuurStempel()});
+  rij.appendChild(naam);
+  var btn=el('button',{class:'fdsim-btn green'},'💾 Bewaar als basisscenario');
+  btn.onclick=function(){ _bewaarOpstelling1(naam.value, btn); };
+  rij.appendChild(btn);
+  wrap.appendChild(rij);
+  if(STATE.basisScenario && STATE.basisScenario.bron==='opstelling_verhogen'){
+    wrap.appendChild(el('div',{style:'margin-top:8px;font-size:12px;color:#05B050'},
+      '✓ Basisscenario vastgezet: '+STATE.basisScenario.naam+' — '+_eurM(STATE.basisScenario.subtotaal_excl_btw)+' (sturing 2)'));
+  }
+  return wrap;
+}
+function _bewaarOpstelling1(naam, btn){
+  var ops=STATE.opstellingen;
+  var L=ops&&ops.verhogen&&ops.verhogen.varianten&&ops.verhogen.varianten.sturing;
+  if(!L){ alert('Opstelling 1 is niet beschikbaar.'); return; }
+  naam=String(naam||'').trim().replace(/[^A-Za-z0-9._-]/g,'_');
+  if(!naam){ alert('Geef een scenarionaam op.'); return; }
+  btn.disabled=true; btn.textContent='Bewaren…';
+  var snap={};
+  Object.keys(STATE).forEach(function(k){
+    if(k==='resultaat'||k==='isRunning'||k==='currentStep'||k==='visited'||k==='resultaatVarianten'||
+       k==='opstellingen'||k==='factuurSim'||k==='factuurSimJaar'||k==='kpiSturing'||k==='vergelijkingOpstellingen') return;
+    snap[k]=STATE[k];
+  });
+  var cfg=(ops.verhogen.config)||{};
+  snap.scenario=naam; snap.scenarioActie='nieuw';
+  // Opstelling 1 = aansluiting verzwaard, GEEN batterij.
+  snap.aansluitingKva=cfg.aansluiting_kva||snap.aansluitingKva;
+  snap.spanning=cfg.spanning||snap.spanning;
+  snap.batterijId=''; snap.batterijCustom=null;
+  snap._opstelling={ nr:1, label:'Toegangsvermogen verhogen', config:cfg,
+    subtotaal_excl_btw:_frComp(L).subtotaal, bewaard_op:new Date().toISOString() };
+  apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:[{scenario:naam,data:snap}] })
+    .then(function(r){
+      // v1.22.4: vanaf nu is DIT het ijkpunt. Bewust niet overschrijven bij latere runs.
+      STATE.basisScenario={ naam:naam, label:'Opstelling 1 — toegangsvermogen verhogen',
+        subtotaal_excl_btw:_frComp(L).subtotaal, bron:'opstelling_verhogen', resultaat:L, config:cfg };
+      log('Basisscenario vastgezet: '+naam,'ok');
+      renderAll();
+    })
+    .catch(function(e){ btn.disabled=false; btn.textContent='💾 Bewaar als basisscenario'; alert('Bewaren mislukt: '+e.message); });
 }
 
 function _renderSturingKPIs(){
