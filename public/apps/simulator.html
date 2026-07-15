@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.21.9</span>
+    <span class="fdsim-version">v1.22.0</span>
   </div>
 </div>
 
@@ -2886,6 +2886,27 @@ function _laadpleinNieuw(){
 function _lpEnergieMwh(lp){ return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000; }
 function _lpVermogenKw(lp){ return (lp.laadpunten||[]).reduce(function(s,x){return s+(x.aantal||0)*(LAADPUNT_KW[x.type]||0);},0); }
 
+// ─── v1.22: MINIMAAL VEREIST laadvermogen per plein ──────────────────────────
+// De laadinfra moet minstens volstaan om de dagelijkse energie binnen het venster
+// geladen te krijgen. Marge omdat laden nooit perfect vlak verloopt (voertuigen
+// komen niet gelijkmatig toe, laadcurves vlakken af bij hoge SoC).
+var LP_MARGE = 1.2;
+function _lpVensterUren(lp){
+  var s=+lp.venster_start||0, e=+lp.venster_eind||0;
+  var u=e-s; if(u<=0) u+=24;           // overnacht/wrap-around venster (bv. 22u → 6u)
+  return (u>0 && u<=24) ? u : 24;
+}
+// Energie die dit plein op één LAADDAG moet opnemen (kWh). Laden gebeurt enkel op
+// dagen_per_week dagen, dus de jaarenergie verdeelt over 52 × dagen_per_week dagen.
+function _lpEnergiePerLaaddagKwh(lp){
+  var dpw=+lp.dagen_per_week||7; if(dpw<=0||dpw>7) dpw=7;
+  return (_lpEnergieMwh(lp)*1000)/(52*dpw);
+}
+function _lpMinVermogenKw(lp){
+  var u=_lpVensterUren(lp);
+  return (_lpEnergiePerLaaddagKwh(lp)/u)*LP_MARGE;
+}
+
 function _lpNum(label, value, step, oninput){
   var b=el('div',{class:'fdsim-row col'});
   b.appendChild(el('label',{class:'fdsim-label'},label));
@@ -2941,8 +2962,20 @@ function _renderLaadpleinKaart(lp, idx){
   });
   card.appendChild(g3);
 
-  card.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:8px'},
-    'Energie: '+fmtNum(_lpEnergieMwh(lp),1)+' MWh/jaar · Laadvermogen: '+_lpVermogenKw(lp)+' kW'+(lp.bestaand?' · bestaand (wordt uit het basisverbruik gehaald en als stuurbaar laadplein herrekend)':'')));
+  // v1.22: minimaal vereist laadvermogen naast het gekozen totaal. Zo zie je meteen
+  // of de geselecteerde laadpalen volstaan om de dagenergie binnen het venster te laden.
+  var _min=_lpMinVermogenKw(lp), _gek=_lpVermogenKw(lp);
+  var _tekort=(_min>0 && _gek<_min);
+  var vgl=el('div',{style:'margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;'+
+    (_tekort?'background:#FFF3E0;border:1px solid #9E480E55':'background:#05B0500f;border:1px solid #05B05040')});
+  vgl.innerHTML='<b>Minimaal vereist: '+fmtNum(_min,0)+' kW</b> '+
+    '<span style="color:#5A6577">('+fmtNum(_lpEnergiePerLaaddagKwh(lp),0)+' kWh per laaddag ÷ '+_lpVensterUren(lp)+'u venster × '+LP_MARGE+' marge)</span>'+
+    '<br><b>Gekozen: '+fmtNum(_gek,0)+' kW</b> '+
+    (_tekort ? '<span style="color:#9E480E">⚠ te weinig — de laadvraag past niet binnen het venster</span>'
+             : '<span style="color:#05B050">✓ volstaat</span>');
+  card.appendChild(vgl);
+  card.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:6px'},
+    'Energie: '+fmtNum(_lpEnergieMwh(lp),1)+' MWh/jaar'+(lp.bestaand?' · bestaand (wordt uit het basisverbruik gehaald en als stuurbaar laadplein herrekend)':'')));
   return card;
 }
 
@@ -2955,10 +2988,20 @@ function _vulLaadpleinen(host){
 
 function _updateLaadpleinSamenvatting(){
   var host=$('fdsim-lp-samenvatting'); if(!host) return;
-  var eTot=0, capTot=0;
-  (STATE.laadpleinen||[]).forEach(function(lp){ eTot+=_lpEnergieMwh(lp); capTot+=_lpVermogenKw(lp); });
-  host.textContent = (STATE.laadpleinen && STATE.laadpleinen.length)
-    ? ('Totaal: '+fmtNum(eTot,1)+' MWh/jaar EV-laadvraag · '+capTot+' kW laadvermogen (= ondergrens batterij)') : '';
+  // v1.22: totalen van het MINIMUM en het GEKOZEN laadvermogen over alle pleinen.
+  var eTot=0, capTot=0, minTot=0, dagTot=0;
+  (STATE.laadpleinen||[]).forEach(function(lp){
+    eTot+=_lpEnergieMwh(lp); capTot+=_lpVermogenKw(lp);
+    minTot+=_lpMinVermogenKw(lp); dagTot+=_lpEnergiePerLaaddagKwh(lp);
+  });
+  if(!(STATE.laadpleinen && STATE.laadpleinen.length)){ host.innerHTML=''; return; }
+  var tekort=(minTot>0 && capTot<minTot);
+  host.innerHTML='<b>Totaal over alle pleinen:</b> '+fmtNum(eTot,1)+' MWh/jaar EV-laadvraag · '+
+    fmtNum(dagTot,0)+' kWh per laaddag<br>'+
+    '<b>Minimaal vereist laadvermogen: '+fmtNum(minTot,0)+' kW</b> · '+
+    '<b>Gekozen laadvermogen: '+fmtNum(capTot,0)+' kW</b> '+
+    (tekort ? '<span style="color:#9E480E">⚠ '+fmtNum(minTot-capTot,0)+' kW te kort</span>'
+            : '<span style="color:#05B050">✓ volstaat</span>');
 }
 
 function _renderLaadpleinenSectie(){
