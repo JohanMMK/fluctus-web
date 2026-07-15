@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.8</span>
+    <span class="fdsim-version">v1.22.11</span>
   </div>
 </div>
 
@@ -4510,6 +4510,11 @@ function _renderOpstellingenVergelijking(){
   sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:10px'},
     'De batterij (opstelling 2) vermijdt de aansluitingsverhoging van '+fmtNum(cap.verhoging_kw,0)+' kW én levert de sturingsbesparing hierboven. In het financieel rapport (volgende stap) zetten we dit tegen: batterij-investering − vermeden kost van de aansluitingsverhoging.'));
 
+  // v1.22.10: toon de dispatch-gevalideerde dimensionering. Zonder dit verandert er
+  // stil een batterij- of aansluitingsmaat zonder dat de verkoper weet waarom.
+  var dm=_renderDimensionering();
+  if(dm) sec.appendChild(dm);
+
   // v1.22.4: waarschuw wanneer opstelling 1 op een ANDERE tariefkaart rekent.
   var cfgV=(ops.verhogen&&ops.verhogen.config)||{};
   if(cfgV.spanning_omgezet){
@@ -4643,6 +4648,63 @@ function _renderOpstellingInvestering(){
   return sec;
 }
 
+// ─── v1.22.11: maten NA de iteratie ──────────────────────────────────────────
+// De server groeit opstelling 1 en 2 tot de dispatch ze aankan. Alles wat daarna over
+// investering rekent MOET die geïtereerde maten gebruiken — niet de vuistregels uit
+// STATE.capaciteit (verhoging_kw) of STATE.batterijCustom. Anders reken je de kosten
+// van de ene configuratie tegen de investering van een andere.
+function _basisVerhogingKw(cfgV){
+  var cap=STATE.capaciteit||{};
+  var na=+((cfgV||{}).aansluiting_kva)||0, huidig=+cap.huidig_toegangsvermogen_kw||0;
+  if(na>0 && huidig>0) return Math.max(0, na-huidig);   // post-iteratie
+  return +cap.verhoging_kw||0;                          // terugval: vuistregel
+}
+function _actieveBatterijKwh(){
+  // Komt het actieve resultaat uit opstelling 2? Dan is de batterij server-side
+  // geïtereerd en wijkt ze af van wat er in de batterijstap staat.
+  var ops=STATE.opstellingen;
+  var b2=ops&&ops.batterij&&ops.batterij.config&&ops.batterij.config.batterij;
+  if(b2 && +b2.kwh>0) return +b2.kwh;
+  return +(_frBatterij().kwh)||0;
+}
+
+// ─── v1.22.10: dispatch-gevalideerde dimensionering tonen ────────────────────
+// De server groeit elke opstelling tot de LP-dispatch 0 verloren dagen meldt, en
+// verfijnt daarna binair. Dit blok maakt dat zichtbaar: welke maat is gekozen, in
+// hoeveel runs, en of het überhaupt haalbaar bleek. Een opstelling die laadvraag
+// laat liggen betaalt overschrijding en lijkt onterecht duur — dat mag niet stil.
+function _renderDimensionering(){
+  var ops=STATE.opstellingen; if(!ops) return null;
+  var dV=(ops.verhogen&&ops.verhogen.dimensionering)||null;
+  var dB=(ops.batterij&&ops.batterij.dimensionering)||null;
+  if(!dV && !dB) return null;
+  var box=el('div',{style:'margin-top:12px;padding:10px 12px;background:#fff;border:1px solid #D5DBE3;border-radius:6px;font-size:12.5px'});
+  box.appendChild(el('div',{style:'font-weight:700;color:#1F3864;margin-bottom:6px'},
+    'Dimensionering — getoetst op de werkelijke dispatch'));
+  function regel(naam, d){
+    if(!d) return '';
+    if(!d.haalbaar){
+      return '<div style="padding:8px 10px;margin-bottom:6px;background:#FEE;border:1px solid #C00;border-radius:6px;color:#900">'+
+        '<b>⚠ '+naam+': geen werkende maat gevonden.</b> Na '+d.iteraties+' pogingen blijven er '+
+        d.verloren_dagen+' van de '+(d.totaal_dagen||365)+' dagen waarop de laadvraag niet geladen raakt. '+
+        'De kosten van deze opstelling bevatten dus overschrijding en zijn NIET representatief.</div>';
+    }
+    var gegroeid=(d.start_maat!=null && d.gekozen_maat!=null && d.gekozen_maat>d.start_maat);
+    return '<div style="padding:6px 0;border-bottom:1px solid #EEF1F5">'+
+      '<b>'+naam+':</b> '+(d.gekozen_maat!=null?fmtNum(d.gekozen_maat,0)+' '+(d.eenheid||''):'—')+
+      ' <span style="color:#05B050">✓ 0 verloren dagen</span>'+
+      (gegroeid?' <span style="color:#9E480E">— bijgesteld van '+fmtNum(d.start_maat,0)+' '+(d.eenheid||'')+
+        ' (de vuistregel volstond niet)</span>':'')+
+      ' <span style="color:#5A6577">· '+d.iteraties+' sim-run(s), beoordeeld '+
+      (d.beoordeeld_op==='geen'?'zonder sturing':'op sturing 2')+'</span></div>';
+  }
+  var html=regel('Opstelling 1 — verzwaren', dV)+regel('Opstelling 2 — batterij', dB);
+  var tmp=el('div'); tmp.innerHTML=html; box.appendChild(tmp);
+  box.appendChild(el('div',{style:'margin-top:6px;font-size:11px;color:#5A6577;font-style:italic'},
+    'Elke opstelling is net zo groot gemaakt dat de laadvraag volledig geladen raakt. Pas dan zijn hun kosten vergelijkbaar.'));
+  return box;
+}
+
 // ─── v1.22.8: BASIS vs ACTIEF — de enige zinvolle vergelijking ───────────────
 // Links : basisscenario = opstelling 1 (verzwaren) ZONDER sturing — wat de klant
 //         krijgt als hij enkel verzwaart en niets slims doet.
@@ -4650,7 +4712,21 @@ function _renderOpstellingInvestering(){
 // Uit exact deze twee facturen volgt ook de terugverdientijd; geen tweede rekenpad,
 // dus geen kans dat het blok iets anders zegt dan de payback eronder.
 function _renderBasisVsActief(){
-  var b=STATE.basisScenario; if(!b || !b.resultaat) return null;
+  // v1.22.9 FIX: het blok mag NIET afhangen van een klik op "Bewaar als basisscenario".
+  // Zolang er niets is vastgezet gebruiken we de LIVE opstelling 1 (zonder sturing) als
+  // ijkpunt — dan zie je de vergelijking en de terugverdientijd meteen. De knop pint het
+  // ijkpunt daarna vast, zodat latere optimalisaties er niet mee opschuiven.
+  var b=STATE.basisScenario;
+  if(!b || !b.resultaat){
+    var ops=STATE.opstellingen;
+    var live=ops&&ops.verhogen&&ops.verhogen.varianten&&ops.verhogen.varianten.geen;
+    if(!live) return null;
+    var cap=STATE.capaciteit||{}, cfgV=(ops.verhogen.config)||{};
+    b={ naam:'(nog niet vastgezet)', label:'Opstelling 1 — verzwaren, zonder sturing',
+        resultaat:live, config:cfgV, lp_sig:null, _live:true,
+        investering:{ cabine:(cfgV.spanning_omgezet?INV_CABINE_EUR:0),
+                      verhoging_kw:_basisVerhogingKw(cfgV) } };
+  }
   var A=STATE.resultaat; if(!A || A.error) return null;
   var cB=_frComp(b.resultaat), cA=_frComp(A);
   var perLabel=(STATE.jaar==='specifiek')?'over de simulatieperiode':'per jaar';
@@ -4694,8 +4770,8 @@ function _renderBasisVsActief(){
   var pv=(+STATE.pvKwp||0)*INV_PV_EUR_PER_KWP;
   var bi=b.investering||{};
   var specB=(bi.cabine||0)+Math.max(0,+bi.verhoging_kw||0)*INV_EUR_PER_KVA;
-  var bt=_frBatterij();
-  var specA=(+bt.kwh||0)*INV_BATT_EUR_PER_KWH;
+  var battKwhA=_actieveBatterijKwh();
+  var specA=battKwhA*INV_BATT_EUR_PER_KWH;
   var subB=pv+laadpalen+specB, subA=pv+laadpalen+specA;
   var totB=subB*(1+INV_KABEL_PCT), totA=subA*(1+INV_KABEL_PCT);
   var netto=totA-totB;
@@ -4713,7 +4789,7 @@ function _renderBasisVsActief(){
       r3('Laadpalen', laadpalen, laadpalen)+
       (bi.cabine ? r3('Cabine + aansluitwerken (LS → MS)', bi.cabine, 0, 'color:#9E480E') : '')+
       r3('Netaanpassingen '+fmtNum(bi.verhoging_kw||0,0)+' kVA × € '+INV_EUR_PER_KVA, Math.max(0,+bi.verhoging_kw||0)*INV_EUR_PER_KVA, 0)+
-      r3('Batterij '+fmtNum(bt.kwh||0,0)+' kWh × € '+INV_BATT_EUR_PER_KWH, 0, specA)+
+      r3('Batterij '+fmtNum(battKwhA,0)+' kWh × € '+INV_BATT_EUR_PER_KWH, 0, specA)+
       r3('Subtotaal', subB, subA, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:5px')+
       r3('Kabeltracés (+'+Math.round(INV_KABEL_PCT*100)+'%)', subB*INV_KABEL_PCT, subA*INV_KABEL_PCT)+
       r3('Totale investering', totB, totA, 'font-weight:800;border-top:2px solid #1F3864;padding-top:6px')+
@@ -4845,7 +4921,7 @@ function _bewaarOpstelling1(naam, btn){
         subtotaal_excl_btw:_frComp(L).subtotaal, bron:'opstelling_verhogen', resultaat:L, config:cfg,
         lp_sig:_laadpleinSignatuur(),
         investering:{ cabine:(cfg.spanning_omgezet?INV_CABINE_EUR:0),
-                      verhoging_kw:+((STATE.capaciteit||{}).verhoging_kw)||0 } };
+                      verhoging_kw:_basisVerhogingKw(cfg) } };
       log('Basisscenario vastgezet: '+naam+' (opstelling 1, zonder sturing)','ok');
       renderAll();
     })
