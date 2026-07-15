@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.2</span>
+    <span class="fdsim-version">v1.22.3</span>
   </div>
 </div>
 
@@ -2915,32 +2915,105 @@ function _piekvermogenBron(){
   return null;
 }
 
-// ─── v1.22: BATTERIJ-DIMENSIONERING (eerste run na de factuuranalyse) ────────
+// ─── v1.22.3: GEBOUWLAST tijdens het laadvenster ─────────────────────────────
+// Uit het gekozen profiel × het jaarverbruik. Nauwkeuriger dan een vlak gemiddelde,
+// want overdag ligt de last hoger dan 's nachts — en juist overdag laadt het plein.
+// Geen profiel geladen → vlakke terugval (jaarverbruik / 8760).
+function _uurInVenster(uur, start, uren){
+  for(var k=0;k<uren;k++){ if(((start+k)%24)===uur) return true; }
+  return false;
+}
+function _gebouwlastInVensterKw(vStart, vUren){
+  var jaarKwh=(STATE.jaarverbruik||0)*1000;
+  if(!(jaarKwh>0)) return 0;
+  var prof=CACHE.profielData && CACHE.profielData[STATE.profielNaam];
+  if(!Array.isArray(prof) || prof.length!==35040) return jaarKwh/8760;
+  var som=0, i;
+  for(i=0;i<prof.length;i++) som+=prof[i];
+  if(!(som>0)) return jaarKwh/8760;
+  var f=jaarKwh/som, tot=0, n=0;
+  for(i=0;i<35040;i++){
+    var uur=Math.floor((i%96)/4);
+    if(_uurInVenster(uur, vStart, vUren)){ tot+=prof[i]*f; n++; }
+  }
+  return n ? (tot/(n*0.25)) : (jaarKwh/8760);
+}
+
+// ─── v1.22.3: BATTERIJ-DIMENSIONERING ────────────────────────────────────────
 // Geen laadplein : kW = piekvermogen, kWh = 2 × kW  (2-uurs standaard)
-// Wel laadplein  : kWh = max( 2 × piekvermogen ; kW-totaal laadpalen ; kWh dagverbruik )
-//                  kW  = kWh / 2
-// LET OP — BEWUSTE KEUZE (bevestigd door Johan): de middelste term neemt het
-// kW-GETAL van de laadpalen letterlijk over als kWh-ondergrens. Dat is dimensioneel
-// los (kW in een kWh-max), maar zo bedoeld als vuistregel: bij 300 kW laadpalen
-// minstens 300 kWh batterij. NIET "corrigeren" naar kW × uren — dat verandert de
-// dimensionering stilzwijgend.
+// Wel laadplein  : de batterij hoeft enkel te dragen wat de AANSLUITING NIET levert.
+//   vrije ruimte  = piekvermogen − gebouwlast tijdens het venster
+//   uit het net   = vrije ruimte × vensteruren
+//   energiegat    = dagverbruik laadplein − uit het net      (÷ DoD → nominaal)
+//   vermogensgat  = laadvermogen palen − vrije ruimte        (×2 → 2-uurs kWh)
+//   kWh = max( 2 × piekvermogen ; energiegat/DoD ; 2 × vermogensgat )
+//   kW  = kWh / 2
+// WAAROM NIET het volle dagverbruik als kWh (de eerdere regel): dan koop je capaciteit
+// die stilstaat. De aansluiting levert tijdens het venster zelf al een groot deel; enkel
+// het verschil moet uit de batterij komen. Het oude resultaat (846 kWh / 423 kW) gaf ook
+// een omvormer die de site fysiek niet kan opnemen (max ± laadpalen + gebouw).
+var BATT_DOD = 0.90;
+// Toont de dimensionering transparant: waar komt de batterij vandaan, en wat zou de
+// oude (volle-dagverbruik) regel gegeven hebben. Zo blijft de keuze navolgbaar.
+function _renderBatterijDimensionering(){
+  var bd=_batterijDimensionering(), d=bd.detail;
+  if(!d) return null;
+  var sec=el('div',{class:'fdsim-section',style:'margin-top:14px;background:#05B0500f;border-color:#05B05040'});
+  sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:6px'},'Hoe deze batterij is bepaald'));
+  var capNieuw=bd.kwh*350, capOud=bd.oud?bd.oud.kwh*350:0;
+  sec.innerHTML+=
+    '<div style="font-size:12.5px;line-height:1.65">'+
+    'Piekvermogen uit je factuur: <b>'+d.piek+' kW</b>. Gebouwlast tijdens het laadvenster: <b>'+d.gebouw+' kW</b>.<br>'+
+    'Vrije aansluitingsruimte: '+d.piek+' − '+d.gebouw+' = <b>'+d.vrij+' kW</b> × '+d.vUren+'u = <b>'+d.uitNet+' kWh</b> die het net zelf levert.<br>'+
+    'Het laadplein vraagt <b>'+d.lpDagKwh+' kWh</b> per laaddag → <b>energiegat '+d.energiegat+' kWh</b> (÷ DoD 0,90 = '+d.kwhEnergie+' kWh).<br>'+
+    'Laadpalen '+d.lpKw+' kW − vrij '+d.vrij+' kW → <b>vermogensgat '+d.vermogensgat+' kW</b> (×2u = '+(2*d.vermogensgat)+' kWh).<br>'+
+    'Vloer (2 × piekvermogen): '+d.vloerKwh+' kWh.<br>'+
+    '<b style="color:#05B050">→ '+bd.kw+' kW / '+bd.kwh+' kWh</b> — '+bd.regel+'.'+
+    '</div>';
+  if(bd.oud && bd.oud.kwh>bd.kwh){
+    sec.innerHTML+='<div style="margin-top:8px;padding:8px 10px;background:#fff;border:1px solid var(--lijn,#D5DBE3);border-radius:6px;font-size:12px;color:#5A6577">'+
+      'Ter vergelijking — de eerdere regel (volledige dagvraag als kWh) gaf <b>'+bd.oud.kw+' kW / '+bd.oud.kwh+' kWh</b> '+
+      '(± € '+capOud.toLocaleString('nl-BE')+' vs € '+capNieuw.toLocaleString('nl-BE')+'). Die kocht capaciteit om een energiegat van '+
+      d.energiegat+' kWh te dichten, en een omvormer die de site fysiek niet kan opnemen.</div>';
+  }
+  return sec;
+}
 function _batterijDimensionering(){
   var piek=_piekvermogenKw();
   if(!(piek>0)) piek=+STATE.aansluitingKva||0;
   var pleinen=STATE.laadpleinen||[];
+  var vloerKwh=2*piek;                       // 2-uurs batterij op het piekvermogen
   if(!pleinen.length){
-    var kw=Math.round(piek);
-    return { kw:kw, kwh:Math.round(2*kw), bron:'geen laadplein: kW = piekvermogen, kWh = 2 × kW' };
+    var kw0=Math.round(piek);
+    return { kw:kw0, kwh:Math.round(2*kw0), regel:'geen laadplein: kW = piekvermogen, kWh = 2 × kW',
+             detail:null, oud:null };
   }
-  var lpKw=0, lpDagKwh=0;
-  pleinen.forEach(function(lp){ lpKw+=_lpVermogenKw(lp); lpDagKwh+=_lpEnergiePerLaaddagKwh(lp); });
-  var kandidaten=[2*piek, lpKw, lpDagKwh];
-  var kwh=Math.round(Math.max.apply(null,kandidaten));
-  var welke=(kwh===Math.round(2*piek)) ? '2 × piekvermogen'
-          : (kwh===Math.round(lpKw))   ? 'kW-totaal laadpalen (als getal)'
-          : 'kWh dagverbruik laadplein';
-  return { kw:Math.round(kwh/2), kwh:kwh, bron:'laadplein: kWh = max(2×piek '+Math.round(2*piek)+
-          '; laadpalen '+Math.round(lpKw)+'; dagverbruik '+Math.round(lpDagKwh)+') → '+welke };
+  var lpKw=0, lpDagKwh=0, vStart=8, vUren=10;
+  pleinen.forEach(function(lp,i){
+    lpKw+=_lpVermogenKw(lp); lpDagKwh+=_lpEnergiePerLaaddagKwh(lp);
+    if(i===0){ vStart=+lp.venster_start||8; vUren=_lpVensterUren(lp); }
+  });
+  var gebouw=_gebouwlastInVensterKw(vStart, vUren);
+  var vrij=Math.max(0, piek-gebouw);
+  var uitNet=vrij*vUren;
+  var energiegat=Math.max(0, lpDagKwh-uitNet);
+  var kwhEnergie=energiegat/BATT_DOD;
+  var vermogensgat=Math.max(0, lpKw-vrij);
+  var kwh=Math.round(Math.max(vloerKwh, kwhEnergie, 2*vermogensgat));
+  var kw=Math.round(kwh/2);
+  var welke=(kwh===Math.round(vloerKwh)) ? '2 × piekvermogen'
+          : (kwh===Math.round(kwhEnergie)) ? 'energiegat ÷ DoD'
+          : '2 × vermogensgat';
+  // Ter vergelijking: de eerdere regel (volle dagverbruik / kW-getal palen als kWh).
+  var oudKwh=Math.round(Math.max(2*piek, lpKw, lpDagKwh));
+  return {
+    kw:kw, kwh:kwh, regel:'bepalend: '+welke,
+    detail:{ piek:Math.round(piek), gebouw:Math.round(gebouw), vrij:Math.round(vrij),
+             vUren:vUren, uitNet:Math.round(uitNet), lpDagKwh:Math.round(lpDagKwh),
+             energiegat:Math.round(energiegat), kwhEnergie:Math.round(kwhEnergie),
+             lpKw:Math.round(lpKw), vermogensgat:Math.round(vermogensgat), vloerKwh:Math.round(vloerKwh) },
+    oud:{ kwh:oudKwh, kw:Math.round(oudKwh/2) }
+  };
 }
 
 // ─── v1.22: MINIMAAL VEREIST laadvermogen per plein ──────────────────────────
@@ -3393,6 +3466,12 @@ function renderStep5Batterij(){
   _refreshBattCustomValidatie();
 
   box.appendChild(customBox);
+  // v1.22.3: transparante onderbouwing van de auto-dimensionering. Enkel tonen wanneer
+  // er een laadplein is — dan is de afweging (net vs batterij) pas interessant.
+  if((STATE.laadpleinen||[]).length){
+    var _dimBox=_renderBatterijDimensionering();
+    if(_dimBox) box.appendChild(_dimBox);
+  }
   return box;
 }
 
