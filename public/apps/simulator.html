@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.1</span>
+    <span class="fdsim-version">v1.22.2</span>
   </div>
 </div>
 
@@ -3019,21 +3019,27 @@ function _renderLaadpleinKaart(lp, idx){
   });
   card.appendChild(g3);
 
-  // v1.22: minimaal vereist laadvermogen naast het gekozen totaal. Zo zie je meteen
-  // of de geselecteerde laadpalen volstaan om de dagenergie binnen het venster te laden.
+  // v1.22.2: minimaal vereist naast gekozen laadvermogen. Krijgt een id zodat
+  // _updateLaadpleinSamenvatting() het live kan bijwerken — zonder de kaart te
+  // hertekenen (dat zou de focus uit het invoerveld halen tijdens het typen).
+  var vgl=el('div',{id:'fdsim-lp-vgl-'+idx});
+  _vulLaadpleinVgl(vgl, lp);
+  card.appendChild(vgl);
+  return card;
+}
+// Eén bron van waarheid voor de vgl-box, gebruikt bij render én bij elke wijziging.
+function _vulLaadpleinVgl(box, lp){
   var _min=_lpMinVermogenKw(lp), _gek=_lpVermogenKw(lp);
   var _tekort=(_min>0 && _gek<_min);
-  var vgl=el('div',{style:'margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;'+
-    (_tekort?'background:#FFF3E0;border:1px solid #9E480E55':'background:#05B0500f;border:1px solid #05B05040')});
-  vgl.innerHTML='<b>Minimaal vereist: '+fmtNum(_min,0)+' kW</b> '+
+  box.style.cssText='margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;'+
+    (_tekort?'background:#FFF3E0;border:1px solid #9E480E55':'background:#05B0500f;border:1px solid #05B05040');
+  box.innerHTML='<b>Minimaal vereist: '+fmtNum(_min,0)+' kW</b> '+
     '<span style="color:#5A6577">('+fmtNum(_lpEnergiePerLaaddagKwh(lp),0)+' kWh per laaddag ÷ '+_lpVensterUren(lp)+'u venster × '+LP_MARGE+' marge)</span>'+
     '<br><b>Gekozen: '+fmtNum(_gek,0)+' kW</b> '+
     (_tekort ? '<span style="color:#9E480E">⚠ te weinig — de laadvraag past niet binnen het venster</span>'
-             : '<span style="color:#05B050">✓ volstaat</span>');
-  card.appendChild(vgl);
-  card.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:6px'},
-    'Energie: '+fmtNum(_lpEnergieMwh(lp),1)+' MWh/jaar'+(lp.bestaand?' · bestaand (wordt uit het basisverbruik gehaald en als stuurbaar laadplein herrekend)':'')));
-  return card;
+             : '<span style="color:#05B050">✓ volstaat</span>')+
+    '<div style="margin-top:5px;color:#5A6577;font-size:11.5px">Energie: '+fmtNum(_lpEnergieMwh(lp),1)+' MWh/jaar'+
+    (lp.bestaand?' · bestaand (wordt uit het basisverbruik gehaald en als stuurbaar laadplein herrekend)':'')+'</div>';
 }
 
 function _vulLaadpleinen(host){
@@ -3046,10 +3052,14 @@ function _vulLaadpleinen(host){
 function _updateLaadpleinSamenvatting(){
   var host=$('fdsim-lp-samenvatting'); if(!host) return;
   // v1.22: totalen van het MINIMUM en het GEKOZEN laadvermogen over alle pleinen.
+  // v1.22.2 FIX: werk óók de vgl-box van elke kaart bij. Die stond eerder alleen bij
+  // het renderen goed en bleef daarna stil op de oude waarde staan (bv. "Gekozen: 0 kW"
+  // terwijl je al laadpalen had gekozen), terwijl de totalen onderaan wél meegingen.
   var eTot=0, capTot=0, minTot=0, dagTot=0;
-  (STATE.laadpleinen||[]).forEach(function(lp){
+  (STATE.laadpleinen||[]).forEach(function(lp,idx){
     eTot+=_lpEnergieMwh(lp); capTot+=_lpVermogenKw(lp);
     minTot+=_lpMinVermogenKw(lp); dagTot+=_lpEnergiePerLaaddagKwh(lp);
+    var _b=$('fdsim-lp-vgl-'+idx); if(_b) _vulLaadpleinVgl(_b, lp);
   });
   if(!(STATE.laadpleinen && STATE.laadpleinen.length)){ host.innerHTML=''; return; }
   var tekort=(minTot>0 && capTot<minTot);
