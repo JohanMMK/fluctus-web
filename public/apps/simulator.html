@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.14</span>
+    <span class="fdsim-version">v1.23.0</span>
   </div>
 </div>
 
@@ -621,6 +621,8 @@ var STATE = {
   // Stap 9 — resultaat
   resultaat: null,
   resultaatVarianten: null,  // v1.20.4: {geen, sturing, onbalans}
+  simLog: [],                // v1.23.0: live voortgangslog tijdens de simulatie
+  simLogStart: 0,
   kpiSturing: null,          // v1.20.4: meerwaarde-KPI's uit /api/nominatie-sim-3
   opstellingen: null,        // v1.20.8: {verhogen, batterij} bij ontoereikend toegangsvermogen
   capaciteit: null,          // v1.20.8: laadplein-capaciteits-oordeel
@@ -771,6 +773,60 @@ function apiPost(path,body){
     _activityHook(path, body);
     return r.json();
   });
+}
+
+// v1.23.0: job aanvragen en voortgang pollen. Resolvet met dezelfde vorm als de
+// oude synchrone POST, zodat de rest van runSimulatie() ongewijzigd blijft.
+var SIM_POLL_MS = 1500;
+var SIM_MAX_WACHT_MS = 12*60*1000;   // ruim: 3 opstellingen x 7 runs x ~25s = ~9 min
+function _sim3Async(input){
+  return apiPost('/api/nominatie-sim-3', input).then(function(r0){
+    // Oude server (of 'enkel'-modus zonder job): meteen het resultaat.
+    if(!r0 || !r0.async || !r0.job_id) return r0;
+    var jobId = r0.job_id, t0 = Date.now();
+    return new Promise(function(resolve, reject){
+      (function poll(){
+        if(Date.now()-t0 > SIM_MAX_WACHT_MS)
+          return reject(new Error('Simulatie duurde langer dan 12 minuten — afgebroken.'));
+        fetch(API_BASE+'/api/sim-voortgang/'+encodeURIComponent(jobId), {headers:_authHeaders({})})
+          .then(function(res){
+            if(res.status===404) throw new Error('De simulatie-opdracht is verlopen of de server is herstart. Probeer opnieuw.');
+            if(!res.ok) return res.text().then(function(t){ throw new Error('HTTP '+res.status+': '+t); });
+            return res.json();
+          })
+          .then(function(v){
+            if(v.log && v.log.length){ STATE.simLog = v.log; _renderSimLog(); }
+            if(v.status==='klaar')  return resolve(v.resultaat);
+            if(v.status==='fout')   return reject(new Error(v.fout||'Simulatie gefaald'));
+            setTimeout(poll, SIM_POLL_MS);
+          })
+          .catch(reject);
+      })();
+    });
+  });
+}
+// Het wachtscherm-log. Bewust verkoop-taal: geen debug-spam, elke regel is iets
+// dat de verkoper aan de klant zou kunnen voorlezen.
+var SIM_LOG_ICOON = { start:'▶', opstelling:'◆', run:'⋯', ok:'✓', faal:'✗',
+                      groei:'↑', verfijn:'⋯', resultaat:'€', klaar:'✓',
+                      waarschuwing:'!', fout:'✗' };
+var SIM_LOG_KLEUR = { ok:'#2B8F3A', klaar:'#2B8F3A', faal:'#C24B2C', fout:'#C24B2C',
+                      waarschuwing:'#C97A1A', resultaat:'#1F3864', opstelling:'#1F3864' };
+function _renderSimLog(){
+  var host=$('fdsim-simlog'); if(!host) return;
+  var L=STATE.simLog||[];
+  host.innerHTML = L.map(function(r){
+    var ic=SIM_LOG_ICOON[r.fase]||'·', kl=SIM_LOG_KLEUR[r.fase]||'#5A6478';
+    var vet=(r.fase==='opstelling'||r.fase==='start');
+    return '<div style="display:flex;gap:8px;padding:2px 0;'+(vet?'margin-top:6px;':'')+'">'+
+      '<span style="color:'+kl+';width:12px;flex:0 0 12px;text-align:center">'+ic+'</span>'+
+      '<span style="color:'+(vet?'#1F3864':'#5A6478')+';'+(vet?'font-weight:700':'')+';font-size:12px;line-height:1.5">'+
+        String(r.tekst).replace(/</g,'&lt;')+'</span>'+
+      '<span style="margin-left:auto;color:#9CA3AF;font-size:10px;flex:0 0 auto">'+
+        (r.t!=null?Math.round(r.t/1000)+'s':'')+'</span>'+
+    '</div>';
+  }).join('');
+  host.scrollTop = host.scrollHeight;
 }
 
 // ============================================================
@@ -1749,7 +1805,7 @@ function _findFreshProjectName(baseName, attempt, callback){
 function _autoSaveScenarioNaFactuur(){
   var data = {};
   Object.keys(STATE).forEach(function(k){
-    if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited'){
+    if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited' && k!=='simLog'){
       data[k] = STATE[k];
     }
   });
@@ -2670,7 +2726,7 @@ function _frLaadpalen(){
   }); });
   return lp;
 }
-// v1.22.14 FIX: STATE.basisScenario.resultaat is het ENIGE sim-resultaat dat in STATE
+// v1.23.0 FIX: STATE.basisScenario.resultaat is het ENIGE sim-resultaat dat in STATE
 // blijft staan, en het wordt door géén van de scenario-snapshots uitgesloten (die
 // filteren enkel resultaat/resultaatVarianten/opstellingen). Het sleepte dus de
 // profielen-arrays (3 × 35.040) mee naar élke GitHub-commit — en met v1.9 zouden daar
@@ -2690,7 +2746,7 @@ function _resultaatLean(R){
   out._arrays_weggelaten=true;
   return out;
 }
-// v1.22.14: laadplein-hoofdstuk voor het financieel rapport.
+// v1.23.0: laadplein-hoofdstuk voor het financieel rapport.
 // Per plein: wat er gevraagd werd, wat er effectief geladen is, en de kwartier-array
 // voor de heatmap (simulator.py v1.9 → laadplein.pleinen[]).
 // De km-omrekening gebruikt het gewogen kWh/km van de wagenparkregels op stap 5, met
@@ -2795,7 +2851,7 @@ function _financieelRapportData(){
       contract:'Dynamisch (spot)', sturing:'Variant 2 (arbitrage, excl. onbalans)'
     },
     energie:_frEnergie(beter,factor),
-    // v1.22.14: laadplein-hoofdstuk — overzicht per plein + heatmap van het effectief
+    // v1.23.0: laadplein-hoofdstuk — overzicht per plein + heatmap van het effectief
     // geladen vermogen per kwartier. Actief = opstelling 2 variant 2, basis = het
     // vastgezette ijkpunt (opstelling 1 zonder sturing), zodat MWh/km/gebouwverbruik
     // naast elkaar staan en de vergelijking controleerbaar is.
@@ -4621,6 +4677,10 @@ var INV_BATT_EUR_PER_KWH= 350;     // batterij-capex (zelfde basis als het finan
 var INV_PV_EUR_PER_KWP  = 450;     // PV-capex
 var INV_LAADPAAL_EUR    = { ac:2500, dc160:40000, dc400:70000 };
 var INV_KABEL_PCT       = 0.20;    // opslag kabeltracés op de volledige installatie
+// v1.23.0: drie opstellingen. Opstelling 3 = opstelling 2 + cabine (LS→MS).
+// Zij deelt de batterij-capex met opstelling 2; het enige verschil in KOST is de
+// cabine, het enige verschil in OPBRENGST is de tariefkaart. Zo blijft de
+// vergelijking 2-vs-3 een zuivere vraag: is de MS-kaart de cabine waard?
 function _opstellingInvestering(){
   var ops=STATE.opstellingen, cap=STATE.capaciteit||{};
   if(!ops||!ops.verhogen||!ops.batterij) return null;
@@ -4646,6 +4706,35 @@ function _opstellingInvestering(){
   var k1=(ops.verhogen.kpi_sturing||{}).kost_geen_excl_btw||0;      // opstelling 1, geen sturing
   var k2=(ops.batterij.kpi_sturing||{}).kost_sturing_excl_btw||0;   // opstelling 2, sturing 2
   var winst = k1 - k2;
+
+  // ── v1.23: opstelling 3 (MS + batterij) ──
+  var o3=null;
+  var _d3i=_derde();
+  if(_d3i){
+    var cfg3=_d3i.o.config||{};
+    var batt3=_dimKwh(_d3i.o) || battKwh;
+    // Cabine alleen als deze opstelling écht van LS naar MS gaat. Stond de site al
+    // op MS, dan is opstelling 3 gratis identiek aan opstelling 2 — en dan hoort ze
+    // ook niet als aparte keuze op het scherm.
+    var cabine3 = cfg3.cabine_nodig ? INV_CABINE_EUR : 0;
+    // Bij een mix verzwaart opstelling 3 óók een stuk — die kVA's kosten geld en
+    // horen in haar investering, anders lijkt de mix gratis goedkoper.
+    var kva3 = Math.max(0, (+cfg3.aansluiting_kva||0) - (+cfg3.mix_huidig_kva||0));
+    var spec3 = batt3*INV_BATT_EUR_PER_KWH + cabine3 + kva3*INV_EUR_PER_KVA;
+    var sub3=gemeenschappelijk+spec3, kab3=sub3*INV_KABEL_PCT, tot3=sub3+kab3;
+    var k3=(_d3i.o.kpi_sturing||{}).kost_sturing_excl_btw||0;
+    var netto3=tot3-tot1, winst3=k1-k3;
+    o3={ key:_d3i.key, label:_d3i.label, kort:_d3i.kort, kvaExtra:kva3,
+         battKwh:batt3, cabine:cabine3, spec3:spec3, sub3:sub3, kab3:kab3, tot3:tot3,
+         k3:k3, netto:netto3, winst:winst3,
+         rendement:(netto3>0 && winst3>0) ? (winst3/netto3*100) : null,
+         payback:(netto3>0 && winst3>0) ? (netto3/winst3) : null,
+         spanning:cfg3.spanning||'MS', omgezet:!!cfg3.cabine_nodig,
+         // Het zuivere tariefkaart-effect: 2 en 3 draaien dezelfde batterij op
+         // dezelfde aansluiting, dus dit verschil IS de LS/MS-keuze.
+         tariefkaart_winst:k2-k3,
+         cabine_terugverdiend_jaar:(k2-k3)>0 ? (cabine3*(1+INV_KABEL_PCT))/(k2-k3) : null };
+  }
   return { pv:pv, pvKwp:+STATE.pvKwp||0, laadpalen:laadpalen, lp:lp, gemeenschappelijk:gemeenschappelijk,
            cabine:cabine, kvaKost:kvaKost, verhoging_kw:+cap.verhoging_kw||0, spec1:spec1,
            battKwh:battKwh, spec2:spec2,
@@ -4653,7 +4742,7 @@ function _opstellingInvestering(){
            netto:netto, k1:k1, k2:k2, winst:winst,
            rendement:(netto>0 && winst>0) ? (winst/netto*100) : null,
            payback:(netto>0 && winst>0) ? (netto/winst) : null,
-           omgezet:!!cfgV.spanning_omgezet };
+           omgezet:!!cfgV.spanning_omgezet, o3:o3 };
 }
 function _renderOpstellingInvestering(){
   var v=_opstellingInvestering(); if(!v) return null;
@@ -4724,6 +4813,28 @@ function _renderOpstellingInvestering(){
 // investering rekent MOET die geïtereerde maten gebruiken — niet de vuistregels uit
 // STATE.capaciteit (verhoging_kw) of STATE.batterijCustom. Anders reken je de kosten
 // van de ene configuratie tegen de investering van een andere.
+// v1.23.0: de derde opstelling is adaptief (server.js v15.20.1).
+//   'ms_batterij' — de site stond op LS: is de MS-tariefkaart de cabine waard?
+//   'mix'         — de site stond al op MS: MS+batterij zou een exacte kopie van
+//                   opstelling 2 zijn, dus zoekt de server het binnengebied tussen
+//                   de twee uitersten (deels verzwaren + kleinere batterij).
+function _derde(){
+  var ops=STATE.opstellingen; if(!ops) return null;
+  if(ops.ms_batterij) return {key:'ms_batterij', o:ops.ms_batterij,
+    label:'Opstelling 3 — naar MS + batterij', kort:'3 · MS + batterij'};
+  if(ops.mix) return {key:'mix', o:ops.mix,
+    label:'Opstelling 3 — mix: deels verzwaren, kleinere batterij', kort:'3 · Mix'};
+  return null;
+}
+// v1.23: de maat NA iteratie, niet de vuistregel vooraf. Zelfde reden als
+// _actieveBatterijKwh: de dimensioneringslus corrigeert de vuistregel geregeld met
+// tientallen procenten, en dan klopt de investering niet meer.
+function _dimKwh(opst){
+  var d=opst&&opst.dimensionering;
+  if(d && d.haalbaar && d.gekozen_maat!=null && d.eenheid==='kWh') return +d.gekozen_maat;
+  var b=opst&&opst.config&&opst.config.batterij;
+  return (b&&+b.kwh)||0;
+}
 function _basisVerhogingKw(cfgV){
   var cap=STATE.capaciteit||{};
   var na=+((cfgV||{}).aansluiting_kva)||0, huidig=+cap.huidig_toegangsvermogen_kw||0;
@@ -4748,7 +4859,8 @@ function _renderDimensionering(){
   var ops=STATE.opstellingen; if(!ops) return null;
   var dV=(ops.verhogen&&ops.verhogen.dimensionering)||null;
   var dB=(ops.batterij&&ops.batterij.dimensionering)||null;
-  if(!dV && !dB) return null;
+  var _d3=_derde(); var dM=(_d3&&_d3.o.dimensionering)||null;       // v1.23: opstelling 3
+  if(!dV && !dB && !dM) return null;
   var box=el('div',{style:'margin-top:12px;padding:10px 12px;background:#fff;border:1px solid #D5DBE3;border-radius:6px;font-size:12.5px'});
   box.appendChild(el('div',{style:'font-weight:700;color:#1F3864;margin-bottom:6px'},
     'Dimensionering — getoetst op de werkelijke dispatch'));
@@ -4770,7 +4882,21 @@ function _renderDimensionering(){
       ' <span style="color:#5A6577">· '+d.iteraties+' sim-run(s), beoordeeld '+
       (d.beoordeeld_op==='geen'?'zonder sturing':'op sturing 2')+'</span></div>';
   }
-  var html=regel('Opstelling 1 — verzwaren', dV)+regel('Opstelling 2 — batterij', dB);
+  var html=regel('Opstelling 1 — verzwaren', dV)
+          +regel('Opstelling 2 — batterij, aansluiting blijft', dB)
+          +regel(_d3?_d3.label:'Opstelling 3', dM);
+  // Bij een mix: laat zien welke mengverhoudingen onderzocht zijn. Anders lijkt de
+  // gekozen combinatie uit de lucht te vallen.
+  if(_d3 && _d3.key==='mix' && _d3.o.mix && _d3.o.mix.alternatieven){
+    html+='<div style="margin-top:8px;padding:8px 10px;background:#F7F9FC;border-radius:6px">'+
+      '<div style="font-size:11px;color:#5A6577;margin-bottom:4px">Onderzochte mengverhoudingen '+
+      '(elk met de kleinst werkende batterij; gekozen op laagste totale kost over 15 jaar):</div>'+
+      _d3.o.mix.alternatieven.map(function(a){
+        return '<div style="font-size:12px;padding:2px 0;'+(a.gekozen?'font-weight:700;color:#1F3864':'color:#5A6577')+'">'+
+          fmtNum(a.kva,0)+' kVA + '+fmtNum(a.kwh,0)+' kWh · investering '+(a.capex!=null?fmtEur(a.capex):'—')+
+          ' · factuur '+fmtEur(a.jaarkost)+'/jaar'+(a.gekozen?'  ← gekozen':'')+'</div>';
+      }).join('')+'</div>';
+  }
   var tmp=el('div'); tmp.innerHTML=html; box.appendChild(tmp);
   box.appendChild(el('div',{style:'margin-top:6px;font-size:11px;color:#5A6577;font-style:italic'},
     'Elke opstelling is net zo groot gemaakt dat de laadvraag volledig geladen raakt. Pas dan zijn hun kosten vergelijkbaar.'));
@@ -4817,7 +4943,7 @@ function _renderBasisVsActief(){
       'Draai de simulatie opnieuw en zet opstelling 1 opnieuw vast.'));
   }
 
-  // ── v1.22.14: ENERGIE-CONTROLE ──
+  // ── v1.23.0: ENERGIE-CONTROLE ──
   // Twee facturen zijn alleen vergelijkbaar als er in beide evenveel geladen is. Laadt
   // de basis minder (omdat de aansluiting de laadvraag afkapt), dan is haar factuur
   // kunstmatig laag en is elke besparing die je erop baseert een illusie. Dit blok maakt
@@ -5097,7 +5223,17 @@ function renderStep9Resultaat(){
   box.appendChild(el('h2',null,'Simulatieresultaat'));
 
   if(STATE.isRunning){
-    box.appendChild(el('div',{class:'fdsim-help'},'Simulatie loopt... dit duurt typisch 20-30 seconden.'));
+    // v1.23.0: live voortgangslog. Met drie opstellingen die elk itereren duurt dit
+    // minuten — zonder feedback lijkt het scherm bevroren.
+    box.appendChild(el('div',{class:'fdsim-help'},
+      'Simulatie loopt. Elke opstelling wordt doorgerekend tot ze de laadvraag écht aankan, '+
+      'dus dit kan enkele minuten duren.'));
+    var logWrap=el('div',{style:'margin-top:10px;border:1px solid #1F386420;border-radius:6px;background:#FAFBFC;padding:10px'});
+    logWrap.appendChild(el('div',{style:'font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;margin-bottom:6px'},'Voortgang'));
+    var logHost=el('div',{id:'fdsim-simlog',style:'max-height:260px;overflow-y:auto;font-family:ui-monospace,Menlo,monospace'});
+    logWrap.appendChild(logHost);
+    box.appendChild(logWrap);
+    setTimeout(_renderSimLog,0);
     box.appendChild(el('div',{style:'text-align:center;padding:40px 0'},[
       el('div',{class:'fdsim-spin'}),
       el('span',{style:'margin-left:10px;color:#1F3864'},'zig met dispatch-optimalisatie...')
@@ -6054,7 +6190,22 @@ function runSimulatie(){
     }
   };
 
-  apiPost('/api/nominatie-sim-3',input).then(function(r){
+  // v1.23.0: ASYNC + LIVE LOG. Drie opstellingen x tot 7 sim-runs loopt op tot enkele
+  // minuten — te lang voor een blokkerende POST, en de verkoper keek al die tijd naar
+  // een dood scherm. We vragen nu een job aan en pollen de voortgang; server.js v15.20
+  // stuurt per stap een leesbare logregel terug.
+  // Valt de server terug op het oude gedrag (geen job_id), dan gebruiken we gewoon de
+  // synchrone response — zo werkt de UI ook tegen een niet-geüpdatete proxy.
+  input._async = true;
+  // v1.23.0: de server kiest de beste mengverhouding op TOTALE eigendomskost en heeft
+  // daar onze investeringsconstanten voor nodig. Ze blijven hier staan (één plek);
+  // de server rekent er enkel mee. Zonder deze waarden kan hij niet kiezen en valt hij
+  // terug op de middelste mix — met een expliciete waarschuwing in het log.
+  input._investering = { cabine_eur:INV_CABINE_EUR, eur_per_kva:INV_EUR_PER_KVA,
+                         eur_per_kwh:INV_BATT_EUR_PER_KWH, kabel_pct:INV_KABEL_PCT,
+                         horizon_jaar:15 };
+  STATE.simLog = []; STATE.simLogStart = Date.now();
+  _sim3Async(input).then(function(r){
     // v1.20.8: twee response-modi.
     //  - 'enkel': r.varianten {geen,sturing,onbalans} + r.kpi_sturing (detailfactuur = sturing).
     //  - 'twee_opstellingen': r.opstellingen {verhogen, batterij} (elk varianten+kpi) +
@@ -6429,7 +6580,7 @@ function _navigeerNaarSc4(sc4Data){
       console.log('[v1.17.3] Sc4 sim klaar — persisteer resultaat in fluctus-scenarios');
       var data = {};
       Object.keys(STATE).forEach(function(k){
-        if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited') data[k]=STATE[k];
+        if(k!=='resultaat' && k!=='resultaatVarianten' && k!=='opstellingen' && k!=='isRunning' && k!=='currentStep' && k!=='visited' && k!=='simLog') data[k]=STATE[k];
       });
       data.resultaat_samenvatting = _buildResultaatSamenvattingExt(STATE.resultaat, STATE);
       apiPost('/api/scenario-bewaren', {
@@ -6915,7 +7066,7 @@ function bewaarScenario(){
   setStatus('waren...','info');
   var data={};
   Object.keys(STATE).forEach(function(k){
-    if(k!=='resultaat'&&k!=='resultaatVarianten'&&k!=='opstellingen'&&k!=='isRunning'&&k!=='currentStep'&&k!=='visited')data[k]=STATE[k];
+    if(k!=='resultaat'&&k!=='resultaatVarianten'&&k!=='opstellingen'&&k!=='isRunning'&&k!=='currentStep'&&k!=='visited'&&k!=='simLog')data[k]=STATE[k];
   });
   // v1.17.3: uitgebreide samenvatting (€ excl btw, alle financiële + fysieke velden)
   data.resultaat_samenvatting = _buildResultaatSamenvattingExt(STATE.resultaat, STATE);
