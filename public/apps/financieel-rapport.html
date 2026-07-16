@@ -340,13 +340,20 @@ function spotPrijsData(d,q){
 // ============================ RENDER ============================
 var R = document.getElementById('rapport');
 function el(tag, attrs, html){ var e=document.createElement(tag); if(attrs)for(var k in attrs){ if(k==='class')e.className=attrs[k]; else e.setAttribute(k,attrs[k]); } if(html!=null)e.innerHTML=html; return e; }
+// v1.6: de nr-parameter is enkel nog documentatie. Het laadplein-hoofdstuk is variabel
+// lang (1 overzichtspagina + 1 pagina per plein), dus wordt er geteld in bronvolgorde.
+// Alle bestaande pagina()-oproepen staan al op volgorde → zelfde nummers als voorheen.
+var _pgTeller=0;
 function pagina(nr, inner){
-  var p=el('div',{class:'a4'});
-  p.innerHTML = inner + '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</span><span>p. '+nr+'</span></div>';
+  var p=el('div',{class:'a4'}); _pgTeller++;
+  p.innerHTML = inner + '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</span><span>p. '+_pgTeller+'</span></div>';
   R.appendChild(p);
   return p;
 }
 
+// ===== v1.6: laadplein-hoofdstuk (overzicht per plein + heatmap geladen kW/kwartier),
+// dynamische paginanummering + inhoudstafel. Gevoed door simulator.html v1.22.14
+// (INV.laadpleinen) → simulator.py v1.9 (laadplein.pleinen[]).
 // ===== v1.5: geïntegreerde factuuranalyse (zelfde helpers als het factuurrapport) =====
 function eur2(v){ return '€ '+new Intl.NumberFormat('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v); }
 function _fvEur(v){ return '<span class="fv-eur">'+eur2(v)+'</span>'; }
@@ -423,6 +430,15 @@ var rendRealWind = opRendement('realistisch', INV.onbalans_windfall_jaar1);
 
 var charts=[]; var heatmaps=[];
 
+// v1.6: laadplein-hoofdstuk. LP_PAGS = 1 overzichtspagina + 1 pagina per plein.
+// Zonder laadplein valt het hoofdstuk volledig weg en schuift de nummering terug.
+var LP = INV.laadpleinen || null;
+if(LP && (!LP.pleinen || !LP.pleinen.length)) LP=null;
+var LP_PAGS = LP ? 1+LP.pleinen.length : 0;
+var LP_P1 = 8;                       // eerste laadpleinpagina
+var NA_LP = LP_P1 + LP_PAGS;         // eerste pagina ná het hoofdstuk (facturen)
+function _lpNum(v,d){ return new Intl.NumberFormat('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}).format(v||0); }
+
 // ==================== PAGINA 1 — TITELBLAD ====================
 pagina(1, `
   <div class="eyebrow">Financieel rapport · vertrouwelijk</div>
@@ -476,17 +492,24 @@ pagina(2, `
 pagina(3, `
   <div class="eyebrow">Inhoud</div>
   <h2>Inhoudstafel</h2>
-  <ul class="toc">
-    <li><span class="n">1</span><span class="t">Onze filosofie — stap voor stap in de juiste richting</span><span>4</span></li>
-    <li><span class="n">2</span><span class="t">Energetische impact — vermogen & kost per kwartier (heatmaps)</span><span>5</span></li>
-    <li><span class="n">3</span><span class="t">Zelfconsumptie & de rol van de batterij</span><span>6</span></li>
-    <li><span class="n">4</span><span class="t">Spotmarkt — energie & prijs per kwartier (heatmaps)</span><span>7</span></li>
-    <li><span class="n">5</span><span class="t">Facturen — van afrekening tot scherp dynamisch contract</span><span>8</span></li>
-    <li><span class="n">6</span><span class="t">Minder vs beter scenario & besparing</span><span>9</span></li>
-    <li><span class="n">7</span><span class="t">Drie kostenscenario's, capex & operationele P&amp;L</span><span>10</span></li>
-    <li><span class="n">8</span><span class="t">Rendement, terugverdientijd & de onbalans-windfall</span><span>11</span></li>
-    <li><span class="n">9</span><span class="t">Vijf financieringsmodellen (15 jaar, cashflow &amp; DSCR)</span><span>12</span></li>
-  </ul>
+  <ul class="toc">${(function(){
+    // v1.6: dynamisch — het laadplein-hoofdstuk valt weg zonder laadplein.
+    var items=[
+      ['Onze filosofie — stap voor stap in de juiste richting', 4],
+      ['Energetische impact — vermogen & kost per kwartier (heatmaps)', 5],
+      ['Zelfconsumptie & de rol van de batterij', 6],
+      ['Spotmarkt — energie & prijs per kwartier (heatmaps)', 7]
+    ];
+    if(LP) items.push(['Laadpleinen — geladen energie per plein, kwartier per kwartier', LP_P1]);
+    items.push(['Facturen — van afrekening tot scherp dynamisch contract', NA_LP]);
+    items.push(['Minder vs beter scenario & besparing', NA_LP+1]);
+    items.push(["Drie kostenscenario's, capex & operationele P&amp;L", NA_LP+2]);
+    items.push(['Rendement, terugverdientijd & de onbalans-windfall', NA_LP+3]);
+    items.push(['Vijf financieringsmodellen (15 jaar, cashflow &amp; DSCR)', NA_LP+4]);
+    return items.map(function(it,i){
+      return '<li><span class="n">'+(i+1)+'</span><span class="t">'+it[0]+'</span><span>'+it[1]+'</span></li>';
+    }).join('');
+  })()}</ul>
   <div class="box"><p class="note">Dit rapport is opgebouwd rond twee scenario's uit de simulator: een <b>minder</b> scenario (ander contract/ontwerp/sturing) en een <b>beter</b> scenario (ons voorstel). De financiële vergelijking gebruikt telkens sturing <b>variant 2</b>.</p></div>
 `);
 
@@ -578,6 +601,98 @@ pagina(7, `
 `);
 heatmaps.push({id:'hm-spot', fn:spotEnergieData, min:-50, max:50, kleur:kleurBWR, lg:'lg-spot', lgtype:'bwr'});
 heatmaps.push({id:'hm-prijs', fn:spotPrijsData, min:-20, max:130, kleur:kleurBWR, lg:'lg-prijs', lgtype:'bwr'});
+
+// ==================== PAGINA 8..8+n — LAADPLEINEN (v1.6) ====================
+// Doel: controleerbaar maken dat beide opstellingen dezelfde energie leveren. Als het
+// actieve scenario minder MWh laadt dan de basis, is de besparing geen besparing maar
+// gewoon minder geladen. Vandaar MWh, km én gebouwverbruik naast elkaar.
+var lpHeat=[];
+if(LP){
+  var _t=LP.totaal;
+  var _dMwh=_t.geladen_mwh.actief-_t.geladen_mwh.basis;
+  var _mx=Math.max(_t.geladen_mwh.actief,_t.geladen_mwh.basis);
+  var _gelijk=_mx>0 && Math.abs(_dMwh)/_mx<0.01;
+  var _tekort=LP.pleinen.reduce(function(a,p){ return a+(+p.tekort_mwh||0); },0);
+
+  var _rijen=LP.pleinen.map(function(p){
+    var pctGeladen=(+p.gevraagd_mwh>0)?(+p.geladen_mwh/+p.gevraagd_mwh*100):100;
+    return `<tr>
+      <td>${p.naam}${p.bestaand?' <span class="note">(bestaand)</span>':''}</td>
+      <td style="text-align:right">${_lpNum(p.aantal)}</td>
+      <td style="text-align:right">${_lpNum(p.cap_kw)} kW</td>
+      <td style="text-align:right">${_lpNum(p.piek_kw)} kW</td>
+      <td style="text-align:right">${_lpNum(p.gevraagd_mwh,1)}</td>
+      <td style="text-align:right"><b>${_lpNum(p.geladen_mwh,1)}</b></td>
+      <td style="text-align:right">${_lpNum(p.km)}</td>
+      <td style="text-align:right;color:${pctGeladen<99.5?'#C24B2C':'#2B8F3A'}">${_lpNum(pctGeladen,1)}%</td>
+    </tr>`;
+  }).join('');
+
+  pagina(LP_P1, `
+    <div class="eyebrow">Laadpleinen</div>
+    <h2>Wat er effectief geladen werd</h2>
+    <p class="lead">Een lagere factuur is pas een besparing als er evenveel geladen én evenveel verbruikt is. Deze pagina zet beide scenario's naast elkaar zodat u dat zelf kunt nagaan.</p>
+
+    <div class="box ${_gelijk?'groen':'oranje'}">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr><th style="text-align:left"></th>
+            <th style="text-align:right">Basis (opstelling 1, zonder sturing)</th>
+            <th style="text-align:right">Voorstel (opstelling 2, variant 2)</th>
+            <th style="text-align:right">Verschil</th></tr>
+        <tr><td>Geladen op het laadplein</td>
+            <td style="text-align:right">${_lpNum(_t.geladen_mwh.basis,1)} MWh</td>
+            <td style="text-align:right"><b>${_lpNum(_t.geladen_mwh.actief,1)} MWh</b></td>
+            <td style="text-align:right">${(_dMwh>=0?'+':'')+_lpNum(_dMwh,1)} MWh</td></tr>
+        <tr><td>Komt overeen met</td>
+            <td style="text-align:right">${_lpNum(_t.km.basis)} km</td>
+            <td style="text-align:right"><b>${_lpNum(_t.km.actief)} km</b></td>
+            <td style="text-align:right">${_lpNum(_t.km.actief-_t.km.basis)} km</td></tr>
+        <tr><td>Verbruik van het gebouw</td>
+            <td style="text-align:right">${_lpNum(_t.gebouw_mwh.basis,1)} MWh</td>
+            <td style="text-align:right"><b>${_lpNum(_t.gebouw_mwh.actief,1)} MWh</b></td>
+            <td style="text-align:right">${_lpNum(_t.gebouw_mwh.actief-_t.gebouw_mwh.basis,1)} MWh</td></tr>
+      </table>
+      <p class="note" style="margin-top:8px">${_gelijk
+        ? 'Beide opstellingen laden dezelfde hoeveelheid energie (verschil &lt; 1%). Het verschil in factuur komt dus volledig uit <b>wanneer</b> er geladen wordt, niet uit <b>hoeveel</b>.'
+        : 'Let op: de scenario’s laden <b>niet</b> dezelfde hoeveelheid energie. Het factuurverschil bevat dus ook een volumeverschil en is geen zuivere vergelijking — corrigeer eerst de dimensionering.'}</p>
+    </div>
+
+    <h3>Per laadplein — voorstel (opstelling 2, variant 2)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+      <tr style="border-bottom:1px solid var(--lijn)">
+        <th style="text-align:left">Laadplein</th><th style="text-align:right">Wagens</th>
+        <th style="text-align:right">Laadvermogen</th><th style="text-align:right">Piek</th>
+        <th style="text-align:right">Gevraagd (MWh)</th><th style="text-align:right">Geladen (MWh)</th>
+        <th style="text-align:right">km</th><th style="text-align:right">Gedekt</th>
+      </tr>
+      ${_rijen}
+    </table>
+    <p class="note">Rekenbasis: ${_lpNum(LP.kwh_per_km,2)} kWh/km gemiddeld over het wagenpark. &ldquo;Gedekt&rdquo; = geladen ÷ gevraagd; alles onder 100% betekent dat een wagen niet vol raakte binnen zijn laadvenster.</p>
+    ${_tekort>0.05 ? `<div class="box oranje"><p class="note"><b>${_lpNum(_tekort,1)} MWh tekort.</b> De sturing kon niet alle laadvraag binnen de vensters kwijt. Vergroot de batterij, verruim de laadvensters of verhoog het toegangsvermogen.</p></div>` : ''}
+  `);
+
+  // Eén pagina per plein: heatmap van het effectief geladen vermogen per kwartier.
+  LP.pleinen.forEach(function(p, i){
+    var id='hm-lp'+i;
+    pagina(LP_P1+1+i, `
+      <div class="eyebrow">Laadpleinen · ${i+1} van ${LP.pleinen.length}</div>
+      <h2>${p.naam}</h2>
+      <p class="lead">Geladen vermogen per kwartier over 12 maanden. Horizontaal de dagen van het jaar (1 januari links), verticaal het uur van de dag (0u onderaan).</p>
+      <div class="kpi-row" style="margin:10px 0">
+        <div class="kpi"><span class="eyebrow">Geladen</span><br><b>${_lpNum(p.geladen_mwh,1)} MWh</b></div>
+        <div class="kpi"><span class="eyebrow">Goed voor</span><br><b>${_lpNum(p.km)} km</b></div>
+        <div class="kpi"><span class="eyebrow">Piekvermogen</span><br><b>${_lpNum(p.piek_kw)} kW</b></div>
+        <div class="kpi"><span class="eyebrow">Wagens</span><br><b>${_lpNum(p.aantal)}</b></div>
+      </div>
+      <div style="text-align:center;margin-top:6px">
+        <canvas id="${id}" width="720" height="230" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas>
+      </div>
+      <div class="hm-legend" id="${id}-lg" style="justify-content:center;gap:8px;margin-top:6px"></div>
+      <p class="note">Donker = veel vermogen. De sturing schuift het laden naar de goedkoopste kwartieren binnen het laadvenster; de sessie is op het einde van het venster hoe dan ook vol. Installatie: ${_lpNum(p.aantal)} wagens · ${_lpNum(p.cap_kw)} kW aansluitbaar laadvermogen · ${_lpNum(p.dag_kwh,0)} kWh laadvraag per laaddag.</p>
+    `);
+    lpHeat.push({id:id, vals:p.load_kw});
+  });
+}
 
 // ==================== PAGINA 8 — FACTUREN ====================
 var f=INV.facturen;
@@ -838,6 +953,9 @@ setTimeout(function(){
     var cv=document.getElementById(h.id); if(cv){ tekenHeatmap(cv, h.fn, h.min, h.max, h.kleur); }
     legendGradient(h.lg, h.kleur, h.min, h.max);
   });
+  // v1.6: laadplein-heatmaps. _fvTekenHeat tekent zelf de assen + de legende in
+  // <id>-lg. posOnly omdat laden nooit negatief is; 'mean' = gemiddeld kW per uur.
+  lpHeat.forEach(function(h){ _fvTekenHeat(h.id, h.vals, LP&&LP.van, {agg:'mean', palet:'blauw', eenheid:'kW', posOnly:true}); });
   charts.forEach(function(ch){
     var cv=document.getElementById(ch.id); if(!cv)return;
     var labels=ch.rows.map(function(r){return r.isNul?'0':r.jaar;});

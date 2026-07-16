@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.13</span>
+    <span class="fdsim-version">v1.22.14</span>
   </div>
 </div>
 
@@ -2670,6 +2670,72 @@ function _frLaadpalen(){
   }); });
   return lp;
 }
+// v1.22.14 FIX: STATE.basisScenario.resultaat is het ENIGE sim-resultaat dat in STATE
+// blijft staan, en het wordt door géén van de scenario-snapshots uitgesloten (die
+// filteren enkel resultaat/resultaatVarianten/opstellingen). Het sleepte dus de
+// profielen-arrays (3 × 35.040) mee naar élke GitHub-commit — en met v1.9 zouden daar
+// nog eens de per-plein-arrays bijkomen. Git-historiek is onuitwisbaar, dus we strippen
+// aan de bron. Het ijkpunt heeft die arrays niet nodig: enkel de kostcomponenten,
+// kpi.totaal_afname_mwh en laadplein.ev_last_mwh worden ervan gebruikt.
+function _resultaatLean(R){
+  if(!R) return R;
+  var out={}; Object.keys(R).forEach(function(k){ if(k!=='profielen') out[k]=R[k]; });
+  if(out.laadplein&&out.laadplein.pleinen){
+    var lp={}; Object.keys(out.laadplein).forEach(function(k){ if(k!=='pleinen') lp[k]=out.laadplein[k]; });
+    lp.pleinen=out.laadplein.pleinen.map(function(p){
+      var q={}; Object.keys(p).forEach(function(k){ if(k!=='load_kw') q[k]=p[k]; }); return q;
+    });
+    out.laadplein=lp;
+  }
+  out._arrays_weggelaten=true;
+  return out;
+}
+// v1.22.14: laadplein-hoofdstuk voor het financieel rapport.
+// Per plein: wat er gevraagd werd, wat er effectief geladen is, en de kwartier-array
+// voor de heatmap (simulator.py v1.9 → laadplein.pleinen[]).
+// De km-omrekening gebruikt het gewogen kWh/km van de wagenparkregels op stap 5, met
+// terugval op de rekenstandaard personenwagen (0,16 kWh/km).
+// Elk plein heeft één voertuigtype (aantal · km_per_jaar · kwh_per_km). Bij meerdere
+// pleinen met verschillende types wegen we op km, zodat MWh→km klopt over het geheel.
+function _frKwhPerKm(pleinen){
+  var som=0, gew=0;
+  (pleinen||STATE.laadpleinen||[]).forEach(function(p){
+    var a=+p.aantal||0, k=+p.kwh_per_km||0, km=+p.km_per_jaar||0;
+    if(a>0&&k>0&&km>0){ som+=a*km*k; gew+=a*km; }
+  });
+  return gew>0 ? som/gew : 0.16;   // rekenstandaard personenwagen
+}
+// Per-plein kWh/km opzoeken op naam (de sim geeft de naam terug, niet het voertuigtype).
+function _frKwhPerKmPlein(naam){
+  var hit=(STATE.laadpleinen||[]).filter(function(p){ return (p.naam||'')===naam; })[0];
+  return (hit && +hit.kwh_per_km>0) ? +hit.kwh_per_km : _frKwhPerKm();
+}
+function _frLaadpleinen(act, bas){
+  var lp=(act&&act.laadplein)||null;
+  if(!lp||!lp.pleinen||!lp.pleinen.length) return null;
+  var kpm=_frKwhPerKm();
+  var evA=+lp.ev_last_mwh||0;
+  var gebA=Math.max(0,((act.kpi&&+act.kpi.totaal_afname_mwh)||0)-evA);
+  var bLp=(bas&&bas.laadplein)||{};
+  var evB=+bLp.ev_last_mwh||0;
+  var gebB=Math.max(0,((bas&&bas.kpi&&+bas.kpi.totaal_afname_mwh)||0)-evB);
+  return {
+    kwh_per_km:kpm,
+    van:(act.profielen&&act.profielen.van)||null,
+    totaal:{
+      geladen_mwh:{actief:evA, basis:evB},
+      gebouw_mwh:{actief:gebA, basis:gebB},
+      km:{actief:(kpm>0?evA*1000/kpm:0), basis:(kpm>0?evB*1000/kpm:0)}
+    },
+    pleinen:lp.pleinen.map(function(p){
+      var k=_frKwhPerKmPlein(p.naam);
+      return { naam:p.naam, aantal:p.aantal, bestaand:p.bestaand, cap_kw:p.cap_kw,
+               dag_kwh:p.dag_kwh, gevraagd_mwh:p.gevraagd_mwh, geladen_mwh:p.geladen_mwh,
+               tekort_mwh:p.tekort_mwh, piek_kw:p.piek_kw, kwh_per_km:k,
+               km:(k>0?(+p.geladen_mwh||0)*1000/k:0), load_kw:p.load_kw };
+    })
+  };
+}
 function _financieelRapportBeschikbaar(){
   var V=STATE.resultaatVarianten||{};
   return !!((STATE.opstellingen&&(STATE.opstellingen.batterij||STATE.opstellingen.verhogen))||V.sturing||STATE.resultaat);
@@ -2729,6 +2795,11 @@ function _financieelRapportData(){
       contract:'Dynamisch (spot)', sturing:'Variant 2 (arbitrage, excl. onbalans)'
     },
     energie:_frEnergie(beter,factor),
+    // v1.22.14: laadplein-hoofdstuk — overzicht per plein + heatmap van het effectief
+    // geladen vermogen per kwartier. Actief = opstelling 2 variant 2, basis = het
+    // vastgezette ijkpunt (opstelling 1 zonder sturing), zodat MWh/km/gebouwverbruik
+    // naast elkaar staan en de vergelijking controleerbaar is.
+    laadpleinen:_frLaadpleinen(beter, minder),
     facturen:{
       afrekening_periode_mnd:afrekMnd, afrekening_bedrag:afrekBedrag,
       bestaand_jaar:bestaandJaar, scherp_dynamisch_jaar:scherpDynJaar,
@@ -4746,7 +4817,7 @@ function _renderBasisVsActief(){
       'Draai de simulatie opnieuw en zet opstelling 1 opnieuw vast.'));
   }
 
-  // ── v1.22.13: ENERGIE-CONTROLE ──
+  // ── v1.22.14: ENERGIE-CONTROLE ──
   // Twee facturen zijn alleen vergelijkbaar als er in beide evenveel geladen is. Laadt
   // de basis minder (omdat de aansluiting de laadvraag afkapt), dan is haar factuur
   // kunstmatig laag en is elke besparing die je erop baseert een illusie. Dit blok maakt
@@ -4953,7 +5024,7 @@ function _bewaarOpstelling1(naam, btn){
       // toegangsvermogen optimaliseert — enkel een gewijzigd LAADPLEIN maakt het ongeldig,
       // want dan verandert ook de nodige verzwaring.
       STATE.basisScenario={ naam:naam, label:'Opstelling 1 — verzwaren, zonder sturing',
-        subtotaal_excl_btw:_frComp(L).subtotaal, bron:'opstelling_verhogen', resultaat:L, config:cfg,
+        subtotaal_excl_btw:_frComp(L).subtotaal, bron:'opstelling_verhogen', resultaat:_resultaatLean(L), config:cfg,
         lp_sig:_laadpleinSignatuur(),
         investering:{ cabine:(cfg.spanning_omgezet?INV_CABINE_EUR:0),
                       verhoging_kw:_basisVerhogingKw(cfg) } };
