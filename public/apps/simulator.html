@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.22.11</span>
+    <span class="fdsim-version">v1.22.13</span>
   </div>
 </div>
 
@@ -4685,9 +4685,10 @@ function _renderDimensionering(){
     if(!d) return '';
     if(!d.haalbaar){
       return '<div style="padding:8px 10px;margin-bottom:6px;background:#FEE;border:1px solid #C00;border-radius:6px;color:#900">'+
-        '<b>⚠ '+naam+': geen werkende maat gevonden.</b> Na '+d.iteraties+' pogingen blijven er '+
-        d.verloren_dagen+' van de '+(d.totaal_dagen||365)+' dagen waarop de laadvraag niet geladen raakt. '+
-        'De kosten van deze opstelling bevatten dus overschrijding en zijn NIET representatief.</div>';
+        '<b>⚠ '+naam+': geen werkende maat gevonden</b> na '+d.iteraties+' sim-run(s).<br>'+
+        'Laatste bevinding: '+(d.reden||'de opstelling kan de laadvraag niet dragen')+'.<br>'+
+        'De kosten van deze opstelling zijn dus NIET representatief — ze bevatten overschrijding of een '+
+        'stilzwijgend verzwaarde aansluiting. Vergelijk ze niet met de andere opstelling.</div>';
     }
     var gegroeid=(d.start_maat!=null && d.gekozen_maat!=null && d.gekozen_maat>d.start_maat);
     return '<div style="padding:6px 0;border-bottom:1px solid #EEF1F5">'+
@@ -4744,6 +4745,40 @@ function _renderBasisVsActief(){
       '⚠ Je laadplein is gewijzigd sinds het basisscenario is vastgezet. De nodige verzwaring hangt dáárvan af, dus dit ijkpunt klopt niet meer. '+
       'Draai de simulatie opnieuw en zet opstelling 1 opnieuw vast.'));
   }
+
+  // ── v1.22.13: ENERGIE-CONTROLE ──
+  // Twee facturen zijn alleen vergelijkbaar als er in beide evenveel geladen is. Laadt
+  // de basis minder (omdat de aansluiting de laadvraag afkapt), dan is haar factuur
+  // kunstmatig laag en is elke besparing die je erop baseert een illusie. Dit blok maakt
+  // dat expliciet i.p.v. het te vertrouwen.
+  var evB=(b.resultaat.laadplein&&+b.resultaat.laadplein.ev_last_mwh)||0;
+  var evA=(A.laadplein&&+A.laadplein.ev_last_mwh)||0;
+  var kmTot=0, evVraagMwh=0;
+  (STATE.laadpleinen||[]).forEach(function(p){
+    kmTot += (p.aantal||0)*(p.km_per_jaar||0);
+    evVraagMwh += _lpEnergieMwh(p);
+  });
+  var gebB=Math.max(0,((b.resultaat.kpi&&+b.resultaat.kpi.totaal_afname_mwh)||0)-evB);
+  var gebA=Math.max(0,((A.kpi&&+A.kpi.totaal_afname_mwh)||0)-evA);
+  var evGelijk = (evB>0 && evA>0) ? (Math.abs(evB-evA)/Math.max(evB,evA) < 0.01) : false;
+  var ctrl=el('div',{style:'margin-bottom:12px;padding:10px 12px;border-radius:6px;font-size:12.5px;'+
+    (evGelijk?'background:#05B0500f;border:1px solid #05B05040':'background:#FFF3E0;border:1px solid #9E480E55')});
+  ctrl.innerHTML=
+    '<div style="font-weight:700;color:#1F3864;margin-bottom:5px">Controle — is dit een eerlijke vergelijking?</div>'+
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">'+
+      '<span></span><span style="text-align:right;font-weight:700">Basis</span><span style="text-align:right;font-weight:700">Actief</span>'+
+      '<span>EV geladen</span><span style="text-align:right">'+fmtNum(evB,1)+' MWh</span><span style="text-align:right">'+fmtNum(evA,1)+' MWh</span>'+
+      '<span>Gebouwverbruik</span><span style="text-align:right">'+fmtNum(gebB,1)+' MWh</span><span style="text-align:right">'+fmtNum(gebA,1)+' MWh</span>'+
+    '</div>'+
+    '<div style="margin-top:6px;color:#5A6577">Laadvraag: '+fmtNum(evVraagMwh,1)+' MWh voor '+
+      new Intl.NumberFormat('nl-BE').format(Math.round(kmTot))+' km/jaar'+
+      (evVraagMwh>0?' ('+fmtNum(evVraagMwh*1000/Math.max(1,kmTot),3)+' kWh/km)':'')+'</div>'+
+    (evGelijk
+      ? '<div style="margin-top:5px;color:#05B050">✓ Beide opstellingen laden evenveel — de facturen zijn vergelijkbaar.</div>'
+      : '<div style="margin-top:5px;color:#9E480E"><b>⚠ Er wordt NIET evenveel geladen ('+fmtNum(Math.abs(evB-evA),1)+
+        ' MWh verschil).</b> De opstelling die minder laadt heeft daardoor een lagere factuur — die besparing is dus deels schijn. '+
+        'Vergelijk deze cijfers niet vóór beide opstellingen de volledige laadvraag leveren.</div>');
+  sec.appendChild(ctrl);
 
   // ── detailfacturen naast elkaar ──
   function rij(label,a,b2,st){
