@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.23.4</span>
+    <span class="fdsim-version">v1.24.2</span>
   </div>
 </div>
 
@@ -3029,13 +3029,37 @@ function updateProfielPreview(){
 }
 
 // ---------- LAADPLEINEN (v1.20.7) ----------
+// v1.24.0 — DIESELBASIS. De base case is niet "elektrisch verzwaren" maar de vloot die
+// vandaag op diesel rijdt. l_100km + de twee dieselprijzen leveren de €/jaar per voertuig
+// waartegen elk ontwerpscenario zich meet. Zie Laadkosten_Belgie_2026_v2.pdf + overdracht §4.
+// pro=true → professionele diesel (goedkoper) voor vracht en bus.
+var DIESEL_EUR_L     = 1.78;   // pomp — personenwagen, bestelwagen
+var DIESEL_PRO_EUR_L = 1.58;   // professioneel — lichte + zware vracht, bus
 var LAADPLEIN_VOERTUIGEN = [
-  {naam:'Personenwagen',      kwh_per_km:0.16, km_per_jaar:15000},
-  {naam:'Bestelwagen',        kwh_per_km:0.25, km_per_jaar:25000},
-  {naam:'Lichte vrachtwagen', kwh_per_km:0.55, km_per_jaar:40000},
-  {naam:'Zware vrachtwagen',  kwh_per_km:1.30, km_per_jaar:50000},
-  {naam:'Bus',                kwh_per_km:1.40, km_per_jaar:50000}
+  {naam:'Personenwagen',      kwh_per_km:0.16, km_per_jaar:15000, l_100km:6.5,  pro:false},
+  {naam:'Bestelwagen',        kwh_per_km:0.25, km_per_jaar:25000, l_100km:8.0,  pro:false},
+  {naam:'Lichte vrachtwagen', kwh_per_km:0.55, km_per_jaar:40000, l_100km:18.0, pro:true},
+  {naam:'Zware vrachtwagen',  kwh_per_km:1.30, km_per_jaar:80000, l_100km:30.0, pro:true},
+  {naam:'Bus',                kwh_per_km:1.40, km_per_jaar:50000, l_100km:35.0, pro:true}
 ];
+// Voertuigdefinitie op naam (l_100km/pro leven ALLEEN in de template, niet in STATE.laadpleinen —
+// km_per_jaar is per plein bewerkbaar, l_100km/pro volgen het gekozen type).
+function _voertuigDef(naam){ return LAADPLEIN_VOERTUIGEN.find(function(v){return v.naam===naam;}) || null; }
+// Dieselprijs van dit voertuigtype (pro-diesel is goedkoper).
+function _dieselPrijs(def){ return (def && def.pro) ? DIESEL_PRO_EUR_L : DIESEL_EUR_L; }
+// Diesel-jaarkost van één laadplein: km/jaar (bewerkbaar) × l/100km (uit type) × €/l × aantal.
+// Geen l_100km bekend (onbekend type) → 0, zodat een ontbrekend type stil 0 geeft i.p.v. NaN.
+function _lpDieselEurJaar(lp){
+  var def=_voertuigDef(lp.voertuigtype);
+  if(!def || !(def.l_100km>0)) return 0;
+  var kmJaar=(lp.km_per_jaar!=null?+lp.km_per_jaar:def.km_per_jaar)||0;
+  var aantal=(+lp.aantal||0);
+  return aantal * kmJaar/100 * def.l_100km * _dieselPrijs(def);
+}
+// D = totale diesel-jaarkost van de volledige vloot over alle pleinen.
+function _dieselKostJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+_lpDieselEurJaar(lp);},0); }
+// Totale km/jaar van de vloot (voor €/km).
+function _vlootKmJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*((lp.km_per_jaar!=null?+lp.km_per_jaar:0)||0);},0); }
 var LAADPUNT_KW    = {AC22:22, DC160:160, DC300:300};
 var LAADPUNT_LABEL = {AC22:'AC 22 kW (stuks)', DC160:'DC 160 kW (stuks)', DC300:'DC 300 kW (stuks)'};
 var _LP_GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px';
@@ -3293,12 +3317,99 @@ function _updateLaadpleinSamenvatting(){
   });
   if(!(STATE.laadpleinen && STATE.laadpleinen.length)){ host.innerHTML=''; return; }
   var tekort=(minTot>0 && capTot<minTot);
+  // v1.24.0: diesel-jaarkost van de vloot = de werkelijke base case waartegen de
+  // ontwerpscenario's zich meten (niet elektrisch-vs-elektrisch). Zie overdracht §4.
+  var dJaar=_dieselKostJaar(), kmJaar=_vlootKmJaar();
   host.innerHTML='<b>Totaal over alle pleinen:</b> '+fmtNum(eTot,1)+' MWh/jaar EV-laadvraag · '+
     fmtNum(dagTot,0)+' kWh per laaddag<br>'+
     '<b>Minimaal vereist laadvermogen: '+fmtNum(minTot,0)+' kW</b> · '+
     '<b>Gekozen laadvermogen: '+fmtNum(capTot,0)+' kW</b> '+
     (tekort ? '<span style="color:#9E480E">⚠ '+fmtNum(minTot-capTot,0)+' kW te kort</span>'
-            : '<span style="color:#05B050">✓ volstaat</span>');
+            : '<span style="color:#05B050">✓ volstaat</span>')+
+    (dJaar>0 ? '<br><b>Diesel base case: '+fmtEur(dJaar)+'/jaar</b> voor '+
+      new Intl.NumberFormat('nl-BE').format(Math.round(kmJaar))+' km/jaar '+
+      '<span style="font-weight:400;color:#5A6577">(deze vloot rijdt vandaag op diesel — dít is wat het ontwerpscenario vervangt)</span>' : '');
+  if(typeof _renderQuickscan==='function') _renderQuickscan();
+}
+
+// ─── v1.24.2: QUICKSCAN — kan dit op de bestaande aansluiting? ────────────────
+// De stap vóór het ontwerp (overdracht §4): één duidelijk antwoord + het KALE budget
+// (laadpalen + batterijen, geen extra's, geen kabeltracé in het bedrag). Regels:
+//   • E = bestaand jaarverbruik + laadplein-energie [MWh/jaar]
+//   • LS én E > 100 MWh → advies "ga sowieso naar MS" (100 MWh-regel; NIET LS_MAX_KVA=100 kVA)
+//   • cabine apart SUGGEREREN wanneer de MWh dat aangeven (beslist 16/07)
+//   • kabeltracé als PERCENTAGE bijgeven, niet in het kale budget (beslist 16/07)
+// Het minimale aantal batterijen en de ja/nee-haalbaarheid komen uit de dispatch
+// (STATE.capaciteit / opstelling 2); zolang die er niet is tonen we het budget van de
+// laadpalen en zeggen we dat de batterij-dimensionering nog een simulatie vraagt.
+function _quickscanData(){
+  if(!(STATE.laadpleinen && STATE.laadpleinen.length)) return null;
+  var evMwh=0, kmTot=0;
+  (STATE.laadpleinen||[]).forEach(function(p){ evMwh+=_lpEnergieMwh(p); kmTot+=(p.aantal||0)*(p.km_per_jaar||0); });
+  var bestaandMwh=+STATE.jaarverbruik||0;
+  var E=bestaandMwh+evMwh;
+  var spanning=STATE.spanning||'LS';
+  var naarMS=(spanning==='LS' && E>100);                 // 100 MWh-regel
+  var lp=_frLaadpalen();
+  var laadpalenEur=lp.ac*INV_LAADPAAL_EUR.ac + lp.dc160*INV_LAADPAAL_EUR.dc160 + lp.dc400*INV_LAADPAAL_EUR.dc400;
+  var cap=STATE.capaciteit||{};
+  var adviesKwh=+cap.advies_batterij_kwh||0;
+  var battEenheden=adviesKwh>0 ? Math.max(1,Math.ceil(adviesKwh/260)) : null;   // eenheden 120/260
+  var battKwh=(battEenheden!=null)?battEenheden*260:null;
+  var battEur=(battKwh!=null)?battKwh*INV_BATT_EUR_PER_KWH:null;
+  var kaalBudget=(battEur!=null)?(laadpalenEur+battEur):null;   // laadpalen + batterijen, KAAL
+  var opsB=STATE.opstellingen && STATE.opstellingen.batterij;
+  var haalbaar=(opsB && opsB.dimensionering) ? !!opsB.dimensionering.haalbaar : null;
+  return { evMwh:evMwh, bestaandMwh:bestaandMwh, totaalMwh:E, kmTot:kmTot, spanning:spanning,
+    naarMS:naarMS, laadpalenEur:laadpalenEur, battEenheden:battEenheden, battKwh:battKwh,
+    battEur:battEur, kaalBudget:kaalBudget, haalbaar:haalbaar, heeftSim:adviesKwh>0,
+    cabineEur:INV_CABINE_EUR, tracePct:INV_KABEL_PCT };
+}
+function _renderQuickscan(){
+  var host=$('fdsim-quickscan'); if(!host) return;
+  var d=_quickscanData(); if(!d){ host.innerHTML=''; return; }
+  var h='<div style="padding:12px 14px;background:#F7F9FC;border:1px solid #1F3864;border-radius:6px">'+
+    '<div style="font-weight:800;color:#1F3864;font-size:14px;margin-bottom:6px">Quickscan — kan dit op uw bestaande aansluiting?</div>'+
+    '<div style="font-size:12.5px;color:#1A1F2B">Totaal verbruik met laadplein: <b>'+fmtNum(d.totaalMwh,1)+' MWh/jaar</b> '+
+      '<span style="color:#5A6577">(bestaand '+fmtNum(d.bestaandMwh,1)+' + laadplein '+fmtNum(d.evMwh,1)+') · huidige aansluiting: '+d.spanning+'</span></div>';
+  // 100 MWh-regel
+  if(d.naarMS){
+    h+='<div style="margin-top:8px;padding:9px 12px;background:#FFF3E0;border:1px solid #9E480E55;border-radius:6px;font-size:12.5px">'+
+      '<b>Advies: ga sowieso naar middenspanning (MS).</b> U zit op LS en het totaal verbruik gaat boven 100 MWh/jaar. '+
+      'De grootte van de cabine is een ontwerpvraag.</div>';
+  }
+  // Kaal budget
+  h+='<div style="margin-top:10px;font-size:12.5px">'+
+    '<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:3px 0"><span>Laadpalen</span>'+
+      '<span style="text-align:right">'+fmtEur(d.laadpalenEur)+'</span></div>';
+  if(d.battEur!=null){
+    h+='<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:3px 0"><span>Batterijen — '+
+      d.battEenheden+' × 120 kW / 260 kWh</span><span style="text-align:right">'+fmtEur(d.battEur)+'</span></div>'+
+      '<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:5px 0;border-top:1px solid #E3E8EF;font-weight:800;color:#1F3864">'+
+      '<span>Kaal investeringsbudget (laadpalen + batterijen)</span><span style="text-align:right">'+fmtEur(d.kaalBudget)+'</span></div>';
+  } else {
+    h+='<div style="margin-top:6px;padding:8px 10px;background:#FFF3E0;border:1px solid #9E480E55;border-radius:6px;font-size:12px">'+
+      'Het minimale aantal batterijen (en dus het volledige kale budget) volgt uit een simulatie. '+
+      'Draai de simulatie om het batterijbudget en het ja/nee-antwoord te bepalen.</div>';
+  }
+  h+='</div>';
+  // ja/nee haalbaarheid
+  if(d.haalbaar!==null){
+    h+='<div style="margin-top:8px;font-size:12.5px;color:'+(d.haalbaar?'#05B050':'#9E480E')+'">'+
+      (d.haalbaar?'✓ Ja — met deze batterijen kan het laadplein op de bestaande aansluiting.'
+                 :'⚠ Nee — zelfs met batterijen moet de aansluiting omhoog (of naar MS).')+'</div>';
+  }
+  // cabine apart suggereren + tracé als %
+  if(d.naarMS){
+    h+='<div style="margin-top:8px;font-size:11.5px;color:#5A6577">'+
+      'Apart te voorzien (niet in het kale budget): cabine LS→MS ± '+fmtEur(d.cabineEur)+' (ontwerpvraag), '+
+      'plus kabeltracé reken +'+Math.round(d.tracePct*100)+'% op de installatie (indicatief).</div>';
+  } else {
+    h+='<div style="margin-top:8px;font-size:11.5px;color:#5A6577">'+
+      'Kabeltracé komt er indicatief +'+Math.round(d.tracePct*100)+'% bovenop; extra\'s en cabine zitten niet in dit kale budget.</div>';
+  }
+  h+='</div>';
+  host.innerHTML=h;
 }
 
 function _renderLaadpleinenSectie(){
@@ -3313,6 +3424,7 @@ function _renderLaadpleinenSectie(){
     STATE.laadpleinen.push(_laadpleinNieuw()); _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting();
   }},'+ Laadplein toevoegen'));
   sec.appendChild(el('div',{id:'fdsim-lp-samenvatting',class:'fdsim-hint',style:'margin-top:12px;font-weight:600;color:#1F3864'}));
+  sec.appendChild(el('div',{id:'fdsim-quickscan',style:'margin-top:12px'}));
   setTimeout(_updateLaadpleinSamenvatting,0);
   return sec;
 }
@@ -5333,6 +5445,83 @@ function _renderBasisVsActief(){
     'PV en laadpalen zitten in beide en vallen weg in het verschil; de kabelopslag werkt wél door op dat verschil.'+
     (STATE.jaar==='specifiek'?' LET OP: de sim draait op de factuurperiode, niet op een vol jaar — rendement en payback zijn dan niet op jaarbasis.':'')+'</div>';
   sec.appendChild(iv);
+
+  // ── v1.24.0: DE ECHTE VERGELIJKING — diesel vs. slimme bedrijfsparking ──────
+  // De vergelijking hierboven is elektrisch-vs-elektrisch en onderschat de waarde
+  // massaal: de vloot rijdt vandaag op DIESEL, niet op stroom. De juiste base case is
+  // de bestaande elektriciteitsfactuur (E_base, ZONDER laadplein) + de dieselkost (D);
+  // het voorstel is E_beste (het actieve scenario, MÉT laadplein). Overdracht §4.
+  //   besparing = (E_base + D) − E_beste = D − ΔE      (ΔE = E_beste − E_base)
+  //   kost/km   = ΔE / km          →  besparing = D − (kost/km × km)  [consistentiecheck]
+  // E_base annualiseren we met ZIJN EIGEN factuurperiode (niet _annFactor): na de knop
+  // "Bewaar facturen en ga verder" (§2.7) staat de sim op rolling12 terwijl de factuur
+  // een periodebedrag blijft — dan zou _annFactor (=1) E_base te laag laten.
+  var _D=_dieselKostJaar(), _kmJaar=_vlootKmJaar();
+  if(_D>0 && _kmJaar>0){
+    var dsl=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:2px solid #1F3864;border-radius:6px'});
+    dsl.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:14px;margin-bottom:4px'},
+      'De echte vergelijking — diesel vervangen, niet elektrisch-met-elektrisch'));
+    dsl.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:10px'},
+      'De vloot rijdt vandaag op diesel. De base case is dus uw bestaande stroomfactuur + de dieselkost; '+
+      'het voorstel is het actieve scenario met laadplein.'));
+    var _E_beste=cA.subtotaal*_annFactor();                 // actief scenario → jaarbasis
+    var _bc=STATE.baseCase||{};
+    var _baseDagen=_periodeDagen(_bc.periodeVan,_bc.periodeTot);
+    var _heeftBase=_heeftFactuur() && _baseDagen>0;
+    var _dieselKm=_D/_kmJaar;                                // €/km diesel
+    if(_heeftBase){
+      var _E_base=(_bc.totaalExclBtw||0)*(365/_baseDagen);   // bestaande factuur → jaar
+      var _dE=_E_beste-_E_base;                              // marginale elektriciteitskost van het laden
+      var _besparing=_D-_dE;                                 // (E_base+D) − E_beste
+      var _kostKm=_dE/_kmJaar;                               // €/km bedrijfsparking
+      var _besparingCheck=_D-(_kostKm*_kmJaar);              // moet == _besparing (algebra)
+      var _consistent=Math.abs(_besparing-_besparingCheck)<1;
+      var _evMwh=0; (STATE.laadpleinen||[]).forEach(function(p){_evMwh+=_lpEnergieMwh(p);});
+      var _kostKwh=(_evMwh>0)?(_dE/(_evMwh*1000)):null;      // €/kWh geladen (marginaal)
+      function _rijD(l,a,cls){ return '<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:4px 0;'+(cls||'')+'">'+
+        '<span>'+l+'</span><span style="text-align:right">'+a+'</span></div>'; }
+      dsl.innerHTML+=
+        '<div style="font-size:12.5px">'+
+          _rijD('Bestaande stroomfactuur (zonder laadplein), per jaar', fmtEur(_E_base))+
+          _rijD('Dieselkost van de vloot, per jaar', fmtEur(_D))+
+          _rijD('<b>Base case totaal (stroom + diesel)</b>', '<b>'+fmtEur(_E_base+_D)+'</b>', 'border-top:1px solid #E3E8EF')+
+          _rijD('Actief scenario — stroomfactuur mét laadplein, per jaar', fmtEur(_E_beste))+
+        '</div>'+
+        '<div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+          '<div style="padding:10px 12px;background:'+(_besparing>0?'#05B0500f':'#FFF3E0')+';border:1px solid '+(_besparing>0?'#05B05040':'#9E480E55')+';border-radius:6px">'+
+            '<div style="font-size:10px;color:#5A6577;text-transform:uppercase">Besparing per jaar</div>'+
+            '<div style="font-size:22px;font-weight:800;color:'+(_besparing>0?'#05B050':'#9E480E')+'">'+fmtEur(_besparing)+'</div>'+
+            '<div style="font-size:11px;color:#5A6577">diesel ('+fmtEur(_D)+') − extra stroom ('+fmtEur(_dE)+')</div></div>'+
+          '<div style="padding:10px 12px;background:#F5F7FA;border:1px solid #D5DBE3;border-radius:6px">'+
+            '<div style="font-size:10px;color:#5A6577;text-transform:uppercase">Kost per km — slimme parking</div>'+
+            '<div style="font-size:22px;font-weight:800;color:#1F3864">'+(_kostKm>=0?fmtNum(_kostKm,3):'—')+' €/km</div>'+
+            '<div style="font-size:11px;color:#5A6577">vs diesel '+fmtNum(_dieselKm,3)+' €/km'+
+              (_kostKwh!=null?' · '+fmtNum(_kostKwh,3)+' €/kWh geladen':'')+'</div></div>'+
+        '</div>'+
+        '<div style="margin-top:8px;font-size:11px;color:'+(_consistent?'#05B050':'#C00')+'">'+
+          (_consistent?'✓':'⚠')+' consistentiecheck: besparing = D − (kost/km × km) = '+fmtEur(_besparingCheck)+
+          (_consistent?'':' — WIJKT AF van '+fmtEur(_besparing)+', nakijken')+'</div>'+
+        '<div style="margin-top:6px;font-size:11px;color:#5A6577;font-style:italic">'+
+          'De kost per km wordt niet bepaald door de keuze voor elektrisch, maar door wáár er geladen wordt. '+
+          'Referentie: CREG-forfait thuisladen bedrijfswagen ± 0,313 €/kWh; boven ± 0,72 €/kWh (DC-snelladen) '+
+          'wordt elektrisch duurder dan diesel. Een eigen slim gestuurde parking duwt de laadprijs daar ver onder.'+
+          (STATE.jaar==='specifiek'?' Bedragen zijn naar jaarbasis gebracht (sim draait op de factuurperiode).':'')+'</div>';
+    } else {
+      // Geen factuur → E_base onbekend. Toon wél de dieselkost (die volgt puur uit het
+      // laadplein) en zeg expliciet dat de volledige besparing/€km een factuur vereist.
+      dsl.innerHTML+=
+        '<div style="font-size:12.5px">'+
+          '<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:4px 0"><span>Dieselkost van de vloot, per jaar</span>'+
+          '<span style="text-align:right;font-weight:700">'+fmtEur(_D)+'</span></div>'+
+          '<div style="display:grid;grid-template-columns:3fr 1fr;gap:8px;padding:4px 0"><span>Diesel, per km</span>'+
+          '<span style="text-align:right">'+fmtNum(_dieselKm,3)+' €/km</span></div>'+
+        '</div>'+
+        '<div style="margin-top:8px;padding:9px 12px;background:#FFF3E0;border:1px solid #9E480E55;border-radius:6px;font-size:12px">'+
+          '⚠ Zonder een ingelezen factuur is de bestaande stroomkost (E_base) onbekend, dus de volledige '+
+          'besparing en de kost per km kunnen nog niet berekend worden. Lees een factuur in (stap 4) om die af te ronden.</div>';
+    }
+    sec.appendChild(dsl);
+  }
   return sec;
 }
 
