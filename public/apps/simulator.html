@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.25.0</span>
+    <span class="fdsim-version">v1.26.0</span>
   </div>
 </div>
 
@@ -3033,8 +3033,22 @@ function updateProfielPreview(){
 // laadt, worden fiscaal terugbetaald aan het CREG-forfait per kWh — het valabele, werkbare
 // alternatief waartegen de eigen bedrijfsparking zich meet (beslist Johan). Niet diesel.
 // De €/km hangt dus niet van een brandstofprijs af maar van WAAR geladen wordt.
-var CREG_EUR_KWH = 0.3132;   // Vlaanderen Q1 2026 (CREG-forfait thuisladen bedrijfswagen).
-                             // Per gewest/kwartaal: Vl Q2 0,3191 · Brussel 0,3426/0,3555 · Wallonië 0,3523/0,3636.
+// v1.26.0: CREG-forfait PER GEWEST (Q1 2026, uit Laadkosten_Belgie_2026_v2.pdf). Regio volgt
+// uit de netbeheerder van de klant. Brussel/Wallonië liggen hoger dan Vlaanderen.
+var CREG_PER_REGIO = { Vlaanderen: 0.3132, Brussel: 0.3426, Wallonie: 0.3523 };
+var GRD_WALLONIE = ['ORES','RESA','AIEG','REW','IECBW'];
+function _klantRegio(){
+  var grd=(STATE.grd||'')+'';
+  if(/Sibelga/i.test(grd)) return 'Brussel';
+  if(GRD_WALLONIE.some(function(w){return grd.indexOf(w)>=0;})) return 'Wallonie';
+  return 'Vlaanderen';
+}
+function _cregTarief(){ return CREG_PER_REGIO[_klantRegio()] || CREG_PER_REGIO.Vlaanderen; }
+// HR-kost (KPI1-noot): de "blinde" extra kost die ontstaat als een werknemer ONGESTUURD thuis
+// laadt en zo zijn eigen maandpiek (capaciteitstarief) opdrijft — een kost die het bedrijf niet
+// vergoedt via het CREG-forfait. Laadkosten_Belgie_2026_v2.pdf: ongestuurd 7,4 kW vs slim ~4 kW
+// ≈ €0,10/kWh verschil. Als €/km schaalt dat met het verbruik van het voertuig.
+var HR_KOST_EUR_KWH = 0.10;
 var LAADPLEIN_VOERTUIGEN = [
   {naam:'Personenwagen',      kwh_per_km:0.16, km_per_jaar:15000},
   {naam:'Bestelwagen',        kwh_per_km:0.25, km_per_jaar:25000},
@@ -3042,15 +3056,22 @@ var LAADPLEIN_VOERTUIGEN = [
   {naam:'Zware vrachtwagen',  kwh_per_km:1.30, km_per_jaar:80000},
   {naam:'Bus',                kwh_per_km:1.40, km_per_jaar:50000}
 ];
-// CREG-kost van één laadplein: geladen energie (kWh) × forfait. De km's van dit plein worden
-// vandaag elders geladen aan het CREG-tarief; dít bedrag vervalt zodra ze op de eigen parking laden.
-function _lpCregEurJaar(lp){ return _lpEnergieMwh(lp)*1000*CREG_EUR_KWH; }
+// CREG-kost van één laadplein: geladen energie (kWh) × forfait (per regio). De km's van dit plein
+// worden vandaag elders geladen aan het CREG-tarief; dít bedrag vervalt zodra ze op de eigen parking laden.
+function _lpCregEurJaar(lp){ return _lpEnergieMwh(lp)*1000*_cregTarief(); }
 // Totale CREG-jaarkost van de vloot (= totale EV-energie × forfait) — de ijklijn voor opstelling 0.
 function _cregKostJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+_lpCregEurJaar(lp);},0); }
 // Totale km/jaar van de vloot (voor €/km).
 function _vlootKmJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*((lp.km_per_jaar!=null?+lp.km_per_jaar:0)||0);},0); }
 // Gemiddelde CREG-kost per km over de vloot (0 km → 0).
 function _cregKmKostGem(){ var km=_vlootKmJaar(); return km>0 ? _cregKostJaar()/km : 0; }
+// Geschatte "blinde" HR-kost per km: extra capaciteitstarief door ongestuurd thuisladen,
+// gewogen over de vloot (€0,10/kWh × gem. verbruik kWh/km).
+function _hrKostKmGem(){
+  var km=_vlootKmJaar(); if(!(km>0)) return 0;
+  var kwh=(STATE.laadpleinen||[]).reduce(function(s,lp){return s+_lpEnergieMwh(lp)*1000;},0);
+  return (kwh/km)*HR_KOST_EUR_KWH;
+}
 var LAADPUNT_KW    = {AC22:22, DC160:160, DC300:300};
 var LAADPUNT_LABEL = {AC22:'AC 22 kW (stuks)', DC160:'DC 160 kW (stuks)', DC300:'DC 300 kW (stuks)'};
 var _LP_GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px';
@@ -5202,6 +5223,354 @@ function _basisVerhogingKw(cfgV){
   if(na>0 && huidig>0) return Math.max(0, na-huidig);   // post-iteratie
   return +cap.verhoging_kw||0;                          // terugval: vuistregel
 }
+
+// ─── v1.26.0: KPI-ENGINE — opstelling 0/1/2/3 + de drie KPI's ────────────────
+// Levert per opstelling alles voor de KPI-blokken en kiest de BESTE op rendement (KPI2).
+//   KPI1 €/km  = marginale kost per km = (E_opstelling − E_base) / km ; opstelling 0 = CREG-€/km
+//   KPI2       = besparing / capex ; besparing = E_base + CREG-km − E_opstelling ;
+//                capex = cabine + laadpalen (beslist Johan — batterij NIET in de noemer)
+//   KPI3       = loadfactor = afname_kWh / (8760 × max toegangsvermogen kW)
+// Alles op jaarbasis (×_annFactor voor de sim-facturen; E_base met eigen factuurperiode).
+function _kpiEngine(){
+  var ops=STATE.opstellingen; if(!ops||!ops.verhogen||!ops.batterij) return null;
+  var af=_annFactor();
+  var bc=STATE.baseCase||{};
+  var baseDagen=_periodeDagen(bc.periodeVan,bc.periodeTot);
+  var heeftBase=_heeftFactuur() && baseDagen>0;
+  var E_base=heeftBase ? (bc.totaalExclBtw||0)*(365/baseDagen) : null;   // bestaande factuur → jaar
+  var C=_cregKostJaar(), km=_vlootKmJaar();
+  var lp=_frLaadpalen();
+  var laadpalen=lp.ac*INV_LAADPAAL_EUR.ac + lp.dc160*INV_LAADPAAL_EUR.dc160 + lp.dc400*INV_LAADPAAL_EUR.dc400;
+  var P_huidig=_piekvermogenKw();
+  var verbruikHuidigKwh=(+STATE.jaarverbruik||0)*1000;                   // bestaand jaarverbruik (MWh→kWh)
+  function factuur(o){ return ((o.kpi_sturing||{}).kost_sturing_excl_btw || _frComp((o.varianten&&o.varianten.sturing)||null).subtotaal || 0)*af; }
+  function afnameKwh(o){ var k=(o.varianten&&o.varianten.sturing&&o.varianten.sturing.kpi)||{}; return ((+k.totaal_afname_mwh||0)*1000)*af; }
+  function maxKw(o){ var c=o.config||{}; return (+c.toegangsvermogen_kw|| +c.aansluiting_kva ||0); }
+  function loadf(kwh,kw){ return (kw>0)? kwh/(8760*kw) : 0; }
+  var d3=_derde();
+  var kols=[
+    {key:'verhogen', nr:1, label:'Opstelling 1 — verzwaren', o:ops.verhogen},
+    {key:'batterij', nr:2, label:'Opstelling 2 — batterij', o:ops.batterij}
+  ];
+  if(d3) kols.push({key:d3.key, nr:3, label:'Opstelling 3 — mix', o:d3.o});
+  var rows=kols.map(function(k){
+    var o=k.o, cfg=o.config||{};
+    var E=factuur(o);
+    var cabine=(cfg.cabine_nodig||cfg.spanning_omgezet)?INV_CABINE_EUR:0;
+    var capex=cabine+laadpalen;                                          // KPI2: cabine + laadpalen
+    var besparing=(E_base!=null)?((E_base+C)-E):null;                    // E_base + CREG-km − E_opstelling
+    var rend=(besparing!=null && capex>0 && besparing>0)?(besparing/capex*100):null;
+    var pb=(besparing!=null && capex>0 && besparing>0)?(capex/besparing):null;
+    var kostKm=(E_base!=null && km>0)?((E-E_base)/km):null;              // marginale €/km parking
+    var afk=afnameKwh(o), mkw=maxKw(o);
+    return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E, cabine:cabine, laadpalen:laadpalen,
+      capex:capex, besparing:besparing, rendement:rend, payback:pb, kostKm:kostKm,
+      loadfactor:loadf(afk,mkw), afnameKwh:afk, maxKw:mkw,
+      haalbaar:((o.dimensionering||{}).haalbaar!==false)};
+  });
+  var lf0=loadf(verbruikHuidigKwh,P_huidig);
+  var opstelling0={key:'geen', nr:0, label:'Opstelling 0 — bestaand', o:null, factuur:E_base,
+    cabine:0, laadpalen:0, capex:0, besparing:0, rendement:0, payback:null,
+    kostKm:(km>0?C/km:null), loadfactor:lf0, afnameKwh:verbruikHuidigKwh, maxKw:P_huidig, haalbaar:true};
+  var beste=null;
+  rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar){ if(!beste||r.rendement>beste.rendement) beste=r; } });
+  return { af:af, E_base:E_base, C:C, km:km, heeftBase:heeftBase, huidigLoadfactor:lf0, P_huidig:P_huidig,
+    laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste };
+}
+
+// Blok 3 — drie KPI-tegels van de beste opstelling.
+function _renderKpiTegels(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var b=eng.beste, o0=eng.opstelling0;
+  var dLoad=b.loadfactor-eng.huidigLoadfactor;
+  function tile(nr,titel,groot,onder,doel,kleur){
+    return '<div style="padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:8px">'+
+      '<div style="font-size:10px;color:#5A6577;text-transform:uppercase;letter-spacing:.3px">KPI '+nr+'</div>'+
+      '<div style="font-size:12.5px;font-weight:700;color:#1F3864;margin-bottom:6px">'+titel+'</div>'+
+      '<div style="font-size:22px;font-weight:800;color:'+(kleur||'#05B050')+'">'+groot+'</div>'+
+      '<div style="font-size:11px;color:#5A6577;margin-top:2px">'+onder+'</div>'+
+      '<div style="font-size:10.5px;color:#8A93A3;margin-top:6px;font-style:italic">'+doel+'</div></div>';
+  }
+  var sec=el('div',{style:'margin-top:14px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
+    'KPI\'s van de beste opstelling — '+b.label));
+  var grid=el('div',{style:'display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px'});
+  grid.innerHTML=
+    tile(1,'Kost per geladen km',
+      (b.kostKm!=null?fmtNum(b.kostKm,3)+' €/km':'—'),
+      (o0.kostKm!=null?'vs CREG-thuisladen '+fmtNum(o0.kostKm,3)+' €/km':''),
+      'opdat de geladen km\'s zo goedkoop mogelijk zijn')+
+    tile(2,'Rendement van de investering',
+      (b.rendement!=null?fmtNum(b.rendement,1)+' %':'—'),
+      (b.payback!=null?'terugverdiend in '+fmtNum(b.payback,1)+' j · capex '+fmtEur(b.capex):'capex '+fmtEur(b.capex)),
+      'opdat laadinfra + batterij een goede belegging vormen')+
+    tile(3,'Stijging loadfactor',
+      '+'+fmtNum(dLoad*100,1)+' %-punt',
+      'van '+fmtNum(eng.huidigLoadfactor*100,1)+'% naar '+fmtNum(b.loadfactor*100,1)+'%',
+      'opdat er weerbaarheid is tegen stijgende netkosten en piekvraag', '#1F3864');
+  sec.appendChild(grid);
+  return sec;
+}
+
+// Blok 8 — "Kost per kilometer of rendement": KPI1-kader (€/km) + KPI2-kader (rendement) voor opst 0/1/2/3.
+function _renderKostPerKmRendement(){
+  var eng=_kpiEngine(); if(!eng) return null;
+  var all=[eng.opstelling0].concat(eng.rows);           // opstelling 0,1,2,3
+  var cols='2fr'+all.map(function(){return ' 1fr';}).join('');
+  function kopRij(){ return '<span>Opstelling</span>'+all.map(function(r){return '<span style="text-align:right;font-weight:700;color:#1F3864">'+r.nr+'</span>';}).join(''); }
+  function rij(label,fn){ return '<span>'+label+'</span>'+all.map(function(r){return '<span style="text-align:right">'+fn(r)+'</span>';}).join(''); }
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},'Kost per kilometer of rendement'));
+  var k1=el('div',{style:'padding:9px 11px;background:#F7F9FC;border-radius:6px;margin-bottom:8px'});
+  k1.innerHTML='<div style="font-weight:700;color:#1F3864;font-size:12px;margin-bottom:5px">KPI 1 — Kost per km</div>'+
+    '<div style="display:grid;grid-template-columns:'+cols+';gap:6px;font-size:12px">'+
+      kopRij()+rij('€/km', function(r){return r.kostKm!=null?fmtNum(r.kostKm,3):'—';})+'</div>';
+  sec.appendChild(k1);
+  var k2=el('div',{style:'padding:9px 11px;background:#F7F9FC;border-radius:6px'});
+  k2.innerHTML='<div style="font-weight:700;color:#1F3864;font-size:12px;margin-bottom:5px">KPI 2 — Rendement van de investering</div>'+
+    '<div style="display:grid;grid-template-columns:'+cols+';gap:6px;font-size:12px">'+
+      kopRij()+
+      rij('Investering', function(r){return r.nr===0?'€ 0':fmtEur(r.capex);})+
+      rij('Besparing/jaar', function(r){return r.nr===0?'€ 0':(r.besparing!=null?fmtEur(r.besparing):'—');})+
+      rij('Terugverdientijd', function(r){return r.nr===0?'—':(r.payback!=null?fmtNum(r.payback,1)+' j':'—');})+
+      rij('Rendement', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})+
+    '</div>';
+  sec.appendChild(k2);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'Opstelling 0 = bestaand verbruik, geen investering (km\'s laden elders aan het CREG-forfait). '+
+    'Capex (KPI2) = cabine + laadpalen. Besparing = bestaande stroomkost + CREG-km − totale kost opstelling.'));
+  return sec;
+}
+
+// Blok 2 — samenvatting van de OPTIMALE opstelling (PV/Batterij/Laadplein) + aansluiting vs vandaag.
+function _renderOptimaleSamenvatting(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var b=eng.beste, cfg=b.o.config||{};
+  var battKwh=_dimKwh(b.o), battKw=(cfg.batterij&&+cfg.batterij.kw)||Math.round(battKwh/2);
+  var eenh=(cfg.batterij&&+cfg.batterij.aantal_batterijen)||(battKwh?Math.round(battKwh/260):0);
+  var evMwh=0; (STATE.laadpleinen||[]).forEach(function(p){evMwh+=_lpEnergieMwh(p);});
+  var pv=(+STATE.pvKwp||0);
+  var aanslBeste=(+cfg.toegangsvermogen_kw|| +cfg.aansluiting_kva ||0), spBeste=cfg.spanning||'LS';
+  var aanslNu=eng.P_huidig, spNu=STATE.spanning||'LS';
+  function tile(t,g,o){ return '<div style="padding:10px 12px;background:#fff;border:1px solid #D5DBE3;border-radius:6px">'+
+    '<div style="font-size:10px;color:#5A6577;text-transform:uppercase">'+t+'</div>'+
+    '<div style="font-size:16px;font-weight:800;color:#1F3864">'+g+'</div>'+
+    (o?'<div style="font-size:11px;color:#5A6577">'+o+'</div>':'')+'</div>'; }
+  var sec=el('div',{style:'margin-top:14px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
+    'Optimale opstelling — '+b.label+' (hoogste rendement)'));
+  var grid=el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:10px'});
+  grid.innerHTML=
+    tile('PV', pv>0?fmtNum(pv,0)+' kWp':'Geen', '')+
+    tile('Batterij', battKwh>0?(eenh+' × 120/260')+'':'Geen', battKwh>0?fmtNum(battKw,0)+' kW / '+fmtNum(battKwh,0)+' kWh':'')+
+    tile('Laadplein (EV)', fmtNum(evMwh,1)+' MWh', '')+
+    tile('Aansluiting', fmtNum(aanslBeste,0)+' kW · '+spBeste, 'vandaag: '+fmtNum(aanslNu,0)+' kW · '+spNu);
+  sec.appendChild(grid);
+  return sec;
+}
+
+// Blok 6 — Investeringen opstelling 0/1/2/3 (geen "netto investering"-regel; opst 0 = alles 0).
+function _investComponenten(r, eng){
+  var cfg=r.o.config||{};
+  var cabine=(cfg.cabine_nodig||cfg.spanning_omgezet)?INV_CABINE_EUR:0;
+  var batterij=_dimKwh(r.o)*INV_BATT_EUR_PER_KWH;
+  var kva=0;
+  if(r.key==='verhogen') kva=Math.max(0,(+cfg.aansluiting_kva||0)-(eng.P_huidig||0));
+  else if(r.key==='mix')  kva=Math.max(0,(+cfg.aansluiting_kva||0)-(+cfg.mix_huidig_kva||0));
+  var netaanpassing=kva*INV_EUR_PER_KVA;
+  var pv=(+STATE.pvKwp||0)*INV_PV_EUR_PER_KWP;
+  var sub=pv+eng.laadpalen+cabine+batterij+netaanpassing;
+  var trace=sub*INV_KABEL_PCT;
+  return {pv:pv,laadpalen:eng.laadpalen,cabine:cabine,batterij:batterij,netaanpassing:netaanpassing,sub:sub,trace:trace,totaal:sub+trace};
+}
+function _renderInvesteringen0123(){
+  var eng=_kpiEngine(); if(!eng) return null;
+  var cols=[{nr:0,i:null}].concat(eng.rows.map(function(r){return {nr:r.nr,i:_investComponenten(r,eng)};}));
+  var grid='2fr'+cols.map(function(){return ' 1fr';}).join('');
+  function kop(){return '<span>Post</span>'+cols.map(function(c){return '<span style="text-align:right;font-weight:700;color:#1F3864">'+c.nr+'</span>';}).join('');}
+  function rij(label,fn,st){return '<span'+(st?' style="'+st+'"':'')+'>'+label+'</span>'+cols.map(function(c){return '<span style="text-align:right'+(st?';'+st:'')+'">'+fn(c)+'</span>';}).join('');}
+  function v(c,k){ return c.i? fmtEur(c.i[k]) : '€ 0'; }
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},'Investeringen — opstelling 0/1/2/3'));
+  var t=el('div');
+  t.innerHTML='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:12px">'+
+    kop()+
+    rij('PV', function(c){return v(c,'pv');})+
+    rij('Laadpalen', function(c){return v(c,'laadpalen');})+
+    rij('Cabine (LS→MS)', function(c){return v(c,'cabine');})+
+    rij('Batterij', function(c){return v(c,'batterij');})+
+    rij('Netaanpassing aansluiting', function(c){return v(c,'netaanpassing');})+
+    rij('Subtotaal', function(c){return v(c,'sub');}, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
+    rij('Kabeltracés (+'+Math.round(INV_KABEL_PCT*100)+'%)', function(c){return v(c,'trace');})+
+    rij('Totale investering', function(c){return v(c,'totaal');}, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+    '</div>';
+  sec.appendChild(t);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'Opstelling 0 = bestaand verbruik, geen investering. We vergelijken t.o.v. opstelling 0, dus er is geen "netto investering"-regel.'));
+  return sec;
+}
+
+// Blok 11 — gedetailleerde factuurvergelijking: huidige factuur (12 mnd) vs optimale opstelling volgroeid,
+// met onderaan de CREG-km-regel bij "as is".
+function _renderFactuur12vsOptimaal(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var b=eng.beste;
+  var cB=_frComp((b.o.varianten&&b.o.varianten.sturing)||null), af=eng.af;
+  var beste={energie:cB.energie*af,distributie:cB.distributie*af,capaciteit:cB.capaciteit*af,heffingen:cB.heffingen*af,subtotaal:b.factuur};
+  function rij(label,a,bv,st){ return '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;padding:4px 0;'+(st||'')+'">'+
+    '<span>'+label+'</span><span style="text-align:right">'+(a!=null?fmtEur(a):'—')+'</span><span style="text-align:right">'+(bv!=null?fmtEur(bv):'—')+'</span></div>'; }
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
+    'Factuur vandaag (12 mnd) vs optimale opstelling volgroeid'));
+  var t=el('div',{style:'font-size:12.5px'});
+  t.innerHTML=
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864">'+
+      '<span>Component (per jaar, excl. btw)</span><span style="text-align:right">Vandaag (as is)</span><span style="text-align:right">'+b.label+'</span></div>'+
+    rij('Stroomfactuur (bestaand / opstelling)', eng.E_base, beste.subtotaal)+
+    rij('Energie · distributie · heffingen', null, null, 'color:#8A93A3;font-size:11px')+
+    rij('&nbsp;&nbsp;Energie (commodity)', null, beste.energie)+
+    rij('&nbsp;&nbsp;Distributie + transport', null, beste.distributie)+
+    rij('&nbsp;&nbsp;Heffingen + accijnzen', null, beste.heffingen)+
+    rij('km aan CREG-forfait (as is)', eng.C, 0, 'border-top:1px solid #E3E8EF')+
+    rij('Totaal (stroom + CREG-km)', (eng.E_base!=null?eng.E_base+eng.C:null), beste.subtotaal, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px');
+  sec.appendChild(t);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'De km-regel telt alleen mee "as is": vandaag laden die km\'s elders aan het CREG-forfait. In de optimale opstelling laden ze op de eigen aansluiting en zit hun energie al in de stroomfactuur.'));
+  return sec;
+}
+
+// Blok 7 — facturen opstelling 0/1/2/3 (opst 0 = bestaande factuur + CREG-km-regel).
+function _renderFacturen0123(){
+  var eng=_kpiEngine(); if(!eng) return null;
+  var af=eng.af;
+  var cols=[{nr:0,comp:null,factuur:eng.E_base,creg:eng.C}];
+  eng.rows.forEach(function(r){
+    var c=_frComp((r.o.varianten&&r.o.varianten.sturing)||null);
+    cols.push({nr:r.nr,comp:{energie:c.energie*af,distributie:c.distributie*af,capaciteit:c.capaciteit*af,heffingen:c.heffingen*af},
+      factuur:r.factuur, creg:0});
+  });
+  var grid='2fr'+cols.map(function(){return ' 1fr';}).join('');
+  function kop(){return '<span>Component (per jaar, excl. btw)</span>'+cols.map(function(c){return '<span style="text-align:right;font-weight:700;color:#1F3864">'+c.nr+'</span>';}).join('');}
+  function rij(label,fn,st){return '<span'+(st?' style="'+st+'"':'')+'>'+label+'</span>'+cols.map(function(c){return '<span style="text-align:right'+(st?';'+st:'')+'">'+fn(c)+'</span>';}).join('');}
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},'Facturen — opstelling 0/1/2/3 (sturing 2, per jaar)'));
+  var t=el('div');
+  t.innerHTML='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:12px">'+
+    kop()+
+    rij('Energie (commodity)', function(c){return c.comp?fmtEur(c.comp.energie):'—';})+
+    rij('Distributie + transport', function(c){return c.comp?fmtEur(c.comp.distributie):'—';})+
+    rij('&nbsp;&nbsp;waarvan capaciteit', function(c){return c.comp?fmtEur(c.comp.capaciteit):'—';})+
+    rij('Heffingen + accijnzen', function(c){return c.comp?fmtEur(c.comp.heffingen):'—';})+
+    rij('Stroomfactuur', function(c){return c.factuur!=null?fmtEur(c.factuur):'—';}, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
+    rij('km aan CREG-forfait', function(c){return fmtEur(c.creg);})+
+    rij('Totaal (stroom + CREG-km)', function(c){return c.factuur!=null?fmtEur((c.factuur||0)+(c.creg||0)):'—';}, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+    '</div>';
+  sec.appendChild(t);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'Opstelling 0 = bestaande factuur + de km\'s die vandaag elders aan het CREG-forfait laden. Bij opstelling 1/2/3 laden die km\'s op de eigen aansluiting, dus staat die regel op € 0.'));
+  return sec;
+}
+
+// Blok 4 — meerwaarde van de sturing, voor de BESTE opstelling.
+function _renderSturingMeerwaardeBeste(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var o=eng.beste.o, af=eng.af, kpi=o.kpi_sturing||{};
+  function sub(v,veld){ if(kpi[veld]!=null) return +kpi[veld]*af; return v?(_frComp(v).subtotaal*af):null; }
+  var geen=sub(o.varianten&&o.varianten.geen,'kost_geen_excl_btw');
+  var stu =sub(o.varianten&&o.varianten.sturing,'kost_sturing_excl_btw');
+  var onb =sub(o.varianten&&o.varianten.onbalans,'kost_onbalans_excl_btw');
+  if(geen==null||stu==null) return null;
+  var mSturing=geen-stu, mOnbalans=(onb!=null)?(stu-onb):null;
+  function tile(t,g,o2){ return '<div style="padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
+    '<div style="font-size:10px;color:#5A6577;text-transform:uppercase">'+t+'</div>'+
+    '<div style="font-size:18px;font-weight:800;color:#05B050">+ '+fmtEur(g)+'</div>'+
+    '<div style="font-size:11px;color:#5A6577">'+o2+'</div></div>'; }
+  var sec=el('div',{style:'margin-top:14px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
+    'Meerwaarde van de sturing — '+eng.beste.label));
+  var grid=el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:10px'});
+  grid.innerHTML=
+    tile('Sturing 2 (batterij + piekshaving)', mSturing, 't.o.v. dom laden zonder sturing')+
+    (mOnbalans!=null?tile('Sturing 3 (+ onbalans)', mOnbalans, 't.o.v. sturing 2'):'');
+  sec.appendChild(grid);
+  return sec;
+}
+
+// Blok 5 — basis vs actief afgeslankt tot ENKEL de energie-controle van de drie opstellingen.
+function _renderEnergieControle(){
+  var eng=_kpiEngine(); if(!eng) return null;
+  var allOk=true;
+  var rows=eng.rows.map(function(r){
+    var d=r.o.dimensionering||{};
+    var ok=(d.haalbaar!==false) && !(d.verloren_dagen>0);
+    if(!ok) allOk=false;
+    return '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;padding:4px 0;border-bottom:1px solid #EEF1F5">'+
+      '<span>'+r.label+'</span><span style="text-align:right;color:'+(ok?'#05B050':'#9E480E')+'">'+
+      (ok?'✓ volledige laadvraag geleverd':'⚠ '+(d.verloren_dagen||0)+' dag(en) tekort')+'</span></div>';
+  }).join('');
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:6px'},
+    'Controle — levert elke opstelling voldoende energie?'));
+  var t=el('div',{style:'font-size:12.5px'}); t.innerHTML=rows; sec.appendChild(t);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:11px;color:'+(allOk?'#05B050':'#9E480E')},
+    allOk?'Alle opstellingen leveren de volledige laadvraag — de facturen zijn onderling vergelijkbaar.'
+         :'Let op: niet elke opstelling levert de volledige laadvraag; vergelijk die factuur voorzichtig.'));
+  return sec;
+}
+
+// Blok 10 — GROEIPAD: aansluiting vast op de optimale opstelling, batterijen 1→N (120/260),
+// per stap % geleverde laadenergie + capex + rendement. Elke stap = echte dispatch-run
+// (/api/groeipad), dus achter een knop.
+function _renderGroeipad(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var b=eng.beste, cfg=b.o.config||{};
+  var N=(cfg.batterij&&+cfg.batterij.aantal_batterijen)||Math.max(1,Math.round(_dimKwh(b.o)/260));
+  var aansl=(+cfg.toegangsvermogen_kw|| +cfg.aansluiting_kva ||0);
+  if(!(N>=1) || !(aansl>0)) return null;
+  var cabine=(cfg.cabine_nodig||cfg.spanning_omgezet)?INV_CABINE_EUR:0;
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'Groeipad — batterij per batterij, aansluiting vast'));
+  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
+    'Aansluiting vast op '+fmtNum(aansl,0)+' kW · '+(cfg.spanning||'LS')+'. Van 1 tot '+N+' batterijen (120 kW / 260 kWh) — zo ziet de klant een instap-pad dat begint bij één batterij.'));
+  var host=el('div',{id:'fdsim-groeipad-host'});
+  var btn=el('button',{class:'fdsim-btn small',style:'margin-bottom:8px'},'Bereken groeipad ('+N+' dispatch-run'+(N>1?'s':'')+')');
+  btn.onclick=function(){
+    if(!STATE.lastSimInput){ host.innerHTML='<div style="color:#9E480E;font-size:12px">Geen sim-input beschikbaar — draai eerst de simulatie.</div>'; return; }
+    host.innerHTML='<div style="font-size:12px;color:#5A6577">Groeipad wordt berekend… ('+N+' runs, kan even duren)</div>';
+    var body=JSON.parse(JSON.stringify(STATE.lastSimInput));
+    body._async=false; body.aansluiting_kva=aansl; body.max_batterijen=N;
+    apiPost('/api/groeipad', body).then(function(r){
+      if(!r||!r.stappen){ host.innerHTML='<div style="color:#9E480E;font-size:12px">Groeipad gaf geen resultaat.</div>'; return; }
+      _vulGroeipadTabel(host, r, eng, cabine, N);
+    }).catch(function(e){ host.innerHTML='<div style="color:#C00;font-size:12px">Groeipad-fout: '+((e&&e.message)||e)+'</div>'; });
+  };
+  sec.appendChild(btn);
+  sec.appendChild(host);
+  return sec;
+}
+function _vulGroeipadTabel(host, r, eng, cabine, N){
+  var C=eng.C, E_base=eng.E_base, laadpalenVol=eng.laadpalen, af=eng.af;
+  var rows=r.stappen.map(function(s){
+    var k=s.aantal_batterijen;
+    var capex=cabine + laadpalenVol*(k/N);                       // cabine + laadpalen naar rato (% batterij)
+    var pct=(s.geleverd_pct!=null)?s.geleverd_pct:0;
+    var cregGedekt=C*(pct/100);                                  // CREG-km gedekt in deze stap
+    var besparing=(E_base!=null && s.factuur_sturing_excl_btw!=null)?(E_base+cregGedekt-s.factuur_sturing_excl_btw*af):null;
+    var rend=(besparing!=null && capex>0 && besparing>0)?(besparing/capex*100):null;
+    var vh=(+s.aansluiting_verhoogd_kw>0);
+    return '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr 1.2fr 1fr;gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px">'+
+      '<span>'+k+' batterij'+(k>1?'en':'')+'</span>'+
+      '<span style="text-align:right;color:'+(vh?'#9E480E':'#1A1F2B')+'">'+(s.geleverd_pct!=null?fmtNum(pct,0)+'%':'—')+(vh?' ⚠':'')+'</span>'+
+      '<span style="text-align:right">'+fmtEur(capex)+'</span>'+
+      '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
+      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span></div>';
+  }).join('');
+  host.innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr 1.2fr 1fr;gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
+      '<span>Stap</span><span style="text-align:right">% geladen</span><span style="text-align:right">Capex (cabine + laadpalen%)</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span></div>'+
+    rows+
+    '<div style="margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic">⚠ = de sim moest bij die batterij de aansluiting nog optrekken (paste niet volledig op de vaste aansluiting). Elke stap is een echte dispatch-run.</div>';
+}
 function _actieveBatterijKwh(){
   // Komt het actieve resultaat uit opstelling 2? Dan is de batterij server-side
   // geïtereerd en wijkt ze af van wat er in de batterijstap staat.
@@ -5494,8 +5863,9 @@ function _renderBasisVsActief(){
           (_consistent?'':' — WIJKT AF van '+fmtEur(_besparing)+', nakijken')+'</div>'+
         '<div style="margin-top:6px;font-size:11px;color:#5A6577;font-style:italic">'+
           'De kost per km wordt niet bepaald door de keuze voor elektrisch, maar door wáár er geladen wordt. '+
-          'Referentie: CREG-forfait thuisladen bedrijfswagen '+fmtNum(CREG_EUR_KWH,4)+' €/kWh. Een eigen slim '+
-          'gestuurde parking duwt de laadprijs daar onder.'+
+          'Referentie: CREG-forfait thuisladen bedrijfswagen '+fmtNum(_cregTarief(),4)+' €/kWh ('+_klantRegio()+'). Een eigen slim '+
+          'gestuurde parking duwt de laadprijs daar onder. Blinde HR-kost bij ongestuurd thuisladen: ± '+
+          fmtNum(_hrKostKmGem(),3)+' €/km (capaciteitstarief, niet vergoed).'+
           (STATE.jaar==='specifiek'?' Bedragen zijn naar jaarbasis gebracht (sim draait op de factuurperiode).':'')+'</div>';
     } else {
       // Geen factuur → E_base onbekend. Toon wél de CREG-kost (die volgt puur uit het
@@ -5680,6 +6050,18 @@ function renderStep9Resultaat(){
   var box=el('div');
   box.appendChild(el('h2',null,'Simulatieresultaat'));
 
+  // v1.26.0 (blok 1): heading — waar dit scherm over gaat (de drie KPI's).
+  if(!STATE.isRunning && STATE.opstellingen){
+    var hd=el('div',{style:'margin-bottom:14px;padding:12px 14px;background:#1F386408;border:1px solid #1F386430;border-radius:6px;font-size:12.5px;line-height:1.55'});
+    hd.innerHTML='<div style="font-weight:800;color:#1F3864;font-size:14px;margin-bottom:4px">Hoe we de aansluiting en de batterij ontwerpen</div>'+
+      'We dimensioneren de aansluiting en de batterij op drie doelstellingen: '+
+      '<b>KPI 1</b> — de geladen km\'s zo goedkoop mogelijk (t.o.v. thuisladen aan het CREG-forfait); '+
+      '<b>KPI 2</b> — laadinfra en batterij als een goede belegging (rendement = besparing / capex); '+
+      '<b>KPI 3</b> — weerbaarheid tegen stijgende netkosten en toenemende piekvraag (stijgende loadfactor). '+
+      'De optimale opstelling is die met het beste rendement; alle cijfers hieronder zijn daarop afgestemd.';
+    box.appendChild(hd);
+  }
+
   if(STATE.isRunning){
     // v1.23.4: live voortgangslog. Met drie opstellingen die elk itereren duurt dit
     // minuten — zonder feedback lijkt het scherm bevroren.
@@ -5721,6 +6103,18 @@ function renderStep9Resultaat(){
     box.appendChild(_renderAssetTegels(R));
   }
 
+  // v1.26.0 (blok 2): samenvatting van de optimale opstelling + aansluiting vs vandaag.
+  if(!R.error && STATE.opstellingen){
+    var _os=_renderOptimaleSamenvatting();
+    if(_os) box.appendChild(_os);
+  }
+
+  // v1.26.0 (blok 3): drie KPI-tegels van de beste opstelling (rendement-optimaal).
+  if(!R.error && STATE.opstellingen){
+    var _kt=_renderKpiTegels();
+    if(_kt) box.appendChild(_kt);
+  }
+
   // v1.21: knop naar het volledige financieel rapport (client-side opgebouwd uit
   // de sim-resultaten: beter=voorstel, minder=basis, windfall=onbalans).
   if(!R.error && _financieelRapportBeschikbaar()){
@@ -5745,8 +6139,12 @@ function renderStep9Resultaat(){
     box.appendChild(frSec);
   }
 
-  // v1.20.4: meerwaarde-KPI's van de 3 sturingen bovenaan het resultaat.
-  if(STATE.kpiSturing && !R.error){
+  // v1.26.0 (blok 4): meerwaarde van de sturing — voor de BESTE opstelling. Terugval op de
+  // oude actieve-config-KPI's als er (nog) geen opstellingen zijn.
+  if(!R.error && STATE.opstellingen){
+    var _smb=_renderSturingMeerwaardeBeste();
+    if(_smb) box.appendChild(_smb);
+  } else if(STATE.kpiSturing && !R.error){
     box.appendChild(_renderSturingKPIs());
   }
 
@@ -5757,7 +6155,12 @@ function renderStep9Resultaat(){
   // v1.22.8: DE vergelijking — basis (opstelling 1, zonder sturing) vs het actieve
   // scenario (sturing 2), met de investering en terugverdientijd die uit exact
   // diezelfde twee facturen volgen. Staat bovenaan, want dit is het gesprek.
-  if(!R.error){
+  // v1.26.0 (blok 5): afgeslankt tot enkel de energie-controle van de drie opstellingen.
+  // De vroegere basis-vs-actief-vergelijking is vervangen door de nieuwe blokken 6/7/8.
+  if(!R.error && STATE.opstellingen){
+    var _ec=_renderEnergieControle();
+    if(_ec) box.appendChild(_ec);
+  } else if(!R.error){
     var _bva=_renderBasisVsActief();
     if(_bva) box.appendChild(_bva);
   }
@@ -5767,6 +6170,36 @@ function renderStep9Resultaat(){
   if(STATE.opstellingen && !R.error){
     var _ov=_renderOpstellingenVergelijking();
     if(_ov) box.appendChild(_ov);
+  }
+
+  // v1.26.0 (blok 6): investeringen opstelling 0/1/2/3.
+  if(STATE.opstellingen && !R.error){
+    var _inv=_renderInvesteringen0123();
+    if(_inv) box.appendChild(_inv);
+  }
+  // v1.26.0 (blok 7): facturen opstelling 0/1/2/3 (opst 0 = bestaande factuur + CREG-km-regel).
+  if(STATE.opstellingen && !R.error){
+    var _f0123=_renderFacturen0123();
+    if(_f0123) box.appendChild(_f0123);
+  }
+
+  // v1.26.0 (blok 8): "Kost per kilometer of rendement" — KPI1 (€/km) + KPI2 (rendement)
+  // voor opstelling 0/1/2/3.
+  if(STATE.opstellingen && !R.error){
+    var _kkr=_renderKostPerKmRendement();
+    if(_kkr) box.appendChild(_kkr);
+  }
+
+  // v1.26.0 (blok 10): groeipad — batterij 1→N op vaste aansluiting (dispatch-sweep achter knop).
+  if(STATE.opstellingen && !R.error){
+    var _gp=_renderGroeipad();
+    if(_gp) box.appendChild(_gp);
+  }
+
+  // v1.26.0 (blok 11): gedetailleerde factuur — vandaag (12 mnd) vs optimale opstelling volgroeid.
+  if(STATE.opstellingen && !R.error){
+    var _f12=_renderFactuur12vsOptimaal();
+    if(_f12) box.appendChild(_f12);
   }
 
   // Foutmelding (als error)
@@ -6680,6 +7113,8 @@ function runSimulatie(){
                          eur_per_kwh:INV_BATT_EUR_PER_KWH, kabel_pct:INV_KABEL_PCT,
                          horizon_jaar:15 };
   STATE.simLog = []; STATE.simLogStart = Date.now();
+  // v1.26.0: bewaar de sim-input zodat het groeipad (blok 10) dezelfde payload kan hergebruiken.
+  try { STATE.lastSimInput = JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput = null; }
   _sim3Async(input).then(function(r){
     // v1.20.8: twee response-modi.
     //  - 'enkel': r.varianten {geen,sturing,onbalans} + r.kpi_sturing (detailfactuur = sturing).
