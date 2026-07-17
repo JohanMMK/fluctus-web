@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.29.2</span>
+    <span class="fdsim-version">v1.29.3</span>
   </div>
 </div>
 
@@ -5444,39 +5444,62 @@ function _renderKpiBespreking(){
   function eenh(r){ if(!r||r.key==='verhogen') return 0; var c=(r.o.config&&r.o.config.batterij)||{}; return (+c.aantal_batterijen)||(_dimKwh(r.o)?Math.round(_dimKwh(r.o)/260):0); }
   function aansl(r){ var c=(r&&r.o&&r.o.config)||{}; return Math.round((+c.toegangsvermogen_kw)|| (+c.aansluiting_kva) ||0); }
   function sp(r){ return (r&&r.o&&r.o.config&&r.o.config.spanning)||'LS'; }
-  function stijg(r){ return r?(r.distributie||0):null; }                 // factuur-stijging bij ×2 netkosten
+  function stijg(r){ return r?(r.distributie||0):0; }                    // factuur-stijging bij ×2 netkosten
   function fx2(r){ return r?(r.factuur+(r.distributie||0)):null; }
+  function capex(r){ return r?(+r.capex||0):0; }
+  function cabine(r){ var c=(r&&r.o&&r.o.config)||{}; return !!(c.cabine_nodig||c.spanning_omgezet); }
   function rend(r){ return (r&&r.rendement!=null)?fmtNum(r.rendement,1)+'%':'—'; }
   function lf(r){ return (r&&r.loadfactor!=null)?fmtNum(r.loadfactor*100,0)+'%':'—'; }
   function eur(v){ return v!=null?fmtEur(v):'—'; }
+  // rangschikking over de haalbare opstellingen — zo kloppen de superlatieven altijd,
+  // ook bij een heel andere case (MS als uitgangspunt, andere resultaten).
+  var haal=eng.rows.filter(function(r){return r.haalbaar;});
+  function isMax(r,fn){ return r && haal.length>1 && haal.every(function(x){return fn(x)<=fn(r);}); }
+  function isMin(r,fn){ return r && haal.length>1 && haal.every(function(x){return fn(x)>=fn(r);}); }
+  function lfVal(r){ return (r&&r.loadfactor)||0; }
+  function rendVal(r){ return (r&&r.rendement)||0; }
   function blok(kleur,titel,tekst){ return '<div style="margin-top:8px;padding:8px 11px;background:#fff;border:1px solid '+kleur+'55;border-radius:6px">'+
     '<div style="font-weight:700;color:'+kleur+';margin-bottom:2px">'+titel+'</div>'+tekst+'</div>'; }
 
   var h='<div style="font-weight:800;color:#1F3864;font-size:13px;margin-bottom:6px">Bespreking &amp; conclusie</div>'+
     'De drie opstellingen lossen dezelfde laadvraag op — maar komen elk ergens anders op uit:';
   if(o1){
-    h+=blok('#9E480E','Opstelling 1 — enkel verzwaren: het kwetsbaarst bij stijgende netkosten',
-      'U vergroot alleen uw aansluiting ('+aansl(o1)+' kW · '+sp(o1)+'), zonder batterij. Uw gecontracteerde vermogen is daardoor het hoogst — '+
-      'en dus uw blootstelling aan het capaciteitstarief. <b>Verdubbelen de netkosten, dan stijgt uw factuur met '+eur(stijg(o1))+'</b> '+
-      '(van '+eur(o1.factuur)+' naar '+eur(fx2(o1))+'), het meest van alle opties. Loadfactor '+lf(o1)+': veel dure capaciteit die grotendeels stilstaat, en geen eigen middel dat de factuur verlaagt.');
+    h+=blok('#9E480E','Opstelling 1 — enkel verzwaren'+(isMax(o1,stijg)?': het kwetsbaarst bij stijgende netkosten':''),
+      'U vergroot alleen uw aansluiting ('+aansl(o1)+' kW · '+sp(o1)+'), zonder batterij. Uw gecontracteerde vermogen is daardoor '+
+      (isMax(o1,aansl)?'het hoogst':'hoog')+' — en dus uw blootstelling aan het capaciteitstarief. '+
+      '<b>Verdubbelen de netkosten, dan stijgt uw factuur met '+eur(stijg(o1))+'</b> (van '+eur(o1.factuur)+' naar '+eur(fx2(o1))+')'+
+      (isMax(o1,stijg)?', het meest van alle opties':'')+'. Loadfactor '+lf(o1)+
+      (isMin(o1,lfVal)?': veel dure capaciteit die grotendeels stilstaat':'')+', en geen eigen middel dat de factuur verlaagt.');
   }
   if(o2){
-    h+=blok('#1F3864','Opstelling 2 — volledig batterij: geen cabine, maar de grootste investering',
-      'U blijft op uw huidige aansluiting ('+aansl(o2)+' kW · '+sp(o2)+') en vangt alles op met de grootste batterij ('+eenh(o2)+' × 120/260). '+
-      'Voordeel: geen cabine, minimale netwerken, snel te plaatsen. Keerzijde: de grootste investering ('+eur(o2.capex)+') en '+
-      (sp(o2)==='LS'?'op laagspanning blijft een groot deel van uw netkost per kWh (volumetrisch) — een batterij vlakt kW af maar niet de €/MWh, dus tegen een verdubbeling van díé kost minder beschermd dan de mix'
-                    :'een hogere netkosten-blootstelling dan de mix')+'. Rendement '+rend(o2)+', factuur + '+eur(stijg(o2))+' bij dubbele netkosten.');
+    var geenCabine=(!cabine(o2) && (cabine(o1)||cabine(o3)));
+    var o2Keer;
+    if(sp(o2)==='LS'){
+      o2Keer='op laagspanning blijft een groot deel van uw netkost per kWh (volumetrisch) — een batterij vlakt kW af maar niet dat €/MWh-tarief, dus tegen een verdubbeling daarvan minder beschermd dan de mix';
+    } else if(o3 && stijg(o2)>stijg(o3)){
+      o2Keer='een hogere netkosten-blootstelling dan de mix (factuur + '+eur(stijg(o2))+' bij ×2, tegenover + '+eur(stijg(o3))+' bij de mix)';
+    } else {
+      o2Keer='een netkosten-blootstelling van + '+eur(stijg(o2))+' bij een verdubbeling';
+    }
+    h+=blok('#1F3864','Opstelling 2 — volledig batterij'+(geenCabine?': geen cabine nodig':''),
+      'U blijft op uw huidige aansluiting ('+aansl(o2)+' kW · '+sp(o2)+') en vangt alles op met '+
+      (isMax(o2,capex)?'de grootste batterij':'een batterij')+' ('+eenh(o2)+' × 120/260). Voordeel: '+
+      (geenCabine?'geen cabine, ':'')+'minimale netwerken, snel te plaatsen. Keerzijde: '+
+      (isMax(o2,capex)?'de grootste investering':'een investering')+' ('+eur(capex(o2))+') en '+o2Keer+'. Rendement '+rend(o2)+'.');
   }
   if(o3){
-    h+=blok('#05B050','Opstelling 3 — mix: het evenwicht',
-      'Net genoeg verzwaren ('+aansl(o3)+' kW · '+sp(o3)+') om de batterij klein te houden ('+eenh(o3)+' × 120/260'+(o2?', i.p.v. '+eenh(o2)+' × bij opstelling 2':'')+'), '+
-      'terwijl de batterij de piek shaved zodat u niet de volle verzwaring van opstelling 1 nodig heeft. Resultaat: rendement '+rend(o3)+', '+
-      'de laagste netkosten-blootstelling (<b>factuur stijgt maar '+eur(stijg(o3))+' bij dubbele netkosten</b>) en een gebalanceerde loadfactor '+lf(o3)+' — goed benut, met marge voor groei.');
+    var kleiner=(o2 && eenh(o3)<eenh(o2))?(', i.p.v. '+eenh(o2)+' × bij opstelling 2'):'';
+    var minderVerzw=(o1 && aansl(o3)<aansl(o1))?'zodat u niet de volle verzwaring van opstelling 1 nodig heeft':'op maat van deze laadvraag';
+    h+=blok('#05B050','Opstelling 3 — mix'+(isMax(o3,rendVal)?': het beste rendement':': het evenwicht'),
+      'Net genoeg verzwaren ('+aansl(o3)+' kW · '+sp(o3)+') om de batterij klein te houden ('+eenh(o3)+' × 120/260'+kleiner+'), '+
+      'terwijl de batterij de piek shaved '+minderVerzw+'. Resultaat: rendement '+rend(o3)+', '+
+      (isMin(o3,stijg)?'de laagste netkosten-blootstelling':'een lage netkosten-blootstelling')+
+      ' (<b>factuur stijgt '+(isMin(o3,stijg)?'maar ':'')+eur(stijg(o3))+' bij dubbele netkosten</b>) en een gebalanceerde loadfactor '+lf(o3)+'.');
   }
   var reden = (beste && beste.nr===3)
-    ? 'de sterkste combinatie van rendement en robuustheid: de laagste blootstelling aan stijgende netkosten, en een loadfactor die hoog genoeg is zonder alle groeimarge op te souperen'
+    ? 'de sterkste combinatie van rendement en robuustheid'+(isMin(beste,stijg)?': de laagste blootstelling aan stijgende netkosten':'')+', met een gebalanceerde loadfactor'
     : (beste && beste.nr===2)
-      ? 'het hoogste rendement onder de opstellingen met batterij; hou wel de hogere netkosten-blootstelling op laagspanning in het achterhoofd naarmate de netkosten stijgen'
+      ? 'het hoogste rendement onder de opstellingen met batterij'+(sp(beste)==='LS'?'; hou wel de hogere netkosten-blootstelling op laagspanning in het achterhoofd naarmate de netkosten stijgen':'')
       : 'de beste balans over de drie KPI\'s';
   if(beste){
     h+='<div style="margin-top:10px;padding:8px 11px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
