@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.27.0</span>
+    <span class="fdsim-version">v1.29.2</span>
   </div>
 </div>
 
@@ -4980,12 +4980,17 @@ function _renderOpstellingenVergelijking(){
   sec.appendChild(tbl);
   // v1.27.0: energie-controle hier geïntegreerd (aparte controle-box vervalt) — per opstelling
   // "✓ volledige laadvraag geleverd".
+  var _gevr=0; (STATE.laadpleinen||[]).forEach(function(p){_gevr+=_lpEnergieMwh(p);});
+  var _af2=_annFactor();
   var _estat=el('div',{style:'margin-top:8px;font-size:12px'});
-  var _eh='';
+  var _eh='<div style="font-weight:700;color:#1F3864;margin-bottom:3px">Levert elke opstelling de volledige laadvraag?</div>';
   [{n:'1',o:ops.verhogen},{n:'2',o:ops.batterij}].concat(d3?[{n:'3',o:d3.o}]:[]).forEach(function(x){
     var dd=(x.o.dimensionering)||{}; var ok=(dd.haalbaar!==false) && !(dd.verloren_dagen>0);
-    _eh+='<span style="margin-right:14px;color:'+(ok?'#05B050':'#9E480E')+'">Opstelling '+x.n+': '+
-      (ok?'✓ volledige laadvraag geleverd':'⚠ '+(dd.verloren_dagen||0)+' dag(en) tekort')+'</span>';
+    var lpS=(x.o.varianten&&x.o.varianten.sturing&&x.o.varianten.sturing.laadplein)||{};
+    var geladen=(+lpS.ev_last_mwh||0)*_af2;
+    var getal=(_gevr>0)?(' — geladen '+fmtNum(geladen,1)+'/'+fmtNum(_gevr,1)+' MWh ('+fmtNum(Math.min(100,_gevr>0?geladen/_gevr*100:0),0)+'%)'):'';
+    _eh+='<div style="color:'+(ok?'#05B050':'#9E480E')+'">Opstelling '+x.n+': '+
+      (ok?'✓ volledige laadvraag geleverd':'⚠ '+(dd.verloren_dagen||0)+' dag(en) tekort')+getal+'</div>';
   });
   _estat.innerHTML=_eh; sec.appendChild(_estat);
   // Het zuivere tariefkaart-effect, als de derde opstelling de MS-variant is.
@@ -5250,6 +5255,9 @@ function _kpiEngine(){
   var P_huidig=_piekvermogenKw();
   var verbruikHuidigKwh=(+STATE.jaarverbruik||0)*1000;                   // bestaand jaarverbruik (MWh→kWh)
   function factuur(o){ return ((o.kpi_sturing||{}).kost_sturing_excl_btw || _frComp((o.varianten&&o.varianten.sturing)||null).subtotaal || 0)*af; }
+  // windfall = extra opbrengst van de onbalans-sturing (sturing 3) t.o.v. sturing 2. Zit al in
+  // de onbalans-variant; NIET in de rendementskeuze (die is puur sturing 2).
+  function onbalansFactuur(o){ var kk=o.kpi_sturing||{}; if(kk.kost_onbalans_excl_btw!=null) return +kk.kost_onbalans_excl_btw*af; return (_frComp((o.varianten&&o.varianten.onbalans)||null).subtotaal||0)*af; }
   function afnameKwh(o){ var k=(o.varianten&&o.varianten.sturing&&o.varianten.sturing.kpi)||{}; return ((+k.totaal_afname_mwh||0)*1000)*af; }
   function maxKw(o){ var c=o.config||{}; return (+c.toegangsvermogen_kw|| +c.aansluiting_kva ||0); }
   function loadf(kwh,kw){ return (kw>0)? kwh/(8760*kw) : 0; }
@@ -5266,7 +5274,9 @@ function _kpiEngine(){
     // rendement-capex: een MS-cabine is voor het verbruik en de netkosten-evolutie toch aangewezen
     // zodra er nog geen MS is (beslist Johan 17/07). kabeltracé = absolute som (nieuwe raming).
     var cabine=(cfg.cabine_nodig||cfg.spanning_omgezet)?INV_CABINE_EUR:0;
-    var battKwh=_dimKwh(o), batterij=battKwh*INV_BATT_EUR_PER_KWH;
+    // v1.28.0: opstelling 1 (verhogen) is puur verzwaren — nooit een batterij (guard tegen
+    // een meegesleepte batterij uit de config; server-fix v15.24.0 wist ze ook al).
+    var battKwh=(k.key==='verhogen')?0:_dimKwh(o), batterij=battKwh*INV_BATT_EUR_PER_KWH;
     var kva = (k.key==='verhogen') ? Math.max(0,(+cfg.aansluiting_kva||0)-(P_huidig||0))
             : (k.key==='mix')      ? Math.max(0,(+cfg.aansluiting_kva||0)-(+cfg.mix_huidig_kva||0)) : 0;
     var netaanpassing=kva*INV_EUR_PER_KVA;
@@ -5279,7 +5289,10 @@ function _kpiEngine(){
     var kostKm=(E_base!=null && km>0)?((E-E_base)/km):null;              // marginale €/km parking
     var afk=afnameKwh(o), mkw=maxKw(o);
     var c=_frComp((o.varianten&&o.varianten.sturing)||null);
-    return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E,
+    var onbF=onbalansFactuur(o), windfall=E-onbF;                       // sturing2 − onbalans = windfall
+    var lpS=(o.varianten&&o.varianten.sturing&&o.varianten.sturing.laadplein)||{};
+    var geladenMwh=(+lpS.ev_last_mwh||0)*af;
+    return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E, windfall:windfall, geladenMwh:geladenMwh,
       distributie:c.distributie*af,                                     // netkosten-regel (voor de ×2-scenario's)
       inv:{pv:pv,laadpalen:laadpalen,cabine:cabine,batterij:batterij,netaanpassing:netaanpassing,trace:trace,
            totaal_excl_cabine:capex, totaal:capex+cabine},
@@ -5291,10 +5304,16 @@ function _kpiEngine(){
   var opstelling0={key:'geen', nr:0, label:'Opstelling 0 — bestaand', o:null, factuur:E_base,
     cabine:0, laadpalen:0, capex:0, besparing:0, rendement:0, payback:null,
     kostKm:(km>0?C/km:null), loadfactor:lf0, afnameKwh:verbruikHuidigKwh, maxKw:P_huidig, haalbaar:true};
+  // v1.29.0: de "beste" (= wat we verkopen) kiezen we onder de opstellingen MÉT batterij
+  // (2 en 3) — interne regel: we verkopen steeds ≥1 batterij + de nodige laadpalen. Opstelling 1
+  // (puur verzwaren) blijft zichtbaar als referentie maar wordt nooit de optimale. Zonder
+  // batterij-opstellingen (edge case) valt het terug op de beste van alles.
   var beste=null;
-  rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar){ if(!beste||r.rendement>beste.rendement) beste=r; } });
+  rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar && r.key!=='verhogen'){ if(!beste||r.rendement>beste.rendement) beste=r; } });
+  if(!beste){ rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar){ if(!beste||r.rendement>beste.rendement) beste=r; } }); }
+  var gevraagdMwh=0; (STATE.laadpleinen||[]).forEach(function(p){gevraagdMwh+=_lpEnergieMwh(p);});
   return { af:af, E_base:E_base, C:C, km:km, heeftBase:heeftBase, huidigLoadfactor:lf0, P_huidig:P_huidig,
-    laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste };
+    laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste, gevraagdMwh:gevraagdMwh };
 }
 
 // Blok 3 — drie KPI-tegels van de beste opstelling.
@@ -5328,6 +5347,13 @@ function _renderKpiTegels(){
       'betere benutting van de aansluiting = robuuster tegen stijgende netkosten',
       'opdat er weerbaarheid is tegen stijgende netkosten en piekvraag', '#1F3864');
   sec.appendChild(grid);
+  // Windfall (onbalans) — apart, bovenop het rendement dat op sturing 2 (zonder onbalans) is berekend.
+  if(b.windfall>0){
+    sec.appendChild(el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px'},
+      '<b>Windfall (onbalans-sturing): + '+fmtEur(b.windfall)+'/jaar</b> bovenop het rendement. '+
+      'De KPI\'s hierboven rekenen bewust op sturing 2 (spot-arbitrage + PV + piekshaving) zonder onbalans; '+
+      'de imbalance-opbrengst komt er als extra bovenop.'));
+  }
   return sec;
 }
 
@@ -5411,17 +5437,53 @@ function _bewaarOptimaal(naam, btn, b){
 // bewust richting opstelling 3 (mix) — gezond rendement + de beste robuustheid.
 function _renderKpiBespreking(){
   var eng=_kpiEngine(); if(!eng) return null;
-  var o3=null; eng.rows.forEach(function(r){ if(r.nr===3) o3=r; });
-  if(!o3) return null;
+  var byNr={}; eng.rows.forEach(function(r){ byNr[r.nr]=r; });
+  var o1=byNr[1], o2=byNr[2], o3=byNr[3], beste=eng.beste;
+  if(!o1 && !o2 && !o3) return null;
+  // Data-gedreven: elke passage rekent met de werkelijke uitkomst van díé opstelling.
+  function eenh(r){ if(!r||r.key==='verhogen') return 0; var c=(r.o.config&&r.o.config.batterij)||{}; return (+c.aantal_batterijen)||(_dimKwh(r.o)?Math.round(_dimKwh(r.o)/260):0); }
+  function aansl(r){ var c=(r&&r.o&&r.o.config)||{}; return Math.round((+c.toegangsvermogen_kw)|| (+c.aansluiting_kva) ||0); }
+  function sp(r){ return (r&&r.o&&r.o.config&&r.o.config.spanning)||'LS'; }
+  function stijg(r){ return r?(r.distributie||0):null; }                 // factuur-stijging bij ×2 netkosten
+  function fx2(r){ return r?(r.factuur+(r.distributie||0)):null; }
+  function rend(r){ return (r&&r.rendement!=null)?fmtNum(r.rendement,1)+'%':'—'; }
+  function lf(r){ return (r&&r.loadfactor!=null)?fmtNum(r.loadfactor*100,0)+'%':'—'; }
+  function eur(v){ return v!=null?fmtEur(v):'—'; }
+  function blok(kleur,titel,tekst){ return '<div style="margin-top:8px;padding:8px 11px;background:#fff;border:1px solid '+kleur+'55;border-radius:6px">'+
+    '<div style="font-weight:700;color:'+kleur+';margin-bottom:2px">'+titel+'</div>'+tekst+'</div>'; }
+
+  var h='<div style="font-weight:800;color:#1F3864;font-size:13px;margin-bottom:6px">Bespreking &amp; conclusie</div>'+
+    'De drie opstellingen lossen dezelfde laadvraag op — maar komen elk ergens anders op uit:';
+  if(o1){
+    h+=blok('#9E480E','Opstelling 1 — enkel verzwaren: het kwetsbaarst bij stijgende netkosten',
+      'U vergroot alleen uw aansluiting ('+aansl(o1)+' kW · '+sp(o1)+'), zonder batterij. Uw gecontracteerde vermogen is daardoor het hoogst — '+
+      'en dus uw blootstelling aan het capaciteitstarief. <b>Verdubbelen de netkosten, dan stijgt uw factuur met '+eur(stijg(o1))+'</b> '+
+      '(van '+eur(o1.factuur)+' naar '+eur(fx2(o1))+'), het meest van alle opties. Loadfactor '+lf(o1)+': veel dure capaciteit die grotendeels stilstaat, en geen eigen middel dat de factuur verlaagt.');
+  }
+  if(o2){
+    h+=blok('#1F3864','Opstelling 2 — volledig batterij: geen cabine, maar de grootste investering',
+      'U blijft op uw huidige aansluiting ('+aansl(o2)+' kW · '+sp(o2)+') en vangt alles op met de grootste batterij ('+eenh(o2)+' × 120/260). '+
+      'Voordeel: geen cabine, minimale netwerken, snel te plaatsen. Keerzijde: de grootste investering ('+eur(o2.capex)+') en '+
+      (sp(o2)==='LS'?'op laagspanning blijft een groot deel van uw netkost per kWh (volumetrisch) — een batterij vlakt kW af maar niet de €/MWh, dus tegen een verdubbeling van díé kost minder beschermd dan de mix'
+                    :'een hogere netkosten-blootstelling dan de mix')+'. Rendement '+rend(o2)+', factuur + '+eur(stijg(o2))+' bij dubbele netkosten.');
+  }
+  if(o3){
+    h+=blok('#05B050','Opstelling 3 — mix: het evenwicht',
+      'Net genoeg verzwaren ('+aansl(o3)+' kW · '+sp(o3)+') om de batterij klein te houden ('+eenh(o3)+' × 120/260'+(o2?', i.p.v. '+eenh(o2)+' × bij opstelling 2':'')+'), '+
+      'terwijl de batterij de piek shaved zodat u niet de volle verzwaring van opstelling 1 nodig heeft. Resultaat: rendement '+rend(o3)+', '+
+      'de laagste netkosten-blootstelling (<b>factuur stijgt maar '+eur(stijg(o3))+' bij dubbele netkosten</b>) en een gebalanceerde loadfactor '+lf(o3)+' — goed benut, met marge voor groei.');
+  }
+  var reden = (beste && beste.nr===3)
+    ? 'de sterkste combinatie van rendement en robuustheid: de laagste blootstelling aan stijgende netkosten, en een loadfactor die hoog genoeg is zonder alle groeimarge op te souperen'
+    : (beste && beste.nr===2)
+      ? 'het hoogste rendement onder de opstellingen met batterij; hou wel de hogere netkosten-blootstelling op laagspanning in het achterhoofd naarmate de netkosten stijgen'
+      : 'de beste balans over de drie KPI\'s';
+  if(beste){
+    h+='<div style="margin-top:10px;padding:8px 11px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
+       '<b style="color:#1F3864">Conclusie — we bevelen '+beste.label+' aan:</b> '+reden+'.</div>';
+  }
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#1F386408;border:1px solid #1F386430;border-radius:6px;font-size:12.5px;line-height:1.55'});
-  sec.innerHTML='<div style="font-weight:800;color:#1F3864;font-size:13px;margin-bottom:6px">Bespreking &amp; conclusie</div>'+
-    'Op de drie KPI\'s samen komt <b>opstelling 3 (mix)</b> als de beste keuze naar voren:'+
-    '<ul style="margin:6px 0 0;padding-left:20px">'+
-      '<li><b>Kost per km</b> — '+(o3.kostKm!=null?fmtNum(o3.kostKm,3)+' €/km':'—')+', ruim onder het CREG-thuisladen.</li>'+
-      '<li><b>Robuustere loadfactor</b> — '+(o3.loadfactor!=null?fmtNum(o3.loadfactor*100,0)+'%':'—')+': hoog genoeg om de aansluiting goed te benutten, niet zó hoog dat er geen marge meer is voor groei.</li>'+
-      '<li><b>Weerbaarheid tegen dubbele netkosten</b> — de mix zit deels op MS en heeft de laagste netkosten-blootstelling, dus haar rendement zakt het minst als de netkosten verdubbelen.</li>'+
-    '</ul>'+
-    '<div style="margin-top:6px">De kale batterij (opstelling 2) haalt een iets hoger rendement, maar blijft op LS met een volledig volumetrische netkost — kwetsbaarder bij stijgende netkosten. De mix combineert een gezond rendement met de beste robuustheid.</div>';
+  sec.innerHTML=h;
   return sec;
 }
 
@@ -5429,8 +5491,8 @@ function _renderKpiBespreking(){
 function _renderOptimaleSamenvatting(){
   var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
   var b=eng.beste, cfg=b.o.config||{};
-  var battKwh=_dimKwh(b.o), battKw=(cfg.batterij&&+cfg.batterij.kw)||Math.round(battKwh/2);
-  var eenh=(cfg.batterij&&+cfg.batterij.aantal_batterijen)||(battKwh?Math.round(battKwh/260):0);
+  var battKwh=(b.key==='verhogen')?0:_dimKwh(b.o), battKw=battKwh?((cfg.batterij&&+cfg.batterij.kw)||Math.round(battKwh/2)):0;
+  var eenh=battKwh?((cfg.batterij&&+cfg.batterij.aantal_batterijen)||Math.round(battKwh/260)):0;
   var evMwh=0; (STATE.laadpleinen||[]).forEach(function(p){evMwh+=_lpEnergieMwh(p);});
   var pv=(+STATE.pvKwp||0);
   var aanslBeste=(+cfg.toegangsvermogen_kw|| +cfg.aansluiting_kva ||0), spBeste=cfg.spanning||'LS';
@@ -7188,6 +7250,16 @@ function runSimulatie(){
   input._investering = { cabine_eur:INV_CABINE_EUR, eur_per_kva:INV_EUR_PER_KVA,
                          eur_per_kwh:INV_BATT_EUR_PER_KWH, kabel_pct:INV_KABEL_PCT,
                          horizon_jaar:15 };
+  // v1.29.0: KPI2-basis voor de mix-keuze (opstelling 3 kiest op rendement). E_base+CREG en
+  // het vaste capex-deel (laadpalen + PV + kabeltracé) zijn constant over de mix-kandidaten;
+  // de server voegt er per k enkel batterij + verzwaring aan toe.
+  try {
+    var _kBc=STATE.baseCase||{}, _kBd=_periodeDagen(_kBc.periodeVan,_kBc.periodeTot);
+    if(_heeftFactuur() && _kBd>0){ input._kpi_base_plus_creg = (_kBc.totaalExclBtw||0)*(365/_kBd) + _cregKostJaar(); }
+    var _kLp=_frLaadpalen();
+    input._kpi_capex_vast = _kLp.ac*INV_LAADPAAL_EUR.ac + _kLp.dc160*INV_LAADPAAL_EUR.dc160 + _kLp.dc400*INV_LAADPAAL_EUR.dc400
+                          + (+STATE.pvKwp||0)*INV_PV_EUR_PER_KWP + _kabeltrace(true);
+  } catch(e){}
   STATE.simLog = []; STATE.simLogStart = Date.now();
   // v1.26.0: bewaar de sim-input zodat het groeipad (blok 10) dezelfde payload kan hergebruiken.
   try { STATE.lastSimInput = JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput = null; }
