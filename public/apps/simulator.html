@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.30.1</span>
+    <span class="fdsim-version">v1.33.1</span>
   </div>
 </div>
 
@@ -5047,6 +5047,43 @@ var INV_BATT_EUR_PER_KWH= 350;     // batterij-capex (zelfde basis als het finan
 var INV_PV_EUR_PER_KWP  = 450;     // PV-capex
 var INV_LAADPAAL_EUR    = { ac:2500, dc160:40000, dc400:70000 };
 var INV_KABEL_PCT       = 0.20;    // opslag kabeltracés op de volledige installatie
+var HORIZON_JAAR        = 15;      // TCO-horizon (jaren) — keuze op laagste eigendomskost
+var BATT_UNIT_KW        = 120;     // fysieke batterij-eenheid (spiegelt server BATT_UNIT_KW)
+var BATT_UNIT_KWH       = 260;     // idem (server BATT_UNIT_KWH)
+// v1.32.0 — TCO-escalatie AFGESTEMD op het financieel rapport (rapport_generator AAN-blok).
+// Onderhoud + verzekering + omvormer-vervanging (jaar 10) + het REALISTISCH kostenscenario:
+// energie/onderhoud groeit met 2% inflatie, netkosten met +6%/jaar én een sprong van +30% vanaf 2029.
+// Zo spreken de opstelling-keuze (simulator) en de waardering (rapport) dezelfde taal.
+var TCO_AAN = {
+  onderhoud:{ pv_kwp:5, batterij_kw:5, laadpaal:50 },   // €/jaar per eenheid
+  omvormer_vervang_kwp:50,       // €/kWp, in jaar 10 (PV-omvormer)
+  verzekering_promille:3.4,      // ‰ van capex per jaar
+  startjaar:2026, horizon:HORIZON_JAAR,
+  // Drie kostenevolutie-scenario's (IDENTIEK aan het financieel rapport). Standaard = het
+  // middelste (realistisch). De gebruiker kan schakelen; dat herrekent de TCO/keuze live.
+  scenarios:{
+    conservatief:{ naam:'Conservatief', toel:'netkosten volgen enkel de inflatie', inflatie:0.02, net_extra:0.00, net_sprong_jaar:null, net_sprong:0 },
+    realistisch: { naam:'Realistisch',  toel:'gematigde stijging van de netkosten', inflatie:0.02, net_extra:0.04, net_sprong_jaar:2029, net_sprong:0.30 },
+    optimistisch:{ naam:'Congestie',    toel:'distributieprijzen stijgen door netcongestie', inflatie:0.04, net_extra:0.05, net_sprong_jaar:2029, net_sprong:0.50 }
+  },
+  standaard:'realistisch'
+};
+function _tcoScenario(){ return TCO_AAN.scenarios[STATE.tcoScenario||TCO_AAN.standaard] || TCO_AAN.scenarios.realistisch; }
+function _tcoGroeiE(y){ return Math.pow(1+_tcoScenario().inflatie, y); }                // energie/heffingen/onderhoud
+function _tcoGroeiN(y){ var sc=_tcoScenario(); var g=Math.pow(1+sc.inflatie+sc.net_extra, y);   // netkosten
+  if(sc.net_sprong_jaar && (TCO_AAN.startjaar+y)>=sc.net_sprong_jaar) g*=(1+sc.net_sprong); return g; }
+// Meerjarige TCO = capex + Σ_{y=0..H-1}(factuur_y + opex_y). De factuur splitst in niet-net
+// (energie + heffingen, groeit met inflatie) en netkosten (groeit met het net-schema). Opex =
+// onderhoud×inflatie + verzekering (‰ op capex); omvormer-vervanging valt in jaar 10.
+function _tcoMeerjaar(capex, jaarkost, netdeel, oh1, pvKwp){
+  var sc=_tcoScenario(), verz=(+capex||0)*TCO_AAN.verzekering_promille/1000;
+  var nietnet=(+jaarkost||0)-(+netdeel||0), som=0;
+  for(var y=0;y<TCO_AAN.horizon;y++){
+    som += nietnet*_tcoGroeiE(y) + (+netdeel||0)*_tcoGroeiN(y) + (+oh1||0)*Math.pow(1+sc.inflatie,y) + verz;
+    if(y===9) som += (+pvKwp||0)*TCO_AAN.omvormer_vervang_kwp;
+  }
+  return (+capex||0)+som;
+}
 // v1.23.4: drie opstellingen. Opstelling 3 = opstelling 2 + cabine (LS→MS).
 // Zij deelt de batterij-capex met opstelling 2; het enige verschil in KOST is de
 // cabine, het enige verschil in OPBRENGST is de tariefkaart. Zo blijft de
@@ -5282,21 +5319,44 @@ function _kpiEngine(){
     var netaanpassing=kva*INV_EUR_PER_KVA;
     var pv=(+STATE.pvKwp||0)*INV_PV_EUR_PER_KWP;
     var trace=_kabeltrace(battKwh>0);
-    var capex=pv+laadpalen+batterij+netaanpassing+trace;                // capex EXCL cabine (rendement)
-    var besparing=(E_base!=null)?((E_base+C)-E):null;                    // E_base + CREG-km − E_opstelling
-    var rend=(besparing!=null && capex>0 && besparing>0)?(besparing/capex*100):null;
-    var pb=(besparing!=null && capex>0 && besparing>0)?(capex/besparing):null;
+    // v1.31.0: capex INCL cabine. We kiezen niet langer op rendement (dat gaf altijd de kleinste
+    // batterij) maar op de laagste TCO over de horizon — daar hoort de cabine dus wél in de capex.
+    var capexExcl=pv+laadpalen+batterij+netaanpassing+trace;            // zonder cabine (info)
+    var capex=capexExcl+cabine;                                         // capex INCL cabine
+    var c=_frComp((o.varianten&&o.varianten.sturing)||null);
+    // v1.33.0: opex jaar 1 = onderhoud + verzekering (‰ op capex) — nodig vóór rendement/payback,
+    // die nu NET VAN OPEX rekenen (afgestemd op het financieel rapport: rendement = operationeel
+    // jaar-1 netto / capex). Onderhoud = PV + batterij(kW) + laadpalen; verzekering = 3,4‰ capex.
+    var netdeel=c.distributie*af;                                       // netkosten (B+C+D), jaarbasis
+    var battKw=(battKwh>0)?(battKwh/BATT_UNIT_KWH*BATT_UNIT_KW):0;
+    var oh1=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + battKw*TCO_AAN.onderhoud.batterij_kw
+          + (lp.ac+lp.dc160+lp.dc400)*TCO_AAN.onderhoud.laadpaal;      // onderhoud jaar 1
+    var opex1=oh1 + capex*TCO_AAN.verzekering_promille/1000;            // opex jaar 1 (onderhoud + verzekering)
+    var besparing=(E_base!=null)?((E_base+C)-E):null;                    // E_base + CREG-km − E_opstelling (bruto)
+    var besparingNetto=(besparing!=null)?(besparing-opex1):null;         // na onderhoud + verzekering
+    var rend=(besparingNetto!=null && capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
+    var pb=(besparingNetto!=null && capex>0 && besparingNetto>0)?(capex/besparingNetto):null;
     var kostKm=(E_base!=null && km>0)?((E-E_base)/km):null;              // marginale €/km parking
     var afk=afnameKwh(o), mkw=maxKw(o);
-    var c=_frComp((o.varianten&&o.varianten.sturing)||null);
     var onbF=onbalansFactuur(o), windfall=E-onbF;                       // sturing2 − onbalans = windfall
     var lpS=(o.varianten&&o.varianten.sturing&&o.varianten.sturing.laadplein)||{};
     var geladenMwh=(+lpS.ev_last_mwh||0)*af;
+    // TCO = meerjarige eigendomskost incl. cabine, onderhoud, verzekering én het gekozen
+    // netkosten-schema (zie TCO_AAN — afgestemd op het financieel rapport). Dit is de keuzemaatstaf.
+    var tco=_tcoMeerjaar(capex, E, netdeel, oh1, (+STATE.pvKwp||0));
+    // Kers op de taart (onbalans): pas ná de keuze. Zelfde capex/opex, maar de jaarfactuur daalt
+    // met de windfall (energie-arbitrage) → lagere TCO en hoger "rendement". Vereist zelf-nominatie
+    // + toegang tot de onbalansmarkt (niet elke leverancier staat dit vandaag toe).
+    var besparingCherry=(besparing!=null)?(besparing+windfall-opex1):null;   // netto (na opex) + windfall
+    var rendCherry=(besparingCherry!=null && capex>0 && besparingCherry>0)?(besparingCherry/capex*100):null;
+    var tcoCherry=_tcoMeerjaar(capex, E-windfall, netdeel, oh1, (+STATE.pvKwp||0));
     return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E, windfall:windfall, geladenMwh:geladenMwh,
       distributie:c.distributie*af,                                     // netkosten-regel (voor de ×2-scenario's)
       inv:{pv:pv,laadpalen:laadpalen,cabine:cabine,batterij:batterij,netaanpassing:netaanpassing,trace:trace,
-           totaal_excl_cabine:capex, totaal:capex+cabine},
-      cabine:cabine, capex:capex, besparing:besparing, rendement:rend, payback:pb, kostKm:kostKm,
+           totaal_excl_cabine:capexExcl, totaal:capex},
+      cabine:cabine, capex:capex, capexExcl:capexExcl, opex1:opex1,
+      besparing:besparing, besparingNetto:besparingNetto, rendement:rend, payback:pb, kostKm:kostKm,
+      tco:tco, tcoCherry:tcoCherry, besparingCherry:besparingCherry, rendementCherry:rendCherry,
       loadfactor:loadf(afk,mkw), afnameKwh:afk, maxKw:mkw,
       haalbaar:((o.dimensionering||{}).haalbaar!==false)};
   });
@@ -5304,13 +5364,16 @@ function _kpiEngine(){
   var opstelling0={key:'geen', nr:0, label:'Opstelling 0 — bestaand', o:null, factuur:E_base,
     cabine:0, laadpalen:0, capex:0, besparing:0, rendement:0, payback:null,
     kostKm:(km>0?C/km:null), loadfactor:lf0, afnameKwh:verbruikHuidigKwh, maxKw:P_huidig, haalbaar:true};
-  // v1.29.0: de "beste" (= wat we verkopen) kiezen we onder de opstellingen MÉT batterij
-  // (2 en 3) — interne regel: we verkopen steeds ≥1 batterij + de nodige laadpalen. Opstelling 1
-  // (puur verzwaren) blijft zichtbaar als referentie maar wordt nooit de optimale. Zonder
-  // batterij-opstellingen (edge case) valt het terug op de beste van alles.
+  // v1.31.0: de "beste" (= wat we verkopen) kiezen we op de LAAGSTE TCO incl. cabine (capex incl
+  // cabine + jaarfactuur sturing 2 × horizon), onder de opstellingen MÉT batterij (2 en 3) —
+  // interne regel: we verkopen steeds ≥1 batterij + de nodige laadpalen. Rendement bleef altijd
+  // de kleinste batterij verkiezen; TCO weegt de jaarlijkse besparing over de volledige horizon.
+  // Onbalans blijft hier BUITEN (kers op de taart, pas ná de keuze). Opstelling 1 (puur verzwaren)
+  // blijft zichtbaar als referentie maar wordt nooit de optimale. Zonder batterij-opstellingen
+  // (edge case) valt het terug op de beste van alles.
   var beste=null;
-  rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar && r.key!=='verhogen'){ if(!beste||r.rendement>beste.rendement) beste=r; } });
-  if(!beste){ rows.forEach(function(r){ if(r.rendement!=null && r.haalbaar){ if(!beste||r.rendement>beste.rendement) beste=r; } }); }
+  rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && r.key!=='verhogen'){ if(!beste||r.tco<beste.tco) beste=r; } });
+  if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar){ if(!beste||r.tco<beste.tco) beste=r; } }); }
   var gevraagdMwh=0; (STATE.laadpleinen||[]).forEach(function(p){gevraagdMwh+=_lpEnergieMwh(p);});
   return { af:af, E_base:E_base, C:C, km:km, heeftBase:heeftBase, huidigLoadfactor:lf0, P_huidig:P_huidig,
     laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste, gevraagdMwh:gevraagdMwh };
@@ -5340,19 +5403,27 @@ function _renderKpiTegels(){
       'opdat de geladen km\'s zo goedkoop mogelijk zijn')+
     tile(2,'Rendement van de investering',
       (b.rendement!=null?fmtNum(b.rendement,1)+' %':'—'),
-      (b.payback!=null?'terugverdiend in '+fmtNum(b.payback,1)+' j · capex '+fmtEur(b.capex):'capex '+fmtEur(b.capex)),
-      'opdat laadinfra + batterij een goede belegging vormen')+
+      (b.payback!=null?'terugverdiend in '+fmtNum(b.payback,1)+' j · capex incl. cabine '+fmtEur(b.capex):'capex incl. cabine '+fmtEur(b.capex))+
+      (b.tco!=null?' · TCO '+HORIZON_JAAR+'j '+fmtEur(b.tco):''),
+      'gekozen op de laagste all-in TCO over '+HORIZON_JAAR+' j (incl. onderhoud + '+_tcoScenario().naam.toLowerCase()+' netkosten-schema)')+
     tile(3,'Loadfactor stijgt',
       fmtNum(eng.huidigLoadfactor*100,0)+'% → '+fmtNum(b.loadfactor*100,0)+'%',
       'betere benutting van de aansluiting = robuuster tegen stijgende netkosten',
       'opdat er weerbaarheid is tegen stijgende netkosten en piekvraag', '#1F3864');
   sec.appendChild(grid);
-  // Windfall (onbalans) — apart, bovenop het rendement dat op sturing 2 (zonder onbalans) is berekend.
+  // Kers op de taart (onbalans) — apart, bovenop de keuze die op sturing 2 (zonder onbalans) staat.
+  // We tonen hier het rendement/TCO HERREKEND mét de windfall, plus de voorwaarde.
   if(b.windfall>0){
-    sec.appendChild(el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px'},
-      '<b>Windfall (onbalans-sturing): + '+fmtEur(b.windfall)+'/jaar</b> bovenop het rendement. '+
-      'De KPI\'s hierboven rekenen bewust op sturing 2 (spot-arbitrage + PV + piekshaving) zonder onbalans; '+
-      'de imbalance-opbrengst komt er als extra bovenop.'));
+    sec.appendChild(el('div',{style:'margin-top:10px;padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px'},
+      '<b>🍒 Kers op de taart — onbalans-sturing: + '+fmtEur(b.windfall)+'/jaar</b> bovenop de gekozen opstelling.<br>'+
+      'Herrekend mét onbalans: rendement '+
+      (b.rendement!=null?fmtNum(b.rendement,1)+' %':'—')+' → <b>'+
+      (b.rendementCherry!=null?fmtNum(b.rendementCherry,1)+' %':'—')+'</b>'+
+      (b.tcoCherry!=null?' · TCO '+HORIZON_JAAR+'j '+fmtEur(b.tco)+' → <b>'+fmtEur(b.tcoCherry)+'</b>':'')+'.<br>'+
+      '<span style="color:#5A6577;font-size:11.5px">De keuze van de opstelling gebeurt bewust op sturing 2 '+
+      '(spot-arbitrage + PV-zelfconsumptie + piekshaving) zónder onbalans. De onbalans-opbrengst komt er als '+
+      'extra bovenop, maar vereist dat je zélf kan nomineren en toegang hebt tot de onbalansmarkt — niet elke '+
+      'leverancier staat dit vandaag al toe.</span>'));
   }
   return sec;
 }
@@ -5367,7 +5438,7 @@ function _renderKostPerKmRendement(){
   // netkosten×2: de "Distributie + transport"-regel (r.distributie) verdubbelt.
   function factuur2(r){ return (r.nr===0)?null:(r.factuur + (r.distributie||0)); }
   function kostKm2(r){ if(r.nr===0) return r.kostKm; var f2=factuur2(r); return (E_base!=null&&km>0&&f2!=null)?((f2-E_base)/km):null; }
-  function rend2(r){ if(r.nr===0) return null; var f2=factuur2(r); if(E_base==null||f2==null) return null; var b2=E_base+C-f2; return (r.capex>0&&b2>0)?(b2/r.capex*100):null; }
+  function rend2(r){ if(r.nr===0) return null; var f2=factuur2(r); if(E_base==null||f2==null) return null; var b2=E_base+C-f2-(r.opex1||0); return (r.capex>0&&b2>0)?(b2/r.capex*100):null; }   // net van opex
   function kopRij(){ return '<span>Opstelling</span>'+all.map(function(r){return '<span style="text-align:right;font-weight:700;color:#1F3864">'+r.nr+'</span>';}).join(''); }
   function rij(label,fn){ return '<span>'+label+'</span>'+all.map(function(r){return '<span style="text-align:right">'+fn(r)+'</span>';}).join(''); }
   function kader(titel,inner){ var d=el('div',{style:'padding:9px 11px;background:#F7F9FC;border-radius:6px;margin-bottom:8px'});
@@ -5377,21 +5448,68 @@ function _renderKostPerKmRendement(){
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},'KPI\'s'));
   sec.appendChild(kader('KPI 1 — Kost per km',
     rij('€/km', function(r){return r.kostKm!=null?fmtNum(r.kostKm,3):'—';})));
-  sec.appendChild(kader('KPI 2 — Rendement van de investering',
-    rij('Investering (excl. cabine)', function(r){return r.nr===0?'€ 0':fmtEur(r.capex);})+
-    rij('Besparing/jaar', function(r){return r.nr===0?'€ 0':(r.besparing!=null?fmtEur(r.besparing):'—');})+
-    rij('Terugverdientijd', function(r){return r.nr===0?'—':(r.payback!=null?fmtNum(r.payback,1)+' j':'—');})+
-    rij('Rendement', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})));
+  sec.appendChild(kader('KPI 2 — Rendement & TCO van de investering',
+    rij('Investering (incl. cabine)', function(r){return r.nr===0?'€ 0':fmtEur(r.capex);})+
+    rij('Besparing/jaar bruto', function(r){return r.nr===0?'€ 0':(r.besparing!=null?fmtEur(r.besparing):'—');})+
+    rij('− Onderhoud + verzekering', function(r){return r.nr===0?'€ 0':(r.opex1!=null?'− '+fmtEur(r.opex1):'—');})+
+    rij('Besparing/jaar netto', function(r){return r.nr===0?'€ 0':(r.besparingNetto!=null?fmtEur(r.besparingNetto):'—');})+
+    rij('Terugverdientijd (netto)', function(r){return r.nr===0?'—':(r.payback!=null?fmtNum(r.payback,1)+' j':'—');})+
+    rij('Rendement (netto)', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})+
+    rij('TCO ('+HORIZON_JAAR+' j — all-in)', function(r){return r.tco!=null?fmtEur(r.tco):'—';})));
   sec.appendChild(kader('KPI 3 — Loadfactor',
     rij('Loadfactor', function(r){return r.loadfactor!=null?fmtNum(r.loadfactor*100,0)+' %':'—';})));
   sec.appendChild(kader('Weerbaarheid — als de netkosten verdubbelen',
     rij('Factuur bij ×2 netkosten', function(r){var f=factuur2(r);return f!=null?fmtEur(f):'—';})+
     rij('Kost per km bij ×2', function(r){var v=kostKm2(r);return v!=null?fmtNum(v,3):'—';})+
     rij('Rendement bij ×2', function(r){if(r.nr===0)return '—';var v=rend2(r);return v!=null?fmtNum(v,1)+' %':'—';})));
+  var _sc=_tcoScenario();
+  var _spr=_sc.net_sprong_jaar?(' met een sprong van +'+Math.round(_sc.net_sprong*100)+'% vanaf '+_sc.net_sprong_jaar):'';
   sec.appendChild(el('div',{style:'margin-top:2px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Opstelling 0 = bestaand verbruik (km\'s laden elders aan het CREG-forfait). Investering = totaal excl. cabine. '+
-    'Netkosten×2 verdubbelt de distributie+transport-regel; de €/km- en rendement-rijen tonen hoe robuust elke opstelling is.'));
+    'Rendement & terugverdientijd zijn NETTO (na onderhoud + verzekering, jaar 1). Investering = totaal incl. cabine. '+
+    'TCO = investering + '+HORIZON_JAAR+' j eigendomskost, all-in en afgestemd op het financieel rapport: incl. onderhoud, '+
+    'verzekering, omvormer-vervanging (jaar 10) én het gekozen kostenscenario ('+_sc.naam+': energie +'+Math.round(_sc.inflatie*100)+'%/j, '+
+    'netkosten +'+Math.round((_sc.inflatie+_sc.net_extra)*100)+'%/j'+_spr+'). '+
+    'Dit is de keuzemaatstaf voor de optimale opstelling. Netkosten×2 is een aparte stresstest van de jaarfactuur.'));
   return sec;
+}
+
+// v1.33.0 — kostenscenario-kiezer (conservatief → optimistisch, standaard = middelste/realistisch).
+// Herrekent de TCO/keuze live via renderStage(); dezelfde 3 scenario's als het financieel rapport.
+function _renderScenarioKiezer(){
+  var wrap=el('div',{style:'margin-top:14px;padding:10px 14px;background:#1F386408;border:1px solid #1F386430;border-radius:6px'});
+  wrap.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:12.5px;margin-bottom:2px'},'Kostenscenario (netkosten-evolutie)'));
+  wrap.appendChild(el('div',{style:'font-size:11px;color:#5A6577;margin-bottom:8px'},
+    'Bepaalt hoe sterk de netkosten stijgen in de TCO — dezelfde 3 scenario\'s als het financieel rapport. Standaard = Realistisch.'));
+  var actief=STATE.tcoScenario||TCO_AAN.standaard;
+  var rij=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap'});
+  ['conservatief','realistisch','optimistisch'].forEach(function(key){
+    var sc=TCO_AAN.scenarios[key], on=(key===actief);
+    var spr=sc.net_sprong_jaar?(' · +'+Math.round(sc.net_sprong*100)+'% in '+sc.net_sprong_jaar):'';
+    var btn=el('button',{class:'fdsim-btn small',
+      style:'flex:1;min-width:150px;text-align:left;'+(on
+        ?'background:#1F3864;color:#fff;border:1px solid #1F3864'
+        :'background:#fff;color:#1F3864;border:1px solid #1F3864')});
+    btn.innerHTML='<div style="font-weight:700">'+(on?'✓ ':'')+sc.naam+'</div>'+
+      '<div style="font-size:10px;opacity:.85">netkosten +'+Math.round((sc.inflatie+sc.net_extra)*100)+'%/j'+spr+'</div>'+
+      (sc.toel?'<div style="font-size:9.5px;opacity:.7;margin-top:1px">'+sc.toel+'</div>':'');
+    btn.onclick=function(){ STATE.tcoScenario=key; renderStage(); };
+    rij.appendChild(btn);
+  });
+  wrap.appendChild(rij);
+  // Herbereken-knop: draait de simulatie opnieuw met het gekozen scenario actief, zodat óók de
+  // batterij-samenstelling van opstelling 3 op dat scenario wordt geoptimaliseerd (server-side).
+  var herRij=el('div',{style:'margin-top:9px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'});
+  var herBtn=el('button',{class:'fdsim-btn green small',style:(STATE.isRunning?'opacity:.6':'')});
+  herBtn.textContent='🔄 Herbereken opstelling 3 op dit scenario';
+  herBtn.disabled=!!STATE.isRunning;
+  herBtn.onclick=function(){ if(STATE.isRunning) return; runSimulatie(); };
+  herRij.appendChild(herBtn);
+  herRij.appendChild(el('span',{style:'font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'Scenario schakelen herrekent de TCO/vergelijking meteen. De batterij-samenstelling van opstelling 3 is bij de '+
+    'vorige simulatie gekozen op het '+(TCO_AAN.scenarios[actief]?TCO_AAN.scenarios[actief].naam:'Realistisch')+'-scenario — '+
+    'klik hierboven om ze op dít scenario opnieuw te laten optimaliseren.'));
+  wrap.appendChild(herRij);
+  return wrap;
 }
 
 // v1.27.0 — bewaar de OPTIMALE opstelling als scenario (naam vooraf aanpasbaar). Onder blok 7.
@@ -5458,6 +5576,7 @@ function _renderKpiBespreking(){
   function isMin(r,fn){ return r && haal.length>1 && haal.every(function(x){return fn(x)>=fn(r);}); }
   function lfVal(r){ return (r&&r.loadfactor)||0; }
   function rendVal(r){ return (r&&r.rendement)||0; }
+  function tcoVal(r){ return (r&&r.tco!=null)?r.tco:Infinity; }   // laagste TCO = keuzemaatstaf
   function blok(kleur,titel,tekst){ return '<div style="margin-top:8px;padding:8px 11px;background:#fff;border:1px solid '+kleur+'55;border-radius:6px">'+
     '<div style="font-weight:700;color:'+kleur+';margin-bottom:2px">'+titel+'</div>'+tekst+'</div>'; }
 
@@ -5490,17 +5609,17 @@ function _renderKpiBespreking(){
   if(o3){
     var kleiner=(o2 && eenh(o3)<eenh(o2))?(', i.p.v. '+eenh(o2)+' × bij opstelling 2'):'';
     var minderVerzw=(o1 && aansl(o3)<aansl(o1))?'zodat u niet de volle verzwaring van opstelling 1 nodig heeft':'op maat van deze laadvraag';
-    h+=blok('#05B050','Opstelling 3 — mix'+(isMax(o3,rendVal)?': het beste rendement':': het evenwicht'),
+    h+=blok('#05B050','Opstelling 3 — mix'+(isMin(o3,tcoVal)?': de laagste eigendomskost (TCO)':': het evenwicht'),
       'Net genoeg verzwaren ('+aansl(o3)+' kW · '+sp(o3)+') om de batterij klein te houden ('+eenh(o3)+' × 120/260'+kleiner+'), '+
-      'terwijl de batterij de piek shaved '+minderVerzw+'. Resultaat: rendement '+rend(o3)+', '+
+      'terwijl de batterij de piek shaved '+minderVerzw+'. Resultaat: rendement '+rend(o3)+' · TCO '+eur(o3.tco)+', '+
       (isMin(o3,stijg)?'de laagste netkosten-blootstelling':'een lage netkosten-blootstelling')+
       ' (<b>factuur stijgt '+(isMin(o3,stijg)?'maar ':'')+eur(stijg(o3))+' bij dubbele netkosten</b>) en een gebalanceerde loadfactor '+lf(o3)+'.');
   }
   var reden = (beste && beste.nr===3)
-    ? 'de sterkste combinatie van rendement en robuustheid'+(isMin(beste,stijg)?': de laagste blootstelling aan stijgende netkosten':'')+', met een gebalanceerde loadfactor'
+    ? 'de laagste all-in eigendomskost (TCO '+eur(beste.tco)+' over '+HORIZON_JAAR+' j — incl. onderhoud, cabine en het '+_tcoScenario().naam.toLowerCase()+' netkosten-schema) én de sterkste robuustheid'+(isMin(beste,stijg)?': de laagste blootstelling aan stijgende netkosten':'')+', met een gebalanceerde loadfactor'
     : (beste && beste.nr===2)
-      ? 'het hoogste rendement onder de opstellingen met batterij'+(sp(beste)==='LS'?'; hou wel de hogere netkosten-blootstelling op laagspanning in het achterhoofd naarmate de netkosten stijgen':'')
-      : 'de beste balans over de drie KPI\'s';
+      ? 'de laagste all-in TCO ('+eur(beste.tco)+' over '+HORIZON_JAAR+' j — incl. onderhoud, cabine en het '+_tcoScenario().naam.toLowerCase()+' netkosten-schema) onder de opstellingen met batterij'+(sp(beste)==='LS'?'; hou wel de hogere netkosten-blootstelling op laagspanning in het achterhoofd naarmate de netkosten stijgen':'')
+      : 'de laagste all-in eigendomskost over '+HORIZON_JAAR+' jaar';
   if(beste){
     h+='<div style="margin-top:10px;padding:8px 11px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px">'+
        '<b style="color:#1F3864">Conclusie — we bevelen '+beste.label+' aan:</b> '+reden+'.</div>';
@@ -5526,7 +5645,7 @@ function _renderOptimaleSamenvatting(){
     (o?'<div style="font-size:11px;color:#5A6577">'+o+'</div>':'')+'</div>'; }
   var sec=el('div',{style:'margin-top:14px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
-    'Optimale opstelling — '+b.label+' (hoogste rendement)'));
+    'Optimale opstelling — '+b.label+' (laagste all-in TCO)'));
   var grid=el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:10px'});
   grid.innerHTML=
     tile('PV', pv>0?fmtNum(pv,0)+' kWp':'Geen', '')+
@@ -5551,18 +5670,19 @@ function _renderInvesteringen0123(){
   var t=el('div');
   t.innerHTML='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:12px">'+
     kop()+
-    rij('Cabine (LS→MS) — apart', function(c){return v(c,'cabine');}, 'color:#9E480E;font-style:italic;border-bottom:1px solid #E3E8EF;padding-bottom:4px')+
     rij('PV', function(c){return v(c,'pv');})+
     rij('Laadpalen', function(c){return v(c,'laadpalen');})+
     rij('Batterij', function(c){return v(c,'batterij');})+
     rij('Netaanpassing aansluiting', function(c){return v(c,'netaanpassing');})+
     rij('Kabeltracé', function(c){return v(c,'trace');})+
-    rij('Totaal (excl. cabine)', function(c){return v(c,'totaal_excl_cabine');}, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+    rij('Subtotaal (excl. cabine)', function(c){return v(c,'totaal_excl_cabine');}, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
+    rij('Cabine (LS→MS)', function(c){return v(c,'cabine');}, 'color:#9E480E')+
+    rij('Totaal (incl. cabine)', function(c){return v(c,'totaal');}, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
     '</div>';
   sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'De cabine staat apart en telt NIET mee in het rendement: een MS-cabine is voor het verbruik en de netkosten-evolutie toch aangewezen. '+
-    'Het rendement (KPI2) rekent met het totaal excl. cabine. Opstelling 0 = bestaand verbruik, geen investering.'));
+    'De cabine (LS→MS) telt vanaf nu MEE in de investering: de optimale opstelling wordt gekozen op de laagste TCO incl. cabine. '+
+    'Opstelling 0 = bestaand verbruik, geen investering.'));
   return sec;
 }
 
@@ -5691,6 +5811,7 @@ function _renderGroeipad(){
   if(!alts||!alts.length) return null;
   var af=eng.af, E_base=eng.E_base, C=eng.C, huidig=eng.P_huidig||0;
   var base0=(E_base!=null)?(E_base+C):null;                             // opstelling 0 = bestaand + CREG-km
+  var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;         // laadpaal-aantal (voor onderhoud)
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
     'Groeipad — van 1 batterij tot het volledige aantal'));
@@ -5698,26 +5819,41 @@ function _renderGroeipad(){
     'Van 1 batterij (grotendeels verzwaren — dicht bij opstelling 1) tot het volledige aantal van opstelling 2. '+
     'Elke stap levert de vólledige laadvraag (100%); we zoeken telkens de aansluiting die daarvoor nodig is. '+
     'Zo ziet u hoe het extra vermogen daalt en de besparing/rendement evolueren; het gemarkeerde punt (✓) is de gekozen opstelling 3.'));
-  var grid='1.2fr 1.2fr 1.2fr 1fr';
+  var grid='1.1fr 1fr 1.1fr 0.8fr 1.1fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
-    '<span>Batterijen</span><span style="text-align:right">Extra vermogen</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span></div>';
+    '<span>Batterijen</span><span style="text-align:right">Extra vermogen</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span><span style="text-align:right">TCO ('+HORIZON_JAAR+'j)</span></div>';
   var rows=alts.map(function(a){
     var kva=+a.kva||0, sp=(kva>100)?'MS':(STATE.spanning||'LS');
     var extra=Math.max(0, kva-huidig);
     var fact=(+a.jaarkost||0)*af;
-    var besparing=(base0!=null)?(base0-fact):null;
-    var rend=(besparing!=null && a.capex>0)?(besparing/a.capex*100):(a.rendement!=null?a.rendement:null);
+    var netdeel=(a.distributie_eur!=null)?((+a.distributie_eur||0)*af):null;   // netkosten (B+C+D), jaarbasis
+    var besparing=(base0!=null)?(base0-fact):null;                             // bruto
+    // v1.31.0: de server geeft capex + tco INCL cabine mee (a.capex/a.tco). Oudere proxy zonder
+    // die velden: capex excl → cabine hier alsnog bijtellen (MS = >100 kVA).
+    var capexIncl=(a.capex!=null)?(+a.capex + ((a.cabine!=null||a.tco!=null)?0:((kva>100)?INV_CABINE_EUR:0))):null;
+    // v1.33.0: rendement NETTO (na opex) en TCO live herrekend op het gekozen scenario, zodat de
+    // rij meebeweegt met de scenario-kiezer. Zonder netkosten-split (oude proxy) valt tco terug
+    // op de server-waarde a.tco.
+    var battKwG=(+a.aantal_batterijen||0)*BATT_UNIT_KW;
+    var oh1G=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + battKwG*TCO_AAN.onderhoud.batterij_kw + lpTot*TCO_AAN.onderhoud.laadpaal;
+    var opex1G=(capexIncl!=null)?(oh1G + capexIncl*TCO_AAN.verzekering_promille/1000):null;
+    var besparingNettoG=(besparing!=null && opex1G!=null)?(besparing-opex1G):null;
+    var rend=(besparingNettoG!=null && capexIncl!=null && capexIncl>0 && besparingNettoG>0)?(besparingNettoG/capexIncl*100):null;
+    var tco=(capexIncl!=null && netdeel!=null)?_tcoMeerjaar(capexIncl, fact, netdeel, oh1G, (+STATE.pvKwp||0))
+          :((a.tco!=null)?(+a.tco):((capexIncl!=null)?(capexIncl+fact*HORIZON_JAAR):null));
     var g=a.gekozen;
     return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
       '<span>'+a.aantal_batterijen+' × 120/260'+(g?' ✓':'')+'</span>'+
       '<span style="text-align:right">'+(extra>0?'+ '+fmtNum(extra,0)+' kW · '+sp:'0 kW')+'</span>'+
       '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
-      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span></div>';
+      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span>'+
+      '<span style="text-align:right">'+(tco!=null?fmtEur(tco):'—')+'</span></div>';
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
     'Elke stap levert 100% van de laadvraag. Meer batterijen = minder extra vermogen (verzwaring t.o.v. vandaag) — robuuster tegen stijgende netkosten en piekgroei. '+
-    'Het gekozen punt (✓) heeft het beste rendement. Suggestie: start met het laadplein en leg meteen de kabels voor het volledige plein; laat de batterijen meegroeien met de EV-vloot.'));
+    'TCO is all-in (cabine, onderhoud, verzekering, '+_tcoScenario().naam.toLowerCase()+' netkosten-schema — zoals het financieel rapport). Het gekozen punt (✓) heeft de laagste TCO over '+HORIZON_JAAR+' jaar. '+
+    'Suggestie: start met het laadplein en leg meteen de kabels voor het volledige plein; laat de batterijen meegroeien met de EV-vloot.'));
   return sec;
 }
 function _actieveBatterijKwh(){
@@ -6261,7 +6397,12 @@ function renderStep9Resultaat(){
     if(_os) box.appendChild(_os);
   }
 
-  // v1.26.0 (blok 3): drie KPI-tegels van de beste opstelling (rendement-optimaal).
+  // v1.33.0: kostenscenario-kiezer (conservatief → optimistisch) — herrekent de TCO/keuze live.
+  if(!R.error && STATE.opstellingen){
+    box.appendChild(_renderScenarioKiezer());
+  }
+
+  // v1.26.0 (blok 3): drie KPI-tegels van de beste opstelling (TCO-optimaal).
   if(!R.error && STATE.opstellingen){
     var _kt=_renderKpiTegels();
     if(_kt) box.appendChild(_kt);
@@ -7254,7 +7395,22 @@ function runSimulatie(){
   // terug op de middelste mix — met een expliciete waarschuwing in het log.
   input._investering = { cabine_eur:INV_CABINE_EUR, eur_per_kva:INV_EUR_PER_KVA,
                          eur_per_kwh:INV_BATT_EUR_PER_KWH, kabel_pct:INV_KABEL_PCT,
-                         horizon_jaar:15 };
+                         horizon_jaar:HORIZON_JAAR };
+  // v1.32.0: TCO-escalatie voor de mix-keuze — IDENTIEK aan het financieel rapport (zie TCO_AAN).
+  // De server rekent de meerjarige TCO per mix-kandidaat met exact deze parameters, zodat de
+  // gekozen opstelling 3 en de getoonde TCO overeenstemmen. onderhoud_vast (PV + laadpalen) is
+  // constant over de kandidaten; de server telt er per k enkel batterij-onderhoud bij.
+  try {
+    var _tLp=_frLaadpalen(), _tPv=(+STATE.pvKwp||0), _tSc=_tcoScenario();
+    input._tco = { scenario:(STATE.tcoScenario||TCO_AAN.standaard),
+                   inflatie:_tSc.inflatie, net_extra:_tSc.net_extra,
+                   net_sprong_jaar:_tSc.net_sprong_jaar, net_sprong:_tSc.net_sprong,
+                   startjaar:TCO_AAN.startjaar, horizon:TCO_AAN.horizon,
+                   verzekering_promille:TCO_AAN.verzekering_promille,
+                   omvormer_vervang_kwp:TCO_AAN.omvormer_vervang_kwp, pv_kwp:_tPv,
+                   onderhoud:TCO_AAN.onderhoud,
+                   onderhoud_vast:_tPv*TCO_AAN.onderhoud.pv_kwp + (_tLp.ac+_tLp.dc160+_tLp.dc400)*TCO_AAN.onderhoud.laadpaal };
+  } catch(e){}
   // v1.29.0: KPI2-basis voor de mix-keuze (opstelling 3 kiest op rendement). E_base+CREG en
   // het vaste capex-deel (laadpalen + PV + kabeltracé) zijn constant over de mix-kandidaten;
   // de server voegt er per k enkel batterij + verzwaring aan toe.
