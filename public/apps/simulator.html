@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.30.0</span>
+    <span class="fdsim-version">v1.30.1</span>
   </div>
 </div>
 
@@ -5620,10 +5620,17 @@ function _renderFacturen0123(){
     rij('Stroomfactuur', function(c){return c.factuur!=null?fmtEur(c.factuur):'—';}, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
     rij('km aan CREG-forfait', function(c){return fmtEur(c.creg);})+
     rij('Totaal (stroom + CREG-km)', function(c){return c.factuur!=null?fmtEur((c.factuur||0)+(c.creg||0)):'—';}, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+    (function(){ var base0=(cols[0].factuur!=null)?((cols[0].factuur||0)+(cols[0].creg||0)):null;
+      return rij('Besparing t.o.v. opstelling 0', function(c){
+        if(c.nr===0||base0==null||c.factuur==null) return '—';
+        var b=base0-((c.factuur||0)+(c.creg||0));
+        return '<span style="color:'+(b>=0?'#05B050':'#9E480E')+'">'+(b>=0?'+ ':'')+fmtEur(b)+'</span>';
+      }, 'font-weight:700;color:#05B050;padding-top:3px'); })()+
     '</div>';
   sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Opstelling 0 = bestaande factuur + de km\'s die vandaag elders aan het CREG-forfait laden. Bij opstelling 1/2/3 laden die km\'s op de eigen aansluiting, dus staat die regel op € 0.'));
+    'Opstelling 0 = bestaande factuur + de km\'s die vandaag elders aan het CREG-forfait laden. Bij opstelling 1/2/3 laden die km\'s op de eigen aansluiting, dus staat die regel op € 0. '+
+    'De besparing is het totaal van opstelling 0 min het totaal van die opstelling.'));
   return sec;
 }
 
@@ -5674,48 +5681,43 @@ function _renderEnergieControle(){
   return sec;
 }
 
-// Blok 10 — GROEIPAD als KPI-EVOLUTIE. Toont de mix-sweep (opstelling 3): van 1 batterij
-// (grotendeels verzwaren — dicht bij opstelling 1) tot het volledige aantal (opstelling 2),
-// telkens met de bijhorende aansluiting. Per stap: KPI1 (€/km), KPI2 (rendement), KPI3
-// (loadfactor) + de netkosten×2-blootstelling. Data komt uit de sim (mix.alternatieven),
-// dus GEEN extra dispatch-runs meer.
+// Blok 10 — GROEIPAD: van 1 tot het volledige aantal batterijen (opstelling 2). Elke stap
+// levert 100% van de laadvraag (de aansluiting wordt net groot genoeg gemaakt), dus tonen we
+// per stap het EXTRA vermogen (verzwaring t.o.v. vandaag), de besparing en het rendement.
+// Data uit de mix-sweep (mix.alternatieven) — geen extra dispatch-runs.
 function _renderGroeipad(){
   var eng=_kpiEngine(); if(!eng) return null;
   var d3=_derde(); var mix=d3&&d3.o&&d3.o.mix; var alts=(mix&&mix.alternatieven)||null;
   if(!alts||!alts.length) return null;
-  var af=eng.af, E_base=eng.E_base, C=eng.C, km=eng.km;
+  var af=eng.af, E_base=eng.E_base, C=eng.C, huidig=eng.P_huidig||0;
+  var base0=(E_base!=null)?(E_base+C):null;                             // opstelling 0 = bestaand + CREG-km
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
-    'Groeipad — meer batterijen, minder verzwaring: hoe de KPI\'s evolueren'));
+    'Groeipad — van 1 batterij tot het volledige aantal'));
   sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
-    'Van 1 batterij (grotendeels verzwaren — dicht bij opstelling 1) tot het volledige aantal (opstelling 2). '+
-    'Bij elke stap zoeken we de aansluiting die de laadvraag nog levert. Zo ziet u de km-kost, het rendement én de weerbaarheid (loadfactor) evolueren; '+
-    'het gemarkeerde punt (✓) is de gekozen opstelling 3 — het beste rendement-evenwicht.'));
-  var grid='1.1fr 1.1fr 1fr 1fr 1fr 1.1fr';
+    'Van 1 batterij (grotendeels verzwaren — dicht bij opstelling 1) tot het volledige aantal van opstelling 2. '+
+    'Elke stap levert de vólledige laadvraag (100%); we zoeken telkens de aansluiting die daarvoor nodig is. '+
+    'Zo ziet u hoe het extra vermogen daalt en de besparing/rendement evolueren; het gemarkeerde punt (✓) is de gekozen opstelling 3.'));
+  var grid='1.2fr 1.2fr 1.2fr 1fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
-    '<span>Batterijen</span><span style="text-align:right">Aansluiting</span><span style="text-align:right">€/km · KPI1</span>'+
-    '<span style="text-align:right">Rendement · KPI2</span><span style="text-align:right">Loadfactor · KPI3</span><span style="text-align:right">Factuur bij ×2</span></div>';
+    '<span>Batterijen</span><span style="text-align:right">Extra vermogen</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span></div>';
   var rows=alts.map(function(a){
     var kva=+a.kva||0, sp=(kva>100)?'MS':(STATE.spanning||'LS');
+    var extra=Math.max(0, kva-huidig);
     var fact=(+a.jaarkost||0)*af;
-    var kostKm=(E_base!=null && km>0)?((fact-E_base)/km):null;
-    var rend=(E_base!=null && a.capex>0)?((E_base+C-fact)/a.capex*100):(a.rendement!=null?a.rendement:null);
-    var lf=(kva>0)?(((+a.afname_mwh||0)*af*1000)/(8760*kva)):null;
-    var fx2=fact+((+a.distributie_eur||0)*af);
+    var besparing=(base0!=null)?(base0-fact):null;
+    var rend=(besparing!=null && a.capex>0)?(besparing/a.capex*100):(a.rendement!=null?a.rendement:null);
     var g=a.gekozen;
     return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
       '<span>'+a.aantal_batterijen+' × 120/260'+(g?' ✓':'')+'</span>'+
-      '<span style="text-align:right">'+fmtNum(kva,0)+' kW · '+sp+'</span>'+
-      '<span style="text-align:right">'+(kostKm!=null?fmtNum(kostKm,3):'—')+'</span>'+
-      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span>'+
-      '<span style="text-align:right">'+(lf!=null?fmtNum(lf*100,0)+'%':'—')+'</span>'+
-      '<span style="text-align:right">'+fmtEur(fx2)+'</span></div>';
+      '<span style="text-align:right">'+(extra>0?'+ '+fmtNum(extra,0)+' kW · '+sp:'0 kW')+'</span>'+
+      '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
+      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span></div>';
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Meer batterijen = minder verzwaring: de loadfactor stijgt (robuuster tegen piekgroei) en de factuur bij een verdubbeling van de netkosten daalt doorgaans. '+
-    'Bij weinig batterijen lijkt het op opstelling 1 (grote aansluiting, kwetsbaar); het gekozen punt (✓) is het beste evenwicht. '+
-    'Suggestie voor de klant: start met het laadplein en leg meteen de kabels voor het volledige plein; laat de batterijen meegroeien met de EV-vloot.'));
+    'Elke stap levert 100% van de laadvraag. Meer batterijen = minder extra vermogen (verzwaring t.o.v. vandaag) — robuuster tegen stijgende netkosten en piekgroei. '+
+    'Het gekozen punt (✓) heeft het beste rendement. Suggestie: start met het laadplein en leg meteen de kabels voor het volledige plein; laat de batterijen meegroeien met de EV-vloot.'));
   return sec;
 }
 function _actieveBatterijKwh(){
