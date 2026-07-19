@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.40.0</span>
+    <span class="fdsim-version">v1.41.0</span>
   </div>
 </div>
 
@@ -5090,19 +5090,24 @@ function _tcoMeerjaar(capex, jaarkost, netdeel, oh1, pvKwp){
   }
   return (+capex||0)+som;
 }
-// v1.39.0 — RENDEMENT OVER DE HORIZON. Het jaar-1-rendement (besparing/capex) is per definitie
-// scenario-onafhankelijk (in jaar 1 zijn alle groeifactoren 1). Dit gemiddelde jaarrendement over
-// de horizon rekent de escalatie wél mee: de besparing groeit (energie-deel met inflatie, netdeel
-// met het net-schema), opex groeit met inflatie, omvormer-vervanging in jaar 10. Zo beweegt het
-// rendement mee met het gekozen kostenscenario. besparingBruto = (E_base+CREG) − E (vóór opex).
-function _rendementHorizonSc(besparingBruto, oh1, capex, pvKwp, sc){
+// v1.41.0 — RENDEMENT OVER DE HORIZON. Het jaar-1-rendement is scenario-onafhankelijk (groeifactoren
+// zijn 1 in jaar 1). Dit gemiddelde jaarrendement over de horizon escaleert de besparing per opstelling
+// met haar ÉCHTE netkosten-component: besparingNet = (netkosten opstelling 0) − (netkosten opstelling).
+// Dat deel groeit met het netkosten-schema (gN), de rest (energie) met inflatie (gE). Voor een opstelling
+// die de netkosten VERHOOGT (opstelling 1 = verzwaren) is besparingNet NEGATIEF → agressiever stijgende
+// netkosten drukken haar rendement (correct). Voor een batterij (die de piek shavet) is besparingNet
+// positief → haar rendement stijgt mét de netkosten. Zonder netkosten-component valt het terug op de
+// 72/28-split van het rapport. Opex groeit met inflatie; omvormer-vervanging in jaar 10.
+function _rendementHorizonSc(besparingBruto, besparingNet, oh1, capex, pvKwp, sc){
   if(!(capex>0) || besparingBruto==null || !sc) return null;
-  var verz=capex*TCO_AAN.verzekering_promille/1000, ed=TCO_AAN.besparing_energie_deel, tot=0;
+  var verz=capex*TCO_AAN.verzekering_promille/1000, tot=0;
+  var bNet=(besparingNet!=null)?besparingNet:besparingBruto*(1-TCO_AAN.besparing_energie_deel);
+  var bEnergie=besparingBruto-bNet;
   for(var y=0;y<TCO_AAN.horizon;y++){
     var gE=Math.pow(1+sc.inflatie,y);
     var gN=Math.pow(1+sc.inflatie+sc.net_extra,y);
     if(sc.net_sprong_jaar && (TCO_AAN.startjaar+y)>=sc.net_sprong_jaar) gN*=(1+sc.net_sprong);
-    var besp=besparingBruto*(ed*gE+(1-ed)*gN);
+    var besp=bEnergie*gE+bNet*gN;
     var opex=(+oh1||0)*Math.pow(1+sc.inflatie,y)+verz;
     var netto=besp-opex;
     if(y===9) netto-=(+pvKwp||0)*TCO_AAN.omvormer_vervang_kwp;
@@ -5110,11 +5115,11 @@ function _rendementHorizonSc(besparingBruto, oh1, capex, pvKwp, sc){
   }
   return (tot/TCO_AAN.horizon)/capex*100;   // gemiddeld jaarlijks netto-rendement over de horizon
 }
-function _rendementHorizon(besparingBruto, oh1, capex, pvKwp){ return _rendementHorizonSc(besparingBruto,oh1,capex,pvKwp,_tcoScenario()); }
+function _rendementHorizon(besparingBruto, besparingNet, oh1, capex, pvKwp){ return _rendementHorizonSc(besparingBruto,besparingNet,oh1,capex,pvKwp,_tcoScenario()); }
 // Horizon-rendement voor ALLE scenario's (voor de KPI2-details) — map key → %.
-function _rendementHorizonAlle(besparingBruto, oh1, capex, pvKwp){
+function _rendementHorizonAlle(besparingBruto, besparingNet, oh1, capex, pvKwp){
   var out={}; ['conservatief','realistisch','optimistisch'].forEach(function(sk){
-    out[sk]=_rendementHorizonSc(besparingBruto,oh1,capex,pvKwp,TCO_AAN.scenarios[sk]); }); return out;
+    out[sk]=_rendementHorizonSc(besparingBruto,besparingNet,oh1,capex,pvKwp,TCO_AAN.scenarios[sk]); }); return out;
 }
 // v1.23.4: drie opstellingen. Opstelling 3 = opstelling 2 + cabine (LS→MS).
 // Zij deelt de batterij-capex met opstelling 2; het enige verschil in KOST is de
@@ -5318,6 +5323,9 @@ function _kpiEngine(){
   var baseDagen=_periodeDagen(bc.periodeVan,bc.periodeTot);
   var heeftBase=_heeftFactuur() && baseDagen>0;
   var E_base=heeftBase ? (bc.totaalExclBtw||0)*(365/baseDagen) : null;   // bestaande factuur → jaar
+  // v1.41.0: netkosten-component van opstelling 0 (bestaand gebouw, jaarbasis) — voor de per-opstelling
+  // net-escalatie van het horizon-rendement. De CREG-km's tellen als energie (forfait), niet als netkosten.
+  var baseNet=heeftBase ? (bc.totaalDistributieExclBtw||0)*(365/baseDagen) : null;
   var C=_cregKostJaar(), km=_vlootKmJaar();
   var lp=_frLaadpalen();
   var laadpalen=lp.ac*INV_LAADPAAL_EUR.ac + lp.dc160*INV_LAADPAAL_EUR.dc160 + lp.dc400*INV_LAADPAAL_EUR.dc400;
@@ -5384,11 +5392,14 @@ function _kpiEngine(){
     var tcoCherry=_tcoMeerjaar(capex, E-windfall, netdeel, oh1, (+STATE.pvKwp||0));
     // v1.39.0: rendement over de horizon (mét escalatie → beweegt mee met het scenario). Zonder
     // en mét onbalans (cherry gebruikt de besparing incl. windfall).
-    var rendHor=_rendementHorizon(besparing, oh1, capex, (+STATE.pvKwp||0));
-    var rendHorCherry=(besparing!=null)?_rendementHorizon(besparing+windfall, oh1, capex, (+STATE.pvKwp||0)):null;
-    // v1.40.0: horizon-rendement voor de 3 scenario's (KPI2-details), zonder en mét onbalans.
-    var rendHorAlle=_rendementHorizonAlle(besparing, oh1, capex, (+STATE.pvKwp||0));
-    var rendHorAlleCherry=(besparing!=null)?_rendementHorizonAlle(besparing+windfall, oh1, capex, (+STATE.pvKwp||0)):{};
+    // v1.41.0: netkosten-deel van de besparing = (netkosten opstelling 0) − (netkosten deze opstelling).
+    // Negatief wanneer de opstelling de netkosten verhoogt (opstelling 1 = verzwaren).
+    var besparingNet=(baseNet!=null && besparing!=null)?(baseNet-netdeel):null;
+    var rendHor=_rendementHorizon(besparing, besparingNet, oh1, capex, (+STATE.pvKwp||0));
+    var rendHorCherry=(besparing!=null)?_rendementHorizon(besparing+windfall, besparingNet, oh1, capex, (+STATE.pvKwp||0)):null;
+    // horizon-rendement voor de 3 scenario's (KPI2-details), zonder en mét onbalans.
+    var rendHorAlle=_rendementHorizonAlle(besparing, besparingNet, oh1, capex, (+STATE.pvKwp||0));
+    var rendHorAlleCherry=(besparing!=null)?_rendementHorizonAlle(besparing+windfall, besparingNet, oh1, capex, (+STATE.pvKwp||0)):{};
     return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E, windfall:windfall, geladenMwh:geladenMwh,
       distributie:c.distributie*af,                                     // netkosten-regel (voor de ×2-scenario's)
       inv:{pv:pv,laadpalen:laadpalen,cabine:cabine,batterij:batterij,netaanpassing:netaanpassing,trace:trace,
