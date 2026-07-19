@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.41.0</span>
+    <span class="fdsim-version">v1.42.0</span>
   </div>
 </div>
 
@@ -5997,23 +5997,27 @@ function _renderGroeipad(){
   var _gi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
   _gi.innerHTML=
     'De aansluiting blijft op élke stap gelijk aan het volgroeide vermogen (<b>'+fmtNum(kvaVol,0)+' kW · '+spVol+'</b>) en de '+
-    'kabels liggen al voor het volledige plein. De dispatch laadt op elke stap zoveel mogelijk laadenergie ónder die vaste '+
-    'aansluiting. Met minder batterijen past er minder onder de aansluiting (de batterij vult de dalen en shavet de piek), dus '+
-    'de <b>% laadenergie</b> ligt lager — gemeten t.o.v. de volgroeide stap. U start bescheiden met 1 batterij en zet er bij '+
-    'naarmate uw EV-vloot groeit, tot 100% bij het volgroeide aantal. Elke stap is een échte dispatch.';
+    'kabels liggen al voor het volledige plein. De dispatch laadt op elke stap zoveel mogelijk km ónder die vaste aansluiting. '+
+    'Met minder batterijen past er minder onder de aansluiting (de batterij vult de dalen en shavet de piek), dus laden er minder '+
+    'km — het <b>% geladen</b> ligt lager, gemeten t.o.v. de volgroeide stap. U start bescheiden met 1 batterij en zet er bij '+
+    'naarmate uw EV-vloot groeit, tot 100% bij het volgroeide aantal. Elke stap is een échte dispatch op de vaste aansluiting.';
   sec.appendChild(_gi);
-  var grid='1.2fr 1.1fr 1.1fr 0.8fr 1.2fr';
+  var grid='0.95fr 0.75fr 0.95fr 0.7fr 1fr 0.7fr 1fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
-    '<span>Batterijen</span><span style="text-align:right">% laadenergie</span><span style="text-align:right">Besparing/jaar</span>'+
-    '<span style="text-align:right">Rendement</span><span style="text-align:right">Instap-investering</span></div>';
-  // v1.38.0: % = geleverde laadenergie van deze stap ÷ die van de VOLGROEIDE stap (spec Johan).
-  // De dispatch is hard begrensd op de vaste aansluiting; met minder batterijen past er minder
-  // laadenergie onder die aansluiting binnen het laadvenster → lagere % en lagere besparing.
+    '<span>Batterijen</span><span style="text-align:right">kVA aansl.</span><span style="text-align:right">km geladen</span>'+
+    '<span style="text-align:right">% geladen</span><span style="text-align:right">Besparing/jaar</span>'+
+    '<span style="text-align:right">Rendement</span><span style="text-align:right">Instap-inv.</span></div>';
+  // v1.42.0: kolommen kVA-aansluiting (constant = volgroeid), totaal km geladen (stijgt met de batterij
+  // op de vaste aansluiting) en % geladen = km(stap)/km(volgroeid). De dispatch mag de aansluiting NU
+  // niet meer verhogen (server-vlag) → geladen_mwh toont wat écht onder de vaste aansluiting past.
+  var vlootKm=_vlootKmJaar(), gevraagdMwh=(+gp.gevraagd_mwh)||0;
   var geladenVol=(+(gp.stappen[gp.stappen.length-1]||{}).geladen_mwh)||0;
+  var kmVol=(gevraagdMwh>0)?vlootKm*(geladenVol/gevraagdMwh):0;
   var rows=gp.stappen.map(function(s){
     var k=+s.aantal_batterijen||0;
     var geladenK=(+s.geladen_mwh)||0;
-    var pct=(geladenVol>0)?Math.min(100, geladenK/geladenVol*100):null;   // % t.o.v. volgroeide stap
+    var kmGeladen=(gevraagdMwh>0)?vlootKm*(geladenK/gevraagdMwh):null;   // totaal km met eigen laadenergie
+    var pct=(kmVol>0)?Math.min(100, kmGeladen/kmVol*100):null;          // % = km(stap)/km(volgroeid)
     var pctF=(pct!=null)?pct/100:1;
     var notDelivered=(geladenVol>0)?Math.max(0,(geladenVol-geladenK)/geladenVol):0;  // niet geleverd t.o.v. volgroeid
     // Besparing van de VOLGROEIDE stap = exact opstelling 3 (b.factuur), zodat KPI2 en groeipad sluiten.
@@ -6029,24 +6033,27 @@ function _renderGroeipad(){
     var opex1=oh1+capex*TCO_AAN.verzekering_promille/1000;
     var besparingNetto=(besparing!=null)?(besparing-opex1):null;
     var rend=(besparingNetto!=null && capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
-    var verhoogd=(+s.aansluiting_verhoogd_kw>0);                        // dispatch moest de aansluiting overschrijden
+    var verhoogd=(+s.aansluiting_verhoogd_kw>0);                        // zou 0 moeten zijn met de vaste-aansluiting-vlag
+    var kvaStap=kvaVol+(verhoogd?(+s.aansluiting_verhoogd_kw):0);       // effectieve aansluiting van deze stap
     var g=(k===kStar);                                                  // volgroeid = optimale opstelling
     return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
-      '<span>'+k+' × 120/260'+(g?' ✓ volgroeid':(k===1?' · instap':''))+'</span>'+
-      '<span style="text-align:right'+(verhoogd?';color:#9E480E':'')+'">'+(pct!=null?fmtNum(pct,0)+' %'+(verhoogd?' ⚠':''):'—')+'</span>'+
+      '<span>'+k+' × 120/260'+(g?' ✓':(k===1?' · instap':''))+'</span>'+
+      '<span style="text-align:right'+(verhoogd?';color:#9E480E':'')+'">'+fmtNum(kvaStap,0)+(verhoogd?' ⚠':'')+'</span>'+
+      '<span style="text-align:right">'+(kmGeladen!=null?fmtNum(kmGeladen,0):'—')+'</span>'+
+      '<span style="text-align:right">'+(pct!=null?fmtNum(pct,0)+' %':'—')+'</span>'+
       '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
       '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span>'+
       '<span style="text-align:right">'+fmtEur(capex)+'</span></div>';
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Aansluiting en kabels zijn overal die van de volgroeide opstelling (één keer aanleggen, nooit meer verhogen); alleen de '+
-    'batterijen en laadpalen groeien mee. % = geleverde laadenergie t.o.v. de volgroeide stap; wat niet onder de vaste '+
-    'aansluiting past, laadt zolang nog elders aan het CREG-forfait (dat drukt de besparing). De volgroeide rij (✓) is identiek '+
-    'aan de optimale opstelling in KPI2. Let op de logica: met mínder batterijen stijgt het rendement (minder investering) maar '+
-    'dáált de besparing (minder laadenergie geleverd) — daarom kiezen we de optimale opstelling op de laagste TCO, niet op het '+
-    'hoogste rendement. De instap met 1 batterij kost fors minder en is een makkelijk verkoopbare, rendabele start; de batterijen '+
-    '(en laadpalen) komen er nadien bij, bij dezelfde partij. ⚠ = op deze stap is de aansluiting de bindende limiet (batterij te klein voor de piek).'));
+    'De kVA-aansluiting is op élke stap dezelfde (die van de volgroeide opstelling — één keer aanleggen, nooit meer verhogen). '+
+    '"km geladen" is het aantal km/jaar dat op de eigen parking geladen raakt; dat stijgt met de groeiende batterij terwijl de '+
+    'aansluiting gelijk blijft. % geladen = km(stap) ÷ km(volgroeid). Wat niet onder de vaste aansluiting past, laadt zolang nog '+
+    'elders aan het CREG-forfait (dat drukt de besparing). De volgroeide rij (✓) is identiek aan de optimale opstelling in KPI2. '+
+    'Met mínder batterijen stijgt het rendement (minder investering) maar dáált de besparing (minder km geladen) — daarom kiezen '+
+    'we op de laagste TCO, niet op het hoogste rendement. De instap met 1 batterij kost fors minder en is een makkelijk verkoopbare, '+
+    'rendabele start; batterijen en laadpalen komen er nadien bij, bij dezelfde partij. ⚠ = aansluiting toch moeten verhogen (oude proxy).'));
   return sec;
 }
 // v1.35.0: oude groeipad-weergave (minimale aansluiting per batterij-aantal, 100% geleverd) —
