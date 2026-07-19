@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.47.0</span>
+    <span class="fdsim-version">v1.48.0</span>
   </div>
 </div>
 
@@ -6068,62 +6068,52 @@ function _renderGroeipad(){
 
   var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
   var base0=(E_base!=null)?(E_base+C):null;
-  var inv=b.inv||{};
-  var fullLaadpalen=+inv.laadpalen||0;
   var battUnitCost=INV_BATT_EUR_PER_KWH*BATT_UNIT_KWH;                  // €/eenheid (120/260)
-  var fullLaadpalenB=+(b.inv||{}).laadpalen||0;
-  // v1.47.0: het groeipad loopt tot het aantal batterijen van opstelling 2 (laatste rij). De
-  // AANBEVOLEN (NPV-optimale) opstelling is opstelling 3 = kOpt batterijen — dáár staat de ✓, niet
-  // op de laatste rij. capexOpt is de KPI2-capex van die optimale opstelling; capexFixed is het
-  // niet-batterij/niet-laadpalen deel (aansluiting + kabels + cabine + PV).
-  var kOpt=Math.max(1, Math.round(_dimKwh(b.o)/BATT_UNIT_KWH));
-  var capexOpt=(b.capex!=null)?+b.capex:0;
-  var capexFixed=capexOpt - kOpt*battUnitCost - fullLaadpalenB;
+  // v1.48.0: capex per stap opnieuw opgebouwd uit de investeringssplit van opstelling 3 (b.inv), zodat
+  // we ze voor ÉLKE aansluiting kunnen herrekenen: vaste basis (PV + kabeltracé) + laadpalen naar rato
+  // geleverde energie + k batterijen + de verzwaring/cabine van díe aansluiting.
+  var _bi=b.inv||{};
+  var fixedBase=(+_bi.pv||0)+(+_bi.trace||0);                          // PV + kabeltracé (batterij/aansluiting-onafhankelijk)
+  var fullLaadpalenB=(+_bi.laadpalen||0);
+  var kOpt=Math.max(1, Math.round(_dimKwh(b.o)/BATT_UNIT_KWH));         // opstelling 3 = kOpt batterijen op de O3-aansluiting
   var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;
-  var kvaVol=+gp.aansluiting_kva|| (+(b.o.config||{}).aansluiting_kva) ||0;
-  var spVol=(kvaVol>100)?'MS':((b.o.config||{}).spanning||STATE.spanning||'LS');
-  var kStar=gp.stappen.length;   // laatste rij = opstelling 2's batterij-aantal
+  // De twee vaste aansluitingen: O3 (verzwaard, voor 100% km) en O2 (geen verzwaring). Verzwaring+cabine
+  // per aansluiting halen we uit de investeringssplit van de respectieve opstelling.
+  var kvaO3=+(b.o.config||{}).aansluiting_kva|| (+gp.aansluiting_kva) ||0;
+  var _o2row=(eng.rows||[]).filter(function(r){return r.key==='batterij';})[0]||null;
+  var kvaO2=(_o2row&&_o2row.o&&_o2row.o.config)?(+_o2row.o.config.aansluiting_kva||0):0;
+  var _o2i=(_o2row&&_o2row.inv)||{};
+  var connCost={};
+  connCost[Math.round(kvaO3)]=(+_bi.netaanpassing||0)+(+_bi.cabine||0);
+  if(kvaO2>0) connCost[Math.round(kvaO2)]=(+_o2i.netaanpassing||0)+(+_o2i.cabine||0);
+  function _connCost(c){ var v=connCost[Math.round(c)]; if(v!=null) return v;
+    return (Math.round(c)===Math.round(kvaO3))?((+_bi.netaanpassing||0)+(+_bi.cabine||0)):0; }
+  function _connLabel(c){ var cr=Math.round(c);
+    if(cr===Math.round(kvaO3)) return fmtNum(c,0)+' kVA · O3';
+    if(kvaO2>0 && cr===Math.round(kvaO2)) return fmtNum(c,0)+' kVA · O2';
+    return fmtNum(c,0)+' kVA'; }
+  var vlootKm=_vlootKmJaar(), gevraagdMwh=(+gp.gevraagd_mwh)||0;
   // v1.43.0: netkosten van opstelling 0 (voor de per-stap net-escalatie van de cumulatieve besparing).
   var _gbc=STATE.baseCase||{}, _gbd=_periodeDagen(_gbc.periodeVan,_gbc.periodeTot);
   var baseNet=(_heeftFactuur()&&_gbd>0)?((_gbc.totaalDistributieExclBtw||0)*(365/_gbd)):null;
 
-  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
-  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
-    'Groeipad — bescheiden starten, klaar voor groei'));
-  var _gi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
-  _gi.innerHTML=
-    'Van 1 batterij tot het volledige aantal van opstelling 2 (wat concurrenten vaak voorstellen), op dezelfde aansluiting '+
-    '(<b>'+fmtNum(kvaVol,0)+' kW · '+spVol+'</b>) met de kabels al voor het volledige plein. De ✓ markeert de aanbevolen opstelling: '+
-    'de hoogste NPV met zo weinig mogelijk capex. U ziet dat extra batterijen daarboven <b>overkill</b> zijn — ze verhogen de '+
-    'investering zonder de goedkope km, het rendement of de weerbaarheid noemenswaardig te verbeteren. Bescheiden starten en later '+
-    'meegroeien met uw elektrificatie is dus zowel goedkoper als financieel sterker. Elke stap is een échte dispatch op de vaste aansluiting.';
-  sec.appendChild(_gi);
-  var grid='0.85fr 0.55fr 0.95fr 0.85fr 0.95fr 0.85fr 0.6fr 0.85fr';
-  var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
-    '<span>Batterijen</span><span style="text-align:right">kVA aansl.</span><span style="text-align:right">km geladen (%)</span>'+
-    '<span style="text-align:right">Besparing/jaar</span>'+
-    '<span style="text-align:right">Cum. besp. '+HORIZON_JAAR+'j</span>'+
-    '<span style="text-align:right">NPV @'+Math.round(_npvDisc()*100)+'%</span>'+
-    '<span style="text-align:right">Rendement</span><span style="text-align:right">Instap-inv.</span></div>';
-  // v1.42.0: kolommen kVA-aansluiting (constant = volgroeid), totaal km geladen (stijgt met de batterij
-  // op de vaste aansluiting) en % geladen = km(stap)/km(volgroeid). De dispatch mag de aansluiting NU
-  // niet meer verhogen (server-vlag) → geladen_mwh toont wat écht onder de vaste aansluiting past.
-  var vlootKm=_vlootKmJaar(), gevraagdMwh=(+gp.gevraagd_mwh)||0;
-  var geladenVol=(+(gp.stappen[gp.stappen.length-1]||{}).geladen_mwh)||0;
-  var kmVol=(gevraagdMwh>0)?vlootKm*(geladenVol/gevraagdMwh):0;
-  // v1.44.0: eerst de data per stap berekenen (incl. NPV), dan het NPV-optimum vinden en renderen.
+  // v1.48.0: per (batterij-aantal, aansluiting) de km + NPV op de GELEVERDE km. De niet-geleverde km
+  // kosten in beide werelden (opstelling 0 én deze stap) CREG en vallen weg → besparing = base0 −
+  // factuur − CREG·(niet-geleverd) = E_base + CREG·(geleverd deel) − factuur. Zo vergelijken we met
+  // opstelling 0 op dezelfde km, ook als de stap minder dan 100% laadt.
   var data=gp.stappen.map(function(s){
     var k=+s.aantal_batterijen||0;
+    var c=(+s.aansluiting_kva)||kvaO3;                                  // back-compat: oude proxy → O3
     var geladenK=(+s.geladen_mwh)||0;
-    var kmGeladen=(gevraagdMwh>0)?vlootKm*(geladenK/gevraagdMwh):null;   // totaal km met eigen laadenergie
-    var pct=(kmVol>0)?Math.min(100, kmGeladen/kmVol*100):null;          // % = km(stap)/km(volgroeid)
+    var pct=(s.geleverd_pct!=null)?(+s.geleverd_pct):(gevraagdMwh>0?Math.min(100,geladenK/gevraagdMwh*100):null);
     var pctF=(pct!=null)?pct/100:1;
-    var notDelivered=(geladenVol>0)?Math.max(0,(geladenVol-geladenK)/geladenVol):0;  // niet geleverd t.o.v. volgroeid
-    var factStap=(k===kOpt && b.factuur!=null)?b.factuur:((+s.factuur_sturing_excl_btw||0)*af);
+    var kmGeladen=(pct!=null)?vlootKm*pctF:null;                        // totaal km met eigen laadenergie
+    var notDelivered=(pct!=null)?Math.max(0,1-pctF):0;                  // niet geleverd t.o.v. de volledige vloot
+    var isOpt=(Math.round(c)===Math.round(kvaO3) && k===kOpt);          // = opstelling 3 (100% km)
+    var factStap=(isOpt && b.factuur!=null)?b.factuur:((+s.factuur_sturing_excl_btw||0)*af);
     var restCreg=C*notDelivered;
-    var besparing=(base0!=null)?(base0-(factStap+restCreg)):null;      // bruto
-    // capex verankerd op de optimale opstelling: vaste deel + laadpalen naar rato geleverde energie + k batterijen.
-    var capex=capexFixed + fullLaadpalenB*pctF + k*battUnitCost;
+    var besparing=(base0!=null)?(base0-(factStap+restCreg)):null;       // bruto, op de geleverde km
+    var capex=fixedBase + fullLaadpalenB*pctF + k*battUnitCost + _connCost(c);
     var oh1=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + (k*BATT_UNIT_KW)*TCO_AAN.onderhoud.batterij_kw + (lpTot*pctF)*TCO_AAN.onderhoud.laadpaal;
     var opex1=oh1+capex*TCO_AAN.verzekering_promille/1000;
     var besparingNetto=(besparing!=null)?(besparing-opex1):null;
@@ -6133,32 +6123,68 @@ function _renderGroeipad(){
     var cumBesp=_besparingCumulatief(besparing, besparingNet, oh1, capex, (+STATE.pvKwp||0));
     var npv=_npv(besparing, besparingNet, oh1, capex, (+STATE.pvKwp||0));
     var verhoogd=(+s.aansluiting_verhoogd_kw>0);
-    var kvaStap=kvaVol+(verhoogd?(+s.aansluiting_verhoogd_kw):0);
-    return {k:k, kmGeladen:kmGeladen, pct:pct, besparing:besparing, cumBesp:cumBesp, npv:npv,
-            rend:rend, capex:capex, verhoogd:verhoogd, kvaStap:kvaStap, g:(k===kOpt)};
+    return {k:k, c:c, kmGeladen:kmGeladen, pct:pct, besparing:besparing, cumBesp:cumBesp, npv:npv,
+            rend:rend, capex:capex, verhoogd:verhoogd, isOpt:isOpt};
   });
+  // Beste aansluiting per batterij-aantal (op NPV) + globaal NPV-maximum. Aanbevolen eerste stap = k=1.
+  var perK={}; data.forEach(function(d){ var g=perK[d.k]; if(!g||(d.npv!=null&&(g.npv==null||d.npv>g.npv))) perK[d.k]=d; });
   var npvMax=null; data.forEach(function(d){ if(d.npv!=null && (npvMax==null||d.npv>npvMax)) npvMax=d.npv; });
-  var rows=data.map(function(d){
-    var bestNpv=(d.npv!=null && npvMax!=null && Math.abs(d.npv-npvMax)<1);
-    return '<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:11px;'+(d.g?'background:#05B0500f;font-weight:700':'')+'">'+
-      '<span>'+d.k+' × 120/260'+(d.g?' ✓ aanbevolen':(d.k===1?' · instap':(d.k>kOpt?' · overkill':'')))+'</span>'+
-      '<span style="text-align:right'+(d.verhoogd?';color:#9E480E':'')+'">'+(d.verhoogd?(fmtNum(kvaVol,0)+'→'+fmtNum(d.kvaStap,0)+' ⚠'):fmtNum(kvaVol,0))+'</span>'+
+  var eersteStap=perK[1]||null;
+
+  var meerdereConn=(kvaO2>0 && Math.round(kvaO2)!==Math.round(kvaO3));
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
+    'Groeipad — de optimale eerste stap'));
+  var _gi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
+  _gi.innerHTML=
+    'Van 1 batterij tot het volledige aantal van opstelling 2, telkens op een <b>vaste aansluiting</b>. Elke stap draait op '+
+    'die van <b>opstelling 3</b> (<b>'+fmtNum(kvaO3,0)+' kVA</b>, verzwaard voor 100% km)'+
+    (meerdereConn?' én die van <b>opstelling 2</b> (<b>'+fmtNum(kvaO2,0)+' kVA</b>, geen verzwaring)':'')+
+    ', en we kiezen per stap de aansluiting met de <b>hoogste NPV op de geleverde km</b>. Met minder batterijen laad je minder km '+
+    '(niet elke EV is er al, of laadt vanaf dag 1 alles) — dat is net het punt: de klant start klein, met het beste rendement en de '+
+    'hoogste NPV op wat hij écht nodig heeft, en groeit mee met zijn elektrificatie. De NPV vergelijkt telkens met opstelling 0 '+
+    '(CREG voor diezelfde km).';
+  sec.appendChild(_gi);
+  if(eersteStap){
+    var _es=eersteStap;
+    var esBox=el('div',{style:'margin-bottom:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12px'});
+    esBox.innerHTML='<b>★ Aanbevolen eerste stap: '+_es.k+' batterij'+(_es.k>1?'en':'')+' op '+_connLabel(_es.c)+'</b> — '+
+      (_es.kmGeladen!=null?fmtNum(_es.kmGeladen,0)+' km geladen ('+(_es.pct!=null?fmtNum(_es.pct,0):'—')+'% van de volledige vloot)':'')+', '+
+      'NPV <b>'+(_es.npv!=null?fmtEur(_es.npv):'—')+'</b> @'+Math.round(_npvDisc()*100)+'%, rendement '+(_es.rend!=null?fmtNum(_es.rend,1)+'%':'—')+', '+
+      'instap-investering '+fmtEur(_es.capex)+'. Vergeleken met opstelling 0 (CREG voor diezelfde km).';
+    sec.appendChild(esBox);
+  }
+  var grid='0.85fr 1.05fr 0.95fr 0.85fr 0.9fr 0.9fr 0.55fr 0.8fr';
+  var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
+    '<span>Batterijen</span><span>Aansluiting</span><span style="text-align:right">km geladen (%)</span>'+
+    '<span style="text-align:right">Besparing/jaar</span>'+
+    '<span style="text-align:right">Cum. besp. '+HORIZON_JAAR+'j</span>'+
+    '<span style="text-align:right">NPV @'+Math.round(_npvDisc()*100)+'%</span>'+
+    '<span style="text-align:right">Rend.</span><span style="text-align:right">Instap-inv.</span></div>';
+  var sorted=data.slice().sort(function(x,y){ return (x.k-y.k) || (x.c-y.c); });
+  var rows=sorted.map(function(d){
+    var bestPerK=(perK[d.k]===d);
+    var isStar=(d.npv!=null && npvMax!=null && Math.abs(d.npv-npvMax)<1);
+    var isStart=(eersteStap && d===eersteStap);
+    var bg=isStart?'background:#05B0501a;font-weight:700':(bestPerK?'background:#1F386408':'');
+    var tag=isStart?' ★ aanbevolen start':(d.isOpt?' ✓ volgroeid':'');
+    return '<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:11px;'+bg+'">'+
+      '<span>'+d.k+' × 120/260'+tag+'</span>'+
+      '<span'+(d.verhoogd?' style="color:#9E480E"':'')+'>'+_connLabel(d.c)+(d.verhoogd?' ⚠':'')+'</span>'+
       '<span style="text-align:right">'+(d.kmGeladen!=null?fmtNum(d.kmGeladen,0)+(d.pct!=null?' ('+fmtNum(d.pct,0)+'%)':''):'—')+'</span>'+
       '<span style="text-align:right">'+(d.besparing!=null?fmtEur(d.besparing):'—')+'</span>'+
       '<span style="text-align:right;color:#0B7A46">'+(d.cumBesp!=null?fmtEur(d.cumBesp):'—')+'</span>'+
-      '<span style="text-align:right;font-weight:700;color:'+(bestNpv?'#05B050':'#1F3864')+'">'+(d.npv!=null?fmtEur(d.npv)+(bestNpv?' ★':''):'—')+'</span>'+
+      '<span style="text-align:right;font-weight:700;color:'+(isStar?'#05B050':(bestPerK?'#1F3864':'#5A6577'))+'">'+(d.npv!=null?fmtEur(d.npv)+(bestPerK?' •':''):'—')+'</span>'+
       '<span style="text-align:right">'+(d.rend!=null?fmtNum(d.rend,1)+'%':'—')+'</span>'+
       '<span style="text-align:right">'+fmtEur(d.capex)+'</span></div>';
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'De kVA-aansluiting is op élke stap dezelfde (die van de aanbevolen opstelling — één keer aanleggen, nooit meer verhogen). '+
-    '"km geladen" stijgt met de groeiende batterij; % geladen = km(stap) ÷ km(volledig). "Cum. besp." is de totale netto besparing '+
-    'over de horizon (nominaal). "NPV @'+Math.round(_npvDisc()*100)+'%" verdisconteert diezelfde besparingen aan '+Math.round(_npvDisc()*100)+'% cost '+
-    'of capital en trekt de investering af — dát is de keuzemaatstaf. ✓ = aanbevolen (hoogste NPV, zo weinig mogelijk capex); ★ = hoogste '+
-    'NPV in dit groeipad. Boven de ✓ staat "overkill": extra batterijen (wat concurrenten vaak voorstellen) verhogen de capex maar '+
-    'voegen amper goedkope km, rendement of weerbaarheid toe — de NPV daalt zelfs. Bescheiden starten en later meegroeien is dus '+
-    'goedkoper én financieel sterker. ⚠ = aansluiting toch moeten verhogen (batterij te klein voor de piek — vlag niet actief).'));
+    'O3 = aansluiting van opstelling 3 (verzwaard voor 100% km); O2 = die van opstelling 2 (geen verzwaring). '+
+    '"km geladen" = km met eigen laadenergie op die vaste aansluiting; % = t.o.v. de volledige vloot. Besparing en NPV zijn '+
+    't.o.v. opstelling 0 op dezelfde geleverde km (de niet-geladen km kosten in beide gevallen CREG en vallen weg). '+
+    '• = beste aansluiting voor dat batterij-aantal; ★ = aanbevolen eerste stap (hoogste NPV, minste capex); '+
+    '✓ = volgroeid (opstelling 3, 100% km). ⚠ = aansluiting toch verhoogd (batterij te klein — vlag niet actief).'));
   return sec;
 }
 // v1.35.0: oude groeipad-weergave (minimale aansluiting per batterij-aantal, 100% geleverd) —
@@ -7820,9 +7846,15 @@ function runSimulatie(){
         // NPV-optimale, capex-arme instap. De aansluiting blijft vast op de optimale opstelling.
         var _ops2=STATE.opstellingen&&STATE.opstellingen.batterij;
         var _nMax=_ops2?Math.max(1,Math.round(_dimKwh(_ops2)/BATT_UNIT_KWH)):Math.max(1,Math.round(_dimKwh(_gb.o)/BATT_UNIT_KWH));
+        // v1.48.0: het groeipad rekent op TWEE vaste aansluitingen — die van opstelling 3 (verzwaard,
+        // voor 100% km) én die van opstelling 2 (geen verzwaring). De server draait elke stap op beide;
+        // de frontend kiest per stap de aansluiting met de hoogste NPV op de geleverde km.
+        var _kvaO2=(_ops2&&_ops2.config)?(+_ops2.config.aansluiting_kva||0):0;
+        var _conns=[]; if(_kvaVol>0) _conns.push(_kvaVol);
+        if(_kvaO2>0 && Math.round(_kvaO2)!==Math.round(_kvaVol)) _conns.push(_kvaO2);
         if(_kvaVol>0){
           var _gpIn=JSON.parse(JSON.stringify(STATE.lastSimInput));
-          _gpIn.aansluiting_kva=_kvaVol; _gpIn.aansluitingKva=_kvaVol; _gpIn.max_batterijen=_nMax;
+          _gpIn.aansluiting_kva=_kvaVol; _gpIn.aansluitingKva=_kvaVol; _gpIn.aansluitingen_kva=_conns; _gpIn.max_batterijen=_nMax;
           STATE.groeipadLoading=true;
           apiPost('/api/groeipad', _gpIn).then(function(gp){
             STATE.groeipad=gp; STATE.groeipadLoading=false;
