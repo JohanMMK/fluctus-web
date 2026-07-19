@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.38.0</span>
+    <span class="fdsim-version">v1.40.0</span>
   </div>
 </div>
 
@@ -5071,7 +5071,8 @@ var TCO_AAN = {
     realistisch: { naam:'Realistisch',  toel:'gematigde stijging van de netkosten', inflatie:0.02, net_extra:0.04, net_sprong_jaar:2029, net_sprong:0.30 },
     optimistisch:{ naam:'Congestie',    toel:'distributieprijzen stijgen door netcongestie', inflatie:0.04, net_extra:0.05, net_sprong_jaar:2029, net_sprong:0.50 }
   },
-  standaard:'realistisch'
+  standaard:'realistisch',
+  besparing_energie_deel:0.72     // aandeel van de besparing dat 'energie' is (rest = netkosten) — rapport
 };
 function _tcoScenario(){ return TCO_AAN.scenarios[STATE.tcoScenario||TCO_AAN.standaard] || TCO_AAN.scenarios.realistisch; }
 function _tcoGroeiE(y){ return Math.pow(1+_tcoScenario().inflatie, y); }                // energie/heffingen/onderhoud
@@ -5088,6 +5089,32 @@ function _tcoMeerjaar(capex, jaarkost, netdeel, oh1, pvKwp){
     if(y===9) som += (+pvKwp||0)*TCO_AAN.omvormer_vervang_kwp;
   }
   return (+capex||0)+som;
+}
+// v1.39.0 — RENDEMENT OVER DE HORIZON. Het jaar-1-rendement (besparing/capex) is per definitie
+// scenario-onafhankelijk (in jaar 1 zijn alle groeifactoren 1). Dit gemiddelde jaarrendement over
+// de horizon rekent de escalatie wél mee: de besparing groeit (energie-deel met inflatie, netdeel
+// met het net-schema), opex groeit met inflatie, omvormer-vervanging in jaar 10. Zo beweegt het
+// rendement mee met het gekozen kostenscenario. besparingBruto = (E_base+CREG) − E (vóór opex).
+function _rendementHorizonSc(besparingBruto, oh1, capex, pvKwp, sc){
+  if(!(capex>0) || besparingBruto==null || !sc) return null;
+  var verz=capex*TCO_AAN.verzekering_promille/1000, ed=TCO_AAN.besparing_energie_deel, tot=0;
+  for(var y=0;y<TCO_AAN.horizon;y++){
+    var gE=Math.pow(1+sc.inflatie,y);
+    var gN=Math.pow(1+sc.inflatie+sc.net_extra,y);
+    if(sc.net_sprong_jaar && (TCO_AAN.startjaar+y)>=sc.net_sprong_jaar) gN*=(1+sc.net_sprong);
+    var besp=besparingBruto*(ed*gE+(1-ed)*gN);
+    var opex=(+oh1||0)*Math.pow(1+sc.inflatie,y)+verz;
+    var netto=besp-opex;
+    if(y===9) netto-=(+pvKwp||0)*TCO_AAN.omvormer_vervang_kwp;
+    tot+=netto;
+  }
+  return (tot/TCO_AAN.horizon)/capex*100;   // gemiddeld jaarlijks netto-rendement over de horizon
+}
+function _rendementHorizon(besparingBruto, oh1, capex, pvKwp){ return _rendementHorizonSc(besparingBruto,oh1,capex,pvKwp,_tcoScenario()); }
+// Horizon-rendement voor ALLE scenario's (voor de KPI2-details) — map key → %.
+function _rendementHorizonAlle(besparingBruto, oh1, capex, pvKwp){
+  var out={}; ['conservatief','realistisch','optimistisch'].forEach(function(sk){
+    out[sk]=_rendementHorizonSc(besparingBruto,oh1,capex,pvKwp,TCO_AAN.scenarios[sk]); }); return out;
 }
 // v1.23.4: drie opstellingen. Opstelling 3 = opstelling 2 + cabine (LS→MS).
 // Zij deelt de batterij-capex met opstelling 2; het enige verschil in KOST is de
@@ -5355,12 +5382,21 @@ function _kpiEngine(){
     var besparingCherry=(besparing!=null)?(besparing+windfall-opex1):null;   // netto (na opex) + windfall
     var rendCherry=(besparingCherry!=null && capex>0 && besparingCherry>0)?(besparingCherry/capex*100):null;
     var tcoCherry=_tcoMeerjaar(capex, E-windfall, netdeel, oh1, (+STATE.pvKwp||0));
+    // v1.39.0: rendement over de horizon (mét escalatie → beweegt mee met het scenario). Zonder
+    // en mét onbalans (cherry gebruikt de besparing incl. windfall).
+    var rendHor=_rendementHorizon(besparing, oh1, capex, (+STATE.pvKwp||0));
+    var rendHorCherry=(besparing!=null)?_rendementHorizon(besparing+windfall, oh1, capex, (+STATE.pvKwp||0)):null;
+    // v1.40.0: horizon-rendement voor de 3 scenario's (KPI2-details), zonder en mét onbalans.
+    var rendHorAlle=_rendementHorizonAlle(besparing, oh1, capex, (+STATE.pvKwp||0));
+    var rendHorAlleCherry=(besparing!=null)?_rendementHorizonAlle(besparing+windfall, oh1, capex, (+STATE.pvKwp||0)):{};
     return {key:k.key, nr:k.nr, label:k.label, o:o, factuur:E, windfall:windfall, geladenMwh:geladenMwh,
       distributie:c.distributie*af,                                     // netkosten-regel (voor de ×2-scenario's)
       inv:{pv:pv,laadpalen:laadpalen,cabine:cabine,batterij:batterij,netaanpassing:netaanpassing,trace:trace,
            totaal_excl_cabine:capexExcl, totaal:capex},
       cabine:cabine, capex:capex, capexExcl:capexExcl, opex1:opex1,
       besparing:besparing, besparingNetto:besparingNetto, rendement:rend, payback:pb, kostKm:kostKm,
+      rendementHorizon:rendHor, rendementHorizonCherry:rendHorCherry,
+      rendementHorizonAlle:rendHorAlle, rendementHorizonAlleCherry:rendHorAlleCherry,
       tco:tco, tcoCherry:tcoCherry, besparingCherry:besparingCherry, rendementCherry:rendCherry,
       loadfactor:loadf(afk,mkw), afnameKwh:afk, maxKw:mkw,
       haalbaar:((o.dimensionering||{}).haalbaar!==false)};
@@ -5406,11 +5442,19 @@ function _renderKpiTegels(){
       (b.kostKm!=null?fmtNum(b.kostKm,3)+' €/km':'—'),
       (o0.kostKm!=null?'vs CREG-thuisladen '+fmtNum(o0.kostKm,3)+' €/km':''),
       'opdat de geladen km\'s zo goedkoop mogelijk zijn')+
-    tile(2,'Rendement van de investering',
-      (b.rendement!=null?fmtNum(b.rendement,1)+' %':'—'),
-      (b.payback!=null?'terugverdiend in '+fmtNum(b.payback,1)+' j · capex incl. cabine '+fmtEur(b.capex):'capex incl. cabine '+fmtEur(b.capex))+
-      (b.tco!=null?' · TCO '+HORIZON_JAAR+'j '+fmtEur(b.tco):''),
-      'gekozen op de laagste all-in TCO over '+HORIZON_JAAR+' j (incl. onderhoud + '+_tcoScenario().naam.toLowerCase()+' netkosten-schema)')+
+    (function(){
+      // v1.40.0: toon het HOOGSTE van jaar-1 en 15-jaar (realistisch scenario) groot, het andere klein.
+      var r1=b.rendement, rH=(b.rendementHorizonAlle&&b.rendementHorizonAlle.realistisch);
+      var hoog, hoogLbl, laag, laagLbl;
+      if(rH!=null && (r1==null || rH>=r1)){ hoog=rH; hoogLbl='over '+HORIZON_JAAR+' j'; laag=r1; laagLbl='jaar 1'; }
+      else { hoog=r1; hoogLbl='jaar 1'; laag=rH; laagLbl='over '+HORIZON_JAAR+' j'; }
+      var groot=(hoog!=null?fmtNum(hoog,1)+' %':'—')+'<span style="font-size:12px;font-weight:600;color:#5A6577"> '+hoogLbl+'</span>';
+      var onder=(laag!=null?'<b>'+fmtNum(laag,1)+' % '+laagLbl+'</b> · ':'')+
+        (b.payback!=null?'terugverdiend in '+fmtNum(b.payback,1)+' j · capex '+fmtEur(b.capex):'capex '+fmtEur(b.capex))+
+        (b.tco!=null?' · TCO '+HORIZON_JAAR+'j '+fmtEur(b.tco):'');
+      return tile(2,'Rendement van de investering', groot, onder,
+        'gekozen op de laagste all-in TCO over '+HORIZON_JAAR+' j (incl. onderhoud + '+_tcoScenario().naam.toLowerCase()+' netkosten-schema)');
+    })()+
     tile(3,'Loadfactor stijgt',
       fmtNum(eng.huidigLoadfactor*100,0)+'% → '+fmtNum(b.loadfactor*100,0)+'%',
       'betere benutting van de aansluiting = robuuster tegen stijgende netkosten',
@@ -5461,7 +5505,11 @@ function _renderKostPerKmRendement(){
     rij('− Onderhoud + verzekering', function(r){return r.nr===0?'€ 0':(r.opex1!=null?'− '+fmtEur(r.opex1):'—');})+
     rij('Besparing/jaar netto', function(r){return r.nr===0?'€ 0':(r.besparingNetto!=null?fmtEur(r.besparingNetto):'—');})+
     rij('Terugverdientijd (netto)', function(r){return r.nr===0?'—':(r.payback!=null?fmtNum(r.payback,1)+' j':'—');})+
-    rij('Rendement (netto)', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})+
+    rij('Rendement (netto, jaar 1)', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})+
+    ['conservatief','realistisch','optimistisch'].map(function(sk){
+      return rij('Rendement '+HORIZON_JAAR+' j · '+TCO_AAN.scenarios[sk].naam+(((STATE.tcoScenario||TCO_AAN.standaard)===sk)?' (actief)':''),
+        function(r){ if(r.nr===0) return '—'; var v=(r.rendementHorizonAlle||{})[sk]; return v!=null?fmtNum(v,1)+' %':'—'; });
+    }).join('')+
     rij('TCO ('+HORIZON_JAAR+' j — all-in)', function(r){return r.tco!=null?fmtEur(r.tco):'—';})));
   // v1.36.0 — apart onbalans-kadertje (kers op de taart): dezelfde 4 slotregels van KPI2, maar
   // MÉT de onbalans-baten. Bewust apart en in een andere (groene) kleur — de rest van de
@@ -5472,7 +5520,11 @@ function _renderKostPerKmRendement(){
       '<div style="display:grid;grid-template-columns:'+cols+';gap:6px;font-size:12px">'+kopRij()+
       rij('Besparing/jaar netto', function(r){return r.nr===0?'€ 0':(r.besparingCherry!=null?fmtEur(r.besparingCherry):'—');})+
       rij('Terugverdientijd', function(r){if(r.nr===0)return '—';var v=pbCh(r);return v!=null?fmtNum(v,1)+' j':'—';})+
-      rij('Rendement', function(r){return r.nr===0?'0 %':(r.rendementCherry!=null?fmtNum(r.rendementCherry,1)+' %':'—');})+
+      rij('Rendement (jaar 1)', function(r){return r.nr===0?'0 %':(r.rendementCherry!=null?fmtNum(r.rendementCherry,1)+' %':'—');})+
+      ['conservatief','realistisch','optimistisch'].map(function(sk){
+        return rij('Rendement '+HORIZON_JAAR+' j · '+TCO_AAN.scenarios[sk].naam+(((STATE.tcoScenario||TCO_AAN.standaard)===sk)?' (actief)':''),
+          function(r){ if(r.nr===0) return '—'; var v=(r.rendementHorizonAlleCherry||{})[sk]; return v!=null?fmtNum(v,1)+' %':'—'; });
+      }).join('')+
       rij('TCO ('+HORIZON_JAAR+' j — all-in)', function(r){return r.tcoCherry!=null?fmtEur(r.tcoCherry):'—';})+
       '</div>';
     var onbBox=el('div',{style:'padding:9px 11px;background:#05B0500f;border:1px solid #05B05055;border-radius:6px;margin-bottom:8px'});
@@ -5492,7 +5544,10 @@ function _renderKostPerKmRendement(){
   var _sc=_tcoScenario();
   var _spr=_sc.net_sprong_jaar?(' met een sprong van +'+Math.round(_sc.net_sprong*100)+'% vanaf '+_sc.net_sprong_jaar):'';
   sec.appendChild(el('div',{style:'margin-top:2px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Rendement & terugverdientijd zijn NETTO (na onderhoud + verzekering, jaar 1). Investering = totaal incl. cabine. '+
+    'Rendement (jaar 1) & terugverdientijd zijn NETTO (na onderhoud + verzekering) en jaar-1 — die bewegen NIET mee met het '+
+    'kostenscenario (in jaar 1 zijn de groeifactoren nog 1). De drie "Rendement '+HORIZON_JAAR+' j"-regels (Conservatief / Realistisch / '+
+    'Congestie) zijn het gemiddelde jaarrendement over de horizon mét escalatie — die stijgen naarmate de netkosten sneller groeien; '+
+    'het (actief)-scenario is dat van de scenario-kiezer en stuurt de TCO/keuze. Investering = totaal incl. cabine. '+
     'TCO = investering + '+HORIZON_JAAR+' j eigendomskost, all-in en afgestemd op het financieel rapport: incl. onderhoud, '+
     'verzekering, omvormer-vervanging (jaar 10) én het gekozen kostenscenario ('+_sc.naam+': energie +'+Math.round(_sc.inflatie*100)+'%/j, '+
     'netkosten +'+Math.round((_sc.inflatie+_sc.net_extra)*100)+'%/j'+_spr+'). '+
