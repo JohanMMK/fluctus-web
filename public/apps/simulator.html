@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.35.0</span>
+    <span class="fdsim-version">v1.38.0</span>
   </div>
 </div>
 
@@ -927,7 +927,10 @@ function applyBaseCaseToWizard(baseCase,options){
   var periode={type:'specifiek',van:bc.periodeVan,tot:bc.periodeTot};
   var pvKwp=bc.pvKwpAanwezig||0;
   var pvInjStrategie='geen';
-  var kVA=aansluitOntbreekt?null:_bcRoundUp5(bc.aansluitVermogenKva);
+  // v1.37.0: de BESTAANDE aansluiting uit de factuur EXACT overnemen (geen afronding naar 5).
+  // Vroeger rondde _bcRoundUp5 op (98 → 100), wat de netkosten-basis en de LS/MS-grens vertekende.
+  // Afronden op stappen van 5 hoort enkel bij een VOORGESTELDE nieuwe aansluiting, niet bij de base case.
+  var kVA=aansluitOntbreekt?null:bc.aansluitVermogenKva;
   var profiel=null;
   // gotoStep is 0-indexed. v1.21.2: na een factuur-scan landen we op Profiel (index 2).
   // Het profiel is nog niet gekozen (profiel=null); zodra de verkoper er één kiest en
@@ -4999,14 +5002,16 @@ function _renderOpstellingenVergelijking(){
     var km=(d3.o.kpi_sturing||{}).kost_sturing_excl_btw||0;
     var eff=kb-km;
     var cab=((d3.o.config||{}).cabine_nodig)?INV_CABINE_EUR*(1+INV_KABEL_PCT):0;
-    sec.appendChild(el('div',{style:'margin-top:10px;padding:9px 12px;background:'+(eff>0?'#05B0500f':'#F5F7FA')+
-      ';border:1px solid '+(eff>0?'#05B05040':'#D5DBE3')+';border-radius:6px;font-size:12.5px'},
+    var _tk=el('div',{style:'margin-top:10px;padding:9px 12px;background:'+(eff>0?'#05B0500f':'#F5F7FA')+
+      ';border:1px solid '+(eff>0?'#05B05040':'#D5DBE3')+';border-radius:6px;font-size:12.5px'});
+    _tk.innerHTML=
       '<b>Tariefkaart-effect (opstelling 3 vs 2): '+(eff>=0?'+ ':'– ')+fmtEur(Math.abs(eff))+' per jaar.</b> '+
       'Beide draaien dezelfde batterij op dezelfde aansluiting — enkel de tariefkaart verschilt. '+
       'Op LS betaal je de distributie grotendeels per MWh, op MS per kW; een batterij vlakt kW af maar kan '+
       'niets aan een €/MWh-tarief doen.'+
       (cab>0 && eff>0 ? ' De cabine (' + fmtEur(cab) + ' incl. kabeltracés) is dan terugverdiend in '+
-        fmtNum(cab/eff,1)+' jaar.' : (cab>0 ? ' De cabine ('+fmtEur(cab)+') verdient zich hier niet terug.' : ''))));
+        fmtNum(cab/eff,1)+' jaar.' : (cab>0 ? ' De cabine ('+fmtEur(cab)+') verdient zich hier niet terug.' : ''));
+    sec.appendChild(_tk);
   }
   // v1.27.0: "De drie detailfacturen naast elkaar" en het aparte "Opstelling 3 — mix"-blok
   // zijn HIER verwijderd (Johan) — die info staat nu in de blokken 6/7/8 (opstelling 0/1/2/3).
@@ -5414,7 +5419,8 @@ function _renderKpiTegels(){
   // Kers op de taart (onbalans) — apart, bovenop de keuze die op sturing 2 (zonder onbalans) staat.
   // We tonen hier het rendement/TCO HERREKEND mét de windfall, plus de voorwaarde.
   if(b.windfall>0){
-    sec.appendChild(el('div',{style:'margin-top:10px;padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px'},
+    var _cd=el('div',{style:'margin-top:10px;padding:10px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12.5px'});
+    _cd.innerHTML=
       '<b>🍒 Kers op de taart — onbalans-sturing: + '+fmtEur(b.windfall)+'/jaar</b> bovenop de gekozen opstelling.<br>'+
       'Herrekend mét onbalans: rendement '+
       (b.rendement!=null?fmtNum(b.rendement,1)+' %':'—')+' → <b>'+
@@ -5423,7 +5429,8 @@ function _renderKpiTegels(){
       '<span style="color:#5A6577;font-size:11.5px">De keuze van de opstelling gebeurt bewust op sturing 2 '+
       '(spot-arbitrage + PV-zelfconsumptie + piekshaving) zónder onbalans. De onbalans-opbrengst komt er als '+
       'extra bovenop, maar vereist dat je zélf kan nomineren en toegang hebt tot de onbalansmarkt — niet elke '+
-      'leverancier staat dit vandaag al toe.</span>'));
+      'leverancier staat dit vandaag al toe.</span>';
+    sec.appendChild(_cd);
   }
   return sec;
 }
@@ -5456,6 +5463,26 @@ function _renderKostPerKmRendement(){
     rij('Terugverdientijd (netto)', function(r){return r.nr===0?'—':(r.payback!=null?fmtNum(r.payback,1)+' j':'—');})+
     rij('Rendement (netto)', function(r){return r.nr===0?'0 %':(r.rendement!=null?fmtNum(r.rendement,1)+' %':'—');})+
     rij('TCO ('+HORIZON_JAAR+' j — all-in)', function(r){return r.tco!=null?fmtEur(r.tco):'—';})));
+  // v1.36.0 — apart onbalans-kadertje (kers op de taart): dezelfde 4 slotregels van KPI2, maar
+  // MÉT de onbalans-baten. Bewust apart en in een andere (groene) kleur — de rest van de
+  // afhandeling blijft op sturing 2 (zonder onbalans); dit toont enkel wat er BOVENOP kan.
+  if(eng.rows.some(function(r){return r.windfall>0;})){
+    function pbCh(r){ return (r.besparingCherry!=null && r.capex>0 && r.besparingCherry>0)?(r.capex/r.besparingCherry):null; }
+    var onbInner='<div style="font-weight:700;color:#0B7A46;font-size:12px;margin-bottom:5px">🍒 Mét onbalans meegerekend (kers op de taart)</div>'+
+      '<div style="display:grid;grid-template-columns:'+cols+';gap:6px;font-size:12px">'+kopRij()+
+      rij('Besparing/jaar netto', function(r){return r.nr===0?'€ 0':(r.besparingCherry!=null?fmtEur(r.besparingCherry):'—');})+
+      rij('Terugverdientijd', function(r){if(r.nr===0)return '—';var v=pbCh(r);return v!=null?fmtNum(v,1)+' j':'—';})+
+      rij('Rendement', function(r){return r.nr===0?'0 %':(r.rendementCherry!=null?fmtNum(r.rendementCherry,1)+' %':'—');})+
+      rij('TCO ('+HORIZON_JAAR+' j — all-in)', function(r){return r.tcoCherry!=null?fmtEur(r.tcoCherry):'—';})+
+      '</div>';
+    var onbBox=el('div',{style:'padding:9px 11px;background:#05B0500f;border:1px solid #05B05055;border-radius:6px;margin-bottom:8px'});
+    onbBox.innerHTML=onbInner;
+    sec.appendChild(onbBox);
+    sec.appendChild(el('div',{style:'margin-top:-4px;margin-bottom:8px;font-size:10px;color:#5A6577;font-style:italic'},
+      'Optioneel voor de klant: dit rekent de onbalans-opbrengst (passieve respons) mee in besparing, terugverdientijd, '+
+      'rendement en TCO. Vereist zelf-nominatie + toegang tot de onbalansmarkt (niet elke leverancier staat dit vandaag toe). '+
+      'Wij blijven de opstelling kiezen en verkopen op sturing 2 — zónder onbalans; dit is puur wat er bovenop kan.'));
+  }
   sec.appendChild(kader('KPI 3 — Loadfactor',
     rij('Loadfactor', function(r){return r.loadfactor!=null?fmtNum(r.loadfactor*100,0)+' %':'—';})));
   sec.appendChild(kader('Weerbaarheid — als de netkosten verdubbelen',
@@ -5803,10 +5830,12 @@ function _renderDetailfactuurOptimaal(){
     '</div>';
   sec.appendChild(t);
   if(besparing!=null){
-    sec.appendChild(el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:13px'},
+    var _bd=el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:13px'});
+    _bd.innerHTML=
       '<b style="color:#1F3864">Besparing per jaar: '+
       '<span style="color:'+(besparing>=0?'#05B050':'#9E480E')+'">'+(besparing>=0?'+ ':'')+fmtEur(besparing)+'</span></b>'+
-      (creg>0?' — waarvan '+fmtEur(creg)+' vermeden CREG-laadkost.':'')));
+      (creg>0?' — waarvan '+fmtEur(creg)+' vermeden CREG-laadkost.':'');
+    sec.appendChild(_bd);
   }
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
     'Vandaag laden de vloot-km\'s elders aan het fiscaal aanvaarde CREG-forfait (kost naast de bestaande stroomfactuur). '+
@@ -5886,42 +5915,55 @@ function _renderGroeipad(){
   var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
   var base0=(E_base!=null)?(E_base+C):null;
   var inv=b.inv||{};
-  var fullLaadpalen=+inv.laadpalen||0, fullKabel=+inv.trace||0, fullNet=+inv.netaanpassing||0,
-      cabine=+inv.cabine||0, pv=+inv.pv||0;
+  var fullLaadpalen=+inv.laadpalen||0;
   var battUnitCost=INV_BATT_EUR_PER_KWH*BATT_UNIT_KWH;                  // €/eenheid (120/260)
+  var capexVol=(b.capex!=null)?+b.capex:0;                             // v1.37.0: ANKER = de KPI2-capex van
+  // de optimale opstelling. Zo is de volgroeide stap identiek aan KPI2 (zelfde rendement). Voor
+  // minder batterijen trekken we (kStar−k) batterij-eenheden af (+ laadpalen naar rato geleverde energie).
   var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;
   var kvaVol=+gp.aansluiting_kva|| (+(b.o.config||{}).aansluiting_kva) ||0;
   var spVol=(kvaVol>100)?'MS':((b.o.config||{}).spanning||STATE.spanning||'LS');
+  var kStar=gp.stappen.length;
 
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
     'Groeipad — bescheiden starten, klaar voor groei'));
-  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
-    'De aansluiting staat meteen op het volgroeide vermogen (<b>'+fmtNum(kvaVol,0)+' kW · '+spVol+'</b>) en de kabels liggen '+
-    'al voor het volledige plein. U start met 1 batterij — en levert dan al een groot deel van de laadvraag. Naarmate uw '+
-    'EV-vloot groeit, zet u batterijen (en laadpalen) bij tot het volgroeide aantal. Elke stap is een échte dispatch op '+
-    'die vaste aansluiting.'));
+  var _gi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
+  _gi.innerHTML=
+    'De aansluiting blijft op élke stap gelijk aan het volgroeide vermogen (<b>'+fmtNum(kvaVol,0)+' kW · '+spVol+'</b>) en de '+
+    'kabels liggen al voor het volledige plein. De dispatch laadt op elke stap zoveel mogelijk laadenergie ónder die vaste '+
+    'aansluiting. Met minder batterijen past er minder onder de aansluiting (de batterij vult de dalen en shavet de piek), dus '+
+    'de <b>% laadenergie</b> ligt lager — gemeten t.o.v. de volgroeide stap. U start bescheiden met 1 batterij en zet er bij '+
+    'naarmate uw EV-vloot groeit, tot 100% bij het volgroeide aantal. Elke stap is een échte dispatch.';
+  sec.appendChild(_gi);
   var grid='1.2fr 1.1fr 1.1fr 0.8fr 1.2fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
     '<span>Batterijen</span><span style="text-align:right">% laadenergie</span><span style="text-align:right">Besparing/jaar</span>'+
     '<span style="text-align:right">Rendement</span><span style="text-align:right">Instap-investering</span></div>';
-  var kStar=gp.stappen.length;
+  // v1.38.0: % = geleverde laadenergie van deze stap ÷ die van de VOLGROEIDE stap (spec Johan).
+  // De dispatch is hard begrensd op de vaste aansluiting; met minder batterijen past er minder
+  // laadenergie onder die aansluiting binnen het laadvenster → lagere % en lagere besparing.
+  var geladenVol=(+(gp.stappen[gp.stappen.length-1]||{}).geladen_mwh)||0;
   var rows=gp.stappen.map(function(s){
     var k=+s.aantal_batterijen||0;
-    var pct=(s.geleverd_pct!=null)?+s.geleverd_pct:null;                // % geleverde laadenergie
+    var geladenK=(+s.geladen_mwh)||0;
+    var pct=(geladenVol>0)?Math.min(100, geladenK/geladenVol*100):null;   // % t.o.v. volgroeide stap
     var pctF=(pct!=null)?pct/100:1;
-    var fact=(+s.factuur_sturing_excl_btw||0)*af;                       // jaarbasis
-    var restCreg=(pct!=null)?C*(1-pctF):0;                              // niet-geleverde km's: nog CREG elders
-    var besparing=(base0!=null)?(base0-(fact+restCreg)):null;          // bruto
-    // Instap-capex: volledige kabels + volledige aansluiting/cabine + PV, maar laadpalen naar rato
-    // van de geleverde laadenergie, en k batterijen.
-    var laadpalenStap=fullLaadpalen*pctF;
-    var capex=pv+laadpalenStap+fullKabel+fullNet+cabine+k*battUnitCost;
+    var notDelivered=(geladenVol>0)?Math.max(0,(geladenVol-geladenK)/geladenVol):0;  // niet geleverd t.o.v. volgroeid
+    // Besparing van de VOLGROEIDE stap = exact opstelling 3 (b.factuur), zodat KPI2 en groeipad sluiten.
+    // Voor lagere stappen: de echte dispatch-factuur (enkel de geleverde laadenergie) + de niet-geleverde
+    // km's laden nog elders aan het CREG-forfait (restCREG).
+    var factStap=(k===kStar && b.factuur!=null)?b.factuur:((+s.factuur_sturing_excl_btw||0)*af);
+    var restCreg=C*notDelivered;
+    var besparing=(base0!=null)?(base0-(factStap+restCreg)):null;      // bruto
+    // Instap-capex verankerd op de volgroeide KPI2-capex: minder batterijen (−(kStar−k) eenheden) +
+    // laadpalen naar rato van de geleverde laadenergie.
+    var capex=capexVol - (kStar-k)*battUnitCost - fullLaadpalen*(1-pctF);
     var oh1=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + (k*BATT_UNIT_KW)*TCO_AAN.onderhoud.batterij_kw + (lpTot*pctF)*TCO_AAN.onderhoud.laadpaal;
     var opex1=oh1+capex*TCO_AAN.verzekering_promille/1000;
     var besparingNetto=(besparing!=null)?(besparing-opex1):null;
     var rend=(besparingNetto!=null && capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
-    var verhoogd=(+s.aansluiting_verhoogd_kw>0);                        // sim moest bijtrekken → past niet op vaste aansl.
+    var verhoogd=(+s.aansluiting_verhoogd_kw>0);                        // dispatch moest de aansluiting overschrijden
     var g=(k===kStar);                                                  // volgroeid = optimale opstelling
     return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
       '<span>'+k+' × 120/260'+(g?' ✓ volgroeid':(k===1?' · instap':''))+'</span>'+
@@ -5932,11 +5974,13 @@ function _renderGroeipad(){
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'De aansluiting en de kabels zijn overal die van de volgroeide opstelling (één keer aanleggen, nooit meer verhogen). '+
-    'Alleen de batterijen en de laadpalen (naar rato van de geleverde laadenergie) groeien mee. Rendement is netto '+
-    '(na onderhoud + verzekering). Een instap met 1 batterij kost fors minder dan het volgroeide bedrag en levert al een '+
-    'groot deel van de laadvraag — een makkelijk verkoopbare, rendabele start; de batterijen en laadpalen komen er nadien '+
-    '(bij dezelfde partij) bij. ⚠ = op deze stap moest de dispatch de aansluiting toch even bijtrekken (batterij te klein voor de piek).'));
+    'Aansluiting en kabels zijn overal die van de volgroeide opstelling (één keer aanleggen, nooit meer verhogen); alleen de '+
+    'batterijen en laadpalen groeien mee. % = geleverde laadenergie t.o.v. de volgroeide stap; wat niet onder de vaste '+
+    'aansluiting past, laadt zolang nog elders aan het CREG-forfait (dat drukt de besparing). De volgroeide rij (✓) is identiek '+
+    'aan de optimale opstelling in KPI2. Let op de logica: met mínder batterijen stijgt het rendement (minder investering) maar '+
+    'dáált de besparing (minder laadenergie geleverd) — daarom kiezen we de optimale opstelling op de laagste TCO, niet op het '+
+    'hoogste rendement. De instap met 1 batterij kost fors minder en is een makkelijk verkoopbare, rendabele start; de batterijen '+
+    '(en laadpalen) komen er nadien bij, bij dezelfde partij. ⚠ = op deze stap is de aansluiting de bindende limiet (batterij te klein voor de piek).'));
   return sec;
 }
 // v1.35.0: oude groeipad-weergave (minimale aansluiting per batterij-aantal, 100% geleverd) —
