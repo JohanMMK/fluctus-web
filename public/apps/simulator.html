@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.34.0</span>
+    <span class="fdsim-version">v1.35.0</span>
   </div>
 </div>
 
@@ -5863,59 +5863,117 @@ function _renderEnergieControle(){
   return sec;
 }
 
-// Blok 10 — GROEIPAD: van 1 tot het volledige aantal batterijen (opstelling 2). Elke stap
-// levert 100% van de laadvraag (de aansluiting wordt net groot genoeg gemaakt), dus tonen we
-// per stap het EXTRA vermogen (verzwaring t.o.v. vandaag), de besparing en het rendement.
-// Data uit de mix-sweep (mix.alternatieven) — geen extra dispatch-runs.
+// Blok 10 — GROEIPAD (v1.35.0, herzien): de aansluiting blijft VAST op het vermogen van de
+// volgroeide (= optimale) opstelling. Vanaf 1 batterij tot het volgroeide aantal tonen we per
+// stap HOEVEEL % van de laadvraag geleverd wordt (echte dispatch op die vaste aansluiting) +
+// het rendement. De instap-capex draagt de VOLLEDIGE kabels + de volledige aansluiting/cabine,
+// maar de laadpalen slechts naar rato van de geleverde laadenergie. Zo ziet de klant dat hij
+// bescheiden kan starten (1 batterij) en al een heel eind komt; batterijen (en laadpalen) groeien
+// mee met de EV-vloot. GEEN TCO hier. Data: /api/groeipad (aparte async dispatch-runs).
 function _renderGroeipad(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var gp=STATE.groeipad;
+  // Wachtstand terwijl de dispatch-runs lopen.
+  if(STATE.groeipadLoading && (!gp||!gp.stappen)){
+    var w=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+    w.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'Groeipad — bescheiden starten, klaar voor groei'));
+    w.appendChild(el('div',{style:'font-size:12px;color:#5A6577'},'⏳ Wordt berekend — per batterij-aantal draait een echte dispatch op de vaste (volgroeide) aansluiting…'));
+    return w;
+  }
+  // Geen groeipad-data (oude proxy zonder /api/groeipad, of fout) → val terug op de oude weergave.
+  if(!gp||!gp.stappen||!gp.stappen.length){ return _renderGroeipadFallback(); }
+
+  var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
+  var base0=(E_base!=null)?(E_base+C):null;
+  var inv=b.inv||{};
+  var fullLaadpalen=+inv.laadpalen||0, fullKabel=+inv.trace||0, fullNet=+inv.netaanpassing||0,
+      cabine=+inv.cabine||0, pv=+inv.pv||0;
+  var battUnitCost=INV_BATT_EUR_PER_KWH*BATT_UNIT_KWH;                  // €/eenheid (120/260)
+  var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;
+  var kvaVol=+gp.aansluiting_kva|| (+(b.o.config||{}).aansluiting_kva) ||0;
+  var spVol=(kvaVol>100)?'MS':((b.o.config||{}).spanning||STATE.spanning||'LS');
+
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
+    'Groeipad — bescheiden starten, klaar voor groei'));
+  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
+    'De aansluiting staat meteen op het volgroeide vermogen (<b>'+fmtNum(kvaVol,0)+' kW · '+spVol+'</b>) en de kabels liggen '+
+    'al voor het volledige plein. U start met 1 batterij — en levert dan al een groot deel van de laadvraag. Naarmate uw '+
+    'EV-vloot groeit, zet u batterijen (en laadpalen) bij tot het volgroeide aantal. Elke stap is een échte dispatch op '+
+    'die vaste aansluiting.'));
+  var grid='1.2fr 1.1fr 1.1fr 0.8fr 1.2fr';
+  var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
+    '<span>Batterijen</span><span style="text-align:right">% laadenergie</span><span style="text-align:right">Besparing/jaar</span>'+
+    '<span style="text-align:right">Rendement</span><span style="text-align:right">Instap-investering</span></div>';
+  var kStar=gp.stappen.length;
+  var rows=gp.stappen.map(function(s){
+    var k=+s.aantal_batterijen||0;
+    var pct=(s.geleverd_pct!=null)?+s.geleverd_pct:null;                // % geleverde laadenergie
+    var pctF=(pct!=null)?pct/100:1;
+    var fact=(+s.factuur_sturing_excl_btw||0)*af;                       // jaarbasis
+    var restCreg=(pct!=null)?C*(1-pctF):0;                              // niet-geleverde km's: nog CREG elders
+    var besparing=(base0!=null)?(base0-(fact+restCreg)):null;          // bruto
+    // Instap-capex: volledige kabels + volledige aansluiting/cabine + PV, maar laadpalen naar rato
+    // van de geleverde laadenergie, en k batterijen.
+    var laadpalenStap=fullLaadpalen*pctF;
+    var capex=pv+laadpalenStap+fullKabel+fullNet+cabine+k*battUnitCost;
+    var oh1=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + (k*BATT_UNIT_KW)*TCO_AAN.onderhoud.batterij_kw + (lpTot*pctF)*TCO_AAN.onderhoud.laadpaal;
+    var opex1=oh1+capex*TCO_AAN.verzekering_promille/1000;
+    var besparingNetto=(besparing!=null)?(besparing-opex1):null;
+    var rend=(besparingNetto!=null && capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
+    var verhoogd=(+s.aansluiting_verhoogd_kw>0);                        // sim moest bijtrekken → past niet op vaste aansl.
+    var g=(k===kStar);                                                  // volgroeid = optimale opstelling
+    return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
+      '<span>'+k+' × 120/260'+(g?' ✓ volgroeid':(k===1?' · instap':''))+'</span>'+
+      '<span style="text-align:right'+(verhoogd?';color:#9E480E':'')+'">'+(pct!=null?fmtNum(pct,0)+' %'+(verhoogd?' ⚠':''):'—')+'</span>'+
+      '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
+      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span>'+
+      '<span style="text-align:right">'+fmtEur(capex)+'</span></div>';
+  }).join('');
+  var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
+  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
+    'De aansluiting en de kabels zijn overal die van de volgroeide opstelling (één keer aanleggen, nooit meer verhogen). '+
+    'Alleen de batterijen en de laadpalen (naar rato van de geleverde laadenergie) groeien mee. Rendement is netto '+
+    '(na onderhoud + verzekering). Een instap met 1 batterij kost fors minder dan het volgroeide bedrag en levert al een '+
+    'groot deel van de laadvraag — een makkelijk verkoopbare, rendabele start; de batterijen en laadpalen komen er nadien '+
+    '(bij dezelfde partij) bij. ⚠ = op deze stap moest de dispatch de aansluiting toch even bijtrekken (batterij te klein voor de piek).'));
+  return sec;
+}
+// v1.35.0: oude groeipad-weergave (minimale aansluiting per batterij-aantal, 100% geleverd) —
+// enkel nog als terugval wanneer /api/groeipad niet beschikbaar is (oude proxy).
+function _renderGroeipadFallback(){
   var eng=_kpiEngine(); if(!eng) return null;
   var d3=_derde(); var mix=d3&&d3.o&&d3.o.mix; var alts=(mix&&mix.alternatieven)||null;
   if(!alts||!alts.length) return null;
   var af=eng.af, E_base=eng.E_base, C=eng.C, huidig=eng.P_huidig||0;
-  var base0=(E_base!=null)?(E_base+C):null;                             // opstelling 0 = bestaand + CREG-km
-  var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;         // laadpaal-aantal (voor onderhoud)
+  var base0=(E_base!=null)?(E_base+C):null;
+  var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
     'Groeipad — van 1 batterij tot het volledige aantal'));
   sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
-    'Van 1 batterij (grotendeels verzwaren — dicht bij opstelling 1) tot het volledige aantal van opstelling 2. '+
-    'Elke stap levert de vólledige laadvraag (100%); we zoeken telkens de aansluiting die daarvoor nodig is. '+
-    'Zo ziet u hoe het extra vermogen daalt en de besparing/rendement evolueren; het gemarkeerde punt (✓) is de gekozen opstelling 3.'));
-  var grid='1.1fr 1fr 1.1fr 0.8fr 1.1fr';
+    'Van 1 batterij tot het volledige aantal; elke stap zoekt de minimale aansluiting die 100% levert. '+
+    '(Terugval-weergave — de nieuwe vaste-aansluiting-berekening vereist een geüpdatete proxy.)'));
+  var grid='1.3fr 1.1fr 1.1fr 0.9fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:12px">'+
-    '<span>Batterijen</span><span style="text-align:right">Extra vermogen</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span><span style="text-align:right">TCO ('+HORIZON_JAAR+'j)</span></div>';
+    '<span>Batterijen</span><span style="text-align:right">Extra vermogen</span><span style="text-align:right">Besparing/jaar</span><span style="text-align:right">Rendement</span></div>';
   var rows=alts.map(function(a){
     var kva=+a.kva||0, sp=(kva>100)?'MS':(STATE.spanning||'LS');
-    var extra=Math.max(0, kva-huidig);
-    var fact=(+a.jaarkost||0)*af;
-    var netdeel=(a.distributie_eur!=null)?((+a.distributie_eur||0)*af):null;   // netkosten (B+C+D), jaarbasis
-    var besparing=(base0!=null)?(base0-fact):null;                             // bruto
-    // v1.31.0: de server geeft capex + tco INCL cabine mee (a.capex/a.tco). Oudere proxy zonder
-    // die velden: capex excl → cabine hier alsnog bijtellen (MS = >100 kVA).
+    var extra=Math.max(0, kva-huidig), fact=(+a.jaarkost||0)*af;
+    var besparing=(base0!=null)?(base0-fact):null;
     var capexIncl=(a.capex!=null)?(+a.capex + ((a.cabine!=null||a.tco!=null)?0:((kva>100)?INV_CABINE_EUR:0))):null;
-    // v1.33.0: rendement NETTO (na opex) en TCO live herrekend op het gekozen scenario, zodat de
-    // rij meebeweegt met de scenario-kiezer. Zonder netkosten-split (oude proxy) valt tco terug
-    // op de server-waarde a.tco.
-    var battKwG=(+a.aantal_batterijen||0)*BATT_UNIT_KW;
-    var oh1G=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + battKwG*TCO_AAN.onderhoud.batterij_kw + lpTot*TCO_AAN.onderhoud.laadpaal;
+    var oh1G=(+STATE.pvKwp||0)*TCO_AAN.onderhoud.pv_kwp + (+a.aantal_batterijen||0)*BATT_UNIT_KW*TCO_AAN.onderhoud.batterij_kw + lpTot*TCO_AAN.onderhoud.laadpaal;
     var opex1G=(capexIncl!=null)?(oh1G + capexIncl*TCO_AAN.verzekering_promille/1000):null;
-    var besparingNettoG=(besparing!=null && opex1G!=null)?(besparing-opex1G):null;
-    var rend=(besparingNettoG!=null && capexIncl!=null && capexIncl>0 && besparingNettoG>0)?(besparingNettoG/capexIncl*100):null;
-    var tco=(capexIncl!=null && netdeel!=null)?_tcoMeerjaar(capexIncl, fact, netdeel, oh1G, (+STATE.pvKwp||0))
-          :((a.tco!=null)?(+a.tco):((capexIncl!=null)?(capexIncl+fact*HORIZON_JAAR):null));
+    var bnG=(besparing!=null && opex1G!=null)?(besparing-opex1G):null;
+    var rend=(bnG!=null && capexIncl!=null && capexIncl>0 && bnG>0)?(bnG/capexIncl*100):null;
     var g=a.gekozen;
     return '<div style="display:grid;grid-template-columns:'+grid+';gap:6px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:12px;'+(g?'background:#05B0500f;font-weight:700':'')+'">'+
       '<span>'+a.aantal_batterijen+' × 120/260'+(g?' ✓':'')+'</span>'+
       '<span style="text-align:right">'+(extra>0?'+ '+fmtNum(extra,0)+' kW · '+sp:'0 kW')+'</span>'+
       '<span style="text-align:right">'+(besparing!=null?fmtEur(besparing):'—')+'</span>'+
-      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span>'+
-      '<span style="text-align:right">'+(tco!=null?fmtEur(tco):'—')+'</span></div>';
+      '<span style="text-align:right">'+(rend!=null?fmtNum(rend,1)+'%':'—')+'</span></div>';
   }).join('');
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
-  sec.appendChild(el('div',{style:'margin-top:6px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'Elke stap levert 100% van de laadvraag. Meer batterijen = minder extra vermogen (verzwaring t.o.v. vandaag) — robuuster tegen stijgende netkosten en piekgroei. '+
-    'TCO is all-in (cabine, onderhoud, verzekering, '+_tcoScenario().naam.toLowerCase()+' netkosten-schema — zoals het financieel rapport). Het gekozen punt (✓) heeft de laagste TCO over '+HORIZON_JAAR+' jaar. '+
-    'Suggestie: start met het laadplein en leg meteen de kabels voor het volledige plein; laat de batterijen meegroeien met de EV-vloot.'));
   return sec;
 }
 function _actieveBatterijKwh(){
@@ -7521,6 +7579,30 @@ function runSimulatie(){
     STATE.isRunning=false;
     STATE._marktRetryCount=0;  // reset bij succes
     setStatus('Simulatie klaar','ok');
+    // v1.35.0: groeipad op VASTE aansluiting (volgroeid = optimale opstelling). Aparte async
+    // call naar /api/groeipad — die draait per batterij-aantal een echte dispatch op dezelfde
+    // aansluiting en geeft per stap het % geleverde laadenergie. Re-rendert zodra binnen.
+    STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false;
+    try {
+      var _geng=_kpiEngine(), _gb=_geng&&_geng.beste;
+      if(_gb && _gb.o && _gb.key!=='verhogen' && STATE.lastSimInput){
+        var _gbcfg=_gb.o.config||{};
+        var _kvaVol=+_gbcfg.aansluiting_kva||0;
+        var _kStar=Math.max(1, Math.round(_dimKwh(_gb.o)/BATT_UNIT_KWH));
+        if(_kvaVol>0){
+          var _gpIn=JSON.parse(JSON.stringify(STATE.lastSimInput));
+          _gpIn.aansluiting_kva=_kvaVol; _gpIn.aansluitingKva=_kvaVol; _gpIn.max_batterijen=_kStar;
+          STATE.groeipadLoading=true;
+          apiPost('/api/groeipad', _gpIn).then(function(gp){
+            STATE.groeipad=gp; STATE.groeipadLoading=false;
+            if(STATE.currentStep===10) renderStage();
+          }).catch(function(e){
+            STATE.groeipadLoading=false; STATE.groeipadFout=e.message;
+            if(STATE.currentStep===10) renderStage();
+          });
+        }
+      }
+    } catch(_ge){ /* groeipad is optioneel — nooit de hoofd-render blokkeren */ }
     renderAll();
   }).catch(function(e){
     // v1.19.1 hotfix: automatische retry wanneer de server nog marktdata aan het
