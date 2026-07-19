@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.49.0</span>
+    <span class="fdsim-version">v1.50.1</span>
   </div>
 </div>
 
@@ -5587,8 +5587,10 @@ function _renderKostPerKmRendement(){
   // v1.47.0: km-vergelijking — % besparing t.o.v. het CREG-forfait én t.o.v. diesel (gewogen over de vloot).
   var _cregKm=(eng.opstelling0&&eng.opstelling0.kostKm!=null)?eng.opstelling0.kostKm:null;
   var _dieselKm=_dieselKmKostGem();
-  function pctBesp(r,ref){ if(r.kostKm==null||ref==null||!(ref>0)) return '—'; var p=(ref-r.kostKm)/ref*100;
-    return '<span style="color:'+(p>=0?'#05B050':'#9E480E')+'">'+(p>=0?'+ ':'')+fmtNum(p,0)+' %</span>'; }
+  // v1.50.0: tonen als KOSTVERANDERING t.o.v. de referentie — een besparing is een DALING en krijgt
+  // dus een minteken (groen); een duurdere km een plusteken (oranje).
+  function pctBesp(r,ref){ if(r.kostKm==null||ref==null||!(ref>0)) return '—'; var chg=(r.kostKm-ref)/ref*100;
+    return '<span style="color:'+(chg<=0?'#05B050':'#9E480E')+'">'+(chg<=0?'− ':'+ ')+fmtNum(Math.abs(chg),0)+' %</span>'; }
   sec.appendChild(kader('KPI 1 — Kost per km',
     rij('€/km', function(r){return r.kostKm!=null?fmtNum(r.kostKm,3):'—';})+
     rij('% besparing t.o.v. CREG-prijs', function(r){return pctBesp(r,_cregKm);})+
@@ -5611,9 +5613,13 @@ function _renderKostPerKmRendement(){
   // afhandeling blijft op sturing 2 (zonder onbalans); dit toont enkel wat er BOVENOP kan.
   if(eng.rows.some(function(r){return r.windfall>0;})){
     function pbCh(r){ return (r.besparingCherry!=null && r.capex>0 && r.besparingCherry>0)?(r.capex/r.besparingCherry):null; }
+    // v1.50.1: besparing op TWEE rijen — (1) besparing zónder onbalans, (2) de EXTRA besparing die de
+    // onbalans er bovenop brengt (het potentieel). Zo zie je meteen dat opstelling 3 de meeste
+    // onbalans-kansen ontsluit. Terugverdientijd/rendement hieronder rekenen mét onbalans (totaal).
     var onbInner='<div style="font-weight:700;color:#0B7A46;font-size:12px;margin-bottom:5px">🍒 Mét onbalans meegerekend (kers op de taart)</div>'+
       '<div style="display:grid;grid-template-columns:'+cols+';gap:6px;font-size:12px">'+kopRij()+
-      rij('Besparing/jaar netto', function(r){return r.nr===0?'€ 0':(r.besparingCherry!=null?fmtEur(r.besparingCherry):'—');})+
+      rij('Besparing/jaar — zónder onbalans', function(r){return r.nr===0?'€ 0':(r.besparingNetto!=null?fmtEur(r.besparingNetto):'—');})+
+      rij('+ Extra door onbalans (potentieel)', function(r){if(r.nr===0)return '€ 0'; return (r.windfall!=null&&r.windfall>0)?'<span style="color:#0B7A46;font-weight:700">+ '+fmtEur(r.windfall)+'</span>':(r.windfall!=null?fmtEur(r.windfall):'—');})+
       rij('Terugverdientijd', function(r){if(r.nr===0)return '—';var v=pbCh(r);return v!=null?fmtNum(v,1)+' j':'—';})+
       rij('Rendement (jaar 1)', function(r){return r.nr===0?'0 %':(r.rendementCherry!=null?fmtNum(r.rendementCherry,1)+' %':'—');})+
       ['conservatief','realistisch','optimistisch'].map(function(sk){
@@ -5626,10 +5632,12 @@ function _renderKostPerKmRendement(){
     var onbBox=el('div',{style:'padding:9px 11px;background:#05B0500f;border:1px solid #05B05055;border-radius:6px;margin-bottom:8px'});
     onbBox.innerHTML=onbInner;
     sec.appendChild(onbBox);
-    sec.appendChild(el('div',{style:'margin-top:-4px;margin-bottom:8px;font-size:10px;color:#5A6577;font-style:italic'},
-      'Optioneel voor de klant: dit rekent de onbalans-opbrengst (passieve respons) mee in besparing, terugverdientijd, '+
-      'rendement en TCO. Vereist zelf-nominatie + toegang tot de onbalansmarkt (niet elke leverancier staat dit vandaag toe). '+
-      'Wij blijven de opstelling kiezen en verkopen op sturing 2 — zónder onbalans; dit is puur wat er bovenop kan.'));
+    var _onbAdv=el('div',{style:'margin-top:4px;margin-bottom:8px;padding:8px 11px;background:#0B7A460d;border:1px solid #0B7A4633;border-radius:6px;font-size:11px;color:#1F3864'});
+    _onbAdv.innerHTML='<b>Advies:</b> de bovenste rij is de besparing die u sowieso maakt; de tweede rij is het <b>onbalans-potentieel</b> '+
+      'bovenop. Ga daarvoor het gesprek aan met uw leverancier om <b>toegang te krijgen tot die meerwaarde</b> (zelf-nominatie + toegang tot de '+
+      'onbalansmarkt). Niet elke leverancier ontsluit dit vandaag al, maar in de komende jaren zal elke leverancier die meerwaarde voor zijn '+
+      'klanten beschikbaar maken. Wij kiezen en verkopen de opstelling bewust op sturing 2 — zónder onbalans; dit is puur wat er bovenop kan.';
+    sec.appendChild(_onbAdv);
   }
   sec.appendChild(kader('KPI 3 — Loadfactor',
     rij('Loadfactor', function(r){return r.loadfactor!=null?fmtNum(r.loadfactor*100,0)+' %':'—';})));
@@ -5845,8 +5853,12 @@ function _renderOptimaleSamenvatting(){
     '<div style="font-size:16px;font-weight:800;color:#1F3864">'+g+'</div>'+
     (o?'<div style="font-size:11px;color:#5A6577">'+o+'</div>':'')+'</div>'; }
   var sec=el('div',{style:'margin-top:14px'});
-  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:8px'},
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:2px'},
     'Optimale opstelling — '+b.label+' (hoogste NPV @ '+Math.round(_npvDisc()*100)+'%)'));
+  // v1.50.0: opstelling 3 is het EINDPUNT — nodig zodra de volledige laadinfrastructuur effectief in
+  // gebruik is. Tot dan volstaat een kleinere instap (zie groeipad).
+  sec.appendChild(el('div',{style:'font-size:11px;color:#5A6577;margin-bottom:8px'},
+    'Dit is de opstelling die nodig is zodra de volledige laadinfrastructuur beschikbaar is en effectief gebruikt wordt. Tot dan volstaat een bescheiden instap die met de vloot meegroeit (zie groeipad).'));
   var grid=el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:10px'});
   grid.innerHTML=
     tile('PV', pv>0?fmtNum(pv,0)+' kWp':'Geen', '')+
@@ -6144,7 +6156,8 @@ function _renderGroeipad(){
     var npv=_npv(besparing, besparingNet, oh1, capex, (+STATE.pvKwp||0));
     var verhoogd=(+s.aansluiting_verhoogd_kw>0);
     return {k:k, c:c, kmGeladen:kmGeladen, pct:pct, besparing:besparing, cumBesp:cumBesp, npv:npv,
-            rend:rend, capex:capex, verhoogd:verhoogd, isOpt:isOpt};
+            rend:rend, capex:capex, verhoogd:verhoogd, isOpt:isOpt,
+            fd:(s.factuur_detail||null), factStap:factStap, notDelivered:notDelivered};
   });
   // Beste aansluiting per batterij-aantal (op NPV) + globaal NPV-maximum. Aanbevolen eerste stap = k=1.
   var perK={}; data.forEach(function(d){ var g=perK[d.k]; if(!g||(d.npv!=null&&(g.npv==null||d.npv>g.npv))) perK[d.k]=d; });
@@ -6163,7 +6176,11 @@ function _renderGroeipad(){
     ', en we kiezen per stap de aansluiting met de <b>hoogste NPV op de geleverde km</b>. Met minder batterijen laad je minder km '+
     '(niet elke EV is er al, of laadt vanaf dag 1 alles) — dat is net het punt: de klant start klein, met het beste rendement en de '+
     'hoogste NPV op wat hij écht nodig heeft, en groeit mee met zijn elektrificatie. De NPV vergelijkt telkens met opstelling 0 '+
-    '(CREG voor diezelfde km).';
+    '(CREG voor diezelfde km).<br><br>'+
+    '<b>Belangrijk:</b> in elke stap wordt álle gevraagde energie geleverd — enkel niet op hetzelfde <b>piekvermogen</b> als de '+
+    'volgroeide opstelling. Het laden wordt gespreid over het venster (spot-slim, buiten de gebouwpiek). Zo is de <b>drempel voor de '+
+    'klant kleiner</b>: hij start bescheiden, en bij elke volgende transitiestap kan rekening gehouden worden met een gewijzigd '+
+    'rij- en verbruiksgedrag en -profiel. De opstelling groeit dus mee met hoe de vloot écht gebruikt wordt.';
   sec.appendChild(_gi);
   if(eersteStap){
     var _es=eersteStap;
@@ -6205,6 +6222,77 @@ function _renderGroeipad(){
     't.o.v. opstelling 0 op dezelfde geleverde km (de niet-geladen km kosten in beide gevallen CREG en vallen weg). '+
     '• = beste aansluiting voor dat batterij-aantal; ★ = aanbevolen eerste stap (hoogste NPV, minste capex); '+
     '✓ = volgroeid (opstelling 3, 100% km). ⚠ = aansluiting toch verhoogd (batterij te klein — vlag niet actief).'));
+
+  // v1.50.0: kies een stap in het groeipad (standaard = aanbevolen eerste stap) en vergelijk de
+  // gedetailleerde factuur van die stap met opstelling 0 (bestaande stroom + CREG voor de km).
+  function _fVergelijk(d){
+    var bc=STATE.baseCase||{}, heeftBase=_heeftFactuur();
+    var dg=_periodeDagen(bc.periodeVan,bc.periodeTot)||365, f0=(dg>0?365/dg:1);
+    var o0=heeftBase?{ energie:(bc.totaalEnergieExclBtw||0)*f0, distributie:(bc.totaalDistributieExclBtw||0)*f0,
+      capaciteit:(bc.totaalCapaciteitExclBtw||0)*f0, heffingen:(bc.totaalHeffingenExclBtw||0)*f0,
+      stroom:(E_base!=null?E_base:(bc.totaalExclBtw||0)*f0)}:null;
+    var fd=d.fd;
+    var stap=fd?{ energie:(+fd.energie||0)*af, distributie:(+fd.distributie||0)*af, capaciteit:(+fd.capaciteit||0)*af,
+      heffingen:(+fd.heffingen||0)*af, stroom:(d.factStap!=null?d.factStap:(+fd.subtotaal||0)*af) }:null;
+    var cregAll=C||0, cregRest=(C||0)*(d.notDelivered||0);
+    var vandaagTot=(o0?o0.stroom:0)+cregAll, straksTot=(stap?stap.stroom:0)+cregRest;
+    var besparing=(o0||cregAll>0)?(vandaagTot-straksTot):null;
+    var gr='2.2fr 1fr 1fr';
+    function rij(l,v0,v1,st){ return '<span'+(st?' style="'+st+'"':'')+'>'+l+'</span>'+
+      '<span style="text-align:right'+(st?';'+st:'')+'">'+(v0!=null?fmtEur(v0):'—')+'</span>'+
+      '<span style="text-align:right'+(st?';'+st:'')+'">'+(v1!=null?fmtEur(v1):'—')+'</span>'; }
+    var fs=el('div',{style:'margin-top:10px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+    fs.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:2px'},
+      'Detailfactuur — gekozen stap ('+d.k+' batterij'+(d.k>1?'en':'')+' · '+_connLabel(d.c)+') vs. opstelling 0'));
+    fs.appendChild(el('div',{style:'font-size:11.5px;color:#5A6577;margin-bottom:8px'},
+      'De factuur van deze stap ('+fmtNum(d.pct||0,0)+'% van de km op eigen, slim gestuurde parking) vs. opstelling 0: de '+
+      'bestaande stroomfactuur plus álle vloot-km aan het CREG-forfait. De km die deze stap nog niet levert, staan aan CREG in béíde kolommen (en vallen dus weg in het verschil).'));
+    if(!stap){ fs.appendChild(el('div',{style:'font-size:12px;color:#9E480E'},
+      'Factuurdetail per stap vereist de geüpdatete proxy (server v15.33.0+).')); return fs; }
+    var t=el('div');
+    t.innerHTML='<div style="display:grid;grid-template-columns:'+gr+';gap:6px;font-size:12px">'+
+      '<span>Component (per jaar, excl. btw)</span>'+
+      '<span style="text-align:right;font-weight:700;color:#1F3864">Opstelling 0 + CREG</span>'+
+      '<span style="text-align:right;font-weight:700;color:#1F3864">Deze stap</span>'+
+      rij('Energie (commodity)', o0?o0.energie:null, stap.energie)+
+      rij('Distributie + transport', o0?o0.distributie:null, stap.distributie)+
+      rij('&nbsp;&nbsp;waarvan capaciteit', o0?o0.capaciteit:null, stap.capaciteit)+
+      rij('Heffingen + accijnzen', o0?o0.heffingen:null, stap.heffingen)+
+      rij('Stroomfactuur (excl. btw)', o0?o0.stroom:null, stap.stroom, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
+      rij('km aan CREG-forfait', cregAll, cregRest, 'color:#9E480E')+
+      rij('Totaal (stroom + CREG-km) / jaar', (o0||cregAll>0)?vandaagTot:null, straksTot, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+      '</div>';
+    fs.appendChild(t);
+    if(besparing!=null){
+      var bd=el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:13px'});
+      bd.innerHTML='<b style="color:#1F3864">Besparing per jaar: <span style="color:'+(besparing>=0?'#05B050':'#9E480E')+'">'+(besparing>=0?'+ ':'')+fmtEur(besparing)+'</span></b>'+
+        ' — NPV @'+Math.round(_npvDisc()*100)+'% '+(d.npv!=null?fmtEur(d.npv):'—')+', rendement '+(d.rend!=null?fmtNum(d.rend,1)+'%':'—')+', instap-investering '+fmtEur(d.capex)+'.';
+      fs.appendChild(bd);
+    }
+    return fs;
+  }
+  var _keuze=null;
+  if(STATE.groeipadKeuze){ _keuze=sorted.filter(function(x){return x.k===STATE.groeipadKeuze.k && Math.round(x.c)===Math.round(STATE.groeipadKeuze.c);})[0]||null; }
+  if(!_keuze) _keuze=eersteStap;
+  if(_keuze){
+    var selWrap=el('div',{style:'margin-top:12px;padding:10px 12px;background:#1F386406;border:1px solid #1F386422;border-radius:6px'});
+    selWrap.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:12px;margin-bottom:6px'},
+      'Startscenario (standaard = aanbevolen eerste stap)'));
+    // v1.50.1: dropdown i.p.v. knoppen — kies het startscenario dat we tegenover opstelling 0 (+ CREG-km) leggen.
+    var sel=el('select',{style:'padding:6px 10px;border:1px solid #1F3864;border-radius:6px;font-size:12.5px;color:#1F3864;background:#fff;max-width:100%;min-width:320px'});
+    sorted.forEach(function(dd,ix){
+      var lbl=dd.k+' batterij'+(dd.k>1?'en':'')+' · '+_connLabel(dd.c)+
+        (dd===eersteStap?'  ★ aanbevolen start':(dd.isOpt?'  ✓ volgroeid':''))+
+        '  —  '+(dd.pct!=null?fmtNum(dd.pct,0)+'% km':'')+', NPV '+(dd.npv!=null?fmtEur(dd.npv):'—');
+      var opt=el('option',{value:String(ix)}, lbl);
+      if(dd===_keuze) opt.setAttribute('selected','selected');
+      sel.appendChild(opt);
+    });
+    sel.onchange=function(){ var dd=sorted[+sel.value]; if(dd){ STATE.groeipadKeuze={k:dd.k, c:dd.c}; renderStage(); } };
+    selWrap.appendChild(sel);
+    sec.appendChild(selWrap);
+    sec.appendChild(_fVergelijk(_keuze));
+  }
   return sec;
 }
 // v1.35.0: oude groeipad-weergave (minimale aansluiting per batterij-aantal, 100% geleverd) —
@@ -7855,7 +7943,7 @@ function runSimulatie(){
     // v1.35.0: groeipad op VASTE aansluiting (volgroeid = optimale opstelling). Aparte async
     // call naar /api/groeipad — die draait per batterij-aantal een echte dispatch op dezelfde
     // aansluiting en geeft per stap het % geleverde laadenergie. Re-rendert zodra binnen.
-    STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false;
+    STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false; STATE.groeipadKeuze=null;
     try {
       var _geng=_kpiEngine(), _gb=_geng&&_geng.beste;
       if(_gb && _gb.o && _gb.key!=='verhogen' && STATE.lastSimInput){
