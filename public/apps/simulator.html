@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.50.1</span>
+    <span class="fdsim-version">v1.51.0</span>
   </div>
 </div>
 
@@ -5353,7 +5353,42 @@ function _basisVerhogingKw(cfgV){
 //   ≥1 batterij  → €15.000
 //   PV aanwezig  → €10.000
 // Toegepast overal waar de investering wordt opgebouwd (result-scherm + groeipad).
+// ─── v1.51.0: koppeling met de KABELPLANNER (intekenen → exacte kabelprijs) ───
+var KABELPLANNER_URL='kabelplanner.html';   // relatief pad — zelfde map (public/apps/) als simulator.html; moet exact matchen met de bestandsnaam die je uploadt
+var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result';
+// Opent de kabelplanner met een seed: adres (verbruikslocatie uit de factuur), de laadpunten uit de
+// laadpleinen en de batterij van de gekozen groeistap. Same-origin → via localStorage.
+function _kblIntekenen(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return;
+  var bc=STATE.baseCase||{};
+  var adres=bc.leveringsadres||bc.klantAdres||(((STATE.postcode||'')+' '+(STATE.gemeente||'')).trim());
+  var lp={}; (STATE.laadpleinen||[]).forEach(function(p){ (p.laadpunten||[]).forEach(function(x){ var a=+x.aantal||0; if(a>0) lp[x.type]=(lp[x.type]||0)+a; }); });
+  var laadpunten=Object.keys(lp).map(function(t){ return {type:t, aantal:lp[t]}; });
+  var k=(STATE.groeipadKeuze&&+STATE.groeipadKeuze.k)||Math.max(1,Math.round(_dimKwh(eng.beste.o)/BATT_UNIT_KWH));
+  var seed={ ts:Date.now(), opstelling:eng.beste.label, adres:adres, laadpunten:laadpunten, batterij:{kwh:BATT_UNIT_KWH, aantal:k} };
+  try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
+  STATE._kblSeedTs=seed.ts;
+  try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){}
+}
+// Detecteert de exacte kabelprijs die de planner terugschrijft (na 'Prijs terug naar simulator').
+function _kblCheckResult(){
+  try{
+    var raw=localStorage.getItem(KBL_RESULT_KEY); if(!raw) return;
+    var res=JSON.parse(raw); if(!res||res.ts==null||res.kabeltrace_eur==null) return;
+    if(STATE._kblResultTs===res.ts) return;
+    if(STATE._kblSeedTs && res.ts < STATE._kblSeedTs) return;   // enkel een resultaat ná onze seed
+    STATE._kblResultTs=res.ts; STATE.kabeltraceResult=res;
+    if(STATE.currentStep===10 && typeof renderStage==='function') renderStage();
+  }catch(e){}
+}
+if(typeof window!=='undefined' && !window._kblListen){ window._kblListen=true;
+  window.addEventListener('focus',_kblCheckResult);
+  window.addEventListener('storage',function(e){ if(e.key===KBL_RESULT_KEY) _kblCheckResult(); });
+}
+
 function _kabeltrace(heeftBatterij){
+  // v1.51.0: exacte kabeltracé-prijs uit de kabelplanner (na 'Intekenen') vervangt de schatting.
+  if(STATE.kabeltraceOverride!=null && isFinite(+STATE.kabeltraceOverride)) return +STATE.kabeltraceOverride;
   var L=(STATE.laadpleinen||[]).length, t=0;
   if(L>0) t += 15000 + Math.max(0,L-1)*10000;
   if(heeftBatterij) t += 15000;
@@ -5866,6 +5901,23 @@ function _renderOptimaleSamenvatting(){
     tile('Laadplein (EV)', fmtNum(evMwh,1)+' MWh', '')+
     tile('Aansluiting', fmtNum(aanslBeste,0)+' kW · '+spBeste, 'vandaag: '+fmtNum(aanslNu,0)+' kW · '+spNu);
   sec.appendChild(grid);
+  // v1.51.0: intekenen op de kabelplanner + herbereken met de exacte kabelprijs.
+  var _kblRow=el('div',{style:'margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center'});
+  var _tekenBtn=el('button',{class:'fdsim-btn small'},'Intekenen op kaart (kabelplanner)');
+  _tekenBtn.onclick=_kblIntekenen;
+  _kblRow.appendChild(_tekenBtn);
+  if(STATE.kabeltraceResult && STATE.kabeltraceResult.kabeltrace_eur!=null){
+    var _herBtn=el('button',{class:'fdsim-btn green small'},'↻ Herbereken met exacte kabelprijs ('+fmtEur(STATE.kabeltraceResult.kabeltrace_eur)+')');
+    _herBtn.onclick=function(){ STATE.kabeltraceOverride=+STATE.kabeltraceResult.kabeltrace_eur; renderStage(); };
+    _kblRow.appendChild(_herBtn);
+  }
+  if(STATE.kabeltraceOverride!=null){
+    _kblRow.appendChild(el('span',{style:'font-size:11px;color:#05B050;font-weight:700'},'✓ exacte kabelprijs actief: '+fmtEur(STATE.kabeltraceOverride)));
+    var _schatBtn=el('button',{class:'fdsim-btn small',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'schatting terug');
+    _schatBtn.onclick=function(){ STATE.kabeltraceOverride=null; renderStage(); };
+    _kblRow.appendChild(_schatBtn);
+  }
+  sec.appendChild(_kblRow);
   return sec;
 }
 

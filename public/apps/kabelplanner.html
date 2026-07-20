@@ -1,0 +1,586 @@
+<!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.3  (simulator-koppeling)
+     Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
+     Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
+     ondergrond-zones, densiteit per PV-zone, undo, bugfix draw.
+     v1.3: koppeling met de Fluctus-simulator (seed inlezen + exacte prijs terug).
+     ============================================================ -->
+
+<div id="fk-app">
+<script>
+  window.FK_CONFIG = {
+    SUPABASE_URL:      "",
+    SUPABASE_ANON_KEY: "",
+    TABLE: "kabelplan_designs",
+    PRICE: { ac:2500, dc:30000, sdc:0, cabine:0, ontk:20000, omv:0, kast:5000 }
+  };
+</script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  #fk-app{ --navy:#1F3864; --green:#05B050; --orange:#9E480E;
+           --bg:#f4f6f9; --line:#dfe4ec; --ink:#1d2330; --muted:#6a7686;
+           font-family:'Barlow',Arial,sans-serif; color:var(--ink);
+           background:var(--bg); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #fk-app *{ box-sizing:border-box; }
+  .fk-wrap{ display:grid; grid-template-columns:220px 1fr 340px; min-height:700px; }
+  @media(max-width:980px){ .fk-wrap{ grid-template-columns:1fr; } #fk-map{ height:420px;} }
+  .fk-col{ padding:12px; overflow:auto; max-height:840px; }
+  .fk-left{ background:#fff; border-right:1px solid var(--line); }
+  .fk-right{ background:#fff; border-left:1px solid var(--line); }
+  #fk-map{ min-height:700px; }
+  .fk-h{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:14px 0 6px; }
+  .fk-h:first-child{ margin-top:0; }
+  .fk-search{ display:flex; gap:6px; margin-bottom:8px; }
+  input,select,button,textarea{ font-family:inherit; font-size:13px; }
+  input,select{ width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); }
+  label{ font-size:11px; color:var(--muted); display:block; margin:6px 0 2px; }
+  .fk-btn{ border:0; border-radius:7px; padding:8px 10px; cursor:pointer; font-weight:600; font-size:12.5px; color:#fff; background:var(--navy); width:100%; transition:filter .15s; }
+  .fk-btn:hover{ filter:brightness(1.08); }
+  .fk-btn.g{ background:var(--green); } .fk-btn.o{ background:var(--orange); }
+  .fk-btn.ghost{ background:#fff; color:var(--navy); border:1px solid var(--navy); }
+  .fk-btn.sm{ padding:6px 8px; font-size:11.5px; }
+  .fk-btn.big{ padding:11px; font-size:13.5px; }
+  .fk-palette{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .fk-obj{ display:flex; flex-direction:column; align-items:center; gap:4px; border:1px solid var(--line); border-radius:8px; padding:8px 4px; cursor:pointer; background:#fff; text-align:center; transition:.12s; }
+  .fk-obj:hover{ border-color:var(--navy); box-shadow:0 1px 6px rgba(31,56,100,.12); }
+  .fk-obj.active{ border-color:var(--orange); background:#fff7f0; }
+  .fk-obj svg{ width:26px; height:26px; } .fk-obj span{ font-size:10px; line-height:1.1; }
+  .fk-tool{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+  .fk-item{ border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:8px; background:#fff; }
+  .fk-item h4{ margin:0 0 6px; font-size:12.5px; display:flex; justify-content:space-between; align-items:center; }
+  .fk-item .x{ color:#c0392b; cursor:pointer; font-weight:700; font-size:13px; }
+  .fk-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .fk-grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .fk-kpi-big{ background:var(--navy); color:#fff; border-radius:10px; padding:14px; text-align:center; margin-bottom:8px; }
+  .fk-kpi-big .n{ font-size:28px; font-weight:700; line-height:1; }
+  .fk-kpi-big .l{ font-size:11px; opacity:.85; margin-top:4px; }
+  .fk-kpi{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+  .fk-kpi .c{ background:#eef1f6; border-radius:9px; padding:9px; text-align:center; }
+  .fk-kpi .c.g{ background:var(--green); color:#fff; }
+  .fk-kpi .c .n{ font-size:18px; font-weight:700; line-height:1; }
+  .fk-kpi .c .l{ font-size:10px; margin-top:3px; color:var(--muted); }
+  .fk-kpi .c.g .l{ color:#fff; opacity:.85; }
+  table.fk-bom{ width:100%; border-collapse:collapse; font-size:12px; }
+  .fk-bom td{ border-bottom:1px solid var(--line); padding:6px 4px; }
+  .fk-bom td:last-child{ text-align:right; font-variant-numeric:tabular-nums; }
+  .fk-bom tfoot td{ font-weight:700; font-size:14px; border-top:2px solid var(--navy); border-bottom:0; padding-top:8px; }
+  .fk-row-obj{ display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid var(--line); font-size:12px; }
+  .fk-row-obj .nm{ flex:1; } .fk-row-obj .pr{ font-variant-numeric:tabular-nums; }
+  .fk-row-obj .x{ color:#c0392b; cursor:pointer; font-weight:700; }
+  .fk-row-obj select{ width:auto; padding:3px 6px; font-size:11px; }
+  .fk-note{ font-size:10.5px; color:var(--muted); line-height:1.4; margin-top:6px; }
+  .fk-toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 16px; border-radius:8px; font-size:13px; z-index:9999; opacity:0; transition:.25s; pointer-events:none; }
+  .fk-toast.show{ opacity:1; }
+  .leaflet-container{ font-family:inherit; }
+  .fk-frozen #fk-map{ outline:3px solid var(--orange); outline-offset:-3px; }
+  .fk-pin div{ display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; background:#fff; border:2px solid var(--navy); box-shadow:0 1px 4px rgba(0,0,0,.3); }
+  .fk-pin svg{ width:18px; height:18px; }
+  .fk-badge{ font-size:10px; color:#fff; border-radius:5px; padding:1px 5px; margin-left:6px; }
+  .fk-tlabel{ background:var(--navy); color:#fff; border:0; border-radius:5px; font-size:10.5px; font-weight:600;
+              padding:1px 6px; box-shadow:0 1px 3px rgba(0,0,0,.35); white-space:nowrap; }
+  .fk-tlabel:before{ display:none !important; }
+</style>
+
+<div class="fk-wrap">
+  <!-- LINKS -->
+  <div class="fk-col fk-left">
+    <div class="fk-h">Project</div>
+    <input id="fk-name" placeholder="Projectnaam"/>
+    <div class="fk-tool" style="margin-top:8px">
+      <button class="fk-btn g sm" id="fk-save">Opslaan</button>
+      <button class="fk-btn ghost sm" id="fk-load">Laden&#8230;</button>
+    </div>
+    <button class="fk-btn ghost sm" id="fk-new" style="margin-top:6px">Nieuw / wissen</button>
+
+    <div class="fk-h">Adres</div>
+    <div class="fk-search"><input id="fk-addr" placeholder="Straat, gemeente"/></div>
+    <button class="fk-btn sm" id="fk-go">Zoek &amp; centreer</button>
+
+    <div class="fk-h">Beeld</div>
+    <button class="fk-btn o" id="fk-freeze">&#128274; Bevries beeld</button>
+
+    <div class="fk-h">Elementen plaatsen</div>
+    <div class="fk-palette" id="fk-palette"></div>
+    <div class="fk-note">Klik element &#8594; klik kaart. Slepen = verplaatsen. Rechtsklik = wissen.</div>
+
+    <div class="fk-h">Trac&#233;s</div>
+    <button class="fk-btn big" id="fk-auto">&#9889; Trek trac&#233;s naar ontkoppelbord</button>
+    <div class="fk-tool">
+      <button class="fk-btn sm ghost" id="fk-draw-trace">Handmatig trac&#233; +</button>
+      <button class="fk-btn sm ghost" id="fk-edit">Bewerken</button>
+    </div>
+    <div class="fk-note">Elk vermogend element wordt L-vormig (lengte + breedte) naar het dichtste ontkoppelbord gerouteerd.</div>
+
+    <div class="fk-h">Zones tekenen</div>
+    <div class="fk-tool">
+      <button class="fk-btn sm g" id="fk-draw-zoneZ">PV Zuid +</button>
+      <button class="fk-btn sm" id="fk-draw-zoneOW" style="background:#0a7d3a">PV OW +</button>
+    </div>
+    <button class="fk-btn sm" id="fk-draw-sub" style="margin-top:6px;background:#7a5c3a">Ondergrond-zone +</button>
+
+    <div class="fk-h">Bewerken</div>
+    <button class="fk-btn ghost" id="fk-undo">&#8617; Ongedaan maken</button>
+
+    <div class="fk-h">Simulator</div>
+    <button class="fk-btn g big" id="fk-return">Prijs terug naar simulator</button>
+    <div class="fk-note">Stuurt de exacte kabel- + grondwerkkost terug zodat de simulator herrekent met de echte trac&#233;-prijs i.p.v. de schatting.</div>
+  </div>
+
+  <!-- KAART -->
+  <div id="fk-map"></div>
+
+  <!-- RECHTS -->
+  <div class="fk-col fk-right">
+    <div class="fk-kpi-big"><div class="n" id="fk-kpi-eur">&#8364; 0</div><div class="l">Totale investering (indicatief)</div></div>
+    <div class="fk-kpi">
+      <div class="c g"><div class="n" id="fk-kpi-pv">0</div><div class="l">PV-max (kWp)</div></div>
+      <div class="c"><div class="n" id="fk-kpi-len">0</div><div class="l">Trac&#233; totaal (m)</div></div>
+    </div>
+
+    <div class="fk-h">Prijsparameters</div>
+    <div class="fk-grid3">
+      <div><label>PV Wp/m&#178;</label><input id="fk-wp" type="number" value="200"></div>
+      <div><label>&#8364;/kWp PV</label><input id="fk-ekwp" type="number" value="350"></div>
+      <div><label>&#8364;/kWh batt.</label><input id="fk-ekwh" type="number" value="300"></div>
+    </div>
+    <div class="fk-grid3" style="margin-top:6px">
+      <div><label>U (V)</label><input id="fk-U" type="number" value="400"></div>
+      <div><label>cos &#966;</label><input id="fk-cos" type="number" step="0.01" value="0.95"></div>
+      <div><label>&#916;U max %</label><input id="fk-du" type="number" step="0.5" value="3"></div>
+    </div>
+    <div class="fk-grid3" style="margin-top:6px">
+      <div><label>Geleider</label><select id="fk-mat"><option value="cu">Koper</option><option value="al">Aluminium</option></select></div>
+      <div><label>Kabel &#8364;/mm&#178;&#183;m</label><input id="fk-ek" type="number" step="0.1" value="1"></div>
+      <div style="display:flex;align-items:flex-end"><button class="fk-btn sm" id="fk-recalc">Herbereken</button></div>
+    </div>
+    <div class="fk-h" style="margin-top:8px">Vermogens (auto-tracering)</div>
+    <div class="fk-grid3">
+      <div><label>Omvormer &#215;kWp</label><input id="fk-pvf" type="number" step="0.05" value="1"></div>
+      <div><label>Batterij C-rate</label><input id="fk-crate" type="number" step="0.1" value="0.5"></div>
+      <div><label>Gelijktijdig %</label><input id="fk-gel" type="number" value="100"></div>
+    </div>
+
+    <div class="fk-h">Geplaatste elementen</div>
+    <div id="fk-objects"></div>
+
+    <div class="fk-h">PV-zones</div>
+    <div id="fk-zones"></div>
+
+    <div class="fk-h">Ondergrond-zones</div>
+    <div id="fk-subs"></div>
+
+    <div class="fk-h">Trac&#233;s &amp; kabel</div>
+    <div id="fk-traces"></div>
+
+    <div class="fk-h">Kostenraming</div>
+    <table class="fk-bom"><tbody id="fk-bom"></tbody>
+      <tfoot><tr><td>Totaal</td><td id="fk-bom-tot">&#8364; 0</td></tr></tfoot></table>
+    <div class="fk-note">&#9888;&#65039; Bedragen, doorsnedes en kabelkosten zijn <b>indicatief</b> voor snelle raming/demo.
+      Definitieve dimensionering te valideren door E+Drive volgens AREI. DC-kabels buiten scope.</div>
+  </div>
+</div>
+<div class="fk-toast" id="fk-toast"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+(function(){
+"use strict";
+const C=window.FK_CONFIG, PRICE=C.PRICE;
+const NAVY="#1F3864", GREEN="#05B050", ORANGE="#9E480E", BROWN="#7a5c3a";
+
+/* type: tracePw = vermogen (kW) voor auto-tracering; undefined = geen tracé */
+const TYPES = {
+  ac:    {label:"Dubbele AC 22kW", tracePw:44,  svg:ic("M7 2v6M17 2v6M5 8h14v5a7 7 0 01-14 0z",NAVY)},
+  dc:    {label:"DC laadpaal",     tracePw:30,  svg:icBox("DC",GREEN)},
+  sdc:   {label:"SuperDC",         tracePw:400, svg:icBox("S",ORANGE)},
+  cabine:{label:"Cabine",          svg:icRect(NAVY)},
+  ontk:  {label:"Ontkoppelbord",   svg:icRect("#555")},
+  omv:   {label:"Omvormer",        tracePw:100, svg:icBox("~",NAVY)},
+  bat:   {label:"Batterij",        tracePw:100, kwh:120, svg:icBatt(GREEN)},
+  kast:  {label:"Voetpadkast",     svg:icRect(ORANGE)}
+};
+function ic(d,c){return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="${d}"/></svg>`;}
+function icBox(t,c){return `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="${c}"/><text x="12" y="16" font-size="9" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">${t}</text></svg>`;}
+function icRect(c){return `<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5" fill="${c}"/><rect x="7" y="8" width="10" height="2" fill="#fff"/></svg>`;}
+function icBatt(c){return `<svg viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="1.5" fill="${c}"/><rect x="19" y="10" width="2.5" height="4" fill="${c}"/></svg>`;}
+
+const GROUND={ gras:{label:"onverhard",derate:1.00,eur:25}, klinkers:{label:"klinkers",derate:0.90,eur:60}, beton:{label:"beton",derate:0.80,eur:120} };
+const SUB_TYPES=["klinkers","beton"];
+const SECTIONS=[1.5,2.5,4,6,10,16,25,35,50,70,95,120,150,185,240,300];
+const MAXSEC=240, MAXPAR=8;  // max mm2 per kabel, max aantal parallelle kabels
+const AMP_CU ={1.5:18,2.5:24,4:31,6:40,10:54,16:73,25:95,35:117,50:141,70:179,95:216,120:249,150:285,185:324,240:380,300:435};
+const RHO={cu:0.0225,al:0.036}, KFACT={al:1.6};
+const BATT_OPTS=[120,260];
+
+let map, frozen=false, placing=null, oidc=0, zoneMode="Z", sb=null, restoring=false;
+let lastKabel=0, lastGrond=0, lastLen=0;   // v1.3: laatste tracé-kost voor de simulator-koppeling
+const objects=[], traces=[], zones=[], subs=[];
+let history=[];
+if(C.SUPABASE_URL && C.SUPABASE_ANON_KEY){ try{ sb=supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY);}catch(e){} }
+
+const esri=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19,attribution:"Esri World Imagery"});
+const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:20,attribution:"© OpenStreetMap"});
+const geopunt=L.tileLayer("https://geo.api.vlaanderen.be/OMWRGBMRVL/wmts?layer=omwrgbmrvl&style=default&tilematrixset=GoogleMapsVL&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng&TileMatrix={z}&TileCol={x}&TileRow={y}",{maxZoom:21,attribution:"Orthofoto © Digitaal Vlaanderen"});
+map=L.map("fk-map",{center:[50.45,4.61],zoom:13,layers:[esri]});
+L.control.layers({"Satelliet (Esri)":esri,"Orthofoto Vlaanderen":geopunt,"Wegenkaart (OSM)":osm},{},{position:"topright"}).addTo(map);
+map.pm.setGlobalOptions({snappable:true,templineStyle:{color:NAVY},hintlineStyle:{color:NAVY,dashArray:"4,4"}});
+
+/* ---- palette ---- */
+const pal=document.getElementById("fk-palette");
+Object.entries(TYPES).forEach(([k,t])=>{
+  const d=document.createElement("div"); d.className="fk-obj"; d.dataset.k=k;
+  d.innerHTML=`${t.svg}<span>${t.label}</span>`;
+  d.onclick=()=>{ const on=placing===k; clearPlacing(); if(!on){ placing=k; d.classList.add("active"); map.getContainer().style.cursor="crosshair"; } };
+  pal.appendChild(d);
+});
+function clearPlacing(){ placing=null; document.querySelectorAll(".fk-obj").forEach(e=>e.classList.remove("active")); map.getContainer().style.cursor=""; }
+
+/* ---- BUGFIX: alleen plaatsen als er NIET getekend/bewerkt wordt ---- */
+map.on("click",e=>{
+  if(!placing) return;
+  if(map.pm.globalDrawModeEnabled() || map.pm.globalEditModeEnabled()) return;
+  snapshot(); addObject(placing,e.latlng);
+});
+function addObject(type,latlng,id,props){
+  const t=TYPES[type]; const oid=id||("o"+(++oidc));
+  const icon=L.divIcon({className:"fk-pin",html:`<div>${t.svg}</div>`,iconSize:[30,30],iconAnchor:[15,15]});
+  const m=L.marker(latlng,{icon,draggable:true}).addTo(map);
+  const o={oid,type,marker:m,props:props||(type==="bat"?{kwh:t.kwh}:{})};
+  m.bindTooltip(t.label,{direction:"top",offset:[0,-14]});
+  m.on("dragstart",snapshot);
+  m.on("dragend",recalc);
+  m.on("contextmenu",()=>{ snapshot(); map.removeLayer(m); objects.splice(objects.indexOf(o),1); recalc(); });
+  objects.push(o); if(!restoring) recalc();
+  return o;
+}
+
+/* ---- teken-knoppen ---- */
+document.getElementById("fk-draw-trace").onclick=()=>{ clearPlacing(); map.pm.enableDraw("Line",{}); };
+document.getElementById("fk-draw-zoneZ").onclick=()=>{ clearPlacing(); zoneMode="Z";  map.pm.enableDraw("Polygon",{}); };
+document.getElementById("fk-draw-zoneOW").onclick=()=>{ clearPlacing(); zoneMode="OW"; map.pm.enableDraw("Polygon",{}); };
+document.getElementById("fk-draw-sub").onclick=()=>{ clearPlacing(); zoneMode="SUB"; map.pm.enableDraw("Polygon",{}); };
+document.getElementById("fk-edit").onclick=()=>{ clearPlacing(); snapshot(); map.pm.toggleGlobalEditMode(); };
+
+map.on("pm:create",e=>{
+  const layer=e.layer, shape=e.shape; snapshot();
+  if(shape==="Line"){ const tr={tid:"t"+Date.now(),layer,pw:50,auto:false};
+    layer.setStyle({color:ORANGE,weight:4}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeTrace(tr)); traces.push(tr);
+  } else if(shape==="Polygon" && zoneMode==="SUB"){ const s={sid:"s"+Date.now(),layer,ground:"klinkers"};
+    layer.setStyle({color:BROWN,fillOpacity:.30,dashArray:"5,4"}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeSub(s)); subs.push(s);
+  } else if(shape==="Polygon"){ const z={zid:"z"+Date.now(),layer,kind:zoneMode,wp:+$("fk-wp").value||200};
+    layer.setStyle({color:zoneMode==="Z"?GREEN:"#0a7d3a",fillOpacity:.35}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeZone(z)); zones.push(z);
+    const c=turf.centroid(layer.toGeoJSON()).geometry.coordinates;   // omvormer op zwaartepunt zone
+    const omv=addObject("omv",L.latLng(c[1],c[0])); z.omvOid=omv.oid;
+  }
+  recalc();
+});
+function removeTrace(tr){ snapshot(); map.removeLayer(tr.layer); traces.splice(traces.indexOf(tr),1); recalc(); }
+function removeZone(z){ snapshot(); map.removeLayer(z.layer); zones.splice(zones.indexOf(z),1);
+  if(z.omvOid){ const o=objects.find(x=>x.oid===z.omvOid); if(o){ map.removeLayer(o.marker); objects.splice(objects.indexOf(o),1); } }
+  recalc(); }
+function removeSub(s){ snapshot(); map.removeLayer(s.layer); subs.splice(subs.indexOf(s),1); recalc(); }
+
+/* 1-op-1 koppeling zone -> omvormer: kWp naar de gekoppelde omvormer */
+function assignPv(){
+  objects.filter(o=>o.type==="omv").forEach(o=>o._pvKwp=0);
+  zones.forEach(z=>{ if(!z.omvOid) return; const omv=objects.find(o=>o.oid===z.omvOid);
+    if(omv) omv._pvKwp += turf.area(z.layer.toGeoJSON())*((z.wp||200)/1000); });
+}
+
+/* ---- AUTO-TRACERING ---- */
+document.getElementById("fk-auto").onclick=autoTrace;
+const dist=(a,b)=>turf.distance([a.lng,a.lat],[b.lng,b.lat]); // km, alleen voor 'dichtste'
+function nearest(from,list){ let best=list[0],bd=Infinity; list.forEach(n=>{ const d=dist(from,n.marker.getLatLng()); if(d<bd){bd=d;best=n;} }); return best; }
+function drawAuto(p,q,pw,srcType){
+  const corner=L.latLng(p.lat,q.lng);              // L-vorm: eerst breedte (O-W), dan lengte (N-Z)
+  const layer=L.polyline([p,corner,q],{color:ORANGE,weight:4,opacity:.9}).addTo(map);
+  const tr={tid:"t"+Date.now()+Math.random(),layer,pw,auto:true,srcType};
+  layer.on("contextmenu",()=>removeTrace(tr)); traces.push(tr);
+}
+function autoTrace(){
+  const boards=objects.filter(o=>o.type==="ontk");
+  if(!boards.length) return toast("Plaats eerst een ontkoppelbord");
+  const kasten=objects.filter(o=>o.type==="kast");
+  const nodes=boards.concat(kasten);               // verdeelknopen niveau 1
+  const pvFactor=+$("fk-pvf").value||1.3, cRate=+$("fk-crate").value||0.5, gelijk=(+$("fk-gel").value||100)/100;
+
+  // PV-zones -> gekoppelde omvormer (1-op-1, geen dubbeltelling)
+  assignPv();
+
+  snapshot();
+  traces.filter(t=>t.auto).forEach(t=>map.removeLayer(t.layer));
+  for(let i=traces.length-1;i>=0;i--) if(traces[i].auto) traces.splice(i,1);
+
+  const kastLoad={}; kasten.forEach(k=>kastLoad[k.oid]=0);
+  let n=0, pvOrphan=false;
+
+  // NIVEAU 1a: niet-AC bronnen -> dichtste knoop (individueel)
+  objects.filter(o=>["dc","sdc","bat","omv"].includes(o.type)).forEach(o=>{
+    let pw;
+    if(o.type==="bat")      pw=cRate*(o.props.kwh||0);
+    else if(o.type==="omv"){ if(!o._pvKwp){ pvOrphan=true; return; } pw=pvFactor*o._pvKwp; }
+    else                    pw=TYPES[o.type].tracePw;
+    const node=nearest(o.marker.getLatLng(),nodes);
+    drawAuto(o.marker.getLatLng(),node.marker.getLatLng(),pw,o.type);
+    if(node.type==="kast") kastLoad[node.oid]+=pw;
+    n++;
+  });
+
+  // NIVEAU 1b: AC-laadpalen combineren -> per knoop in keten, cumulatief vermogen
+  const pwAc=TYPES.ac.tracePw;
+  const acGroups=new Map();
+  objects.filter(o=>o.type==="ac").forEach(o=>{ const node=nearest(o.marker.getLatLng(),nodes);
+    if(!acGroups.has(node.oid)) acGroups.set(node.oid,{node,list:[]}); acGroups.get(node.oid).list.push(o); });
+  acGroups.forEach(({node,list})=>{
+    // keten via nearest-neighbor vanaf de knoop
+    let cur=node.marker.getLatLng(); const rem=list.slice(), chain=[];
+    while(rem.length){ let bi=0,bd=Infinity; rem.forEach((o,idx)=>{ const d=dist(cur,o.marker.getLatLng()); if(d<bd){bd=d;bi=idx;} });
+      const nx=rem.splice(bi,1)[0]; chain.push(nx); cur=nx.marker.getLatLng(); }
+    const nTot=chain.length; let prev=node.marker.getLatLng();
+    chain.forEach((o,idx)=>{ const load=(nTot-idx)*pwAc;   // deze paal + alle verderop in de keten
+      drawAuto(prev,o.marker.getLatLng(),load,"ac"); prev=o.marker.getLatLng(); n++; });
+    if(node.type==="kast") kastLoad[node.oid]+=nTot*pwAc;
+  });
+  // NIVEAU 2: voetpadkast -> dichtste ontkoppelbord (opgeteld vermogen)
+  kasten.forEach(k=>{
+    const load=(kastLoad[k.oid]||0)*gelijk;
+    const p=k.marker.getLatLng(); const board=nearest(p,boards);
+    drawAuto(p,board.marker.getLatLng(),load,"kast"); n++;
+  });
+
+  recalc();
+  let msg=n+" tracé"+(n!==1?"s":"")+" getrokken";
+  if(pvOrphan) msg+=" · let op: omvormer(s) zonder PV-zone in de buurt overgeslagen";
+  toast(msg);
+}
+
+/* ---- freeze ---- */
+document.getElementById("fk-freeze").onclick=()=>{
+  frozen=!frozen; const btn=document.getElementById("fk-freeze"); const f=frozen?"disable":"enable";
+  map.dragging[f](); map.scrollWheelZoom[f](); map.doubleClickZoom[f](); map.touchZoom[f](); map.boxZoom[f](); map.keyboard[f]();
+  document.getElementById("fk-app").classList.toggle("fk-frozen",frozen);
+  btn.textContent=frozen?"🔓 Ontgrendel beeld":"🔒 Bevries beeld";
+};
+
+/* ---- geocode ---- */
+document.getElementById("fk-go").onclick=geocode;
+document.getElementById("fk-addr").addEventListener("keydown",e=>{ if(e.key==="Enter")geocode(); });
+async function geocode(){ const q=document.getElementById("fk-addr").value.trim(); if(!q)return;
+  try{ const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q));
+    const j=await r.json(); if(j[0])map.setView([+j[0].lat,+j[0].lon],19); else toast("Adres niet gevonden");
+  }catch(e){ toast("Zoeken mislukt"); } }
+
+/* ---- undo ---- */
+function snapshot(){ if(restoring)return; history.push(JSON.stringify(serialize())); if(history.length>50)history.shift(); }
+document.getElementById("fk-undo").onclick=()=>{
+  if(!history.length) return toast("Niets om terug te draaien");
+  const s=history.pop(); restoring=true; rebuild(JSON.parse(s),true); restoring=false; recalc(); toast("Teruggedraaid");
+};
+
+/* ============ BEREKENING ============ */
+const $=id=>document.getElementById(id);
+document.getElementById("fk-recalc").onclick=recalc;
+const eur=n=>"€ "+Math.round(n).toLocaleString('nl-BE');
+function objPrice(o){ if(o.type==="bat") return (o.props.kwh||0)*(+$("fk-ekwh").value||300); return PRICE[o.type]||0; }
+
+/* meters per ondergrondtype langs een polyline; niet-aangeduid = onverhard */
+function traceGround(layer){
+  const line=layer.toGeoJSON(); const total=turf.length(line,{units:"meters"});
+  const meters={gras:0,klinkers:0,beton:0};
+  if(!subs.length){ meters.gras=total; return {cost:total*GROUND.gras.eur, minDerate:1.0, total, meters}; }
+  const N=Math.max(6,Math.min(120,Math.round(total/2))); const seg=total/N; let minDerate=1.0;
+  for(let i=0;i<N;i++){ const pt=turf.along(line,(i+0.5)*seg,{units:"meters"}); let g="gras";
+    for(const s of subs){ if(turf.booleanPointInPolygon(pt,s.layer.toGeoJSON())){ g=s.ground; break; } }
+    meters[g]+=seg; minDerate=Math.min(minDerate,GROUND[g].derate);
+  }
+  const cost=meters.gras*GROUND.gras.eur+meters.klinkers*GROUND.klinkers.eur+meters.beton*GROUND.beton.eur;
+  return {cost,minDerate,total,meters};
+}
+function groundMix(m){ const p=[]; if(m.gras>0.5)p.push(`onverhard ${m.gras.toFixed(0)} m`); if(m.klinkers>0.5)p.push(`klinkers ${m.klinkers.toFixed(0)} m`); if(m.beton>0.5)p.push(`beton ${m.beton.toFixed(0)} m`); return p.join(" · "); }
+
+function recalc(){
+  const U=+$("fk-U").value||400, cos=+$("fk-cos").value||0.95, duMax=(+$("fk-du").value||3)/100,
+        mat=$("fk-mat").value, ekwp=+$("fk-ekwp").value||350, ek=+$("fk-ek").value||1;
+  const pvf=+$("fk-pvf").value||1;
+
+  assignPv();  // koppel PV-vermogen aan omvormers zodat de tooltip klopt
+  objects.filter(o=>o.type==="omv").forEach(o=>{
+    const kw=Math.round(pvf*(o._pvKwp||0));
+    o.marker.setTooltipContent(kw?`Omvormer · ${kw} kW`:"Omvormer (geen zone)"); });
+
+  /* objecten */
+  let objCost=0; const oHtml=[];
+  objects.forEach(o=>{ const t=TYPES[o.type], p=objPrice(o); objCost+=p; let extra="";
+    if(o.type==="bat") extra=`<select data-bk="${o.oid}">${BATT_OPTS.map(v=>`<option value="${v}" ${v==o.props.kwh?'selected':''}>${v} kWh</option>`).join("")}</select>`;
+    oHtml.push(`<div class="fk-row-obj"><span class="nm">${t.label}</span>${extra}<span class="pr">${eur(p)}</span><span class="x" data-ox="${o.oid}">✕</span></div>`);
+  });
+  $("fk-objects").innerHTML=oHtml.join("")||`<div class="fk-note">Nog geen elementen.</div>`;
+
+  /* PV-zones (densiteit per zone) */
+  let pvKwp=0; const zHtml=[];
+  zones.forEach((z,i)=>{ const area=turf.area(z.layer.toGeoJSON()); const kwp=area*((z.wp||200)/1000); pvKwp+=kwp;
+    zHtml.push(`<div class="fk-item"><h4>PV-zone ${i+1}<span class="fk-badge" style="background:${z.kind==='OW'?'#0a7d3a':GREEN}">${z.kind==='OW'?'Oost-West':'Zuid'}</span><span class="x" data-zx="${z.zid}">✕</span></h4>
+      <div class="fk-grid3"><div><label>Opp.</label><input value="${Math.round(area)} m²" disabled></div>
+        <div><label>Wp/m²</label><input type="number" data-zwp="${z.zid}" value="${z.wp||200}"></div>
+        <div><label>kWp</label><input value="${kwp.toFixed(1)}" disabled></div></div></div>`);
+  });
+  $("fk-zones").innerHTML=zHtml.join("")||`<div class="fk-note">Nog geen PV-zones.</div>`;
+  const pvCost=pvKwp*ekwp;
+
+  /* ondergrond-zones */
+  const sHtml=[];
+  subs.forEach((s,i)=>{ const area=turf.area(s.layer.toGeoJSON());
+    sHtml.push(`<div class="fk-item"><h4>Ondergrond ${i+1}<span class="x" data-sx="${s.sid}">✕</span></h4>
+      <div class="fk-grid2"><div><label>Type</label><select data-sg="${s.sid}">${SUB_TYPES.map(k=>`<option value="${k}" ${k===s.ground?'selected':''}>${GROUND[k].label}</option>`).join("")}</select></div>
+        <div><label>Opp.</label><input value="${Math.round(area)} m²" disabled></div></div></div>`);
+  });
+  $("fk-subs").innerHTML=sHtml.join("")||`<div class="fk-note">Geen verharde zones — alles onverhard.</div>`;
+
+  /* tracés + kabel + grondwerk */
+  let lenTot=0, cableM=0, kabelCost=0, grondCost=0; const tHtml=[];
+  traces.forEach((tr,i)=>{ const g=traceGround(tr.layer); const L_m=g.total; lenTot+=L_m;
+    const pw=tr.pw!=null?tr.pw:50; const calc=cable(pw,L_m,U,cos,duMax,mat,g.minDerate);
+    const kc=L_m*calc.A*calc.n*ek; const gc=g.cost; kabelCost+=kc; grondCost+=gc; cableM+=L_m*calc.n;
+    tr.layer.bindTooltip(`${Math.round(pw)} kW · ${secLabel(calc)} mm²`,{permanent:true,direction:"center",className:"fk-tlabel"});
+    const tag=tr.auto?`<span class="fk-badge" style="background:${NAVY}">auto${tr.srcType?" · "+TYPES[tr.srcType].label:""}</span>`:"";
+    tHtml.push(`<div class="fk-item"><h4>Tracé ${i+1}${tag}<span class="x" data-tx="${tr.tid}">✕</span></h4>
+      <div class="fk-grid3"><div><label>Lengte</label><input value="${L_m.toFixed(1)} m" disabled></div>
+        <div><label>kW</label><input type="number" data-tpw="${tr.tid}" value="${pw}"></div>
+        <div><label>Doorsnede</label><input value="${secLabel(calc)} mm²" disabled></div></div>
+      <div class="fk-grid2" style="margin-top:6px"><div><label>Kabel</label><input value="${eur(kc)}" disabled></div>
+        <div><label>Grondwerk</label><input value="${eur(gc)}" disabled></div></div>
+      <div class="fk-note">${calc.I.toFixed(0)} A · ΔU ${calc.du.toFixed(1)}% · ${groundMix(g.meters)}</div></div>`);
+  });
+  $("fk-traces").innerHTML=tHtml.join("")||`<div class="fk-note">Nog geen tracés — plaats elementen + een ontkoppelbord en klik “Trek tracés”.</div>`;
+
+  /* kostenraming */
+  const groups={}; objects.forEach(o=>{ const k=o.type; if(!groups[k])groups[k]={n:0,c:0,label:TYPES[k].label}; groups[k].n++; groups[k].c+=objPrice(o); });
+  const rows=[];
+  Object.values(groups).forEach(g=>{ rows.push(`<tr><td>${g.label} <span style="color:var(--muted)">× ${g.n}</span></td><td>${eur(g.c)}</td></tr>`); });
+  if(pvKwp>0)     rows.push(`<tr><td>PV-installatie <span style="color:var(--muted)">${pvKwp.toFixed(0)} kWp</span></td><td>${eur(pvCost)}</td></tr>`);
+  if(kabelCost>0) rows.push(`<tr><td>AC-kabels <span style="color:var(--muted)">${cableM.toFixed(0)} m kabel</span></td><td>${eur(kabelCost)}</td></tr>`);
+  if(grondCost>0) rows.push(`<tr><td>Grondwerk</td><td>${eur(grondCost)}</td></tr>`);
+  const total=objCost+pvCost+kabelCost+grondCost;
+  $("fk-bom").innerHTML=rows.join("")||`<tr><td colspan="2" style="color:var(--muted)">Nog niets om te ramen.</td></tr>`;
+  $("fk-bom-tot").textContent=eur(total);
+  $("fk-kpi-eur").textContent=eur(total);
+  $("fk-kpi-pv").textContent=Math.round(pvKwp).toLocaleString('nl-BE');
+  $("fk-kpi-len").textContent=Math.round(lenTot).toLocaleString('nl-BE');
+  lastKabel=kabelCost; lastGrond=grondCost; lastLen=lenTot;   // v1.3: bewaar voor de simulator-koppeling
+  bindInputs();
+}
+
+function cable(pw_kW,L,U,cos,duMax,mat,derate){
+  const P=pw_kW*1000, I=P/(Math.sqrt(3)*U*cos), rho=RHO[mat];
+  const A_du_tot=(Math.sqrt(3)*rho*L*I*cos)/(duMax*U);  // totale koperdoorsnede voor spanningsval
+  const kfac=mat==="al"?KFACT.al:1;
+  const pick=a=>{ for(const s of SECTIONS){ if(s>=a) return s; } return SECTIONS[SECTIONS.length-1]; };
+  let n=1,A=SECTIONS[SECTIONS.length-1];
+  while(n<=MAXPAR){
+    const Ic=I/n;                                       // stroom per kabel
+    let A_amp=SECTIONS[SECTIONS.length-1];
+    for(const s of SECTIONS){ if(AMP_CU[s]*derate>=Ic*kfac){ A_amp=s; break; } }
+    const sec=pick(Math.max(A_du_tot/n, A_amp));        // sectie per kabel
+    if(sec<=MAXSEC || n===MAXPAR){ A=sec; break; }
+    n++;
+  }
+  const du=(Math.sqrt(3)*rho*L*I*cos)/(n*A*U)*100;      // ple met n parallel
+  return {I,A,n,du};
+}
+function secLabel(c){ return c.n>1 ? (c.n+"×"+c.A) : (""+c.A); }
+
+function bindInputs(){
+  document.querySelectorAll("[data-bk]").forEach(el=>el.onchange=e=>{ snapshot(); const o=objects.find(o=>o.oid===e.target.dataset.bk); if(o){o.props.kwh=+e.target.value; recalc();}});
+  document.querySelectorAll("[data-ox]").forEach(el=>el.onclick=e=>{ const o=objects.find(o=>o.oid===e.target.dataset.ox); if(o){ snapshot(); map.removeLayer(o.marker); objects.splice(objects.indexOf(o),1); recalc(); }});
+  document.querySelectorAll("[data-zwp]").forEach(el=>el.onchange=e=>{ const z=zones.find(z=>z.zid===e.target.dataset.zwp); if(z){ snapshot(); z.wp=+e.target.value; recalc(); }});
+  document.querySelectorAll("[data-zx]").forEach(el=>el.onclick=e=>{ const z=zones.find(z=>z.zid===e.target.dataset.zx); if(z)removeZone(z); });
+  document.querySelectorAll("[data-sg]").forEach(el=>el.onchange=e=>{ const s=subs.find(s=>s.sid===e.target.dataset.sg); if(s){ snapshot(); s.ground=e.target.value; recalc(); }});
+  document.querySelectorAll("[data-sx]").forEach(el=>el.onclick=e=>{ const s=subs.find(s=>s.sid===e.target.dataset.sx); if(s)removeSub(s); });
+  document.querySelectorAll("[data-tpw]").forEach(el=>el.onchange=e=>{ const tr=traces.find(t=>t.tid===e.target.dataset.tpw); if(tr){ snapshot(); tr.pw=+e.target.value; recalc(); }});
+  document.querySelectorAll("[data-tx]").forEach(el=>el.onclick=e=>{ const tr=traces.find(t=>t.tid===e.target.dataset.tx); if(tr)removeTrace(tr); });
+}
+
+/* ---- Supabase ---- */
+function serialize(){ return {
+  name:$("fk-name").value||"naamloos", center:map.getCenter(), zoom:map.getZoom(),
+  params:{U:+$("fk-U").value,cos:+$("fk-cos").value,du:+$("fk-du").value,mat:$("fk-mat").value,wp:+$("fk-wp").value,ekwp:+$("fk-ekwp").value,ekwh:+$("fk-ekwh").value,ek:+$("fk-ek").value,pvf:+$("fk-pvf").value,crate:+$("fk-crate").value,gel:+$("fk-gel").value},
+  objects:objects.map(o=>({type:o.type,latlng:o.marker.getLatLng(),props:o.props})),
+  traces:traces.map(t=>({pw:t.pw,auto:t.auto,srcType:t.srcType,coords:t.layer.toGeoJSON().geometry.coordinates})),
+  zones:zones.map(z=>({kind:z.kind,wp:z.wp,omvIdx:z.omvOid?objects.findIndex(o=>o.oid===z.omvOid):-1,coords:z.layer.toGeoJSON().geometry.coordinates})),
+  subs:subs.map(s=>({ground:s.ground,coords:s.layer.toGeoJSON().geometry.coordinates})) }; }
+function clearAll(){ objects.splice(0).forEach(o=>map.removeLayer(o.marker)); traces.splice(0).forEach(t=>map.removeLayer(t.layer)); zones.splice(0).forEach(z=>map.removeLayer(z.layer)); subs.splice(0).forEach(s=>map.removeLayer(s.layer)); }
+function rebuild(d,keepView){
+  clearAll(); $("fk-name").value=d.name||"";
+  if(d.params){ const p=d.params; $("fk-U").value=p.U;$("fk-cos").value=p.cos;$("fk-du").value=p.du;$("fk-mat").value=p.mat;
+    if(p.wp)$("fk-wp").value=p.wp; if(p.ekwp)$("fk-ekwp").value=p.ekwp; if(p.ekwh)$("fk-ekwh").value=p.ekwh; if(p.ek)$("fk-ek").value=p.ek;
+    if(p.pvf)$("fk-pvf").value=p.pvf; if(p.crate)$("fk-crate").value=p.crate; if(p.gel)$("fk-gel").value=p.gel; }
+  if(d.center && !keepView)map.setView([d.center.lat,d.center.lng],d.zoom||18);
+  const createdObjs=(d.objects||[]).map(o=>addObject(o.type,o.latlng,null,o.props));
+  (d.traces||[]).forEach(t=>{ const ll=t.coords.map(c=>[c[1],c[0]]); const layer=L.polyline(ll,{color:ORANGE,weight:4}).addTo(map);
+    const tr={tid:"t"+Date.now()+Math.random(),layer,pw:t.pw,auto:!!t.auto,srcType:t.srcType};
+    if(!t.auto)layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeTrace(tr)); traces.push(tr); });
+  (d.zones||[]).forEach(z=>{ const ll=z.coords[0].map(c=>[c[1],c[0]]); const layer=L.polygon(ll,{color:z.kind==="OW"?"#0a7d3a":GREEN,fillOpacity:.35}).addTo(map);
+    const zo={zid:"z"+Date.now()+Math.random(),layer,kind:z.kind||"Z",wp:z.wp||200};
+    if(z.omvIdx>=0 && createdObjs[z.omvIdx]) zo.omvOid=createdObjs[z.omvIdx].oid;
+    layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeZone(zo)); zones.push(zo); });
+  (d.subs||[]).forEach(s=>{ const ll=s.coords[0].map(c=>[c[1],c[0]]); const layer=L.polygon(ll,{color:BROWN,fillOpacity:.30,dashArray:"5,4"}).addTo(map);
+    const so={sid:"s"+Date.now()+Math.random(),layer,ground:s.ground||"klinkers"}; layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeSub(so)); subs.push(so); });
+  if(!restoring) recalc();
+}
+document.getElementById("fk-save").onclick=async()=>{ if(!sb)return toast("Vul SUPABASE_URL + KEY in de config in");
+  const data=serialize(); const {error}=await sb.from(C.TABLE).upsert({name:data.name,data},{onConflict:"name"}); toast(error?"Opslaan mislukt: "+error.message:"Opgeslagen ✓"); };
+document.getElementById("fk-load").onclick=async()=>{ if(!sb)return toast("Vul SUPABASE_URL + KEY in de config in");
+  const {data,error}=await sb.from(C.TABLE).select("name,data").order("updated_at",{ascending:false});
+  if(error)return toast("Laden mislukt: "+error.message); if(!data||!data.length)return toast("Geen projecten");
+  const pick=prompt("Welk project laden?\n\n"+data.map((r,i)=>`${i+1}. ${r.name}`).join("\n")); const idx=parseInt(pick,10)-1;
+  if(data[idx]){ snapshot(); rebuild(data[idx].data); } };
+document.getElementById("fk-new").onclick=()=>{ if(confirm("Alles wissen?")){ snapshot(); clearAll(); recalc(); } };
+
+let tt; function toast(m){ const t=document.getElementById("fk-toast"); t.textContent=m; t.classList.add("show"); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove("show"),2600); }
+
+/* ===== v1.3: koppeling met de Fluctus-simulator ===== */
+var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result';
+var rbtn=document.getElementById('fk-return');
+if(rbtn) rbtn.onclick=function(){
+  var payload={ts:Date.now(), kabeltrace_eur:Math.round(lastKabel+lastGrond),
+    detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)}};
+  try{ localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }catch(e){}
+  toast('Exacte kabelprijs '+eur(payload.kabeltrace_eur)+' teruggestuurd naar de simulator');
+};
+(function(){
+  var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
+  if(!raw) return;
+  var seed; try{ seed=JSON.parse(raw); }catch(e){ return; }
+  try{ localStorage.removeItem(KBL_SEED_KEY); }catch(e){}
+  if(!seed) return;
+  var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
+  if(seed.adres) $('fk-addr').value=seed.adres;
+  function plaats(){
+    var c=map.getCenter(), i=0;
+    function pos(){ var row=Math.floor(i/6), col=i%6; i++; return L.latLng(c.lat+0.00012-row*0.00006, c.lng-0.00018+col*0.00006); }
+    addObject('ontk', L.latLng(c.lat, c.lng));
+    (seed.laadpunten||[]).forEach(function(l){ var t=TMAP[l.type]||'dc'; for(var q=0;q<(+l.aantal||0);q++) addObject(t, pos()); });
+    if(seed.batterij && +seed.batterij.aantal>0) for(var b=0;b<+seed.batterij.aantal;b++) addObject('bat', pos(), null, {kwh: seed.batterij.kwh||260});
+    recalc(); try{ autoTrace(); }catch(e){}
+    toast('Ontwerp geladen uit de simulator — sleep de elementen juist en stuur de prijs terug');
+  }
+  var q=(seed.adres||'').trim();
+  if(q){ fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
+      .then(function(r){return r.json();}).then(function(j){ if(j&&j[0]) map.setView([+j[0].lat,+j[0].lon],19); setTimeout(plaats,350); })
+      .catch(function(){ plaats(); }); }
+  else plaats();
+})();
+
+recalc();
+})();
+</script>
+</div>
