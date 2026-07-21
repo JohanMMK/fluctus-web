@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.55.0</span>
+    <span class="fdsim-version">v1.56.0</span>
   </div>
 </div>
 
@@ -6465,8 +6465,12 @@ function _pvMaxKwp(){
   var gebouwMwh=(+STATE.jaarverbruik||0);
   var stap1Mwh=0;
   if(STATE.groeipad && STATE.groeipad.stappen){
+    // volle-laadplein-pad: laadenergie van de aanbevolen eerste stap (k=1)
     stap1Mwh=STATE.groeipad.stappen.filter(function(s){return (+s.aantal_batterijen)===1;})
       .reduce(function(m,s){return Math.max(m, +s.geladen_mwh||0);},0);
+  } else if(!STATE.groeipadGebouw && STATE.laadpleinen && STATE.laadpleinen.length>0){
+    // optie-a (laadvraag past al): volledige laadenergie wordt geleverd
+    stap1Mwh=(STATE.laadpleinen||[]).reduce(function(s,lp){return s+(_lpEnergieMwh(lp)||0);},0);
   }
   return Math.max(0, Math.round(gebouwMwh+stap1Mwh));
 }
@@ -6474,6 +6478,9 @@ function _pvSweepConfig(){
   if(STATE.groeipadGebouw) return { c:(+STATE.groeipadGebouw.aansluiting_kva||0), k:1 };
   var eng=_kpiEngine(), b=eng&&eng.beste;
   if(b && b.o && b.o.config) return { c:(+b.o.config.aansluiting_kva||0), k:1 };
+  // optie-a: enkel de batterij-opstelling (Batterij = Optimaal), _kpiEngine gaf null
+  var opsB=STATE.opstellingen && STATE.opstellingen.batterij;
+  if(opsB && opsB.config && (+opsB.config.aansluiting_kva>0)) return { c:(+opsB.config.aansluiting_kva||0), k:1 };
   return null;
 }
 function _startPvSweep(){
@@ -6577,6 +6584,69 @@ function _renderPvSuggestie(){
   btnRow.appendChild(applyBtn);
   btnRow.appendChild(el('span',{style:'font-size:11px;color:#8A94A6'},'De simulatie wordt opnieuw gedraaid met deze PV in alle opstellingen.'));
   sec.appendChild(btnRow);
+  return sec;
+}
+// ── v1.56.0 — PV-ENERGIEBALANS (batterij-bewust, één geheel — geen gebouw/LP-split) ──
+// Toont, zodra PV toegepast is, waar de PV-productie naartoe gaat: direct zelfverbruik,
+// via de batterij naar later verbruik, netto-injectie (met opbrengst) en curtailment. Plus
+// de onbalans-windfall (extra winst door slim te nomineren/bijsturen op injectie i.f.v. onbalans).
+function _renderPvBalans(){
+  if((+STATE.pvKwp||0)<=0) return null;
+  var vs=STATE.resultaatVarianten||{}; var st=vs.sturing||STATE.resultaat; if(!st||!st.kpi) return null;
+  var k=st.kpi; if(!((+k.totaal_pv_mwh||0)>0 || (+k.pv_potentiele_productie_mwh||0)>0)) return null;
+  var af=_annFactor();
+  var prodPot=(+k.pv_potentiele_productie_mwh|| +k.totaal_pv_mwh||0)*af;
+  var curt=(+k.pv_curtailed_mwh||0)*af;
+  var direct=(+k.pv_direct_zelfverbruik_mwh|| +k.pv_eigen_verbruik_mwh||0)*af;
+  var viaBatt=(+k.pv_via_batterij_mwh||0)*af;
+  var inj=(+k.pv_netto_injectie_mwh||0)*af;
+  var injOpbr=(+k.injectie_opbrengst_eur||0)*af;
+  var vermeden=(+k.vermeden_injectie_kost_eur||0)*af;
+  var lokaal=direct+viaBatt;
+  var benut=Math.max(0,prodPot-curt);
+  // Onbalans-windfall = extra besparing van de onbalans-variant t.o.v. sturing (twee runs).
+  var windfall=null;
+  if(STATE.kpiSturing && STATE.kpiSturing.meerwaarde_onbalans_excl_btw!=null && !STATE.kpiSturing.onbalans_niet_van_toepassing){
+    windfall=(+STATE.kpiSturing.meerwaarde_onbalans_excl_btw||0)*af;
+  }
+  function pct(x){ return benut>0?fmtNum(x/benut*100,0)+'%':'—'; }
+
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
+    'PV-energiebalans — waar gaat de zonne-energie naartoe?'));
+  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:9px'},
+    'Jaarcijfers voor '+fmtNum(STATE.pvKwp,0)+' kWp op de gekozen opstelling. Eén geheel (gebouw + laadpleinen samen). '+
+    'De productie splitst in wat u lokaal gebruikt (direct of via de batterij), wat u injecteert, en wat afgeregeld wordt.'));
+
+  var grid='1.4fr 0.8fr 0.7fr 1.1fr';
+  var rows=[
+    ['Productie (bruto)', fmtNum(prodPot,1)+' MWh', '', 'Potentiële opbrengst van de installatie'],
+    ['↳ Direct zelfverbruik', fmtNum(direct,1)+' MWh', pct(direct), 'Meteen verbruikt op het moment van productie'],
+    ['↳ Via de batterij', fmtNum(viaBatt,1)+' MWh', pct(viaBatt), 'Opgeslagen en later lokaal gebruikt (incl. rendementsverlies)'],
+    ['↳ Netto-injectie', fmtNum(inj,1)+' MWh', pct(inj), 'Naar het net — opbrengst '+fmtEur(injOpbr)+'/jaar'],
+    ['↳ Afgeregeld (curtailment)', fmtNum(curt,1)+' MWh', pct(curt), 'Niet geproduceerd bij lage/negatieve prijs — vermeden kost '+fmtEur(vermeden)+'/jaar'],
+  ];
+  var html='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
+    '<span>Stroom</span><span style="text-align:right">Energie/jaar</span><span style="text-align:right">Aandeel</span><span>Toelichting</span></div>';
+  rows.forEach(function(r,idx){
+    var strong=(idx===0);
+    html+='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:1px solid #EEF1F5;font-size:11.5px;'+(strong?'font-weight:700;color:#1F3864':'color:#3A424C')+'">'+
+      '<span>'+r[0]+'</span><span style="text-align:right">'+r[1]+'</span><span style="text-align:right">'+r[2]+'</span>'+
+      '<span style="font-size:10.5px;color:#5A6577">'+r[3]+'</span></div>';
+  });
+  var t=el('div'); t.innerHTML=html; sec.appendChild(t);
+
+  var samen=el('div',{style:'margin-top:9px;padding:8px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12px;color:#1F3864'});
+  samen.innerHTML='<b>Lokaal benut: '+fmtNum(lokaal,1)+' MWh/jaar ('+pct(lokaal)+' van de productie)</b> — direct + via de batterij. '+
+    'De rest gaat naar het net ('+fmtNum(inj,1)+' MWh, opbrengst '+fmtEur(injOpbr)+'/jaar).';
+  sec.appendChild(samen);
+
+  if(windfall!=null && windfall>0){
+    var wf=el('div',{style:'margin-top:8px;padding:8px 12px;background:#1F386408;border:1px solid #1F386430;border-radius:6px;font-size:12px;color:#3A424C'});
+    wf.innerHTML='<b style="color:#1F3864">Onbalans-windfall: +'+fmtEur(windfall)+'/jaar</b> — extra winst bovenop het bovenstaande door de injectie '+
+      'slim te nomineren en bij te sturen in functie van de onbalansprijs. Dit is opportunistisch (geen gegarandeerde basis).';
+    sec.appendChild(wf);
+  }
   return sec;
 }
 function _actieveBatterijKwh(){
@@ -7216,6 +7286,11 @@ function renderStep9Resultaat(){
   if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
     var _pvs=_renderPvSuggestie();
     if(_pvs) box.appendChild(_pvs);
+  }
+  // v1.56.0: PV-energiebalans — zodra PV toegepast is: direct/via-batterij/injectie/curtailment + windfall.
+  if(!R.error && (+STATE.pvKwp||0)>0){
+    var _pvb=_renderPvBalans();
+    if(_pvb) box.appendChild(_pvb);
   }
   // v1.27.0: blok 11 (factuur 12 mnd vs optimaal) VERWIJDERD — voegde niets toe (Johan).
 
@@ -8240,6 +8315,15 @@ function runSimulatie(){
     // v1.55.0: battery-only Kamino (gebouw zonder laadplein) → geen laadplein-groeipad, dus PV-suggestie
     // meteen starten (PVmax = gebouwverbruik). De laadplein-tak start ze in de groeipad-.then() hierboven.
     try { if(STATE.groeipadGebouw) _startPvSweep(); } catch(_pe){}
+    // v1.55.1: optie-a (laadplein past al + batterij → Batterij = Optimaal). Dan firet het multi-connectie-
+    // groeipad niet (_kpiEngine geeft null), dus starten we de PV-suggestie hier. PVmax = gebouw + volledige
+    // laadenergie (die past immers al binnen de aansluiting).
+    try {
+      if(STATE.opstellingen && !STATE.groeipadGebouw){
+        var _engPvA=_kpiEngine();
+        if(!_engPvA || !_engPvA.beste) _startPvSweep();
+      }
+    } catch(_pe2){}
     renderAll();
   }).catch(function(e){
     // v1.19.1 hotfix: automatische retry wanneer de server nog marktdata aan het
