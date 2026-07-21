@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.52.0</span>
+    <span class="fdsim-version">v1.54.0</span>
   </div>
 </div>
 
@@ -5327,9 +5327,9 @@ function _renderOpstellingInvestering(){
 function _derde(){
   var ops=STATE.opstellingen; if(!ops) return null;
   if(ops.ms_batterij) return {key:'ms_batterij', o:ops.ms_batterij,
-    label:'Opstelling 3 — naar MS + batterij', kort:'3 · MS + batterij'};
+    label:OPST_NAAM[3], kort:'Optimaal'};
   if(ops.mix) return {key:'mix', o:ops.mix,
-    label:'Opstelling 3 — mix: deels verzwaren, kleinere batterij', kort:'3 · Mix'};
+    label:OPST_NAAM[3], kort:'Optimaal'};
   return null;
 }
 // v1.23: de maat NA iteratie, niet de vuistregel vooraf. Zelfde reden als
@@ -5433,6 +5433,8 @@ function _kpiEngine(){
     {key:'batterij', nr:2, label:OPST_NAAM[2], o:ops.batterij}
   ];
   if(d3) kols.push({key:d3.key, nr:3, label:OPST_NAAM[3], o:d3.o});
+  // v1.52.0: opstellingen zonder eigen data weglaten (bv. optie a — laadvraag past, geen Verzwaren).
+  kols=kols.filter(function(k){ return k && k.o; });
   var rows=kols.map(function(k){
     var o=k.o, cfg=o.config||{};
     var E=factuur(o);
@@ -6386,6 +6388,73 @@ function _renderGroeipadFallback(){
   var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
   return sec;
 }
+// v1.54.0 — BATTERIJ-ONLY KAMINO: groeipad voor een gebouw ZONDER laadplein. De server
+// (modus 'batterij_gebouw') sweept 1…Nmax batterijen op het bestaande verbruik en geeft per
+// stap besparing/jaar, capex, NPV en rendement terug. Optimaal = hoogste NPV; stap 1 = de
+// aanbevolen, capex-arme instap. Geen km-kolommen (er is geen laadvraag), geen verzwaring.
+function _renderGroeipadGebouw(){
+  var gg=STATE.groeipadGebouw; if(!gg||!gg.alternatieven||!gg.alternatieven.length) return null;
+  var alts=gg.alternatieven, optK=+gg.optimaal_k||1, P=+gg.aansluiting_kva||0;
+  var disc=Math.round(_npvDisc()*100);
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},
+    'Groeipad batterij — bescheiden starten op het bestaande verbruik'));
+  var _gi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
+  _gi.innerHTML=
+    'Dit gebouw heeft <b>geen laadplein</b>. We onderzoeken of één of meer batterijen rendement geven op het '+
+    '<b>bestaande verbruik</b> — via piekshaving, spot-arbitrage, meer eigen zonne-energie en onbalans. De '+
+    'aansluiting blijft <b>vast'+(P>0?' op '+fmtNum(P,0)+' kVA':'')+'</b> (geen verzwaring). We sweepen van 1 batterij '+
+    'tot <b>'+ (+gg.nmax||alts.length) +'</b> (tot 120 kW batterijvermogen boven de aansluiting) en kiezen de stap met de '+
+    '<b>hoogste NPV</b> als optimale opstelling. <b>Stap 1 is de aanbevolen instap</b>: de capex-armste stap met het beste '+
+    'rendement per geïnvesteerde euro. De klant start klein en breidt uit wanneer het rendabel is.';
+  sec.appendChild(_gi);
+
+  var _opt=alts.filter(function(a){return +a.aantal_batterijen===optK;})[0]||null;
+  var _es=alts.filter(function(a){return +a.aantal_batterijen===1;})[0]||null;
+  if(_es){
+    var esBox=el('div',{style:'margin-bottom:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:12px'});
+    esBox.innerHTML='<b>★ Aanbevolen instap: 1 batterij (120 kW / 260 kWh)</b> — besparing '+
+      '<b>'+(_es.besparing_jaar!=null?fmtEur(_es.besparing_jaar):'—')+'/jaar</b>, NPV '+
+      (_es.npv!=null?fmtEur(_es.npv):'—')+' @'+disc+'%, rendement '+(_es.rendement!=null?fmtNum(_es.rendement,1)+'%':'—')+', '+
+      'instap-investering '+(_es.capex!=null?fmtEur(_es.capex):'—')+'.';
+    sec.appendChild(esBox);
+  }
+  if(_opt && optK!==1){
+    var optBox=el('div',{style:'margin-bottom:10px;padding:9px 12px;background:#1F386408;border:1px solid #1F386440;border-radius:6px;font-size:12px'});
+    optBox.innerHTML='<b>✓ Optimaal (hoogste NPV): '+optK+' batterij'+(optK>1?'en':'')+'</b> — besparing '+
+      '<b>'+(_opt.besparing_jaar!=null?fmtEur(_opt.besparing_jaar):'—')+'/jaar</b>, NPV '+
+      (_opt.npv!=null?fmtEur(_opt.npv):'—')+' @'+disc+'%, rendement '+(_opt.rendement!=null?fmtNum(_opt.rendement,1)+'%':'—')+', '+
+      'investering '+(_opt.capex!=null?fmtEur(_opt.capex):'—')+'.';
+    sec.appendChild(optBox);
+  }
+
+  var grid='0.9fr 1.05fr 0.95fr 0.95fr 0.9fr 0.7fr 0.95fr';
+  var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
+    '<span>Batterijen</span><span>Vermogen</span>'+
+    '<span style="text-align:right">Factuur/jaar</span>'+
+    '<span style="text-align:right">Besparing/jaar</span>'+
+    '<span style="text-align:right">NPV @'+disc+'%</span>'+
+    '<span style="text-align:right">Rend.</span><span style="text-align:right">Investering</span></div>';
+  var npvMax=null; alts.forEach(function(a){ if(a.npv!=null && (npvMax==null||a.npv>npvMax)) npvMax=a.npv; });
+  var rows=alts.map(function(a){
+    var k=+a.aantal_batterijen||0;
+    var isStart=(k===1), isOpt=(k===optK);
+    var bg=isStart?'background:#05B0501a;font-weight:700':(isOpt?'background:#1F386410;font-weight:700':'');
+    var tag=isStart?' ★ aanbevolen':(isOpt?' ✓ optimaal':'');
+    return '<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:4px 0;border-bottom:1px solid #EEF1F5;font-size:11.5px;'+bg+'">'+
+      '<span>'+k+' × 120/260'+tag+'</span>'+
+      '<span>'+fmtNum(a.kw||k*BATT_UNIT_KW,0)+' kW · '+fmtNum(a.kwh||k*BATT_UNIT_KWH,0)+' kWh</span>'+
+      '<span style="text-align:right">'+(a.jaarkost!=null?fmtEur(a.jaarkost):'—')+'</span>'+
+      '<span style="text-align:right">'+(a.besparing_jaar!=null?fmtEur(a.besparing_jaar):'—')+'</span>'+
+      '<span style="text-align:right">'+(a.npv!=null?fmtEur(a.npv):'—')+'</span>'+
+      '<span style="text-align:right">'+(a.rendement!=null?fmtNum(a.rendement,1)+'%':'—')+'</span>'+
+      '<span style="text-align:right">'+(a.capex!=null?fmtEur(a.capex):'—')+'</span></div>';
+  }).join('');
+  var t=el('div'); t.innerHTML=kop+rows; sec.appendChild(t);
+  sec.appendChild(el('div',{style:'font-size:11px;color:#8A94A6;margin-top:6px'},
+    'Besparing vergeleken met Vandaag (geen batterij). NPV @'+disc+'% over '+HORIZON_JAAR+' jaar, na aftrek van onderhoud en verzekering. Onbalans komt daar nog bovenop.'));
+  return sec;
+}
 function _actieveBatterijKwh(){
   // Komt het actieve resultaat uit opstelling 2? Dan is de batterij server-side
   // geïtereerd en wijkt ze af van wat er in de batterijstap staat.
@@ -7013,6 +7082,11 @@ function renderStep9Resultaat(){
   if(STATE.opstellingen && !R.error){
     var _gp=_renderGroeipad();
     if(_gp) box.appendChild(_gp);
+  }
+  // v1.54.0: batterij-only Kamino (gebouw zonder laadplein) — groeipad-sweep op bestaand verbruik.
+  if(!R.error && STATE.groeipadGebouw){
+    var _gpg=_renderGroeipadGebouw();
+    if(_gpg) box.appendChild(_gpg);
   }
   // v1.27.0: blok 11 (factuur 12 mnd vs optimaal) VERWIJDERD — voegde niets toe (Johan).
 
@@ -7836,6 +7910,7 @@ function renderStepFactuuranalyse(){
 function runSimulatie(){
   if(!validateStep(9))return;
   STATE.isRunning=true;
+  STATE.groeipadGebouw=null;   // v1.54.0: reset batterij-only groeipad
   STATE.currentStep=10;
   STATE.visited[9]=true;
   renderAll();
@@ -7974,6 +8049,7 @@ function runSimulatie(){
     //  - 'twee_opstellingen': r.opstellingen {verhogen, batterij} (elk varianten+kpi) +
     //    r.capaciteit + r.vergelijking. Detailfactuur = opstelling 'batterij', sturing 2.
     STATE.opstellingen = null; STATE.capaciteit = r.capaciteit || null; STATE.vergelijkingOpstellingen = null;
+    STATE.groeipadGebouw = r.groeipad_gebouw || null;   // v1.54.0: batterij-only Kamino (gebouw zonder laadplein)
     var varianten, sim;
     if(r.modus === 'twee_opstellingen' && r.opstellingen){
       STATE.opstellingen = r.opstellingen;
