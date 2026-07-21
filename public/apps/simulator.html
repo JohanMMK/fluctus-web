@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.54.0</span>
+    <span class="fdsim-version">v1.55.0</span>
   </div>
 </div>
 
@@ -6455,6 +6455,130 @@ function _renderGroeipadGebouw(){
     'Besparing vergeleken met Vandaag (geen batterij). NPV @'+disc+'% over '+HORIZON_JAAR+' jaar, na aftrek van onderhoud en verzekering. Onbalans komt daar nog bovenop.'));
   return sec;
 }
+// ── v1.55.0 — PV-SUGGESTIE ────────────────────────────────────────────────────
+// Na de Kamino-analyse: 5 PV-systemen in gelijke stappen 0 → PVmax (1 kWp/MWh), waarbij
+// PVmax = het verbruik van groeistap 1 (gebouw + laadenergie). De server (/api/pv-sweep)
+// draait per PV-stap een echte dispatch op de vaste instap-config; hier tonen we de
+// MARGINALE PV-waarde (besparing t.o.v. 0 PV) en laat de klant één systeem kiezen. "Toepassen"
+// herrekent alles met die PV in Optimaal én de instap gebakken.
+function _pvMaxKwp(){
+  var gebouwMwh=(+STATE.jaarverbruik||0);
+  var stap1Mwh=0;
+  if(STATE.groeipad && STATE.groeipad.stappen){
+    stap1Mwh=STATE.groeipad.stappen.filter(function(s){return (+s.aantal_batterijen)===1;})
+      .reduce(function(m,s){return Math.max(m, +s.geladen_mwh||0);},0);
+  }
+  return Math.max(0, Math.round(gebouwMwh+stap1Mwh));
+}
+function _pvSweepConfig(){
+  if(STATE.groeipadGebouw) return { c:(+STATE.groeipadGebouw.aansluiting_kva||0), k:1 };
+  var eng=_kpiEngine(), b=eng&&eng.beste;
+  if(b && b.o && b.o.config) return { c:(+b.o.config.aansluiting_kva||0), k:1 };
+  return null;
+}
+function _startPvSweep(){
+  if((+STATE.pvKwp||0)>0) return;                      // PV al gekozen/manueel → geen suggestie
+  if(STATE.pvSweep || STATE.pvSweepLoading) return;    // al bezig/klaar
+  if(!STATE.lastSimInput) return;
+  var cfg=_pvSweepConfig(); if(!cfg || !(cfg.c>0)) return;
+  var pvmax=_pvMaxKwp(); if(!(pvmax>0)) return;
+  var lijst=[]; for(var i=0;i<5;i++){ lijst.push(Math.round(pvmax*i/4)); }
+  lijst=lijst.filter(function(v,idx){ return lijst.indexOf(v)===idx; });   // dedupe bij kleine PVmax
+  var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
+  _in.aansluiting_kva=cfg.c; _in.aansluitingKva=cfg.c; _in.aantal_batterijen=cfg.k; _in.pv_kwp_lijst=lijst;
+  STATE.pvSweepLoading=true;
+  apiPost('/api/pv-sweep', _in).then(function(pw){
+    STATE.pvSweep=pw; STATE.pvSweepLoading=false;
+    if(STATE.currentStep===10) renderStage();
+  }).catch(function(e){
+    STATE.pvSweepLoading=false; STATE.pvSweepFout=e.message;
+    if(STATE.currentStep===10) renderStage();
+  });
+}
+function _renderPvSuggestie(){
+  if(STATE.pvSweepLoading && !STATE.pvSweep){
+    var w=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+    w.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'PV-suggestie — hoeveel zonnepanelen lonen?'));
+    w.appendChild(el('div',{style:'font-size:12px;color:#5A6577'},'⏳ Wordt berekend — per PV-stap draait een echte dispatch op de instap-opstelling…'));
+    return w;
+  }
+  var pw=STATE.pvSweep; if(!pw||!pw.stappen||!pw.stappen.length) return null;
+  var af=_annFactor();
+  var st=pw.stappen.slice().sort(function(a,b){return (+a.pv_kwp)-(+b.pv_kwp);});
+  var base=st.filter(function(s){return (+s.pv_kwp)===0;})[0]||st[0];
+  var f0=(+base.factuur_sturing_excl_btw||0), d0=(+base.distributie_eur||0);
+  var data=st.map(function(s){
+    var pv=+s.pv_kwp||0;
+    var besparing=(f0-(+s.factuur_sturing_excl_btw||0))*af;         // marginaal t.o.v. 0 PV
+    var besparingNet=(d0-(+s.distributie_eur||0))*af;
+    var capex=pv*INV_PV_EUR_PER_KWP;
+    var oh1=pv*TCO_AAN.onderhoud.pv_kwp;
+    var npv=pv>0?_npv(besparing, besparingNet, oh1, capex, pv):0;
+    var cum=pv>0?_besparingCumulatief(besparing, besparingNet, oh1, capex, pv):0;
+    var rend=(pv>0 && capex>0)?_rendementHorizon(besparing, besparingNet, oh1, capex, pv):null;
+    return {pv:pv, prod:(+s.productie_mwh||0), besparing:besparing, npv:npv, cum:cum, rend:rend, capex:capex};
+  });
+  // Suggestie = hoogste NPV met pv>0; als alles ≤0 → geen PV (0).
+  var sugg=0, npvMax=null;
+  data.forEach(function(d){ if(d.pv>0 && d.npv!=null && (npvMax==null||d.npv>npvMax)){ npvMax=d.npv; sugg=d.pv; } });
+  if(npvMax!=null && npvMax<=0) sugg=0;
+  if(STATE.pvKeuzeKwp==null) STATE.pvKeuzeKwp=sugg;
+  var disc=Math.round(_npvDisc()*100);
+
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'PV-suggestie — hoeveel zonnepanelen lonen?'));
+  var _pi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
+  _pi.innerHTML='We onderzoeken <b>5 PV-groottes</b> in gelijke stappen van 0 tot <b>PVmax = '+fmtNum(pw.pv_kwp_lijst[pw.pv_kwp_lijst.length-1],0)+' kWp</b> '+
+    '(= het verbruik van groeistap 1: gebouw + laadenergie, 1 kWp per MWh). Elke stap draait op de <b>instap-opstelling</b> '+
+    '('+fmtNum(pw.aansluiting_kva,0)+' kVA'+(pw.aantal_batterijen>0?' · '+pw.aantal_batterijen+' batterij'+(pw.aantal_batterijen>1?'en':''):'')+'). '+
+    'De besparing en NPV hieronder zijn de <b>extra</b> waarde van de PV bovenop diezelfde opstelling zónder PV. '+
+    'De gekozen PV wordt mee opgenomen in <b>Optimaal én de instap</b>.';
+  sec.appendChild(_pi);
+
+  var grid='0.5fr 0.95fr 1.05fr 0.95fr 0.95fr 0.7fr 0.95fr';
+  var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
+    '<span></span><span>PV-vermogen</span><span style="text-align:right">Productie/jaar</span>'+
+    '<span style="text-align:right">Extra besparing/jaar</span>'+
+    '<span style="text-align:right">NPV @'+disc+'%</span>'+
+    '<span style="text-align:right">Rend.</span><span style="text-align:right">PV-investering</span></div>';
+  var body=el('div'); body.innerHTML=kop;
+  data.forEach(function(d){
+    var isSel=(Math.round(+STATE.pvKeuzeKwp)===Math.round(d.pv));
+    var isSugg=(Math.round(d.pv)===Math.round(sugg));
+    var row=el('div',{style:'display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:1px solid #EEF1F5;font-size:11.5px;align-items:center;cursor:pointer;'+(isSel?'background:#05B0501a;font-weight:700':'')});
+    var rb=el('input',{type:'radio',name:'pvkeuze'}); rb.checked=isSel;
+    rb.onclick=function(){ STATE.pvKeuzeKwp=d.pv; if(STATE.currentStep===10) renderStage(); };
+    var cell=el('span'); cell.appendChild(rb);
+    row.appendChild(cell);
+    row.appendChild(el('span',null,(d.pv>0?fmtNum(d.pv,0)+' kWp':'geen PV')+(isSugg&&d.pv>0?' ★':'')));
+    row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtNum(d.prod,1)+' MWh':'—'));
+    row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtEur(d.besparing):'—'));
+    row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtEur(d.npv):'—'));
+    row.appendChild(el('span',{style:'text-align:right'},d.rend!=null?fmtNum(d.rend,1)+'%':'—'));
+    row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtEur(d.capex):'—'));
+    row.onclick=function(e){ if(e.target!==rb){ STATE.pvKeuzeKwp=d.pv; if(STATE.currentStep===10) renderStage(); } };
+    body.appendChild(row);
+  });
+  sec.appendChild(body);
+
+  var suggBox=el('div',{style:'margin-top:9px;font-size:12px;color:#5A6577'});
+  suggBox.innerHTML=(sugg>0
+    ? '★ <b>Suggestie: '+fmtNum(sugg,0)+' kWp</b> — de PV-grootte met de hoogste NPV @'+disc+'%.'
+    : 'Op deze opstelling geeft PV geen positieve NPV — <b>geen PV</b> is hier de zuinigste keuze.');
+  sec.appendChild(suggBox);
+
+  var btnRow=el('div',{style:'margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'});
+  var applyBtn=el('button',{class:'fdsim-btn green'},'☀ Pas '+((+STATE.pvKeuzeKwp||0)>0?fmtNum(STATE.pvKeuzeKwp,0)+' kWp':'geen PV')+' toe op Optimaal + instap');
+  applyBtn.onclick=function(){
+    STATE.pvKwp=(+STATE.pvKeuzeKwp||0);
+    STATE.pvSweep=null; STATE.pvKeuzeKwp=null;   // suggestie sluit; her-run bakt PV in alle scenario's
+    runSimulatie();
+  };
+  btnRow.appendChild(applyBtn);
+  btnRow.appendChild(el('span',{style:'font-size:11px;color:#8A94A6'},'De simulatie wordt opnieuw gedraaid met deze PV in alle opstellingen.'));
+  sec.appendChild(btnRow);
+  return sec;
+}
 function _actieveBatterijKwh(){
   // Komt het actieve resultaat uit opstelling 2? Dan is de batterij server-side
   // geïtereerd en wijkt ze af van wat er in de batterijstap staat.
@@ -7087,6 +7211,11 @@ function renderStep9Resultaat(){
   if(!R.error && STATE.groeipadGebouw){
     var _gpg=_renderGroeipadGebouw();
     if(_gpg) box.appendChild(_gpg);
+  }
+  // v1.55.0: PV-suggestie — 5 PV-groottes op de instap-opstelling, met keuze die in Optimaal + instap gaat.
+  if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
+    var _pvs=_renderPvSuggestie();
+    if(_pvs) box.appendChild(_pvs);
   }
   // v1.27.0: blok 11 (factuur 12 mnd vs optimaal) VERWIJDERD — voegde niets toe (Johan).
 
@@ -7911,6 +8040,7 @@ function runSimulatie(){
   if(!validateStep(9))return;
   STATE.isRunning=true;
   STATE.groeipadGebouw=null;   // v1.54.0: reset batterij-only groeipad
+  STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null;   // v1.55.0: reset PV-suggestie (pvKeuze pas na sweep)
   STATE.currentStep=10;
   STATE.visited[9]=true;
   renderAll();
@@ -8074,6 +8204,8 @@ function runSimulatie(){
     // call naar /api/groeipad — die draait per batterij-aantal een echte dispatch op dezelfde
     // aansluiting en geeft per stap het % geleverde laadenergie. Re-rendert zodra binnen.
     STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false; STATE.groeipadKeuze=null;
+    // v1.55.0: PV-suggestie — reset per run; wordt na de analyse gevuld door _startPvSweep().
+    STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null; STATE.pvKeuzeKwp=null;
     try {
       var _geng=_kpiEngine(), _gb=_geng&&_geng.beste;
       if(_gb && _gb.o && _gb.key!=='verhogen' && STATE.lastSimInput){
@@ -8097,6 +8229,7 @@ function runSimulatie(){
           apiPost('/api/groeipad', _gpIn).then(function(gp){
             STATE.groeipad=gp; STATE.groeipadLoading=false;
             if(STATE.currentStep===10) renderStage();
+            try{ _startPvSweep(); }catch(_pe){}   // v1.55.0: PV-suggestie zodra groeistap-1-verbruik bekend is
           }).catch(function(e){
             STATE.groeipadLoading=false; STATE.groeipadFout=e.message;
             if(STATE.currentStep===10) renderStage();
@@ -8104,6 +8237,9 @@ function runSimulatie(){
         }
       }
     } catch(_ge){ /* groeipad is optioneel — nooit de hoofd-render blokkeren */ }
+    // v1.55.0: battery-only Kamino (gebouw zonder laadplein) → geen laadplein-groeipad, dus PV-suggestie
+    // meteen starten (PVmax = gebouwverbruik). De laadplein-tak start ze in de groeipad-.then() hierboven.
+    try { if(STATE.groeipadGebouw) _startPvSweep(); } catch(_pe){}
     renderAll();
   }).catch(function(e){
     // v1.19.1 hotfix: automatische retry wanneer de server nog marktdata aan het
