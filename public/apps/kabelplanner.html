@@ -551,10 +551,24 @@ let tt; function toast(m){ const t=document.getElementById("fk-toast"); t.textCo
 var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result';
 var rbtn=document.getElementById('fk-return');
 if(rbtn) rbtn.onclick=function(){
+  // v1.4: geef naast de prijs ook de LAYOUT terug — componenten-coördinaten, PV-zone-hoekpunten en de
+  // kaart-bounds — zodat de simulator ze kan tonen, in het scenario bewaren en later regenereren.
+  var comps=objects.map(function(o){ var ll=o.marker.getLatLng();
+    return {type:o.type, lat:Math.round(ll.lat*1e6)/1e6, lng:Math.round(ll.lng*1e6)/1e6, kwp:Math.round((o._pvKwp||0)*10)/10}; });
+  var pvz=zones.map(function(z){ var hoek=[], area=0;
+    try{ var g=z.layer.toGeoJSON(); var ring=(g.geometry&&g.geometry.coordinates&&g.geometry.coordinates[0])||[];
+      hoek=ring.map(function(c){ return [Math.round(c[1]*1e6)/1e6, Math.round(c[0]*1e6)/1e6]; });   // [lat,lng]
+      area=turf.area(g); }catch(e){}
+    return {wp:(z.wp||200), kwp:Math.round(area*((z.wp||200)/1000)*10)/10, hoekpunten:hoek}; });
+  var pvKwpTot=pvz.reduce(function(s,z){return s+(+z.kwp||0);},0);
+  var kaart=null; try{ var b=map.getBounds(); var cc=map.getCenter();
+    kaart={center:[Math.round(cc.lat*1e6)/1e6, Math.round(cc.lng*1e6)/1e6], zoom:map.getZoom(),
+           bounds:[[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]]}; }catch(e){}
   var payload={ts:Date.now(), kabeltrace_eur:Math.round(lastKabel+lastGrond),
-    detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)}};
+    detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)},
+    componenten:comps, pv_zones:pvz, pv_kwp_getekend:Math.round(pvKwpTot*10)/10, kaart:kaart};
   try{ localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }catch(e){}
-  toast('Exacte kabelprijs '+eur(payload.kabeltrace_eur)+' teruggestuurd naar de simulator');
+  toast('Prijs + layout ('+comps.length+' componenten · '+payload.pv_kwp_getekend+' kWp PV) teruggestuurd naar de simulator');
 };
 (function(){
   var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
@@ -564,6 +578,11 @@ if(rbtn) rbtn.onclick=function(){
   if(!seed) return;
   var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
   if(seed.adres) $('fk-addr').value=seed.adres;
+  // v1.4: PV-doel uit de simulator — toon het en laat de klant PV-zones tekenen tot dat vermogen.
+  if(seed.pv && +seed.pv.kwp>0){ window._fkPvDoel=+seed.pv.kwp;
+    try{ var _t=$('fk-kpi-pv'); if(_t){ var _c=_t.closest('.c'); var _l=_c&&_c.querySelector('.l'); if(_l) _l.textContent='PV getekend / doel '+Math.round(+seed.pv.kwp)+' kWp'; } }catch(e){}
+    setTimeout(function(){ toast('Doel-PV uit de simulator: '+Math.round(+seed.pv.kwp)+' kWp — teken PV-zones tot je dat haalt'); }, 900);
+  }
   function plaats(){
     var c=map.getCenter(), i=0;
     function pos(){ var row=Math.floor(i/6), col=i%6; i++; return L.latLng(c.lat+0.00012-row*0.00006, c.lng-0.00018+col*0.00006); }

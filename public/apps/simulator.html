@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.57.0</span>
+    <span class="fdsim-version">v1.58.2</span>
   </div>
 </div>
 
@@ -5357,7 +5357,7 @@ function _basisVerhogingKw(cfgV){
 var KABELPLANNER_URL='kabelplanner.html';   // relatief pad — zelfde map (public/apps/) als simulator.html; moet exact matchen met de bestandsnaam die je uploadt
 var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result';
 // v1.52.0: sleutelwoorden per opstelling (voorstel A) — vervangt "Opstelling 0/1/2/3".
-var OPST_NAAM={0:'Vandaag', 1:'Verzwaren', 2:'Batterij', 3:'Optimaal', 'G1':'Groeistap 1'};
+var OPST_NAAM={0:'Vandaag', 1:'Verzwaren', 2:'Batterij', 3:'Optimaal', 'G1':'START'};
 // Opent de kabelplanner met een seed: adres (verbruikslocatie uit de factuur), de laadpunten uit de
 // laadpleinen en de batterij van de gekozen groeistap. Same-origin → via localStorage.
 function _kblIntekenen(){
@@ -5367,7 +5367,10 @@ function _kblIntekenen(){
   var lp={}; (STATE.laadpleinen||[]).forEach(function(p){ (p.laadpunten||[]).forEach(function(x){ var a=+x.aantal||0; if(a>0) lp[x.type]=(lp[x.type]||0)+a; }); });
   var laadpunten=Object.keys(lp).map(function(t){ return {type:t, aantal:lp[t]}; });
   var k=(STATE.groeipadKeuze&&+STATE.groeipadKeuze.k)||Math.max(1,Math.round(_dimKwh(eng.beste.o)/BATT_UNIT_KWH));
-  var seed={ ts:Date.now(), opstelling:eng.beste.label, adres:adres, laadpunten:laadpunten, batterij:{kwh:BATT_UNIT_KWH, aantal:k} };
+  // v1.58.1: geef de gekozen PV (kWp) mee — de klant tekent PV-zones tot dat vermogen in de planner.
+  var pvKwp=(+STATE.pvKwp||+STATE.pvKeuzeKwp||0);
+  var seed={ ts:Date.now(), opstelling:eng.beste.label, adres:adres, laadpunten:laadpunten,
+             batterij:{kwh:BATT_UNIT_KWH, aantal:k}, pv:{kwp:pvKwp} };
   try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
   STATE._kblSeedTs=seed.ts;
   try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){}
@@ -5527,6 +5530,9 @@ function _kpiEngine(){
   // terugval als NPV niet berekenbaar is (geen base case): kies op laagste TCO.
   if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && _kiesbaar(r)){ if(!beste||r.tco<beste.tco) beste=r; } });
     if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && r.key!=='groeistap1'){ if(!beste||r.tco<beste.tco) beste=r; } }); } }
+  // v1.58.0: FOCUS-modus — in de groeistap-kopie is groeistap 1 (START) de "beste", zodat de 4
+  // dimensioneringskaders + 3 KPI's + detailfactuur op die stap slaan (dezelfde render-functies).
+  if(STATE._focusGroeistap1){ var _g1=null; rows.forEach(function(r){ if(r.key==='groeistap1') _g1=r; }); if(_g1) beste=_g1; }
   var gevraagdMwh=0; (STATE.laadpleinen||[]).forEach(function(p){gevraagdMwh+=_lpEnergieMwh(p);});
   return { af:af, E_base:E_base, C:C, km:km, heeftBase:heeftBase, huidigLoadfactor:lf0, P_huidig:P_huidig,
     laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste, gevraagdMwh:gevraagdMwh };
@@ -5791,6 +5797,9 @@ function _bewaarOptimaal(naam, btn, b){
   snap.spanning=cfg.spanning||snap.spanning;
   if(cfg.batterij){ snap.batterijId='CUSTOM'; snap.batterijCustom=cfg.batterij; }
   snap._opstelling={ nr:b.nr, label:b.label, config:cfg, subtotaal_excl_btw:b.factuur, bewaard_op:new Date().toISOString() };
+  // v1.58.1: bewaar de kabelplanner-layout expliciet (componenten + PV-hoekpunten + kosten) voor hergebruik/regeneratie.
+  snap._kabelplanner=STATE.kabeltraceResult||null;
+  snap._pvKwp=(+STATE.pvKwp||0);
   apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:[{scenario:naam,data:snap}] })
     .then(function(){ btn.textContent='✓ Bewaard'; if(typeof log==='function') log('Optimale opstelling bewaard: '+naam,'ok'); })
     .catch(function(e){ btn.disabled=false; btn.textContent='💾 Bewaar optimale opstelling'; alert('Bewaren mislukt: '+e.message); });
@@ -5911,24 +5920,105 @@ function _renderOptimaleSamenvatting(){
     tile('Laadplein (EV)', fmtNum(evMwh,1)+' MWh', '')+
     tile('Aansluiting', fmtNum(aanslBeste,0)+' kW · '+spBeste, 'vandaag: '+fmtNum(aanslNu,0)+' kW · '+spNu);
   sec.appendChild(grid);
-  // v1.51.0: intekenen op de kabelplanner + herbereken met de exacte kabelprijs.
-  var _kblRow=el('div',{style:'margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center'});
-  var _tekenBtn=el('button',{class:'fdsim-btn small'},'Intekenen op kaart (kabelplanner)');
+  // v1.58.1: de kabelplanner-knop staat niet meer hier maar in een eigen blok ná de PV-suggestie
+  // (zie _renderKabelplannerBlok), zodat de gekozen PV mee in het ontwerp gaat.
+  return sec;
+}
+// ── v1.58.1 — KABELPLANNER-BLOK (ná de PV-suggestie): intekenen + teruggekregen layout ──
+// Knop opent de planner met de opstelling + gekozen PV; bij terugkeer tonen we de componenten,
+// de kosten, de getekende kWp én een luchtfoto (Esri-satelliet van de component-bounding-box met
+// de componenten erop). De teruggekregen layout wordt mee in het scenario bewaard.
+function _renderKabelplannerBlok(){
+  var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'Kabelplanner — teken het ontwerp in op de kaart'));
+  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
+    'Open de planner met de laadpunten, batterij en de gekozen PV. Teken de PV-vlakken en de tracés; de exacte kabelkost '+
+    'en de layout (component-coördinaten + PV-hoekpunten) komen terug en worden in het scenario bewaard.'));
+  var _kblRow=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:center'});
+  var _tekenBtn=el('button',{class:'fdsim-btn'},'🗺 Intekenen op kaart (kabelplanner)');
   _tekenBtn.onclick=_kblIntekenen;
   _kblRow.appendChild(_tekenBtn);
-  if(STATE.kabeltraceResult && STATE.kabeltraceResult.kabeltrace_eur!=null){
-    var _herBtn=el('button',{class:'fdsim-btn green small'},'↻ Herbereken met exacte kabelprijs ('+fmtEur(STATE.kabeltraceResult.kabeltrace_eur)+')');
-    _herBtn.onclick=function(){ STATE.kabeltraceOverride=+STATE.kabeltraceResult.kabeltrace_eur; renderStage(); };
+  var _kr=STATE.kabeltraceResult;
+  if(_kr && _kr.kabeltrace_eur!=null){
+    var _herBtn=el('button',{class:'fdsim-btn green'},'↻ Herbereken met exacte kabelprijs ('+fmtEur(_kr.kabeltrace_eur)+')');
+    _herBtn.onclick=function(){ STATE.kabeltraceOverride=+_kr.kabeltrace_eur; renderStage(); };
     _kblRow.appendChild(_herBtn);
   }
   if(STATE.kabeltraceOverride!=null){
     _kblRow.appendChild(el('span',{style:'font-size:11px;color:#05B050;font-weight:700'},'✓ exacte kabelprijs actief: '+fmtEur(STATE.kabeltraceOverride)));
-    var _schatBtn=el('button',{class:'fdsim-btn small',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'schatting terug');
+    var _schatBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'schatting terug');
     _schatBtn.onclick=function(){ STATE.kabeltraceOverride=null; renderStage(); };
     _kblRow.appendChild(_schatBtn);
   }
   sec.appendChild(_kblRow);
+  // Teruggekregen layout-datablok (componenten + kosten + getekende kWp + luchtfoto).
+  if(_kr && (_kr.componenten || _kr.detail)){
+    var _d=_renderKblData(_kr); if(_d) sec.appendChild(_d);
+  }
   return sec;
+}
+// Datablok van wat de planner terugstuurde + luchtfoto met de componenten erop.
+function _renderKblData(kr){
+  var TL={ontk:'Ontkoppelbord', ac:'AC-laadpunt', dc:'DC-laadpunt', sdc:'Snel-DC', bat:'Batterij', omv:'Omvormer'};
+  var wrap=el('div',{style:'margin-top:12px;padding:10px 12px;background:#F5F7FA;border:1px solid #E3E8EF;border-radius:6px'});
+  wrap.appendChild(el('div',{style:'font-weight:700;color:#1F3864;font-size:12.5px;margin-bottom:6px'},'Teruggekregen ontwerp uit de kabelplanner'));
+  var comps=kr.componenten||[];
+  var telling={}; comps.forEach(function(c){ telling[c.type]=(telling[c.type]||0)+1; });
+  var chips=Object.keys(telling).map(function(t){ return (TL[t]||t)+': '+telling[t]; }).join(' · ');
+  var det=kr.detail||{};
+  var info=el('div',{style:'font-size:11.5px;color:#3A424C;line-height:1.6'});
+  info.innerHTML=
+    '<b>Componenten:</b> '+(chips||'—')+'<br>'+
+    '<b>PV getekend:</b> '+(kr.pv_kwp_getekend!=null?fmtNum(kr.pv_kwp_getekend,1)+' kWp':'—')+
+      ((kr.pv_zones&&kr.pv_zones.length)?(' ('+kr.pv_zones.length+' vlak'+(kr.pv_zones.length>1?'ken':'')+')'):'')+'<br>'+
+    '<b>Kabelkost:</b> '+(det.kabel!=null?fmtEur(det.kabel):'—')+' · <b>Grondwerk:</b> '+(det.grond!=null?fmtEur(det.grond):'—')+
+      ' · <b>Tracélengte:</b> '+(det.len_m!=null?fmtNum(det.len_m,0)+' m':'—')+'<br>'+
+    '<b>Totale kabeltracékost:</b> <span style="color:#1F3864;font-weight:700">'+(kr.kabeltrace_eur!=null?fmtEur(kr.kabeltrace_eur):'—')+'</span>';
+  wrap.appendChild(info);
+  // Luchtfoto: Esri World Imagery export van de component-bounding-box, met de componenten als stippen.
+  var foto=_kblLuchtfoto(kr); if(foto) wrap.appendChild(foto);
+  return wrap;
+}
+// Bouwt een luchtfoto (Esri static export) van de bounding-box van de componenten + overlay-stippen.
+function _kblLuchtfoto(kr){
+  var comps=(kr.componenten||[]).filter(function(c){ return isFinite(+c.lat)&&isFinite(+c.lng); });
+  var pts=comps.map(function(c){ return [+c.lat,+c.lng]; });
+  (kr.pv_zones||[]).forEach(function(z){ (z.hoekpunten||[]).forEach(function(h){ if(isFinite(+h[0])&&isFinite(+h[1])) pts.push([+h[0],+h[1]]); }); });
+  if(pts.length<1) return null;
+  var lats=pts.map(function(p){return p[0];}), lngs=pts.map(function(p){return p[1];});
+  var minLat=Math.min.apply(null,lats), maxLat=Math.max.apply(null,lats);
+  var minLng=Math.min.apply(null,lngs), maxLng=Math.max.apply(null,lngs);
+  // marge rond de bbox (min. grootte zodat één punt niet degenereert).
+  var dLat=Math.max((maxLat-minLat),0.0006), dLng=Math.max((maxLng-minLng),0.0009);
+  minLat-=dLat*0.25; maxLat+=dLat*0.25; minLng-=dLng*0.25; maxLng+=dLng*0.25;
+  var W=600,H=380;
+  // v1.58.2: Orthofoto Vlaanderen (Digitaal Vlaanderen, laag 'Ortho') — zelfde bron als de kabelplanner.
+  // CRS:84 = lng,lat (geen as-volgorde-verwarring); het beeld mapt de bbox lineair, dus de overlay-stippen
+  // (lineair lat/lng → pixel) vallen exact goed. Buiten Vlaanderen / bij fout → terugval op Esri World Imagery.
+  var vlUrl='https://geo.api.vlaanderen.be/OMWRGBMRVL/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'+
+    '&LAYERS=Ortho&STYLES=&CRS=CRS:84&BBOX='+minLng+','+minLat+','+maxLng+','+maxLat+
+    '&WIDTH='+W+'&HEIGHT='+H+'&FORMAT=image/png';
+  var esriUrl='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export'+
+    '?bbox='+minLng+','+minLat+','+maxLng+','+maxLat+'&bboxSR=4326&imageSR=4326&size='+W+','+H+'&format=png&f=image';
+  var box=el('div',{style:'margin-top:10px;position:relative;width:100%;max-width:'+W+'px;border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
+  var img=el('img',{src:vlUrl,style:'display:block;width:100%;height:auto',alt:'Luchtfoto met componenten'});
+  img.onerror=function(){
+    if(img.getAttribute('data-fb')!=='1'){ img.setAttribute('data-fb','1'); img.src=esriUrl; }   // Vlaanderen faalt → Esri
+    else { box.style.display='none'; }                                                             // ook Esri faalt → verbergen
+  };
+  box.appendChild(img);
+  var CL={ontk:'#1F3864', ac:'#05B050', dc:'#E8A33D', sdc:'#C0392B', bat:'#7A5CC0', omv:'#2AA6A6'};
+  function px(lat,lng){ var x=(lng-minLng)/(maxLng-minLng)*100; var y=(maxLat-lat)/(maxLat-minLat)*100; return [x,y]; }
+  (kr.componenten||[]).forEach(function(c){ if(!isFinite(+c.lat)||!isFinite(+c.lng)) return;
+    var p=px(+c.lat,+c.lng); var col=CL[c.type]||'#1F3864';
+    var dot=el('div',{style:'position:absolute;left:'+p[0].toFixed(2)+'%;top:'+p[1].toFixed(2)+'%;transform:translate(-50%,-50%);'+
+      'width:11px;height:11px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.6)'});
+    box.appendChild(dot);
+  });
+  var cap=el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Luchtfoto © Orthofoto Vlaanderen (Digitaal Vlaanderen) · terugval Esri');
+  box.appendChild(cap);
+  return box;
 }
 
 // Blok 6 — Investeringen opstelling 0/1/2/3. Cabine APART bovenaan; het totaal (= capex voor het
@@ -6143,6 +6233,26 @@ function _renderDetailfactuurGroeistap1(){
   }
   return sec;
 }
+// ── v1.58.0 — VOLLEDIGE KOPIE VAN HET RESULTAAT, TOEGESPITST OP GROEISTAP 1 (START) ──
+// Onder het bestaande (Optimaal-)resultaat: dezelfde analyseblokken opnieuw, maar met groeistap 1
+// als "beste" (focus-vlag in _kpiEngine). Zo slaan de 4 dimensioneringskaders + 3 KPI's + kost/km +
+// detailfactuur op de instap, en staat de opstelling START mee in de vergelijkingstabellen.
+function _renderGroeistapKopie(){
+  if(!STATE.groeistap1) return null;
+  var wrap=el('div',{style:'margin-top:24px;border-top:3px solid #05B050;padding-top:8px'});
+  var band=el('div',{style:'margin:8px 0 4px;padding:11px 14px;background:#05B0500f;border:1px solid #05B05055;border-radius:6px'});
+  band.innerHTML='<div style="font-weight:800;color:#1F3864;font-size:15px">Ontwerp toegespitst op START (groeistap 1)</div>'+
+    '<div style="font-size:12px;color:#5A6577;margin-top:2px">Dezelfde analyse als hierboven, maar met de <b>aanbevolen instap</b> als ontwerp. '+
+    'De dimensionering en de KPI\'s hieronder slaan op <b>groeistap 1 (START)</b>; in de vergelijkingstabellen staat START mee naast Vandaag/Verzwaren/Batterij/Optimaal.</div>';
+  wrap.appendChild(band);
+  var prev=STATE._focusGroeistap1; STATE._focusGroeistap1=true;
+  try {
+    var fns=[_renderOptimaleSamenvatting, _renderKpiTegels, _renderInvesteringen0123, _renderFacturen0123,
+             _renderKostPerKmRendement, _renderKpiBespreking, _renderDetailfactuurOptimaal];
+    fns.forEach(function(fn){ try{ var e=fn(); if(e) wrap.appendChild(e); }catch(_e){} });
+  } finally { STATE._focusGroeistap1=prev; }
+  return wrap;
+}
 
 // Blok 4 — meerwaarde van de sturing, voor de BESTE opstelling.
 function _renderSturingMeerwaardeBeste(){
@@ -6201,12 +6311,10 @@ function _renderEnergieControle(){
 function _renderGroeipad(){
   var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
   var gp=STATE.groeipad;
-  // Wachtstand terwijl de dispatch-runs lopen.
+  // Wachtstand terwijl de dispatch-runs lopen — met kleine live-log (v1.57.3).
   if(STATE.groeipadLoading && (!gp||!gp.stappen)){
-    var w=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
-    w.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'Groeipad — bescheiden starten, klaar voor groei'));
-    w.appendChild(el('div',{style:'font-size:12px;color:#5A6577'},'⏳ Wordt berekend — per batterij-aantal draait een echte dispatch op de vaste (volgroeide) aansluiting…'));
-    return w;
+    return _logBox('Groeipad — bescheiden starten, klaar voor groei', STATE.groeipadT0, (STATE.groeipadN||1),
+      function(i){ return 'Groeistap '+i+' doorrekenen op de vaste aansluiting'; });
   }
   // Geen groeipad-data (oude proxy zonder /api/groeipad, of fout) → val terug op de oude weergave.
   if(!gp||!gp.stappen||!gp.stappen.length){ return _renderGroeipadFallback(); }
@@ -6313,7 +6421,7 @@ function _renderGroeipad(){
         if(!STATE.lastSimInput) return;
         var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
         _in.aansluiting_kva=_es.c; _in.aansluitingKva=_es.c; _in.aantal_batterijen=_es.k;
-        STATE.groeistap1Loading=true; STATE.groeistap1Fout=null; renderStage();
+        STATE.groeistap1Loading=true; STATE.groeistap1Fout=null; STATE.groeistap1T0=Date.now(); _startLogTimer(); renderStage();
         apiPost('/api/opstelling', _in).then(function(r){
           STATE.groeistap1=(r&&r.opstelling)||null; STATE.groeistap1Loading=false;
           if(STATE.currentStep===10) renderStage();
@@ -6547,26 +6655,57 @@ function _renderGroeipadGebouw(){
 // MARGINALE PV-waarde (besparing t.o.v. 0 PV) en laat de klant één systeem kiezen. "Toepassen"
 // herrekent alles met die PV in Optimaal én de instap gebakken.
 function _pvMaxKwp(){
+  // v1.57.2: PVmax = gebouwverbruik + volledige laadplein-energie (1 kWp/MWh). Onafhankelijk van het
+  // groeipad, zodat de PV-berekening vóór het groeipad kan draaien (op de optimale opstelling die 100% levert).
   var gebouwMwh=(+STATE.jaarverbruik||0);
-  var stap1Mwh=0;
-  if(STATE.groeipad && STATE.groeipad.stappen){
-    // volle-laadplein-pad: laadenergie van de aanbevolen eerste stap (k=1)
-    stap1Mwh=STATE.groeipad.stappen.filter(function(s){return (+s.aantal_batterijen)===1;})
-      .reduce(function(m,s){return Math.max(m, +s.geladen_mwh||0);},0);
-  } else if(!STATE.groeipadGebouw && STATE.laadpleinen && STATE.laadpleinen.length>0){
-    // optie-a (laadvraag past al): volledige laadenergie wordt geleverd
-    stap1Mwh=(STATE.laadpleinen||[]).reduce(function(s,lp){return s+(_lpEnergieMwh(lp)||0);},0);
-  }
-  return Math.max(0, Math.round(gebouwMwh+stap1Mwh));
+  var lpMwh=(STATE.laadpleinen||[]).reduce(function(s,lp){return s+(_lpEnergieMwh(lp)||0);},0);
+  return Math.max(0, Math.round(gebouwMwh+lpMwh));
 }
 function _pvSweepConfig(){
-  if(STATE.groeipadGebouw) return { c:(+STATE.groeipadGebouw.aansluiting_kva||0), k:1 };
+  // v1.57.1: PV wordt berekend op de OPTIMALE opstelling (volgroeide batterij), niet op de instap.
+  if(STATE.groeipadGebouw){
+    var _kg=Math.max(1,Math.round((+STATE.groeipadGebouw.optimaal_k||1)));
+    return { c:(+STATE.groeipadGebouw.aansluiting_kva||0), k:_kg };
+  }
   var eng=_kpiEngine(), b=eng&&eng.beste;
-  if(b && b.o && b.o.config) return { c:(+b.o.config.aansluiting_kva||0), k:1 };
+  if(b && b.o && b.o.config){
+    var _kb=Math.max(1,Math.round(_dimKwh(b.o)/BATT_UNIT_KWH));
+    return { c:(+b.o.config.aansluiting_kva||0), k:_kb };
+  }
   // optie-a: enkel de batterij-opstelling (Batterij = Optimaal), _kpiEngine gaf null
   var opsB=STATE.opstellingen && STATE.opstellingen.batterij;
-  if(opsB && opsB.config && (+opsB.config.aansluiting_kva>0)) return { c:(+opsB.config.aansluiting_kva||0), k:1 };
+  if(opsB && opsB.config && (+opsB.config.aansluiting_kva>0)){
+    var _ko=Math.max(1,Math.round(_dimKwh(opsB)/BATT_UNIT_KWH));
+    return { c:(+opsB.config.aansluiting_kva||0), k:_ko };
+  }
   return null;
+}
+// ── v1.57.3 — kleine live-log tijdens PV-/groeipad-berekening ──────────────────
+// De endpoints draaien synchroon (geen server-progress), dus we tonen een client-side
+// activiteitenlog met verstreken tijd + een schatting van welke stap loopt. Eén interval
+// hertekent elke seconde zolang er iets laadt; het stopt zichzelf zodra alles klaar is.
+function _logTick(){
+  var bezig=(STATE.currentStep===10 && (STATE.pvSweepLoading||STATE.groeipadLoading||STATE.groeistap1Loading));
+  if(bezig){ if(STATE.currentStep===10) renderStage(); }
+  else if(STATE._logTimer){ clearInterval(STATE._logTimer); STATE._logTimer=null; }
+}
+function _startLogTimer(){ if(!STATE._logTimer){ try{ STATE._logTimer=setInterval(_logTick,1000); }catch(e){} } }
+function _elapsedS(t0){ return t0?Math.max(0,Math.round((Date.now()-t0)/1000)):0; }
+// Rendert een klein log-kader: titel + verstreken tijd + een reeks stap-regels (geschatte voortgang).
+function _logBox(titel, t0, aantal, stapLabel){
+  var s=_elapsedS(t0);
+  // schatting: ~4 s per dispatch-stap → hoeveel stappen zijn wellicht al klaar.
+  var klaar=Math.max(0, Math.min(aantal||0, Math.floor(s/4)));
+  var el0=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  el0.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},titel));
+  el0.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:6px'},
+    '⏳ Rekent — verstreken tijd: '+s+' s'+(aantal?(' · ~'+klaar+'/'+aantal+' stappen'):'')));
+  var box=el('div',{style:'font-family:monospace;font-size:11px;color:#3A424C;background:#F5F7FA;border:1px solid #E3E8EF;border-radius:5px;padding:8px 10px;line-height:1.6'});
+  var rows='';
+  if(aantal){ for(var i=1;i<=aantal;i++){ rows+=((i<=klaar)?'✓ ':((i===klaar+1)?'▸ ':'· '))+stapLabel(i)+'<br>'; } }
+  rows+='<span style="color:#8A94A6">De motor draait per stap een echte dispatch (spot × profiel × batterij) — dit duurt even.</span>';
+  box.innerHTML=rows; el0.appendChild(box);
+  return el0;
 }
 function _startPvSweep(){
   if((+STATE.pvKwp||0)>0) return;                      // PV al gekozen/manueel → geen suggestie
@@ -6578,7 +6717,7 @@ function _startPvSweep(){
   lijst=lijst.filter(function(v,idx){ return lijst.indexOf(v)===idx; });   // dedupe bij kleine PVmax
   var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
   _in.aansluiting_kva=cfg.c; _in.aansluitingKva=cfg.c; _in.aantal_batterijen=cfg.k; _in.pv_kwp_lijst=lijst;
-  STATE.pvSweepLoading=true;
+  STATE.pvSweepLoading=true; STATE.pvSweepT0=Date.now(); STATE.pvSweepN=lijst.length; _startLogTimer();
   apiPost('/api/pv-sweep', _in).then(function(pw){
     STATE.pvSweep=pw; STATE.pvSweepLoading=false;
     if(STATE.currentStep===10) renderStage();
@@ -6589,10 +6728,8 @@ function _startPvSweep(){
 }
 function _renderPvSuggestie(){
   if(STATE.pvSweepLoading && !STATE.pvSweep){
-    var w=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
-    w.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'PV-suggestie — hoeveel zonnepanelen lonen?'));
-    w.appendChild(el('div',{style:'font-size:12px;color:#5A6577'},'⏳ Wordt berekend — per PV-stap draait een echte dispatch op de instap-opstelling…'));
-    return w;
+    return _logBox('PV-suggestie — hoeveel zonnepanelen lonen?', STATE.pvSweepT0, (STATE.pvSweepN||5),
+      function(i){ return 'PV-scenario '+i+' doorrekenen op de optimale opstelling'; });
   }
   var pw=STATE.pvSweep; if(!pw||!pw.stappen||!pw.stappen.length) return null;
   var af=_annFactor();
@@ -6608,43 +6745,56 @@ function _renderPvSuggestie(){
     var npv=pv>0?_npv(besparing, besparingNet, oh1, capex, pv):0;
     var cum=pv>0?_besparingCumulatief(besparing, besparingNet, oh1, capex, pv):0;
     var rend=(pv>0 && capex>0)?_rendementHorizon(besparing, besparingNet, oh1, capex, pv):null;
-    return {pv:pv, prod:(+s.productie_mwh||0), besparing:besparing, npv:npv, cum:cum, rend:rend, capex:capex};
+    return {pv:pv, prod:(+s.productie_mwh||0), besparing:besparing, npv:npv, cum:cum, rend:rend, capex:capex,
+            zelf:(s.zelfconsumptie_pct!=null?+s.zelfconsumptie_pct:null)};
   });
-  // Suggestie = hoogste NPV met pv>0; als alles ≤0 → geen PV (0).
+  // NPV-beste (secundaire info).
   var sugg=0, npvMax=null;
   data.forEach(function(d){ if(d.pv>0 && d.npv!=null && (npvMax==null||d.npv>npvMax)){ npvMax=d.npv; sugg=d.pv; } });
   if(npvMax!=null && npvMax<=0) sugg=0;
-  if(STATE.pvKeuzeKwp==null) STATE.pvKeuzeKwp=sugg;
+  // v1.57.2: STANDAARD = de GROOTSTE PV waarvan de zelfconsumptie nog ≥ drempel% is (instelbaar).
+  // Zo maximaliseren we het zelf benutte PV-volume zonder in te veel injectie te vervallen.
+  var drempel=(STATE.pvZelfDrempel!=null)?+STATE.pvZelfDrempel:80;
+  var suggZelf=0, zelfBij=null;
+  data.forEach(function(d){ if(d.pv>0 && d.zelf!=null && d.zelf>=drempel){ if(suggZelf===0 || d.pv>suggZelf){ suggZelf=d.pv; zelfBij=d.zelf; } } });
+  if(suggZelf===0){ var _zm=null; data.forEach(function(d){ if(d.pv>0 && d.zelf!=null && (_zm==null||d.zelf>_zm)){ _zm=d.zelf; suggZelf=d.pv; zelfBij=d.zelf; } }); }
+  var defKwp=(suggZelf>0?suggZelf:sugg);
+  if(STATE.pvKeuzeKwp==null) STATE.pvKeuzeKwp=defKwp;
   var disc=Math.round(_npvDisc()*100);
 
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'PV-suggestie — hoeveel zonnepanelen lonen?'));
   var _pi=el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'});
   _pi.innerHTML='We onderzoeken <b>5 PV-groottes</b> in gelijke stappen van 0 tot <b>PVmax = '+fmtNum(pw.pv_kwp_lijst[pw.pv_kwp_lijst.length-1],0)+' kWp</b> '+
-    '(= het verbruik van groeistap 1: gebouw + laadenergie, 1 kWp per MWh). Elke stap draait op de <b>instap-opstelling</b> '+
+    '(= het verbruik van groeistap 1: gebouw + laadenergie, 1 kWp per MWh). Elke stap draait op de <b>optimale opstelling</b> '+
     '('+fmtNum(pw.aansluiting_kva,0)+' kVA'+(pw.aantal_batterijen>0?' · '+pw.aantal_batterijen+' batterij'+(pw.aantal_batterijen>1?'en':''):'')+'). '+
     'De besparing en NPV hieronder zijn de <b>extra</b> waarde van de PV bovenop diezelfde opstelling zónder PV, '+
     'berekend op sturing <b>zónder onbalans</b> (de onbalans-winst komt daar nog bovenop). '+
+    'De <b>% zelfconsumptie</b> is (direct + via batterij) t.o.v. de bruto productie. '+
+    'Standaard stellen we het scenario met de <b>hoogste zelfconsumptie</b> voor; u kan een andere grootte kiezen. '+
     'De gekozen PV wordt mee opgenomen in <b>Optimaal én de instap</b>.';
   sec.appendChild(_pi);
 
-  var grid='0.5fr 0.95fr 1.05fr 0.95fr 0.95fr 0.7fr 0.95fr';
+  var grid='0.42fr 0.85fr 0.85fr 0.8fr 0.9fr 0.9fr 0.6fr 0.9fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
     '<span></span><span>PV-vermogen</span><span style="text-align:right">Productie/jaar</span>'+
+    '<span style="text-align:right">Zelf-<br>consumptie</span>'+
     '<span style="text-align:right">Extra besparing/jaar<br><span style="font-weight:400;color:#8A94A6">(zonder onbalans)</span></span>'+
     '<span style="text-align:right">NPV @'+disc+'%<br><span style="font-weight:400;color:#8A94A6">(zonder onbalans)</span></span>'+
     '<span style="text-align:right">Rend.</span><span style="text-align:right">PV-investering</span></div>';
   var body=el('div'); body.innerHTML=kop;
   data.forEach(function(d){
     var isSel=(Math.round(+STATE.pvKeuzeKwp)===Math.round(d.pv));
-    var isSugg=(Math.round(d.pv)===Math.round(sugg));
+    var isZelf=(d.pv>0 && suggZelf>0 && Math.round(d.pv)===Math.round(suggZelf));
+    var isNpv=(d.pv>0 && sugg>0 && Math.round(d.pv)===Math.round(sugg));
     var row=el('div',{style:'display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:1px solid #EEF1F5;font-size:11.5px;align-items:center;cursor:pointer;'+(isSel?'background:#05B0501a;font-weight:700':'')});
     var rb=el('input',{type:'radio',name:'pvkeuze'}); rb.checked=isSel;
     rb.onclick=function(){ STATE.pvKeuzeKwp=d.pv; if(STATE.currentStep===10) renderStage(); };
     var cell=el('span'); cell.appendChild(rb);
     row.appendChild(cell);
-    row.appendChild(el('span',null,(d.pv>0?fmtNum(d.pv,0)+' kWp':'geen PV')+(isSugg&&d.pv>0?' ★':'')));
+    row.appendChild(el('span',null,(d.pv>0?fmtNum(d.pv,0)+' kWp':'geen PV')+(isZelf?' ★':'')+(isNpv&&!isZelf?' ◇':'')));
     row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtNum(d.prod,1)+' MWh':'—'));
+    row.appendChild(el('span',{style:'text-align:right'+(isZelf?';color:#05B050;font-weight:700':'')},d.zelf!=null&&d.pv>0?fmtNum(d.zelf,0)+'%':'—'));
     row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtEur(d.besparing):'—'));
     row.appendChild(el('span',{style:'text-align:right'},d.pv>0?fmtEur(d.npv):'—'));
     row.appendChild(el('span',{style:'text-align:right'},d.rend!=null?fmtNum(d.rend,1)+'%':'—'));
@@ -6654,9 +6804,21 @@ function _renderPvSuggestie(){
   });
   sec.appendChild(body);
 
+  // v1.57.2: instelbare zelfconsumptie-drempel — verandert de standaard-keuze (nieuwe iteratie op de 5 stappen).
+  var drRow=el('div',{style:'margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:#5A6577'});
+  drRow.appendChild(el('span',null,'Zelfconsumptie-drempel voor de standaardkeuze:'));
+  var drIn=el('input',{type:'number',min:'0',max:'100',step:'5',value:String(drempel),
+    style:'width:64px;padding:3px 6px;border:1px solid #D5DBE3;border-radius:4px;font-size:12px;text-align:right'});
+  drIn.onchange=function(){ var v=parseFloat(drIn.value); if(!isFinite(v)) v=80; v=Math.max(0,Math.min(100,v));
+    STATE.pvZelfDrempel=v; STATE.pvKeuzeKwp=null; if(STATE.currentStep===10) renderStage(); };
+  drRow.appendChild(drIn); drRow.appendChild(el('span',null,'%'));
+  sec.appendChild(drRow);
+
   var suggBox=el('div',{style:'margin-top:9px;font-size:12px;color:#5A6577'});
-  suggBox.innerHTML=(sugg>0
-    ? '★ <b>Suggestie: '+fmtNum(sugg,0)+' kWp</b> — de PV-grootte met de hoogste NPV @'+disc+'% (zonder onbalans; onbalans komt daar nog bovenop).'
+  suggBox.innerHTML=(suggZelf>0
+    ? '★ <b>Standaard: '+fmtNum(suggZelf,0)+' kWp</b> — de <b>grootste</b> PV waarvan de zelfconsumptie nog ≥ '+fmtNum(drempel,0)+'% is'+
+      (zelfBij!=null?' (hier '+fmtNum(zelfBij,0)+'%)':'')+', direct + via batterij.'
+      +(sugg>0&&Math.round(sugg)!==Math.round(suggZelf)?' &nbsp;◇ Hoogste NPV: '+fmtNum(sugg,0)+' kWp.':'')
     : 'Op deze opstelling geeft PV geen positieve NPV — <b>geen PV</b> is hier de zuinigste keuze.');
   sec.appendChild(suggBox);
 
@@ -7367,6 +7529,21 @@ function renderStep9Resultaat(){
     if(_bes) box.appendChild(_bes);
   }
 
+  // v1.57.2: PV-suggestie staat NU BOVEN het groeipad (draait op de optimale opstelling, vóór het groeipad).
+  if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
+    var _pvs=_renderPvSuggestie();
+    if(_pvs) box.appendChild(_pvs);
+  }
+  // v1.56.1: PV-energiebalans — zodra PV toegepast is: direct/naar-batterij/injectie/curtailment (som 100%) + windfall.
+  if(!R.error && (+STATE.pvKwp||0)>0){
+    var _pvb=_renderPvBalans();
+    if(_pvb) box.appendChild(_pvb);
+  }
+  // v1.58.1: kabelplanner-blok — ná de PV-suggestie (gekozen PV gaat mee in het ontwerp).
+  if(STATE.opstellingen && !R.error){
+    var _kbl=_renderKabelplannerBlok();
+    if(_kbl) box.appendChild(_kbl);
+  }
   // v1.26.0 (blok 10): groeipad — batterij 1→N op vaste aansluiting (auto-berekend voor de beste).
   if(STATE.opstellingen && !R.error){
     var _gp=_renderGroeipad();
@@ -7376,16 +7553,6 @@ function renderStep9Resultaat(){
   if(!R.error && STATE.groeipadGebouw){
     var _gpg=_renderGroeipadGebouw();
     if(_gpg) box.appendChild(_gpg);
-  }
-  // v1.55.0: PV-suggestie — 5 PV-groottes op de instap-opstelling, met keuze die in Optimaal + instap gaat.
-  if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
-    var _pvs=_renderPvSuggestie();
-    if(_pvs) box.appendChild(_pvs);
-  }
-  // v1.56.1: PV-energiebalans — zodra PV toegepast is: direct/naar-batterij/injectie/curtailment (som 100%) + windfall.
-  if(!R.error && (+STATE.pvKwp||0)>0){
-    var _pvb=_renderPvBalans();
-    if(_pvb) box.appendChild(_pvb);
   }
   // v1.27.0: blok 11 (factuur 12 mnd vs optimaal) VERWIJDERD — voegde niets toe (Johan).
 
@@ -7570,6 +7737,8 @@ function renderStep9Resultaat(){
     if(!R.error){ var _dfo=_renderDetailfactuurOptimaal(); if(_dfo) box.appendChild(_dfo); }
     // v1.57.0: ná Optimaal de detailfactuur van groeistap 1 (enkel als herberekend).
     if(!R.error && STATE.groeistap1){ var _dfg=_renderDetailfactuurGroeistap1(); if(_dfg) box.appendChild(_dfg); }
+    // v1.58.0: volledige kopie van het resultaat toegespitst op groeistap 1 (START).
+    if(!R.error && STATE.groeistap1){ var _gk=_renderGroeistapKopie(); if(_gk) box.appendChild(_gk); }
   } else {
   // KPI tegels
   var kpis=el('div',{class:'fdsim-kpis'});
@@ -8399,11 +8568,10 @@ function runSimulatie(){
         if(_kvaVol>0){
           var _gpIn=JSON.parse(JSON.stringify(STATE.lastSimInput));
           _gpIn.aansluiting_kva=_kvaVol; _gpIn.aansluitingKva=_kvaVol; _gpIn.aansluitingen_kva=_conns; _gpIn.max_batterijen=_nMax;
-          STATE.groeipadLoading=true;
+          STATE.groeipadLoading=true; STATE.groeipadT0=Date.now(); STATE.groeipadN=_nMax*_conns.length; _startLogTimer();
           apiPost('/api/groeipad', _gpIn).then(function(gp){
             STATE.groeipad=gp; STATE.groeipadLoading=false;
             if(STATE.currentStep===10) renderStage();
-            try{ _startPvSweep(); }catch(_pe){}   // v1.55.0: PV-suggestie zodra groeistap-1-verbruik bekend is
           }).catch(function(e){
             STATE.groeipadLoading=false; STATE.groeipadFout=e.message;
             if(STATE.currentStep===10) renderStage();
@@ -8411,17 +8579,9 @@ function runSimulatie(){
         }
       }
     } catch(_ge){ /* groeipad is optioneel — nooit de hoofd-render blokkeren */ }
-    // v1.55.0: battery-only Kamino (gebouw zonder laadplein) → geen laadplein-groeipad, dus PV-suggestie
-    // meteen starten (PVmax = gebouwverbruik). De laadplein-tak start ze in de groeipad-.then() hierboven.
-    try { if(STATE.groeipadGebouw) _startPvSweep(); } catch(_pe){}
-    // v1.55.1: optie-a (laadplein past al + batterij → Batterij = Optimaal). Dan firet het multi-connectie-
-    // groeipad niet (_kpiEngine geeft null), dus starten we de PV-suggestie hier.
-    try {
-      if(STATE.opstellingen && !STATE.groeipadGebouw){
-        var _engPvA=_kpiEngine();
-        if(!_engPvA || !_engPvA.beste) _startPvSweep();
-      }
-    } catch(_pe2){}
+    // v1.57.2: PV-suggestie draait NU al (op de optimale opstelling, vóór/onafhankelijk van het groeipad).
+    // Eén trigger dekt alle paden — _startPvSweep bepaalt zelf de config (Optimaal/optie-a/gebouw) en PVmax.
+    try { _startPvSweep(); } catch(_pe){}
     renderAll();
   }).catch(function(e){
     // v1.19.1 hotfix: automatische retry wanneer de server nog marktdata aan het
