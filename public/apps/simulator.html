@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.56.2</span>
+    <span class="fdsim-version">v1.57.0</span>
   </div>
 </div>
 
@@ -5357,7 +5357,7 @@ function _basisVerhogingKw(cfgV){
 var KABELPLANNER_URL='kabelplanner.html';   // relatief pad — zelfde map (public/apps/) als simulator.html; moet exact matchen met de bestandsnaam die je uploadt
 var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result';
 // v1.52.0: sleutelwoorden per opstelling (voorstel A) — vervangt "Opstelling 0/1/2/3".
-var OPST_NAAM={0:'Vandaag', 1:'Verzwaren', 2:'Batterij', 3:'Optimaal'};
+var OPST_NAAM={0:'Vandaag', 1:'Verzwaren', 2:'Batterij', 3:'Optimaal', 'G1':'Groeistap 1'};
 // Opent de kabelplanner met een seed: adres (verbruikslocatie uit de factuur), de laadpunten uit de
 // laadpleinen en de batterij van de gekozen groeistap. Same-origin → via localStorage.
 function _kblIntekenen(){
@@ -5433,6 +5433,10 @@ function _kpiEngine(){
     {key:'batterij', nr:2, label:OPST_NAAM[2], o:ops.batterij}
   ];
   if(d3) kols.push({key:d3.key, nr:3, label:OPST_NAAM[3], o:d3.o});
+  // v1.57.0: "Herbereken voor groeistap 1" → groeistap 1 als EXTRA opstelling naast Optimaal.
+  if(STATE.groeistap1 && STATE.groeistap1.varianten && STATE.groeistap1.varianten.sturing){
+    kols.push({key:'groeistap1', nr:'G1', label:OPST_NAAM.G1, o:STATE.groeistap1});
+  }
   // v1.52.0: opstellingen zonder eigen data weglaten (bv. optie a — laadvraag past, geen Verzwaren).
   kols=kols.filter(function(k){ return k && k.o; });
   var rows=kols.map(function(k){
@@ -5515,12 +5519,14 @@ function _kpiEngine(){
   // interne regel: we verkopen steeds ≥1 batterij + de nodige laadpalen. NPV rekent de tijdswaarde
   // van geld (i.t.t. TCO): een kleinere, sneller renderende opstelling kan zo winnen. Onbalans blijft
   // hier BUITEN (kers op de taart). Opstelling 1 (puur verzwaren) blijft referentie, nooit optimaal.
+  // v1.57.0: groeistap 1 is een INSTAP-referentie, nooit de "beste"/Optimaal (die blijft de volgroeide keuze).
+  function _kiesbaar(r){ return r.key!=='verhogen' && r.key!=='groeistap1'; }
   var beste=null;
-  rows.forEach(function(r){ if(r.npv!=null && r.haalbaar && r.key!=='verhogen'){ if(!beste||r.npv>beste.npv) beste=r; } });
-  if(!beste){ rows.forEach(function(r){ if(r.npv!=null && r.haalbaar){ if(!beste||r.npv>beste.npv) beste=r; } }); }
+  rows.forEach(function(r){ if(r.npv!=null && r.haalbaar && _kiesbaar(r)){ if(!beste||r.npv>beste.npv) beste=r; } });
+  if(!beste){ rows.forEach(function(r){ if(r.npv!=null && r.haalbaar && r.key!=='groeistap1'){ if(!beste||r.npv>beste.npv) beste=r; } }); }
   // terugval als NPV niet berekenbaar is (geen base case): kies op laagste TCO.
-  if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && r.key!=='verhogen'){ if(!beste||r.tco<beste.tco) beste=r; } });
-    if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar){ if(!beste||r.tco<beste.tco) beste=r; } }); } }
+  if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && _kiesbaar(r)){ if(!beste||r.tco<beste.tco) beste=r; } });
+    if(!beste){ rows.forEach(function(r){ if(r.tco!=null && r.haalbaar && r.key!=='groeistap1'){ if(!beste||r.tco<beste.tco) beste=r; } }); } }
   var gevraagdMwh=0; (STATE.laadpleinen||[]).forEach(function(p){gevraagdMwh+=_lpEnergieMwh(p);});
   return { af:af, E_base:E_base, C:C, km:km, heeftBase:heeftBase, huidigLoadfactor:lf0, P_huidig:P_huidig,
     laadpalen:laadpalen, opstelling0:opstelling0, rows:rows, beste:beste, gevraagdMwh:gevraagdMwh };
@@ -6086,6 +6092,57 @@ function _renderDetailfactuurOptimaal(){
     (heeftBase?'':'Laad een factuur op (stap 1) voor de volledige stroom-vergelijking van opstelling 0.')));
   return sec;
 }
+// v1.57.0 — Detailfactuur van GROEISTAP 1 vs. vandaag (staat ná de Optimaal-detailfactuur).
+// Zelfde opbouw als _renderDetailfactuurOptimaal, maar op de groeistap-1-opstelling (de instap).
+function _renderDetailfactuurGroeistap1(){
+  var eng=_kpiEngine(); if(!eng) return null;
+  var g=(eng.rows||[]).filter(function(r){return r.key==='groeistap1';})[0]; if(!g) return null;
+  var af=eng.af, creg=eng.C||0;
+  var c=_frComp((g.o.varianten&&g.o.varianten.sturing)||null);
+  var opt={ energie:c.energie*af, distributie:c.distributie*af, capaciteit:c.capaciteit*af,
+            heffingen:c.heffingen*af, stroom:(g.factuur!=null?g.factuur:c.subtotaal*af) };
+  var bc=STATE.baseCase||{}, heeftBase=_heeftFactuur();
+  var dg=_periodeDagen(bc.periodeVan,bc.periodeTot)||365, f0=(dg>0?365/dg:1);
+  var o0=heeftBase?{
+    energie:(bc.totaalEnergieExclBtw||0)*f0, distributie:(bc.totaalDistributieExclBtw||0)*f0,
+    capaciteit:(bc.totaalCapaciteitExclBtw||0)*f0, heffingen:(bc.totaalHeffingenExclBtw||0)*f0,
+    stroom:(eng.E_base!=null?eng.E_base:(bc.totaalExclBtw||0)*f0) }:null;
+  var vandaagTot=(o0?o0.stroom:0)+creg, straksTot=opt.stroom;
+  var besparing=(o0||creg>0)?(vandaagTot-straksTot):null;
+  var grid='2.2fr 1fr 1fr';
+  function kop(){ return '<span>Component (per jaar, excl. btw)</span>'+
+    '<span style="text-align:right;font-weight:700;color:#1F3864">Vandaag (opst. 0)</span>'+
+    '<span style="text-align:right;font-weight:700;color:#1F3864">Groeistap 1</span>'; }
+  function rij(label,v0,v1,st){ return '<span'+(st?' style="'+st+'"':'')+'>'+label+'</span>'+
+    '<span style="text-align:right'+(st?';'+st:'')+'">'+(v0!=null?fmtEur(v0):'—')+'</span>'+
+    '<span style="text-align:right'+(st?';'+st:'')+'">'+(v1!=null?fmtEur(v1):'—')+'</span>'; }
+  var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #05B05055;border-radius:6px'});
+  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:2px'},
+    'Detailfactuur — groeistap 1 (aanbevolen instap) vs. vandaag'));
+  sec.appendChild(el('div',{style:'font-size:11.5px;color:#5A6577;margin-bottom:8px'},
+    'De factuur van de instap-opstelling (1 batterij, geen verzwaring) vergeleken met vandaag. Dit is waar de klant start; '+
+    'Optimaal hierboven is de volgroeide opstelling waar hij naartoe groeit.'));
+  var t=el('div');
+  t.innerHTML='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:12px">'+
+    kop()+
+    rij('Energie (commodity)', o0?o0.energie:null, opt.energie)+
+    rij('Distributie + transport', o0?o0.distributie:null, opt.distributie)+
+    rij('&nbsp;&nbsp;waarvan capaciteit', o0?o0.capaciteit:null, opt.capaciteit)+
+    rij('Heffingen + accijnzen', o0?o0.heffingen:null, opt.heffingen)+
+    rij('Stroomfactuur (excl. btw)', o0?o0.stroom:null, opt.stroom, 'font-weight:700;border-top:1px solid #E3E8EF;padding-top:4px')+
+    rij('km aan CREG-forfait', creg, 0, 'color:#9E480E')+
+    rij('Totaal (stroom + CREG-km) / jaar', o0||creg>0?vandaagTot:null, straksTot, 'font-weight:800;border-top:2px solid #1F3864;padding-top:5px')+
+    '</div>';
+  sec.appendChild(t);
+  if(besparing!=null){
+    var _bd=el('div',{style:'margin-top:10px;padding:9px 12px;background:#05B0500f;border:1px solid #05B05040;border-radius:6px;font-size:13px'});
+    _bd.innerHTML='<b style="color:#1F3864">Besparing per jaar (groeistap 1): '+
+      '<span style="color:'+(besparing>=0?'#05B050':'#9E480E')+'">'+(besparing>=0?'+ ':'')+fmtEur(besparing)+'</span></b>'+
+      (creg>0?' — waarvan '+fmtEur(creg)+' vermeden CREG-laadkost.':'');
+    sec.appendChild(_bd);
+  }
+  return sec;
+}
 
 // Blok 4 — meerwaarde van de sturing, voor de BESTE opstelling.
 function _renderSturingMeerwaardeBeste(){
@@ -6246,6 +6303,34 @@ function _renderGroeipad(){
       'NPV <b>'+(_es.npv!=null?fmtEur(_es.npv):'—')+'</b> @'+Math.round(_npvDisc()*100)+'%, rendement '+(_es.rend!=null?fmtNum(_es.rend,1)+'%':'—')+', '+
       'instap-investering '+fmtEur(_es.capex)+'. Vergeleken met opstelling 0 (CREG voor diezelfde km).';
     sec.appendChild(esBox);
+    // v1.57.0: knop → echte her-run met de groeistap-1-config → groeistap 1 als extra opstelling.
+    var _hbRow=el('div',{style:'margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'});
+    if(STATE.groeistap1Loading){
+      _hbRow.appendChild(el('span',{style:'font-size:12px;color:#1F3864'},'⏳ Groeistap 1 wordt doorgerekend…'));
+    } else {
+      var _hbBtn=el('button',{class:'fdsim-btn green'},'↻ Herbereken voor groeistap 1');
+      _hbBtn.onclick=function(){
+        if(!STATE.lastSimInput) return;
+        var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
+        _in.aansluiting_kva=_es.c; _in.aansluitingKva=_es.c; _in.aantal_batterijen=_es.k;
+        STATE.groeistap1Loading=true; STATE.groeistap1Fout=null; renderStage();
+        apiPost('/api/opstelling', _in).then(function(r){
+          STATE.groeistap1=(r&&r.opstelling)||null; STATE.groeistap1Loading=false;
+          if(STATE.currentStep===10) renderStage();
+        }).catch(function(e){ STATE.groeistap1Loading=false; STATE.groeistap1Fout=e.message; if(STATE.currentStep===10) renderStage(); });
+      };
+      _hbRow.appendChild(_hbBtn);
+      _hbRow.appendChild(el('span',{style:'font-size:11px;color:#8A94A6'},
+        STATE.groeistap1?'✓ Groeistap 1 staat als extra opstelling in de tabellen en detailfactuur hieronder.'
+                        :'Voegt groeistap 1 toe als aparte opstelling (kolom + eigen detailfactuur naast Optimaal).'));
+      if(STATE.groeistap1){
+        var _hbClr=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'× verberg groeistap 1');
+        _hbClr.onclick=function(){ STATE.groeistap1=null; renderStage(); };
+        _hbRow.appendChild(_hbClr);
+      }
+    }
+    if(STATE.groeistap1Fout) _hbRow.appendChild(el('span',{style:'font-size:11px;color:#C00'},'Herberekening mislukt: '+STATE.groeistap1Fout));
+    sec.appendChild(_hbRow);
   }
   var grid='0.85fr 1.05fr 0.95fr 0.85fr 0.9fr 0.9fr 0.55fr 0.8fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
@@ -6538,15 +6623,16 @@ function _renderPvSuggestie(){
   _pi.innerHTML='We onderzoeken <b>5 PV-groottes</b> in gelijke stappen van 0 tot <b>PVmax = '+fmtNum(pw.pv_kwp_lijst[pw.pv_kwp_lijst.length-1],0)+' kWp</b> '+
     '(= het verbruik van groeistap 1: gebouw + laadenergie, 1 kWp per MWh). Elke stap draait op de <b>instap-opstelling</b> '+
     '('+fmtNum(pw.aansluiting_kva,0)+' kVA'+(pw.aantal_batterijen>0?' · '+pw.aantal_batterijen+' batterij'+(pw.aantal_batterijen>1?'en':''):'')+'). '+
-    'De besparing en NPV hieronder zijn de <b>extra</b> waarde van de PV bovenop diezelfde opstelling zónder PV. '+
+    'De besparing en NPV hieronder zijn de <b>extra</b> waarde van de PV bovenop diezelfde opstelling zónder PV, '+
+    'berekend op sturing <b>zónder onbalans</b> (de onbalans-winst komt daar nog bovenop). '+
     'De gekozen PV wordt mee opgenomen in <b>Optimaal én de instap</b>.';
   sec.appendChild(_pi);
 
   var grid='0.5fr 0.95fr 1.05fr 0.95fr 0.95fr 0.7fr 0.95fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
     '<span></span><span>PV-vermogen</span><span style="text-align:right">Productie/jaar</span>'+
-    '<span style="text-align:right">Extra besparing/jaar</span>'+
-    '<span style="text-align:right">NPV @'+disc+'%</span>'+
+    '<span style="text-align:right">Extra besparing/jaar<br><span style="font-weight:400;color:#8A94A6">(zonder onbalans)</span></span>'+
+    '<span style="text-align:right">NPV @'+disc+'%<br><span style="font-weight:400;color:#8A94A6">(zonder onbalans)</span></span>'+
     '<span style="text-align:right">Rend.</span><span style="text-align:right">PV-investering</span></div>';
   var body=el('div'); body.innerHTML=kop;
   data.forEach(function(d){
@@ -6570,7 +6656,7 @@ function _renderPvSuggestie(){
 
   var suggBox=el('div',{style:'margin-top:9px;font-size:12px;color:#5A6577'});
   suggBox.innerHTML=(sugg>0
-    ? '★ <b>Suggestie: '+fmtNum(sugg,0)+' kWp</b> — de PV-grootte met de hoogste NPV @'+disc+'%.'
+    ? '★ <b>Suggestie: '+fmtNum(sugg,0)+' kWp</b> — de PV-grootte met de hoogste NPV @'+disc+'% (zonder onbalans; onbalans komt daar nog bovenop).'
     : 'Op deze opstelling geeft PV geen positieve NPV — <b>geen PV</b> is hier de zuinigste keuze.');
   sec.appendChild(suggBox);
 
@@ -7482,6 +7568,8 @@ function renderStep9Resultaat(){
   // (van de quickscan-run) tonen we daarom enkel nog in de enkel-modus (geen opstellingen).
   if(STATE.opstellingen){
     if(!R.error){ var _dfo=_renderDetailfactuurOptimaal(); if(_dfo) box.appendChild(_dfo); }
+    // v1.57.0: ná Optimaal de detailfactuur van groeistap 1 (enkel als herberekend).
+    if(!R.error && STATE.groeistap1){ var _dfg=_renderDetailfactuurGroeistap1(); if(_dfg) box.appendChild(_dfg); }
   } else {
   // KPI tegels
   var kpis=el('div',{class:'fdsim-kpis'});
@@ -8124,6 +8212,7 @@ function runSimulatie(){
   if(!validateStep(9))return;
   STATE.isRunning=true;
   STATE.groeipadGebouw=null;   // v1.54.0: reset batterij-only groeipad
+  STATE.groeistap1=null; STATE.groeistap1Loading=false; STATE.groeistap1Fout=null;   // v1.57.0: reset groeistap-1-herberekening
   STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null;   // v1.55.0: reset PV-suggestie (pvKeuze pas na sweep)
   STATE.currentStep=10;
   STATE.visited[9]=true;
@@ -8288,6 +8377,7 @@ function runSimulatie(){
     // call naar /api/groeipad — die draait per batterij-aantal een echte dispatch op dezelfde
     // aansluiting en geeft per stap het % geleverde laadenergie. Re-rendert zodra binnen.
     STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false; STATE.groeipadKeuze=null;
+    STATE.groeistap1=null; STATE.groeistap1Loading=false; STATE.groeistap1Fout=null;   // v1.57.0
     // v1.55.0: PV-suggestie — reset per run; wordt na de analyse gevuld door _startPvSweep().
     STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null; STATE.pvKeuzeKwp=null;
     try {
