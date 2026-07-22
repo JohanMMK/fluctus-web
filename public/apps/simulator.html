@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.58.2</span>
+    <span class="fdsim-version">v1.58.3</span>
   </div>
 </div>
 
@@ -530,6 +530,13 @@ var FluctusAppAuth = {
     });
   },
 
+  // v1.58.3: async accessor die het token VERVERST indien (bijna) verlopen vóór de call.
+  // apiGet/apiPost gebruiken dit zodat een verlopen access-token (na >1u of tab-slaap)
+  // niet meer stil een 401 "Niet ingelogd" geeft terwijl de sessie eigenlijk nog geldig is.
+  tokenAsync: function(){ try{ return _zorgToken(); }catch(e){ return Promise.resolve(FluctusAppAuth.token()); } },
+  // Forceert een refresh (bij een 401-retry). Returnt Promise<access_token|null>.
+  vernieuwNu: function(){ try{ var o=_sessie(); return o ? _vernieuw(o).then(function(t){ _token=t; return t; }) : Promise.resolve(null); }catch(e){ return Promise.resolve(null); } },
+
   // Best-effort activity-logging. Faalt stil, blokkeert nooit.
   logActivity: function(appId, actie, payload){
     try{
@@ -757,21 +764,60 @@ function _activityHook(path, body){
     }
   }catch(e){ /* stil */ }
 }
+// v1.58.3: bouw headers met een VERS token (async refresh vooraf). Terugval op de sync-token
+// als er (nog) geen FluctusAppAuth is.
+function _authHeadersAsync(base){
+  var h={}; for(var k in base){ if(base.hasOwnProperty(k)) h[k]=base[k]; }
+  var p;
+  try{ p = (window.FluctusAppAuth && window.FluctusAppAuth.tokenAsync) ? window.FluctusAppAuth.tokenAsync() : Promise.resolve(null); }
+  catch(e){ p = Promise.resolve(null); }
+  return p.then(function(t){
+    if(!t){ try{ t = window.FluctusAppAuth && window.FluctusAppAuth.token && window.FluctusAppAuth.token(); }catch(e){} }
+    if(t) h['Authorization']='Bearer '+t;
+    return h;
+  });
+}
+// Forceer een refresh en herbouw de headers (voor de 401-retry).
+function _authHeadersRetry(base){
+  var h={}; for(var k in base){ if(base.hasOwnProperty(k)) h[k]=base[k]; }
+  var p;
+  try{ p = (window.FluctusAppAuth && window.FluctusAppAuth.vernieuwNu) ? window.FluctusAppAuth.vernieuwNu() : Promise.resolve(null); }
+  catch(e){ p = Promise.resolve(null); }
+  return p.then(function(t){ if(t) h['Authorization']='Bearer '+t; return h; });
+}
 function apiGet(path){
-  return fetch(API_BASE+path,{headers:_authHeaders({})}).then(function(r){
-    if(!r.ok)throw new Error('HTTP '+r.status+' op '+path);
-    return r.json();
+  return _authHeadersAsync({}).then(function(h){
+    return fetch(API_BASE+path,{headers:h}).then(function(r){
+      if(r.status===401){
+        return _authHeadersRetry({}).then(function(h2){
+          return fetch(API_BASE+path,{headers:h2}).then(function(r2){
+            if(!r2.ok)throw new Error('HTTP '+r2.status+' op '+path);
+            return r2.json();
+          });
+        });
+      }
+      if(!r.ok)throw new Error('HTTP '+r.status+' op '+path);
+      return r.json();
+    });
   });
 }
 function apiPost(path,body){
-  return fetch(API_BASE+path,{
-    method:'POST',
-    headers:_authHeaders({'Content-Type':'application/json'}),
-    body:JSON.stringify(body)
-  }).then(function(r){
-    if(!r.ok)return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t);});
-    _activityHook(path, body);
-    return r.json();
+  var payload=JSON.stringify(body);
+  return _authHeadersAsync({'Content-Type':'application/json'}).then(function(h){
+    return fetch(API_BASE+path,{method:'POST',headers:h,body:payload}).then(function(r){
+      if(r.status===401){
+        // token verlopen → forceer refresh en probeer één keer opnieuw.
+        return _authHeadersRetry({'Content-Type':'application/json'}).then(function(h2){
+          return fetch(API_BASE+path,{method:'POST',headers:h2,body:payload}).then(function(r2){
+            if(!r2.ok)return r2.text().then(function(t){throw new Error('HTTP '+r2.status+': '+t);});
+            _activityHook(path, body); return r2.json();
+          });
+        });
+      }
+      if(!r.ok)return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t);});
+      _activityHook(path, body);
+      return r.json();
+    });
   });
 }
 
