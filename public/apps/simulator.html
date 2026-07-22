@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.58.3</span>
+    <span class="fdsim-version">v1.58.4</span>
   </div>
 </div>
 
@@ -662,7 +662,7 @@ var STAP_NAMEN = [
   'Contract',
   'Aansluiting',
   'Periode',
-  'Resultaat'
+  'Ontwerp'
 ];
 
 // ============================================================
@@ -5939,13 +5939,44 @@ function _renderKpiBespreking(){
 }
 
 // Blok 2 — samenvatting van de OPTIMALE opstelling (PV/Batterij/Laadplein) + aansluiting vs vandaag.
+// v1.58.4: rapport-knoppen (financieel + onderhandelingsmarge) — helemaal onderaan het resultaat.
+function _renderRapportKnoppen(){
+  if(!_financieelRapportBeschikbaar()) return null;
+  var frSec=el('div',{class:'fdsim-section',style:'margin-top:20px;background:#1F386408;border-color:#1F386430'});
+  frSec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Rapporten'));
+  frSec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
+    'Het volledige investeringsrapport (facturen, besparing over de batterijlevensduur, 3 kostenscenario\'s, capex/opex, rendement & terugverdientijd, 5 financieringsmodellen) en het aparte onderhandelingsmarge-rapport uit de factuuranalyse.'));
+  var frKnoppen=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'});
+  var frBtn=el('button',{class:'fdsim-btn green'},'📊 Genereer financieel rapport');
+  frBtn.onclick=function(){ _openFinancieelRapport(); };
+  frKnoppen.appendChild(frBtn);
+  if(STATE.baseCase && STATE.baseCase.totaalExclBtw>0){
+    var fmBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'📄 Onderhandelingsmarge-rapport');
+    fmBtn.onclick=function(){ _openFactuurrapport(); };
+    frKnoppen.appendChild(fmBtn);
+  }
+  frSec.appendChild(frKnoppen);
+  return frSec;
+}
+// v1.58.4: effectieve PV in het ontwerp = toegepast, anders getekend in de kabelplanner, anders gekozen.
+function _effectievePvKwp(){
+  var applied=(+STATE.pvKwp||0);
+  if(applied>0) return {kwp:applied, bron:'toegepast'};
+  var drawn=(STATE.kabeltraceResult&&+STATE.kabeltraceResult.pv_kwp_getekend)||0;
+  if(drawn>0) return {kwp:drawn, bron:'getekend in kabelplanner'};
+  var chosen=(+STATE.pvKeuzeKwp||0);
+  if(chosen>0) return {kwp:chosen, bron:'gekozen — nog niet toegepast'};
+  return {kwp:0, bron:''};
+}
 function _renderOptimaleSamenvatting(){
   var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
   var b=eng.beste, cfg=b.o.config||{};
   var battKwh=(b.key==='verhogen')?0:_dimKwh(b.o), battKw=battKwh?((cfg.batterij&&+cfg.batterij.kw)||Math.round(battKwh/2)):0;
   var eenh=battKwh?((cfg.batterij&&+cfg.batterij.aantal_batterijen)||Math.round(battKwh/260)):0;
   var evMwh=0; (STATE.laadpleinen||[]).forEach(function(p){evMwh+=_lpEnergieMwh(p);});
-  var pv=(+STATE.pvKwp||0);
+  // v1.58.4: toon de EFFECTIEVE PV in het configuratie-kader — toegepast, anders de in de kabelplanner
+  // getekende kWp, anders de gekozen suggestie. Zo staat de PV mee in de 4 config-blokken.
+  var _pvEff=_effectievePvKwp(), pv=_pvEff.kwp, _pvBron=_pvEff.bron;
   var aanslBeste=(+cfg.toegangsvermogen_kw|| +cfg.aansluiting_kva ||0), spBeste=cfg.spanning||'LS';
   var aanslNu=eng.P_huidig, spNu=STATE.spanning||'LS';
   function tile(t,g,o){ return '<div style="padding:10px 12px;background:#fff;border:1px solid #D5DBE3;border-radius:6px">'+
@@ -5961,7 +5992,7 @@ function _renderOptimaleSamenvatting(){
     'Dit is de opstelling die nodig is zodra de volledige laadinfrastructuur beschikbaar is en effectief gebruikt wordt. Tot dan volstaat een bescheiden instap die met de vloot meegroeit (zie groeipad).'));
   var grid=el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:10px'});
   grid.innerHTML=
-    tile('PV', pv>0?fmtNum(pv,0)+' kWp':'Geen', '')+
+    tile('PV', pv>0?fmtNum(pv,0)+' kWp':'Geen', pv>0?_pvBron:'')+
     tile('Batterij', battKwh>0?(eenh+' × 120/260')+'':'Geen', battKwh>0?fmtNum(battKw,0)+' kW / '+fmtNum(battKwh,0)+' kWh':'')+
     tile('Laadplein (EV)', fmtNum(evMwh,1)+' MWh', '')+
     tile('Aansluiting', fmtNum(aanslBeste,0)+' kW · '+spBeste, 'vandaag: '+fmtNum(aanslNu,0)+' kW · '+spNu);
@@ -6031,10 +6062,21 @@ function _kblLuchtfoto(kr){
   var comps=(kr.componenten||[]).filter(function(c){ return isFinite(+c.lat)&&isFinite(+c.lng); });
   var pts=comps.map(function(c){ return [+c.lat,+c.lng]; });
   (kr.pv_zones||[]).forEach(function(z){ (z.hoekpunten||[]).forEach(function(h){ if(isFinite(+h[0])&&isFinite(+h[1])) pts.push([+h[0],+h[1]]); }); });
-  if(pts.length<1) return null;
-  var lats=pts.map(function(p){return p[0];}), lngs=pts.map(function(p){return p[1];});
-  var minLat=Math.min.apply(null,lats), maxLat=Math.max.apply(null,lats);
-  var minLng=Math.min.apply(null,lngs), maxLng=Math.max.apply(null,lngs);
+  var minLat,maxLat,minLng,maxLng;
+  if(pts.length>=1){
+    var lats=pts.map(function(p){return p[0];}), lngs=pts.map(function(p){return p[1];});
+    minLat=Math.min.apply(null,lats); maxLat=Math.max.apply(null,lats);
+    minLng=Math.min.apply(null,lngs); maxLng=Math.max.apply(null,lngs);
+  } else if(kr.kaart && kr.kaart.bounds && kr.kaart.bounds.length===2){
+    // v1.58.4: geen component-coördinaten maar wél kaart-bounds → toon toch de luchtfoto van het gebied.
+    minLat=+kr.kaart.bounds[0][0]; minLng=+kr.kaart.bounds[0][1];
+    maxLat=+kr.kaart.bounds[1][0]; maxLng=+kr.kaart.bounds[1][1];
+  } else {
+    // Geen coördinaten én geen bounds (oude kabelplanner) → informatieve nota i.p.v. niks.
+    return el('div',{style:'margin-top:10px;font-size:11px;color:#8A94A6;font-style:italic'},
+      'Luchtfoto verschijnt zodra je intekent met de nieuwe kabelplanner (v1.4): dan komen de coördinaten van de componenten mee terug.');
+  }
+  if(!(isFinite(minLat)&&isFinite(minLng)&&isFinite(maxLat)&&isFinite(maxLng))) return null;
   // marge rond de bbox (min. grootte zodat één punt niet degenereert).
   var dLat=Math.max((maxLat-minLat),0.0006), dLng=Math.max((maxLng-minLng),0.0009);
   minLat-=dLat*0.25; maxLat+=dLat*0.25; minLng-=dLng*0.25; maxLng+=dLng*0.25;
@@ -6457,34 +6499,7 @@ function _renderGroeipad(){
       'NPV <b>'+(_es.npv!=null?fmtEur(_es.npv):'—')+'</b> @'+Math.round(_npvDisc()*100)+'%, rendement '+(_es.rend!=null?fmtNum(_es.rend,1)+'%':'—')+', '+
       'instap-investering '+fmtEur(_es.capex)+'. Vergeleken met opstelling 0 (CREG voor diezelfde km).';
     sec.appendChild(esBox);
-    // v1.57.0: knop → echte her-run met de groeistap-1-config → groeistap 1 als extra opstelling.
-    var _hbRow=el('div',{style:'margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'});
-    if(STATE.groeistap1Loading){
-      _hbRow.appendChild(el('span',{style:'font-size:12px;color:#1F3864'},'⏳ Groeistap 1 wordt doorgerekend…'));
-    } else {
-      var _hbBtn=el('button',{class:'fdsim-btn green'},'↻ Herbereken voor groeistap 1');
-      _hbBtn.onclick=function(){
-        if(!STATE.lastSimInput) return;
-        var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
-        _in.aansluiting_kva=_es.c; _in.aansluitingKva=_es.c; _in.aantal_batterijen=_es.k;
-        STATE.groeistap1Loading=true; STATE.groeistap1Fout=null; STATE.groeistap1T0=Date.now(); _startLogTimer(); renderStage();
-        apiPost('/api/opstelling', _in).then(function(r){
-          STATE.groeistap1=(r&&r.opstelling)||null; STATE.groeistap1Loading=false;
-          if(STATE.currentStep===10) renderStage();
-        }).catch(function(e){ STATE.groeistap1Loading=false; STATE.groeistap1Fout=e.message; if(STATE.currentStep===10) renderStage(); });
-      };
-      _hbRow.appendChild(_hbBtn);
-      _hbRow.appendChild(el('span',{style:'font-size:11px;color:#8A94A6'},
-        STATE.groeistap1?'✓ Groeistap 1 staat als extra opstelling in de tabellen en detailfactuur hieronder.'
-                        :'Voegt groeistap 1 toe als aparte opstelling (kolom + eigen detailfactuur naast Optimaal).'));
-      if(STATE.groeistap1){
-        var _hbClr=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'× verberg groeistap 1');
-        _hbClr.onclick=function(){ STATE.groeistap1=null; renderStage(); };
-        _hbRow.appendChild(_hbClr);
-      }
-    }
-    if(STATE.groeistap1Fout) _hbRow.appendChild(el('span',{style:'font-size:11px;color:#C00'},'Herberekening mislukt: '+STATE.groeistap1Fout));
-    sec.appendChild(_hbRow);
+    // v1.58.4: de herbereken-knop staat nu ONDER de stap-kiezer (zie hieronder), en rekent op de GEKOZEN stap.
   }
   var grid='0.85fr 1.05fr 0.95fr 0.85fr 0.9fr 0.9fr 0.55fr 0.8fr';
   var kop='<div style="display:grid;grid-template-columns:'+grid+';gap:5px;padding:5px 0;border-bottom:2px solid #E3E8EF;font-weight:700;color:#1F3864;font-size:11px">'+
@@ -6583,8 +6598,36 @@ function _renderGroeipad(){
       if(dd===_keuze) opt.setAttribute('selected','selected');
       sel.appendChild(opt);
     });
-    sel.onchange=function(){ var dd=sorted[+sel.value]; if(dd){ STATE.groeipadKeuze={k:dd.k, c:dd.c}; renderStage(); } };
+    sel.onchange=function(){ var dd=sorted[+sel.value]; if(dd){ STATE.groeipadKeuze={k:dd.k, c:dd.c}; STATE.groeistap1=null; renderStage(); } };
     selWrap.appendChild(sel);
+    // v1.58.4: herbereken-knop ONDER de kiezer — rekent op de GEKOZEN groeistap (default = aanbevolen).
+    var _hbRow=el('div',{style:'margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'});
+    if(STATE.groeistap1Loading){
+      _hbRow.appendChild(el('span',{style:'font-size:12px;color:#1F3864'},'⏳ Gekozen groeistap wordt doorgerekend…'));
+    } else {
+      var _hbBtn=el('button',{class:'fdsim-btn green'},'↻ Herbereken volgens de gekozen groeistap ('+_keuze.k+' batterij'+(_keuze.k>1?'en':'')+')');
+      _hbBtn.onclick=function(){
+        if(!STATE.lastSimInput) return;
+        var _in=JSON.parse(JSON.stringify(STATE.lastSimInput));
+        _in.aansluiting_kva=_keuze.c; _in.aansluitingKva=_keuze.c; _in.aantal_batterijen=_keuze.k;
+        STATE.groeistap1Loading=true; STATE.groeistap1Fout=null; STATE.groeistap1T0=Date.now(); _startLogTimer(); renderStage();
+        apiPost('/api/opstelling', _in).then(function(r){
+          STATE.groeistap1=(r&&r.opstelling)||null; STATE.groeistap1Loading=false;
+          if(STATE.currentStep===10) renderStage();
+        }).catch(function(e){ STATE.groeistap1Loading=false; STATE.groeistap1Fout=e.message; if(STATE.currentStep===10) renderStage(); });
+      };
+      _hbRow.appendChild(_hbBtn);
+      _hbRow.appendChild(el('span',{style:'font-size:11px;color:#8A94A6'},
+        STATE.groeistap1?'✓ De gekozen groeistap (START) staat in de tabellen + volledige uitwerking hieronder.'
+                        :'Voegt de gekozen groeistap toe als opstelling START + volledige uitwerking onderaan.'));
+      if(STATE.groeistap1){
+        var _hbClr=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'× verberg');
+        _hbClr.onclick=function(){ STATE.groeistap1=null; renderStage(); };
+        _hbRow.appendChild(_hbClr);
+      }
+    }
+    if(STATE.groeistap1Fout) _hbRow.appendChild(el('span',{style:'font-size:11px;color:#C00'},'Herberekening mislukt: '+STATE.groeistap1Fout));
+    selWrap.appendChild(_hbRow);
     sec.appendChild(selWrap);
     sec.appendChild(_fVergelijk(_keuze));
   }
@@ -7504,29 +7547,8 @@ function renderStep9Resultaat(){
     if(_kt) box.appendChild(_kt);
   }
 
-  // v1.21: knop naar het volledige financieel rapport (client-side opgebouwd uit
-  // de sim-resultaten: beter=voorstel, minder=basis, windfall=onbalans).
-  if(!R.error && _financieelRapportBeschikbaar()){
-    var frSec=el('div',{class:'fdsim-section',style:'margin-bottom:16px;background:#1F386408;border-color:#1F386430'});
-    frSec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Financieel rapport'));
-    frSec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
-      'Het volledige investeringsrapport: facturen, besparing over de batterijlevensduur, 3 kostenscenario\'s, capex/opex, rendement & terugverdientijd en 5 financieringsmodellen — opgebouwd uit deze simulatie.'));
-    var frKnoppen=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'});
-    var frBtn=el('button',{class:'fdsim-btn green'},'📊 Genereer financieel rapport');
-    frBtn.onclick=function(){ _openFinancieelRapport(); };
-    frKnoppen.appendChild(frBtn);
-    // v1.21.8: het onderhandelingsmarge-rapport blijft een APART rapport (bewust niet
-    // in het financieel rapport, om bias bij herbouw te vermijden). Deze knop roept het
-    // op uit de bewaarde factuuranalyse — ook nadat we al in de klassieke analyse zitten.
-    if(STATE.baseCase && STATE.baseCase.totaalExclBtw>0){
-      var fmBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},
-        '📄 Onderhandelingsmarge-rapport');
-      fmBtn.onclick=function(){ _openFactuurrapport(); };
-      frKnoppen.appendChild(fmBtn);
-    }
-    frSec.appendChild(frKnoppen);
-    box.appendChild(frSec);
-  }
+  // v1.58.4: de rapport-knoppen (financieel + onderhandelingsmarge) staan nu HELEMAAL ONDERAAN
+  // (zie _renderRapportKnoppen, aangeroepen aan het einde van het resultaat).
 
   // v1.27.0: blok 4 (meerwaarde sturing van opstelling 2) VERWIJDERD — niet relevant hier (Johan).
   // Enkel in de enkel-modus (geen opstellingen) tonen we nog de klassieke sturing-KPI's.
@@ -8058,6 +8080,9 @@ function renderStep9Resultaat(){
     renderAll();
     setStatus('Nieuw scenario gestart','info');
   }
+  // v1.58.4: rapport-knoppen (financieel + onderhandelingsmarge) HELEMAAL ONDERAAN, net boven de bewaar-actie.
+  try{ var _rk=_renderRapportKnoppen(); if(_rk) box.appendChild(_rk); }catch(_re){}
+
   var actions=el('div',{style:'display:flex;gap:8px;justify-content:flex-end;margin-top:14px'});
   actions.appendChild(el('button',{class:'fdsim-btn ghost',onclick:_resetVoorNieuw},'Nieuw scenario'));
   actions.appendChild(el('button',{class:'fdsim-btn green',onclick:bewaarScenario},'Bewaar als scenario'));
