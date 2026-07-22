@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.58.4</span>
+    <span class="fdsim-version">v1.58.5</span>
   </div>
 </div>
 
@@ -1868,9 +1868,30 @@ function _autoSaveScenarioNaFactuur(){
   });
 }
 
+// v1.58.5: ALLE ontwerp- en resultaatstaat wissen zodat NIETS van een vorig project doorsijpelt
+// (kabelplanner-PV, laadpleinen, batterij, groeipad, opstellingen, resultaat…). Raakt de factuur/
+// locatie/profiel NIET — die worden door de caller (factuur-apply) opnieuw gezet.
+function _resetOntwerpState(){
+  STATE.laadpleinen = [];
+  STATE.pvKwp = 0; STATE.pvInjStrategie = 'geen'; STATE.pvKeuzeKwp = null; STATE.pvZelfDrempel = null;
+  STATE.batterijId = ''; STATE.batterijCustom = null;
+  STATE.kabeltraceResult = null; STATE.kabeltraceOverride = null; STATE._kblSeedTs = null; STATE._kblResultTs = null;
+  STATE.pvSweep = null; STATE.pvSweepLoading = false; STATE.pvSweepFout = null;
+  STATE.groeipad = null; STATE.groeipadGebouw = null; STATE.groeipadKeuze = null; STATE.groeipadFout = null; STATE.groeipadLoading = false;
+  STATE.groeistap1 = null; STATE.groeistap1Loading = false; STATE.groeistap1Fout = null;
+  STATE.opstellingen = null; STATE.resultaat = null; STATE.resultaatVarianten = null;
+  STATE.kpiSturing = null; STATE.capaciteit = null; STATE.vergelijkingOpstellingen = null;
+  STATE.lastSimInput = null;
+  STATE.factuurSim = null; STATE.factuurSimJaar = null; STATE._factuurSimSig = null;
+  // De kabelplanner-handoff in localStorage óók wissen — anders pikt een nieuw project een oud
+  // resultaat op (bv. de kabelplanner van het vorige project stond nog open).
+  try{ localStorage.removeItem('fluctus_kbl_result'); localStorage.removeItem('fluctus_kbl_seed'); }catch(e){}
+}
 function _fmodApplyToState(){
   if(!FMOD.applied||FMOD.applied.status==='BLOKKEER'||!FMOD.applied.state)return;
   var s=FMOD.applied.state;
+  // v1.58.5: eerst ALLES van een vorig project wissen (factuur-apply = nieuw project).
+  _resetOntwerpState();
 
   // v1.16 sessie 5a (Feature 1): project + scenario zelf bouwen i.p.v. uit
   // applyBaseCaseToWizard. applyBaseCaseToWizard zet s.project=bc.klantNaam en
@@ -5427,7 +5448,11 @@ function _kblCheckResult(){
     var raw=localStorage.getItem(KBL_RESULT_KEY); if(!raw) return;
     var res=JSON.parse(raw); if(!res||res.ts==null||res.kabeltrace_eur==null) return;
     if(STATE._kblResultTs===res.ts) return;
-    if(STATE._kblSeedTs && res.ts < STATE._kblSeedTs) return;   // enkel een resultaat ná onze seed
+    // v1.58.5: ALLEEN aanvaarden als we in DIT project effectief hebben ingetekend (seed gezet) én het
+    // resultaat ná die seed komt. Zonder actieve seed nooit iets binnenlaten — anders lekt de kabelplanner
+    // van een vorig project (die nog open stond) een oud resultaat naar het nieuwe project.
+    if(!STATE._kblSeedTs) return;
+    if(res.ts < STATE._kblSeedTs) return;
     STATE._kblResultTs=res.ts; STATE.kabeltraceResult=res;
     if(STATE.currentStep===10 && typeof renderStage==='function') renderStage();
   }catch(e){}
@@ -8073,6 +8098,8 @@ function renderStep9Resultaat(){
     STATE._aansluitingManueel = false;
     STATE.spanning = '';
     STATE.contract = '';
+    // v1.58.5: ALLE ontwerp-/resultaatstaat wissen (kabelplanner, PV-keuze, laadpleinen, groeipad…).
+    try{ _resetOntwerpState(); }catch(e){}
     // FMOD (factuur-modal) volledige reset
     if(typeof _fmodReset === 'function'){
       try { _fmodReset(); } catch(e){ /* modal niet geopend = ok */ }
