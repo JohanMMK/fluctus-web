@@ -1,5 +1,5 @@
 <!-- ============================================================
-     FLUCTUS KABELPLANNER  v1.5  (simulator-koppeling)
+     FLUCTUS KABELPLANNER  v1.6  (simulator-koppeling)
      Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
      Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
      ondergrond-zones, densiteit per PV-zone, undo, bugfix draw.
@@ -7,6 +7,9 @@
      v1.4: layout terug (component-coördinaten + PV-hoekpunten + kaart-bounds).
      v1.5: paneel-layout per zone (Zuid gespreid / Oost-West aaneengesloten, GCR-densiteit,
            panelen zichtbaar), oriëntatie-toggle per zone, PV-kost + tracé-polylijnen mee terug.
+     v1.6: OW = Zuid 90° gedraaid + aaneengesloten; donkerder panelen met grijs randje; tracés
+           altijd boven de PV; volledige ontwerp-state + statische luchtfoto (html2canvas) mee terug;
+           herstel van een eerder ontwerp bij terugkeer vanuit de simulator.
      ============================================================ -->
 
 <div id="fk-app">
@@ -193,6 +196,7 @@
 <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
 <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
 <script>
 (function(){
@@ -230,9 +234,10 @@ const objects=[], traces=[], zones=[], subs=[];
 let history=[];
 if(C.SUPABASE_URL && C.SUPABASE_ANON_KEY){ try{ sb=supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY);}catch(e){} }
 
-const esri=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19,attribution:"Esri World Imagery"});
-const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:20,attribution:"© OpenStreetMap"});
-const geopunt=L.tileLayer("https://geo.api.vlaanderen.be/OMWRGBMRVL/wmts?layer=omwrgbmrvl&style=default&tilematrixset=GoogleMapsVL&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng&TileMatrix={z}&TileCol={x}&TileRow={y}",{maxZoom:21,attribution:"Orthofoto © Digitaal Vlaanderen"});
+// v1.6: crossOrigin op de tegels zodat html2canvas de kaart als afbeelding kan exporteren (geen taint).
+const esri=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19,crossOrigin:true,attribution:"Esri World Imagery"});
+const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:20,crossOrigin:true,attribution:"© OpenStreetMap"});
+const geopunt=L.tileLayer("https://geo.api.vlaanderen.be/OMWRGBMRVL/wmts?layer=omwrgbmrvl&style=default&tilematrixset=GoogleMapsVL&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng&TileMatrix={z}&TileCol={x}&TileRow={y}",{maxZoom:21,crossOrigin:true,attribution:"Orthofoto © Digitaal Vlaanderen"});
 map=L.map("fk-map",{center:[50.45,4.61],zoom:13,layers:[esri]});
 L.control.layers({"Satelliet (Esri)":esri,"Orthofoto Vlaanderen":geopunt,"Wegenkaart (OSM)":osm},{},{position:"topright"}).addTo(map);
 map.pm.setGlobalOptions({snappable:true,templineStyle:{color:NAVY},hintlineStyle:{color:NAVY,dashArray:"4,4"}});
@@ -321,15 +326,18 @@ function drawZonePanels(z){
     for(var i=0;i<poly.length-1;i++){ var my=(poly[i][1]+poly[i+1][1])/2; if(my<bmin){bmin=my;bi=i;} }
     var A=poly[bi], B=poly[bi+1], ang=Math.atan2(B[1]-A[1], B[0]-A[0]);
     function rot(p,cs,sn){ return [p[0]*cs - p[1]*sn, p[0]*sn + p[1]*cs]; }
-    var cN=Math.cos(-ang), sN=Math.sin(-ang);            // in het frame: onderste rand horizontaal
+    // v1.6: Oost-West = EXACT dezelfde landscape-paneelrijen als Zuid, maar 90° gedraaid én
+    // aaneengesloten (geen rij overgeslagen). Zuid = gespreide rijen (strook PV / strook vrij).
+    var isOW=(z.kind==="OW");
+    var baseAng=ang + (isOW?Math.PI/2:0);                 // OW: 90° t.o.v. de onderste rand
+    var rowH=1.02;                                        // paneel-diepte (landscape), gelijk voor beide
+    var pitch=isOW?1.14:2.02;                             // OW aaneengesloten, Zuid met vrije strook ertussen
+    var cN=Math.cos(-baseAng), sN=Math.sin(-baseAng);     // frame: rijrichting horizontaal
     var Rp=poly.map(function(p){ return rot(p,cN,sN); });
     var ys=Rp.map(function(p){return p[1];}), xs=Rp.map(function(p){return p[0];});
     var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys);
     var xmin=Math.min.apply(null,xs), xmax=Math.max.apply(null,xs);
-    var isOW=(z.kind==="OW");
-    var rowH=isOW?1.68:1.05;                              // paneel-diepte (portret vs landscape)
-    var pitch=isOW?1.72:2.02;                             // rij-tot-rij (OW aaneengesloten, Zuid gespreid)
-    var cI=Math.cos(ang), sI=Math.sin(ang);
+    var cI=Math.cos(baseAng), sI=Math.sin(baseAng);
     for(var y=ymin+0.15; y+rowH<=ymax-0.05; y+=pitch){
       var corners=[[xmin,y],[xmax,y],[xmax,y+rowH],[xmin,y+rowH]];
       var back=corners.map(function(p){ return toLL(rot(p,cI,sI)); });
@@ -339,7 +347,8 @@ function drawZonePanels(z){
       var gm=clip.geometry, polys=(gm.type==="Polygon")?[gm.coordinates]:gm.coordinates;
       polys.forEach(function(cc){
         var lls=cc[0].map(function(p){ return [p[1],p[0]]; });
-        var lyr=L.polygon(lls,{color:"#0b3d91",weight:0.7,fillColor:"#1e63d0",fillOpacity:0.72,interactive:false}).addTo(map);
+        // v1.6: donkerder paneel + lichtgrijs randje zodat het duidelijk panelen zijn.
+        var lyr=L.polygon(lls,{color:"#c9d1dc",weight:0.9,fillColor:"#0f2748",fillOpacity:0.86,interactive:false}).addTo(map);
         z._panels.push(lyr);
       });
     }
@@ -536,6 +545,8 @@ function recalc(){
   $("fk-kpi-pv").textContent=Math.round(pvKwp).toLocaleString('nl-BE');
   $("fk-kpi-len").textContent=Math.round(lenTot).toLocaleString('nl-BE');
   lastKabel=kabelCost; lastGrond=grondCost; lastLen=lenTot;   // v1.3: bewaar voor de simulator-koppeling
+  // v1.6: kabeltracés ALTIJD boven de PV-panelen tekenen (panelen worden elke recalc opnieuw toegevoegd).
+  traces.forEach(function(t){ try{ t.layer.bringToFront(); }catch(e){} });
   bindInputs();
 }
 
@@ -634,9 +645,31 @@ if(rbtn) rbtn.onclick=function(){
     detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)},
     componenten:comps, pv_zones:pvz, pv_kwp_getekend:Math.round(pvKwpTot*10)/10,
     pv_eur:Math.round(pvKwpTot*ekwpVal), tracers:tracers, kaart:kaart};
-  try{ localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }catch(e){}
-  toast('Prijs + layout ('+comps.length+' componenten · '+tracers.length+' tracés · '+payload.pv_kwp_getekend+' kWp PV) teruggestuurd naar de simulator');
+  // v1.6: het VOLLEDIGE ontwerp mee terug (serialize) zodat de simulator het in het scenario bewaart
+  // én de planner het bij een volgende klik exact herstelt (verder werken i.p.v. opnieuw beginnen).
+  try{ payload.state=serialize(); }catch(e){}
+  // v1.6: een STATISCHE afbeelding van de kaart mee terug (zoals de klant ze ziet). Betrouwbaarder dan
+  // een luchtfoto opnieuw opbouwen in de simulator. Faalt de capture (CORS) → simulator valt terug op Esri.
+  _fkVerstuur(payload, comps.length, tracers.length);
 };
+function _fkVerstuur(payload, nComp, nTrace){
+  function schrijf(dataUrl){
+    if(dataUrl) payload.foto_dataurl=dataUrl;
+    try{ localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }
+    catch(e){ // te groot? probeer zonder foto
+      try{ delete payload.foto_dataurl; localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }catch(_e){}
+    }
+    toast('Ontwerp ('+nComp+' componenten · '+nTrace+' tracés · '+payload.pv_kwp_getekend+' kWp PV'+(dataUrl?' + luchtfoto':'')+') teruggestuurd naar de simulator');
+  }
+  try{
+    if(typeof html2canvas!=='function'){ return schrijf(null); }
+    var elMap=document.getElementById('fk-map'); if(!elMap){ return schrijf(null); }
+    var sc=Math.min(1, 1000/(elMap.offsetWidth||1000));
+    html2canvas(elMap,{useCORS:true, logging:false, scale:sc, backgroundColor:'#e9edf2'})
+      .then(function(cv){ var u=null; try{ u=cv.toDataURL('image/jpeg',0.72); }catch(e){ u=null; } schrijf(u); })
+      .catch(function(){ schrijf(null); });
+  }catch(e){ schrijf(null); }
+}
 (function(){
   var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
   if(!raw) return;
@@ -645,6 +678,14 @@ if(rbtn) rbtn.onclick=function(){
   if(!seed) return;
   var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
   if(seed.adres) $('fk-addr').value=seed.adres;
+  // v1.6: heeft de simulator een eerder ONTWERP meegegeven? Dan herstellen we dat exact zodat de klant
+  // verder werkt op wat hij het laatst doorstuurde (i.p.v. opnieuw te beginnen met auto-plaatsing).
+  if(seed.restore && typeof seed.restore==='object'){
+    try{ restoring=true; rebuild(seed.restore); restoring=false; recalc();
+      setTimeout(function(){ toast('Vorig ontwerp hersteld — werk verder en stuur opnieuw terug'); }, 700);
+      return;
+    }catch(e){ restoring=false; }
+  }
   // v1.4: PV-doel uit de simulator — toon het en laat de klant PV-zones tekenen tot dat vermogen.
   if(seed.pv && +seed.pv.kwp>0){ window._fkPvDoel=+seed.pv.kwp;
     try{ var _t=$('fk-kpi-pv'); if(_t){ var _c=_t.closest('.c'); var _l=_c&&_c.querySelector('.l'); if(_l) _l.textContent='PV getekend / doel '+Math.round(+seed.pv.kwp)+' kWp'; } }catch(e){}

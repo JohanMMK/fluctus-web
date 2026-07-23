@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.59.0</span>
+    <span class="fdsim-version">v1.60.0</span>
   </div>
 </div>
 
@@ -587,6 +587,12 @@ var STATE = {
   jaarverbruik: 200,      // MWh
   // Stap 4 — PV (v1.1: alleen kWp, geen prijslogica; v1.10: + injectie-strategie)
   pvKwp: 0,
+  // v1.60.0: kabelplanner-koppeling als INITIËLE keys, zodat ze bij het laden van een scenario
+  // hersteld worden (load doet STATE[k]=d[k] enkel voor bestaande keys). Zo blijft het ingetekende
+  // ontwerp + de statische luchtfoto behouden en kan je in de planner verder werken.
+  kabeltraceResult: null,   // volledige terugkoppeling incl. .state (ontwerp) en .foto_dataurl
+  kabeltraceOverride: null, // exacte kabeltracékost die de schatting vervangt
+  _kblDoorgerekend: null,   // bevestiging dat de kabelplanner-gegevens verwerkt zijn
   // v1.10: PV-injectie strategie
   pvInjStrategie: 'curtail_neg',  // 'geen' | 'curtail_neg' | 'bsp_actief'
   pvCurtailDrempel: 0,            // €/MWh, alleen relevant bij curtail_neg
@@ -1875,7 +1881,7 @@ function _resetOntwerpState(){
   STATE.laadpleinen = [];
   STATE.pvKwp = 0; STATE.pvInjStrategie = 'geen'; STATE.pvKeuzeKwp = null; STATE.pvZelfDrempel = null;
   STATE.batterijId = ''; STATE.batterijCustom = null;
-  STATE.kabeltraceResult = null; STATE.kabeltraceOverride = null; STATE._kblSeedTs = null; STATE._kblResultTs = null; STATE._pvUitKabelplanner = false;
+  STATE.kabeltraceResult = null; STATE.kabeltraceOverride = null; STATE._kblSeedTs = null; STATE._kblResultTs = null; STATE._pvUitKabelplanner = false; STATE._kblDoorgerekend = null; STATE._autoPin = {};
   STATE.pvSweep = null; STATE.pvSweepLoading = false; STATE.pvSweepFout = null;
   STATE.groeipad = null; STATE.groeipadGebouw = null; STATE.groeipadKeuze = null; STATE.groeipadFout = null; STATE.groeipadLoading = false;
   STATE.groeistap1 = null; STATE.groeistap1Loading = false; STATE.groeistap1Fout = null;
@@ -5438,6 +5444,10 @@ function _kblIntekenen(){
   var pvKwp=(+STATE.pvKwp||+STATE.pvKeuzeKwp||0);
   var seed={ ts:Date.now(), opstelling:eng.beste.label, adres:adres, laadpunten:laadpunten,
              batterij:{kwh:BATT_UNIT_KWH, aantal:k}, pv:{kwp:pvKwp} };
+  // v1.60.0: hebben we al een ontwerp uit de kabelplanner? Geef het VOLLEDIG mee zodat de planner het
+  // herstelt en de klant verder werkt op zijn laatste versie (i.p.v. opnieuw te beginnen).
+  var _prev=(STATE.kabeltraceResult&&STATE.kabeltraceResult.state)||null;
+  if(_prev) seed.restore=_prev;
   try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
   STATE._kblSeedTs=seed.ts;
   try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){}
@@ -5454,14 +5464,23 @@ function _kblCheckResult(){
     if(!STATE._kblSeedTs) return;
     if(res.ts < STATE._kblSeedTs) return;
     STATE._kblResultTs=res.ts; STATE.kabeltraceResult=res;
-    // v1.59.0: pas de in de kabelplanner GETEKENDE PV meteen toe op het ontwerp — zo staat ze
-    // mee in de 4 config-blokken én in de financiële berekening (klant vroeg dit expliciet).
+    // v1.60.0: ALLES uit de kabelplanner meteen VERWERKEN (geen knop meer): de getekende PV én de exacte
+    // kabeltracéprijs worden toegepast en het hele ontwerp wordt herrekend (client-side: capex, facturen,
+    // NPV, KPI's volgen STATE.pvKwp + kabeltraceOverride). De laadpunten kwamen uit dit ontwerp mee, dus
+    // de EV-laadvraag blijft consistent.
     if(res.pv_kwp_getekend!=null && +res.pv_kwp_getekend>0){
       STATE.pvKwp=+res.pv_kwp_getekend;
       STATE.pvKeuzeKwp=+res.pv_kwp_getekend;
       STATE._pvUitKabelplanner=true;
     }
+    if(res.kabeltrace_eur!=null && isFinite(+res.kabeltrace_eur)){
+      STATE.kabeltraceOverride=+res.kabeltrace_eur;   // exacte kabelprijs automatisch actief
+    }
+    STATE._kblDoorgerekend={ ts:res.ts, pvKwp:(+res.pv_kwp_getekend||0), kabel:(+res.kabeltrace_eur||0) };
     if(STATE.currentStep===10 && typeof renderStage==='function') renderStage();
+    // v1.60.0: dit herrekende ontwerp ook automatisch bewaren — zelfde naam + "_XXkWp".
+    var _kw=Math.round(+res.pv_kwp_getekend||0);
+    _autoSaveScenario('kbl', _ontwerpBasisNaam()+'_'+_kw+'kWp');
   }catch(e){}
 }
 if(typeof window!=='undefined' && !window._kblListen){ window._kblListen=true;
@@ -5857,7 +5876,57 @@ function _renderBewaarOptimaal(){
   btn.onclick=function(){ _bewaarOptimaal(naam.value, btn, b); };
   rij.appendChild(btn);
   wrap.appendChild(rij);
+  // v1.60.0: het ontwerp wordt automatisch bewaard aan het einde van elke stap. Deze knop bewaart het
+  // volledige ontwerp (alle data + kabelplanner-layout) nog eens op de auto-naam (met versienummer bij botsing).
+  var rij2=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px'});
+  var autoBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'↻ Bewaar volledig ontwerp nu');
+  autoBtn.onclick=function(){ autoBtn.disabled=true; autoBtn.textContent='Bewaren…';
+    _autoSaveScenario('ontwerp', _ontwerpBasisNaam(), function(nm){ autoBtn.disabled=false; autoBtn.textContent=nm?('✓ Bewaard: '+nm):'Bewaren mislukt'; }); };
+  rij2.appendChild(autoBtn);
+  rij2.appendChild(el('span',{style:'font-size:10.5px;color:#8A93A3;font-style:italic'},'Automatisch bewaard na elke stap; hier kan je het manueel forceren.'));
+  wrap.appendChild(rij2);
   return wrap;
+}
+// ═══ v1.60.0 — AUTO-SAVE van het ontwerp-scenario per stap ═══
+// Aan het einde van elke ontwerp-stap bewaren we alle data automatisch, met de naamlogica van de
+// optimale opstelling. Binnen dezelfde sessie overschrijven we dezelfde naam; botst de naam met een
+// BESTAAND scenario (van eerder), dan versienummeren we: _V1, _V2, … De kabelplanner-stap voegt "_XXkWp"
+// toe. Er is ook een knop om handmatig opnieuw te bewaren.
+function _ontwerpBasisNaam(){ return _klantSlug()+'_Optimaal_'+_factuurStempel(); }
+function _bouwOntwerpSnap(){
+  var snap={};
+  Object.keys(STATE).forEach(function(k){
+    if(k==='resultaat'||k==='isRunning'||k==='currentStep'||k==='visited'||k==='resultaatVarianten'||
+       k==='opstellingen'||k==='factuurSim'||k==='factuurSimJaar'||k==='kpiSturing'||k==='vergelijkingOpstellingen'||k==='lastSimInput') return;
+    snap[k]=STATE[k];
+  });
+  snap._kabelplanner=STATE.kabeltraceResult||null;
+  snap._pvKwp=(+STATE.pvKwp||0);
+  snap._autoSavedAt=new Date().toISOString();
+  return snap;
+}
+// Bewaart best-effort; blokkeert nooit de UI. naamKey pint de opgeloste naam per sessie zodat opeenvolgende
+// stap-saves DEZELFDE naam overschrijven i.p.v. telkens een nieuwe versie te maken.
+function _autoSaveScenario(naamKey, baseNaam, cb){
+  try{
+    if(!STATE.project){ if(cb)cb(null); return; }
+    baseNaam=String(baseNaam||'').trim().replace(/[^A-Za-z0-9._-]/g,'_'); if(!baseNaam){ if(cb)cb(null); return; }
+    STATE._autoPin=STATE._autoPin||{};
+    if(STATE._autoPin[naamKey]){ _postAutoScenario(STATE._autoPin[naamKey], cb); return; }
+    apiGet('/api/scenarios?project='+encodeURIComponent(STATE.project)).then(function(r){
+      var names=(r&&r.scenarios||[]).map(function(s){ return typeof s==='string'?s:(s.scenario||s.naam); });
+      var naam=baseNaam, n=1;
+      while(names.indexOf(naam)>=0){ naam=baseNaam+'_V'+n; n++; if(n>50) break; }
+      STATE._autoPin[naamKey]=naam;
+      _postAutoScenario(naam, cb);
+    }).catch(function(){ STATE._autoPin[naamKey]=baseNaam; _postAutoScenario(baseNaam, cb); });
+  }catch(e){ if(cb)cb(null); }
+}
+function _postAutoScenario(naam, cb){
+  var snap=_bouwOntwerpSnap(); snap.scenario=naam;
+  apiPost('/api/scenarios-batch-bewaren',{ project:STATE.project, scenarios:[{scenario:naam,data:snap}] })
+    .then(function(){ if(typeof log==='function') log('Auto-save scenario: '+naam,'ok'); if(cb)cb(naam); })
+    .catch(function(e){ if(typeof log==='function') log('Auto-save mislukt ('+naam+'): '+(e&&e.message),'warn'); if(cb)cb(null); });
 }
 function _bewaarOptimaal(naam, btn, b){
   var o=b.o, S=(o.varianten&&o.varianten.sturing); if(!S){ alert('De optimale opstelling is niet beschikbaar.'); return; }
@@ -6041,23 +6110,26 @@ function _renderKabelplannerBlok(){
   var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
   // v1.59.0: de sectiehoofding "3. Kabelplanning" staat al boven dit blok — hier enkel de knop + resultaat.
+  var _kr=STATE.kabeltraceResult;
   var _kblRow=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:center'});
-  var _tekenBtn=el('button',{class:'fdsim-btn'},'🗺 Intekenen op kaart (kabelplanner)');
+  var _tekenBtn=el('button',{class:'fdsim-btn'}, _kr?'🗺 Verder tekenen (kabelplanner)':'🗺 Intekenen op kaart (kabelplanner)');
   _tekenBtn.onclick=_kblIntekenen;
   _kblRow.appendChild(_tekenBtn);
-  var _kr=STATE.kabeltraceResult;
-  if(_kr && _kr.kabeltrace_eur!=null){
-    var _herBtn=el('button',{class:'fdsim-btn green'},'↻ Herbereken met exacte kabelprijs ('+fmtEur(_kr.kabeltrace_eur)+')');
-    _herBtn.onclick=function(){ STATE.kabeltraceOverride=+_kr.kabeltrace_eur; renderStage(); };
-    _kblRow.appendChild(_herBtn);
-  }
-  if(STATE.kabeltraceOverride!=null){
-    _kblRow.appendChild(el('span',{style:'font-size:11px;color:#05B050;font-weight:700'},'✓ exacte kabelprijs actief: '+fmtEur(STATE.kabeltraceOverride)));
-    var _schatBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'schatting terug');
-    _schatBtn.onclick=function(){ STATE.kabeltraceOverride=null; renderStage(); };
-    _kblRow.appendChild(_schatBtn);
-  }
   sec.appendChild(_kblRow);
+  // v1.60.0: alles wat terugkomt wordt AUTOMATISCH doorgerekend (geen knop meer). Toon de bevestiging.
+  if(STATE._kblDoorgerekend){
+    var _dd=STATE._kblDoorgerekend;
+    var conf=el('div',{style:'margin-top:8px;padding:8px 10px;background:#EAF7EE;border:1px solid #05B05055;border-radius:6px;font-size:11.5px;color:#0A6B2E;font-weight:600'});
+    conf.innerHTML='✓ Doorgerekend met de kabelplanner-gegevens — PV '+fmtNum(_dd.pvKwp,0)+' kWp toegepast en exacte kabeltracékost '+fmtEur(_dd.kabel)+' actief. Alle blokken hieronder zijn herrekend.';
+    sec.appendChild(conf);
+    if(STATE.kabeltraceOverride!=null){
+      var _schatRow=el('div',{style:'margin-top:6px'});
+      var _schatBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864;font-size:11px;padding:4px 10px'},'schatting terug (i.p.v. exacte kabelprijs)');
+      _schatBtn.onclick=function(){ STATE.kabeltraceOverride=null; renderStage(); };
+      _schatRow.appendChild(_schatBtn);
+      sec.appendChild(_schatRow);
+    }
+  }
   // Teruggekregen layout-datablok (componenten + kosten + getekende kWp + luchtfoto).
   if(_kr && (_kr.componenten || _kr.detail)){
     var _d=_renderKblData(_kr); if(_d) sec.appendChild(_d);
@@ -6098,6 +6170,14 @@ function _renderKblData(kr){
 // We hertekenen de coördinaten op de ortho i.p.v. een screenshot te nemen — dat is betrouwbaarder
 // (een echte kaart-screenshot loopt vast op canvas/CORS) en toont exact wat de klant intekende.
 function _kblLuchtfoto(kr){
+  // v1.60.0: heeft de kabelplanner een echte STATISCHE afbeelding meegestuurd (html2canvas)? Toon die
+  // rechtstreeks — dat is exact wat de klant in de planner zag (panelen, tracés, iconen inbegrepen).
+  if(kr.foto_dataurl && typeof kr.foto_dataurl==='string' && kr.foto_dataurl.indexOf('data:image')===0){
+    var fb=el('div',{style:'margin-top:10px;position:relative;width:100%;max-width:640px;border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
+    fb.appendChild(el('img',{src:kr.foto_dataurl,style:'display:block;width:100%;height:auto',alt:'Ingetekend ontwerp (kabelplanner)'}));
+    fb.appendChild(el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Zoals ingetekend in de kabelplanner'));
+    return fb;
+  }
   var comps=(kr.componenten||[]).filter(function(c){ return isFinite(+c.lat)&&isFinite(+c.lng); });
   var pts=comps.map(function(c){ return [+c.lat,+c.lng]; });
   (kr.pv_zones||[]).forEach(function(z){ (z.hoekpunten||[]).forEach(function(h){ if(isFinite(+h[0])&&isFinite(+h[1])) pts.push([+h[0],+h[1]]); }); });
@@ -6121,20 +6201,14 @@ function _kblLuchtfoto(kr){
   var dLat=Math.max((maxLat-minLat),0.0006), dLng=Math.max((maxLng-minLng),0.0009);
   minLat-=dLat*0.25; maxLat+=dLat*0.25; minLng-=dLng*0.25; maxLng+=dLng*0.25;
   var W=600,H=380;
-  // v1.58.2: Orthofoto Vlaanderen (Digitaal Vlaanderen, laag 'Ortho') — zelfde bron als de kabelplanner.
-  // CRS:84 = lng,lat (geen as-volgorde-verwarring); het beeld mapt de bbox lineair, dus de overlay
-  // (lineair lat/lng → pixel) valt exact goed. Buiten Vlaanderen / bij fout → terugval op Esri World Imagery.
-  var vlUrl='https://geo.api.vlaanderen.be/OMWRGBMRVL/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'+
-    '&LAYERS=Ortho&STYLES=&CRS=CRS:84&BBOX='+minLng+','+minLat+','+maxLng+','+maxLat+
-    '&WIDTH='+W+'&HEIGHT='+H+'&FORMAT=image/png';
+  // v1.60.0: Esri World Imagery als PRIMAIRE bron voor de statische export (de losse WMS-GetMap van de
+  // Vlaamse ortho — 'Ortho'/CRS:84 — bleek niet betrouwbaar te renderen; de planner gebruikt WMTS-tegels).
+  // Esri /export levert deterministisch één beeld voor de bbox (EPSG:4326), lineair → overlay valt goed.
   var esriUrl='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export'+
     '?bbox='+minLng+','+minLat+','+maxLng+','+maxLat+'&bboxSR=4326&imageSR=4326&size='+W+','+H+'&format=png&f=image';
   var box=el('div',{style:'margin-top:10px;position:relative;width:100%;max-width:'+W+'px;aspect-ratio:'+W+'/'+H+';background:#E9EDF2;border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
-  var img=el('img',{src:vlUrl,style:'display:block;width:100%;height:100%;object-fit:cover',alt:'Luchtfoto met het ingetekende ontwerp'});
-  img.onerror=function(){
-    if(img.getAttribute('data-fb')!=='1'){ img.setAttribute('data-fb','1'); img.src=esriUrl; }   // Vlaanderen faalt → Esri
-    else { img.style.display='none'; }                                                            // ook Esri faalt → overlay blijft op grijze achtergrond
-  };
+  var img=el('img',{src:esriUrl,style:'display:block;width:100%;height:100%;object-fit:cover',alt:'Luchtfoto met het ingetekende ontwerp'});
+  img.onerror=function(){ img.style.display='none'; };   // beeld faalt → overlay blijft op grijze achtergrond
   box.appendChild(img);
   function px(lat,lng){ var x=(lng-minLng)/(maxLng-minLng)*100; var y=(maxLat-lat)/(maxLat-minLat)*100; return [x,y]; }
   // ── SVG-overlay (percent-ruimte) voor PV-zones + tracés ──
@@ -6168,7 +6242,7 @@ function _kblLuchtfoto(kr){
       'box-shadow:0 0 3px rgba(0,0,0,.6);font-size:9px;font-weight:800;line-height:15px;text-align:center;white-space:nowrap'}, IC[c.type]||'•');
     box.appendChild(m);
   });
-  var cap=el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Ortho © Digitaal Vlaanderen · overlay: getekend ontwerp (PV-vlakken, tracés, componenten)');
+  var cap=el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Satelliet © Esri · overlay: getekend ontwerp (PV-vlakken, tracés, componenten)');
   box.appendChild(cap);
   return box;
 }
@@ -6678,6 +6752,8 @@ function _renderGroeipad(){
         apiPost('/api/opstelling', _in).then(function(r){
           STATE.groeistap1=(r&&r.opstelling)||null; STATE.groeistap1Loading=false;
           if(STATE.currentStep===10) renderStage();
+          // v1.60.0: einde stap 4 (groeistap gekozen + herrekend) → auto-save van het ontwerp-scenario.
+          try{ _autoSaveScenario('ontwerp', _ontwerpBasisNaam()); }catch(e){}
         }).catch(function(e){ STATE.groeistap1Loading=false; STATE.groeistap1Fout=e.message; if(STATE.currentStep===10) renderStage(); });
       };
       _hbRow.appendChild(_hbBtn);
@@ -7544,7 +7620,7 @@ var ONTW_STAPPEN=[
   {id:'ontw-4', nr:4, kort:'Groeipad — stap 1'}
 ];
 function _ontwerpNav(){
-  var bar=el('div',{id:'ontw-nav',style:'position:sticky;top:0;z-index:20;display:flex;gap:6px;flex-wrap:wrap;'+
+  var bar=el('div',{id:'ontw-nav',style:'position:sticky;top:56px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;'+
     'background:#fff;border:1px solid #1F386430;border-radius:8px;padding:6px;margin:0 0 16px;box-shadow:0 2px 8px rgba(31,56,100,.08)'});
   ONTW_STAPPEN.forEach(function(s){
     var chip=el('button',{'class':'ontw-chip','data-target':s.id,
@@ -7557,7 +7633,7 @@ function _ontwerpNav(){
   return bar;
 }
 function _sectieKop(nr, titel, sub, anchorId){
-  var wrap=el('div',{id:anchorId,style:'scroll-margin-top:70px;margin:26px 0 10px'});
+  var wrap=el('div',{id:anchorId,style:'scroll-margin-top:128px;margin:26px 0 10px'});
   var band=el('div',{style:'display:flex;align-items:center;gap:10px;padding:9px 12px;background:linear-gradient(90deg,#1F3864,#2E4E86);border-radius:6px'});
   band.appendChild(el('div',{style:'flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:#fff;color:#1F3864;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center'},''+nr));
   band.appendChild(el('div',{style:'font-weight:800;color:#fff;font-size:14px'},titel));
@@ -7581,7 +7657,7 @@ function _initOntwerpNavSpy(){
     function sync(){
       var best=0, bestTop=-Infinity;
       for(var i=0;i<ONTW_STAPPEN.length;i++){ var a=document.getElementById(ONTW_STAPPEN[i].id); if(!a) continue;
-        var top=a.getBoundingClientRect().top - 90;   // net onder de sticky balk
+        var top=a.getBoundingClientRect().top - 130;   // net onder de externe header + sticky balk
         if(top<=0 && top>bestTop){ bestTop=top; best=i; }
       }
       setActive(best);
@@ -8765,6 +8841,8 @@ function runSimulatie(){
     STATE.isRunning=false;
     STATE._marktRetryCount=0;  // reset bij succes
     setStatus('Simulatie klaar','ok');
+    // v1.60.0: einde stap 1 (optimale opstelling) → auto-save van het ontwerp-scenario.
+    try{ _autoSaveScenario('ontwerp', _ontwerpBasisNaam()); }catch(e){}
     // v1.35.0: groeipad op VASTE aansluiting (volgroeid = optimale opstelling). Aparte async
     // call naar /api/groeipad — die draait per batterij-aantal een echte dispatch op dezelfde
     // aansluiting en geeft per stap het % geleverde laadenergie. Re-rendert zodra binnen.
