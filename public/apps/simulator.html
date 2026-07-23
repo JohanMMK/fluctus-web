@@ -224,7 +224,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.58.5</span>
+    <span class="fdsim-version">v1.59.0</span>
   </div>
 </div>
 
@@ -1875,7 +1875,7 @@ function _resetOntwerpState(){
   STATE.laadpleinen = [];
   STATE.pvKwp = 0; STATE.pvInjStrategie = 'geen'; STATE.pvKeuzeKwp = null; STATE.pvZelfDrempel = null;
   STATE.batterijId = ''; STATE.batterijCustom = null;
-  STATE.kabeltraceResult = null; STATE.kabeltraceOverride = null; STATE._kblSeedTs = null; STATE._kblResultTs = null;
+  STATE.kabeltraceResult = null; STATE.kabeltraceOverride = null; STATE._kblSeedTs = null; STATE._kblResultTs = null; STATE._pvUitKabelplanner = false;
   STATE.pvSweep = null; STATE.pvSweepLoading = false; STATE.pvSweepFout = null;
   STATE.groeipad = null; STATE.groeipadGebouw = null; STATE.groeipadKeuze = null; STATE.groeipadFout = null; STATE.groeipadLoading = false;
   STATE.groeistap1 = null; STATE.groeistap1Loading = false; STATE.groeistap1Fout = null;
@@ -5454,6 +5454,13 @@ function _kblCheckResult(){
     if(!STATE._kblSeedTs) return;
     if(res.ts < STATE._kblSeedTs) return;
     STATE._kblResultTs=res.ts; STATE.kabeltraceResult=res;
+    // v1.59.0: pas de in de kabelplanner GETEKENDE PV meteen toe op het ontwerp — zo staat ze
+    // mee in de 4 config-blokken én in de financiële berekening (klant vroeg dit expliciet).
+    if(res.pv_kwp_getekend!=null && +res.pv_kwp_getekend>0){
+      STATE.pvKwp=+res.pv_kwp_getekend;
+      STATE.pvKeuzeKwp=+res.pv_kwp_getekend;
+      STATE._pvUitKabelplanner=true;
+    }
     if(STATE.currentStep===10 && typeof renderStage==='function') renderStage();
   }catch(e){}
 }
@@ -6033,10 +6040,7 @@ function _renderOptimaleSamenvatting(){
 function _renderKabelplannerBlok(){
   var eng=_kpiEngine(); if(!eng||!eng.beste) return null;
   var sec=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
-  sec.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},'Kabelplanner — teken het ontwerp in op de kaart'));
-  sec.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:8px'},
-    'Open de planner met de laadpunten, batterij en de gekozen PV. Teken de PV-vlakken en de tracés; de exacte kabelkost '+
-    'en de layout (component-coördinaten + PV-hoekpunten) komen terug en worden in het scenario bewaard.'));
+  // v1.59.0: de sectiehoofding "3. Kabelplanning" staat al boven dit blok — hier enkel de knop + resultaat.
   var _kblRow=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:center'});
   var _tekenBtn=el('button',{class:'fdsim-btn'},'🗺 Intekenen op kaart (kabelplanner)');
   _tekenBtn.onclick=_kblIntekenen;
@@ -6070,10 +6074,17 @@ function _renderKblData(kr){
   var chips=Object.keys(telling).map(function(t){ return (TL[t]||t)+': '+telling[t]; }).join(' · ');
   var det=kr.detail||{};
   var info=el('div',{style:'font-size:11.5px;color:#3A424C;line-height:1.6'});
+  // v1.59.0: oriëntatie per PV-vlak (Zuid / Oost-West) tonen als de planner ze meestuurt.
+  var oriTxt=''; if(kr.pv_zones&&kr.pv_zones.length){
+    var oc={}; kr.pv_zones.forEach(function(z){ var k=(z.kind==='OW')?'Oost-West':'Zuid'; oc[k]=(oc[k]||0)+1; });
+    oriTxt=' — '+Object.keys(oc).map(function(k){ return oc[k]+'× '+k; }).join(', ');
+  }
   info.innerHTML=
     '<b>Componenten:</b> '+(chips||'—')+'<br>'+
     '<b>PV getekend:</b> '+(kr.pv_kwp_getekend!=null?fmtNum(kr.pv_kwp_getekend,1)+' kWp':'—')+
-      ((kr.pv_zones&&kr.pv_zones.length)?(' ('+kr.pv_zones.length+' vlak'+(kr.pv_zones.length>1?'ken':'')+')'):'')+'<br>'+
+      ((kr.pv_zones&&kr.pv_zones.length)?(' ('+kr.pv_zones.length+' vlak'+(kr.pv_zones.length>1?'ken':'')+oriTxt+')'):'')+
+      (kr.pv_eur!=null?(' · installatie '+fmtEur(kr.pv_eur)):'')+
+      ((kr.pv_kwp_getekend!=null&&+kr.pv_kwp_getekend>0)?' <span style="color:#05B050;font-weight:700">✓ toegepast in het ontwerp</span>':'')+'<br>'+
     '<b>Kabelkost:</b> '+(det.kabel!=null?fmtEur(det.kabel):'—')+' · <b>Grondwerk:</b> '+(det.grond!=null?fmtEur(det.grond):'—')+
       ' · <b>Tracélengte:</b> '+(det.len_m!=null?fmtNum(det.len_m,0)+' m':'—')+'<br>'+
     '<b>Totale kabeltracékost:</b> <span style="color:#1F3864;font-weight:700">'+(kr.kabeltrace_eur!=null?fmtEur(kr.kabeltrace_eur):'—')+'</span>';
@@ -6082,11 +6093,15 @@ function _renderKblData(kr){
   var foto=_kblLuchtfoto(kr); if(foto) wrap.appendChild(foto);
   return wrap;
 }
-// Bouwt een luchtfoto (Esri static export) van de bounding-box van de componenten + overlay-stippen.
+// v1.59.0: luchtfoto (Orthofoto Vlaanderen) van de bounding-box met een getrouwe OVERLAY van wat in
+// de kabelplanner getekend is: PV-zones (vlakken), kabeltracés (lijnen) én de componenten als iconen.
+// We hertekenen de coördinaten op de ortho i.p.v. een screenshot te nemen — dat is betrouwbaarder
+// (een echte kaart-screenshot loopt vast op canvas/CORS) en toont exact wat de klant intekende.
 function _kblLuchtfoto(kr){
   var comps=(kr.componenten||[]).filter(function(c){ return isFinite(+c.lat)&&isFinite(+c.lng); });
   var pts=comps.map(function(c){ return [+c.lat,+c.lng]; });
   (kr.pv_zones||[]).forEach(function(z){ (z.hoekpunten||[]).forEach(function(h){ if(isFinite(+h[0])&&isFinite(+h[1])) pts.push([+h[0],+h[1]]); }); });
+  (kr.tracers||[]).forEach(function(tr){ (tr||[]).forEach(function(p){ if(isFinite(+p[0])&&isFinite(+p[1])) pts.push([+p[0],+p[1]]); }); });
   var minLat,maxLat,minLng,maxLng;
   if(pts.length>=1){
     var lats=pts.map(function(p){return p[0];}), lngs=pts.map(function(p){return p[1];});
@@ -6099,7 +6114,7 @@ function _kblLuchtfoto(kr){
   } else {
     // Geen coördinaten én geen bounds (oude kabelplanner) → informatieve nota i.p.v. niks.
     return el('div',{style:'margin-top:10px;font-size:11px;color:#8A94A6;font-style:italic'},
-      'Luchtfoto verschijnt zodra je intekent met de nieuwe kabelplanner (v1.4): dan komen de coördinaten van de componenten mee terug.');
+      'Luchtfoto verschijnt zodra je intekent met de nieuwe kabelplanner (v1.5): dan komen de coördinaten van de componenten mee terug.');
   }
   if(!(isFinite(minLat)&&isFinite(minLng)&&isFinite(maxLat)&&isFinite(maxLng))) return null;
   // marge rond de bbox (min. grootte zodat één punt niet degenereert).
@@ -6107,29 +6122,53 @@ function _kblLuchtfoto(kr){
   minLat-=dLat*0.25; maxLat+=dLat*0.25; minLng-=dLng*0.25; maxLng+=dLng*0.25;
   var W=600,H=380;
   // v1.58.2: Orthofoto Vlaanderen (Digitaal Vlaanderen, laag 'Ortho') — zelfde bron als de kabelplanner.
-  // CRS:84 = lng,lat (geen as-volgorde-verwarring); het beeld mapt de bbox lineair, dus de overlay-stippen
-  // (lineair lat/lng → pixel) vallen exact goed. Buiten Vlaanderen / bij fout → terugval op Esri World Imagery.
+  // CRS:84 = lng,lat (geen as-volgorde-verwarring); het beeld mapt de bbox lineair, dus de overlay
+  // (lineair lat/lng → pixel) valt exact goed. Buiten Vlaanderen / bij fout → terugval op Esri World Imagery.
   var vlUrl='https://geo.api.vlaanderen.be/OMWRGBMRVL/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'+
     '&LAYERS=Ortho&STYLES=&CRS=CRS:84&BBOX='+minLng+','+minLat+','+maxLng+','+maxLat+
     '&WIDTH='+W+'&HEIGHT='+H+'&FORMAT=image/png';
   var esriUrl='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export'+
     '?bbox='+minLng+','+minLat+','+maxLng+','+maxLat+'&bboxSR=4326&imageSR=4326&size='+W+','+H+'&format=png&f=image';
-  var box=el('div',{style:'margin-top:10px;position:relative;width:100%;max-width:'+W+'px;border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
-  var img=el('img',{src:vlUrl,style:'display:block;width:100%;height:auto',alt:'Luchtfoto met componenten'});
+  var box=el('div',{style:'margin-top:10px;position:relative;width:100%;max-width:'+W+'px;aspect-ratio:'+W+'/'+H+';background:#E9EDF2;border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
+  var img=el('img',{src:vlUrl,style:'display:block;width:100%;height:100%;object-fit:cover',alt:'Luchtfoto met het ingetekende ontwerp'});
   img.onerror=function(){
     if(img.getAttribute('data-fb')!=='1'){ img.setAttribute('data-fb','1'); img.src=esriUrl; }   // Vlaanderen faalt → Esri
-    else { box.style.display='none'; }                                                             // ook Esri faalt → verbergen
+    else { img.style.display='none'; }                                                            // ook Esri faalt → overlay blijft op grijze achtergrond
   };
   box.appendChild(img);
-  var CL={ontk:'#1F3864', ac:'#05B050', dc:'#E8A33D', sdc:'#C0392B', bat:'#7A5CC0', omv:'#2AA6A6'};
   function px(lat,lng){ var x=(lng-minLng)/(maxLng-minLng)*100; var y=(maxLat-lat)/(maxLat-minLat)*100; return [x,y]; }
-  (kr.componenten||[]).forEach(function(c){ if(!isFinite(+c.lat)||!isFinite(+c.lng)) return;
-    var p=px(+c.lat,+c.lng); var col=CL[c.type]||'#1F3864';
-    var dot=el('div',{style:'position:absolute;left:'+p[0].toFixed(2)+'%;top:'+p[1].toFixed(2)+'%;transform:translate(-50%,-50%);'+
-      'width:11px;height:11px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.6)'});
-    box.appendChild(dot);
+  // ── SVG-overlay (percent-ruimte) voor PV-zones + tracés ──
+  var svgParts=[];
+  (kr.pv_zones||[]).forEach(function(z){
+    var ring=(z.hoekpunten||[]).filter(function(h){ return isFinite(+h[0])&&isFinite(+h[1]); });
+    if(ring.length<3) return;
+    var kol=(z.kind==='OW')?'#0a7d3a':'#05B050';
+    var poly=ring.map(function(h){ var p=px(+h[0],+h[1]); return p[0].toFixed(2)+','+p[1].toFixed(2); }).join(' ');
+    svgParts.push('<polygon points="'+poly+'" fill="'+kol+'" fill-opacity="0.32" stroke="'+kol+'" stroke-width="0.5"/>');
   });
-  var cap=el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Luchtfoto © Orthofoto Vlaanderen (Digitaal Vlaanderen) · terugval Esri');
+  (kr.tracers||[]).forEach(function(tr){
+    var line=(tr||[]).filter(function(p){ return isFinite(+p[0])&&isFinite(+p[1]); });
+    if(line.length<2) return;
+    var pl=line.map(function(p){ var q=px(+p[0],+p[1]); return q[0].toFixed(2)+','+q[1].toFixed(2); }).join(' ');
+    svgParts.push('<polyline points="'+pl+'" fill="none" stroke="#E8A33D" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round"/>');
+  });
+  if(svgParts.length){
+    var ov=el('div',{style:'position:absolute;inset:0;pointer-events:none'});
+    ov.innerHTML='<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%;display:block">'+svgParts.join('')+'</svg>';
+    box.appendChild(ov);
+  }
+  // ── component-iconen (per type, met korte label) ──
+  var CL={ontk:'#1F3864', ac:'#05B050', dc:'#E8A33D', sdc:'#C0392B', bat:'#7A5CC0', omv:'#2AA6A6'};
+  var IC={ontk:'▤', ac:'AC', dc:'DC', sdc:'⚡', bat:'🔋', omv:'~'};
+  var TL={ontk:'Ontkoppelbord', ac:'AC-laadpunt', dc:'DC-laadpunt', sdc:'Snel-DC', bat:'Batterij', omv:'Omvormer'};
+  comps.forEach(function(c){
+    var p=px(+c.lat,+c.lng); var col=CL[c.type]||'#1F3864';
+    var m=el('div',{title:(TL[c.type]||c.type),style:'position:absolute;left:'+p[0].toFixed(2)+'%;top:'+p[1].toFixed(2)+'%;transform:translate(-50%,-50%);'+
+      'min-width:17px;height:17px;padding:0 3px;border-radius:4px;background:'+col+';color:#fff;border:1.5px solid #fff;'+
+      'box-shadow:0 0 3px rgba(0,0,0,.6);font-size:9px;font-weight:800;line-height:15px;text-align:center;white-space:nowrap'}, IC[c.type]||'•');
+    box.appendChild(m);
+  });
+  var cap=el('div',{style:'position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px'},'Ortho © Digitaal Vlaanderen · overlay: getekend ontwerp (PV-vlakken, tracés, componenten)');
   box.appendChild(cap);
   return box;
 }
@@ -7495,9 +7534,69 @@ function _renderSturingKPIs(){
   return sec;
 }
 
+// ═══ v1.59.0 — ONTWERP-navigatie: de vier logische stappen bovenaan het ontwerpscherm ═══
+// Sticky balk naast de titel met vier stappen; toont in welke stap je zit en scrollt bij klik
+// naar het begin ervan. Elke stap krijgt hieronder een duidelijke sectiehoofding.
+var ONTW_STAPPEN=[
+  {id:'ontw-1', nr:1, kort:'Optimale opstelling'},
+  {id:'ontw-2', nr:2, kort:'PV-systemen'},
+  {id:'ontw-3', nr:3, kort:'Kabelplanning'},
+  {id:'ontw-4', nr:4, kort:'Groeipad — stap 1'}
+];
+function _ontwerpNav(){
+  var bar=el('div',{id:'ontw-nav',style:'position:sticky;top:0;z-index:20;display:flex;gap:6px;flex-wrap:wrap;'+
+    'background:#fff;border:1px solid #1F386430;border-radius:8px;padding:6px;margin:0 0 16px;box-shadow:0 2px 8px rgba(31,56,100,.08)'});
+  ONTW_STAPPEN.forEach(function(s){
+    var chip=el('button',{'class':'ontw-chip','data-target':s.id,
+      style:'flex:1 1 120px;min-width:118px;cursor:pointer;border:1px solid #D5DBE3;background:#F5F7FA;color:#5A6577;'+
+      'border-radius:6px;padding:7px 8px;font-family:inherit;text-align:center;line-height:1.25;transition:background .15s,color .15s,border-color .15s'},
+      [ el('div',{style:'font-size:10px;opacity:.75'},'Stap '+s.nr), el('div',{style:'font-size:11.5px;font-weight:700'},s.kort) ]);
+    chip.onclick=function(){ var t=document.getElementById(s.id); if(t){ try{ t.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){ t.scrollIntoView(); } } };
+    bar.appendChild(chip);
+  });
+  return bar;
+}
+function _sectieKop(nr, titel, sub, anchorId){
+  var wrap=el('div',{id:anchorId,style:'scroll-margin-top:70px;margin:26px 0 10px'});
+  var band=el('div',{style:'display:flex;align-items:center;gap:10px;padding:9px 12px;background:linear-gradient(90deg,#1F3864,#2E4E86);border-radius:6px'});
+  band.appendChild(el('div',{style:'flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:#fff;color:#1F3864;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center'},''+nr));
+  band.appendChild(el('div',{style:'font-weight:800;color:#fff;font-size:14px'},titel));
+  wrap.appendChild(band);
+  if(sub) wrap.appendChild(el('div',{style:'font-size:11.5px;color:#5A6577;margin:6px 2px 0;line-height:1.5'},sub));
+  return wrap;
+}
+// Markeert de actieve stap-chip op basis van de scrollpositie (scrollspy). Capture=true zodat het
+// werkt ongeacht welk element scrolt (venster of een container-div).
+function _initOntwerpNavSpy(){
+  try{
+    var bar=document.getElementById('ontw-nav'); if(!bar) return;
+    var chips=bar.querySelectorAll('.ontw-chip');
+    function setActive(idx){
+      for(var i=0;i<chips.length;i++){ var on=(i===idx);
+        chips[i].style.background=on?'#1F3864':'#F5F7FA';
+        chips[i].style.color=on?'#fff':'#5A6577';
+        chips[i].style.borderColor=on?'#1F3864':'#D5DBE3';
+      }
+    }
+    function sync(){
+      var best=0, bestTop=-Infinity;
+      for(var i=0;i<ONTW_STAPPEN.length;i++){ var a=document.getElementById(ONTW_STAPPEN[i].id); if(!a) continue;
+        var top=a.getBoundingClientRect().top - 90;   // net onder de sticky balk
+        if(top<=0 && top>bestTop){ bestTop=top; best=i; }
+      }
+      setActive(best);
+    }
+    if(window._ontwSpy){ try{ window.removeEventListener('scroll', window._ontwSpy, true); }catch(e){} }
+    window._ontwSpy=sync;
+    window.addEventListener('scroll', sync, true);
+    sync();
+  }catch(e){}
+}
 function renderStep9Resultaat(){
   var box=el('div');
-  box.appendChild(el('h2',null,'Simulatieresultaat'));
+  box.appendChild(el('h2',null,'Ontwerp'));
+  // v1.59.0: navigatiebalk met de 4 ontwerp-stappen — alleen als het resultaat klaar is.
+  if(!STATE.isRunning && STATE.resultaat && STATE.opstellingen){ box.appendChild(_ontwerpNav()); }
 
   // v1.26.0 (blok 1): heading — waar dit scherm over gaat (de drie KPI's).
   if(!STATE.isRunning && STATE.opstellingen){
@@ -7555,6 +7654,12 @@ function renderStep9Resultaat(){
     box.appendChild(_renderAssetTegels(R));
   }
 
+  // ── v1.59.0 STAP 1 — OPTIMALE OPSTELLING ──
+  if(!R.error && STATE.opstellingen){
+    box.appendChild(_sectieKop(1,'Optimale opstelling',
+      'De opstelling met de hoogste NPV — het eindpunt zodra de volledige laadinfrastructuur in gebruik is. '+
+      'Alle investeringen, facturen en KPI\'s hieronder gaan over deze opstelling.','ontw-1'));
+  }
   // v1.26.0 (blok 2): samenvatting van de optimale opstelling + aansluiting vs vandaag.
   if(!R.error && STATE.opstellingen){
     var _os=_renderOptimaleSamenvatting();
@@ -7622,6 +7727,12 @@ function renderStep9Resultaat(){
     if(_bes) box.appendChild(_bes);
   }
 
+  // ── v1.59.0 STAP 2 — PV-SYSTEMEN ──
+  if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
+    box.appendChild(_sectieKop(2,'PV-systemen',
+      'PV-suggestie op de optimale opstelling. Standaard de grootste installatie waarvan ≥ 80 % direct wordt '+
+      'verbruikt (instelbaar). De meerwaarde is telkens berekend zónder onbalans.','ontw-2'));
+  }
   // v1.57.2: PV-suggestie staat NU BOVEN het groeipad (draait op de optimale opstelling, vóór het groeipad).
   if(!R.error && (STATE.pvSweep || STATE.pvSweepLoading)){
     var _pvs=_renderPvSuggestie();
@@ -7632,10 +7743,22 @@ function renderStep9Resultaat(){
     var _pvb=_renderPvBalans();
     if(_pvb) box.appendChild(_pvb);
   }
+  // ── v1.59.0 STAP 3 — KABELPLANNING ──
+  if(STATE.opstellingen && !R.error){
+    box.appendChild(_sectieKop(3,'Kabelplanning',
+      'Teken laadpunten, batterij, PV-vlakken en kabeltracés op de luchtfoto. De exacte kabelkost, de getekende '+
+      'PV en de layout komen terug in het ontwerp en worden in het scenario bewaard.','ontw-3'));
+  }
   // v1.58.1: kabelplanner-blok — ná de PV-suggestie (gekozen PV gaat mee in het ontwerp).
   if(STATE.opstellingen && !R.error){
     var _kbl=_renderKabelplannerBlok();
     if(_kbl) box.appendChild(_kbl);
+  }
+  // ── v1.59.0 STAP 4 — GROEIPAD (STAP 1) ──
+  if(STATE.opstellingen && !R.error){
+    box.appendChild(_sectieKop(4,'Groeipad — stap 1',
+      'De aanbevolen instapstap: de kleinste batterij/aansluiting waarmee je vandaag start en die met de vloot '+
+      'meegroeit. Kies een stap en herbereken om de dimensionering en de KPI\'s op die stap af te stemmen.','ontw-4'));
   }
   // v1.26.0 (blok 10): groeipad — batterij 1→N op vaste aansluiting (auto-berekend voor de beste).
   if(STATE.opstellingen && !R.error){
@@ -8115,6 +8238,8 @@ function renderStep9Resultaat(){
   actions.appendChild(el('button',{class:'fdsim-btn green',onclick:bewaarScenario},'Bewaar als scenario'));
   box.appendChild(actions);
 
+  // v1.59.0: scrollspy voor de ontwerp-navigatie activeren zodra het scherm in de DOM staat.
+  if(!STATE.isRunning && STATE.resultaat && STATE.opstellingen){ setTimeout(_initOntwerpNavSpy,60); }
   return box;
 }
 

@@ -1,9 +1,12 @@
 <!-- ============================================================
-     FLUCTUS KABELPLANNER  v1.3  (simulator-koppeling)
+     FLUCTUS KABELPLANNER  v1.5  (simulator-koppeling)
      Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
      Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
      ondergrond-zones, densiteit per PV-zone, undo, bugfix draw.
      v1.3: koppeling met de Fluctus-simulator (seed inlezen + exacte prijs terug).
+     v1.4: layout terug (component-coördinaten + PV-hoekpunten + kaart-bounds).
+     v1.5: paneel-layout per zone (Zuid gespreid / Oost-West aaneengesloten, GCR-densiteit,
+           panelen zichtbaar), oriëntatie-toggle per zone, PV-kost + tracé-polylijnen mee terug.
      ============================================================ -->
 
 <div id="fk-app">
@@ -284,16 +287,70 @@ map.on("pm:create",e=>{
   recalc();
 });
 function removeTrace(tr){ snapshot(); map.removeLayer(tr.layer); traces.splice(traces.indexOf(tr),1); recalc(); }
-function removeZone(z){ snapshot(); map.removeLayer(z.layer); zones.splice(zones.indexOf(z),1);
+function removeZone(z){ snapshot(); clearZonePanels(z); map.removeLayer(z.layer); zones.splice(zones.indexOf(z),1);
   if(z.omvOid){ const o=objects.find(x=>x.oid===z.omvOid); if(o){ map.removeLayer(o.marker); objects.splice(objects.indexOf(o),1); } }
   recalc(); }
 function removeSub(s){ snapshot(); map.removeLayer(s.layer); subs.splice(subs.indexOf(s),1); recalc(); }
+
+/* ===== v1.5: paneel-oriëntatie & bezetting (GCR) =====
+   Zuid  = gespreide LANDSCAPE-rijen evenwijdig met de onderste rand: strook PV + strook vrij
+           (geen onderlinge schaduw). Lagere bezetting → minder kWp per m², maar hogere opbrengst/kWp.
+   OW    = aaneengesloten PORTRET-rijen (oost-west) evenwijdig met de onderste rand, geen vrije strook.
+           Hoge bezetting → meer kWp op dezelfde oppervlakte. */
+var PV_GCR={ Z:0.52, OW:0.88 };                       // ground-cover-ratio per oriëntatie
+function zoneGcr(z){ return (z&&PV_GCR[z.kind]!=null)?PV_GCR[z.kind]:0.52; }
+function zoneArea(z){ try{ return turf.area(z.layer.toGeoJSON()); }catch(e){ return 0; } }
+function zoneKwp(z){ return zoneArea(z)*((z.wp||200)/1000)*zoneGcr(z); }
+
+/* Tekent de paneelrijen binnen een zone (visueel). Volledig defensief: bij een geometrie-fout
+   blijft de zone gewoon als vlak staan en telt de kWp nog steeds. */
+function _mPerDeg(lat){ return {mx:111320*Math.cos(lat*Math.PI/180), my:110540}; }
+function clearZonePanels(z){ if(z&&z._panels){ z._panels.forEach(function(l){ try{map.removeLayer(l);}catch(e){} }); z._panels=[]; } }
+function drawZonePanels(z){
+  try{
+    clearZonePanels(z); z._panels=[];
+    var g=z.layer.toGeoJSON();
+    var ring=(g.geometry&&g.geometry.coordinates&&g.geometry.coordinates[0])||[];
+    if(ring.length<4) return;
+    var c=turf.centroid(g).geometry.coordinates, lat0=c[1], lng0=c[0], f=_mPerDeg(lat0);
+    function toXY(ll){ return [(ll[0]-lng0)*f.mx, (ll[1]-lat0)*f.my]; }   // ll=[lng,lat] -> meters
+    function toLL(xy){ return [lng0+xy[0]/f.mx, lat0+xy[1]/f.my]; }       // meters -> [lng,lat]
+    var poly=ring.map(toXY);
+    // onderste rand = de zijde met de laagste gemiddelde y (zuidelijkste)
+    var bi=0,bmin=Infinity;
+    for(var i=0;i<poly.length-1;i++){ var my=(poly[i][1]+poly[i+1][1])/2; if(my<bmin){bmin=my;bi=i;} }
+    var A=poly[bi], B=poly[bi+1], ang=Math.atan2(B[1]-A[1], B[0]-A[0]);
+    function rot(p,cs,sn){ return [p[0]*cs - p[1]*sn, p[0]*sn + p[1]*cs]; }
+    var cN=Math.cos(-ang), sN=Math.sin(-ang);            // in het frame: onderste rand horizontaal
+    var Rp=poly.map(function(p){ return rot(p,cN,sN); });
+    var ys=Rp.map(function(p){return p[1];}), xs=Rp.map(function(p){return p[0];});
+    var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys);
+    var xmin=Math.min.apply(null,xs), xmax=Math.max.apply(null,xs);
+    var isOW=(z.kind==="OW");
+    var rowH=isOW?1.68:1.05;                              // paneel-diepte (portret vs landscape)
+    var pitch=isOW?1.72:2.02;                             // rij-tot-rij (OW aaneengesloten, Zuid gespreid)
+    var cI=Math.cos(ang), sI=Math.sin(ang);
+    for(var y=ymin+0.15; y+rowH<=ymax-0.05; y+=pitch){
+      var corners=[[xmin,y],[xmax,y],[xmax,y+rowH],[xmin,y+rowH]];
+      var back=corners.map(function(p){ return toLL(rot(p,cI,sI)); });
+      var stripGJ={type:"Feature",properties:{},geometry:{type:"Polygon",coordinates:[back.concat([back[0]])]}};
+      var clip=null; try{ clip=turf.intersect(stripGJ,g); }catch(e){ clip=null; }
+      if(!clip) continue;
+      var gm=clip.geometry, polys=(gm.type==="Polygon")?[gm.coordinates]:gm.coordinates;
+      polys.forEach(function(cc){
+        var lls=cc[0].map(function(p){ return [p[1],p[0]]; });
+        var lyr=L.polygon(lls,{color:"#0b3d91",weight:0.7,fillColor:"#1e63d0",fillOpacity:0.72,interactive:false}).addTo(map);
+        z._panels.push(lyr);
+      });
+    }
+  }catch(e){ /* stil: zone blijft als vlak zichtbaar, kWp blijft correct */ }
+}
 
 /* 1-op-1 koppeling zone -> omvormer: kWp naar de gekoppelde omvormer */
 function assignPv(){
   objects.filter(o=>o.type==="omv").forEach(o=>o._pvKwp=0);
   zones.forEach(z=>{ if(!z.omvOid) return; const omv=objects.find(o=>o.oid===z.omvOid);
-    if(omv) omv._pvKwp += turf.area(z.layer.toGeoJSON())*((z.wp||200)/1000); });
+    if(omv) omv._pvKwp += zoneKwp(z); });
 }
 
 /* ---- AUTO-TRACERING ---- */
@@ -425,12 +482,15 @@ function recalc(){
   });
   $("fk-objects").innerHTML=oHtml.join("")||`<div class="fk-note">Nog geen elementen.</div>`;
 
-  /* PV-zones (densiteit per zone) */
+  /* PV-zones (densiteit per zone, oriëntatie-afhankelijke bezetting) */
   let pvKwp=0; const zHtml=[];
-  zones.forEach((z,i)=>{ const area=turf.area(z.layer.toGeoJSON()); const kwp=area*((z.wp||200)/1000); pvKwp+=kwp;
+  zones.forEach((z,i)=>{ const area=zoneArea(z); const gcr=zoneGcr(z); const kwp=area*((z.wp||200)/1000)*gcr; pvKwp+=kwp;
+    drawZonePanels(z);
     zHtml.push(`<div class="fk-item"><h4>PV-zone ${i+1}<span class="fk-badge" style="background:${z.kind==='OW'?'#0a7d3a':GREEN}">${z.kind==='OW'?'Oost-West':'Zuid'}</span><span class="x" data-zx="${z.zid}">✕</span></h4>
-      <div class="fk-grid3"><div><label>Opp.</label><input value="${Math.round(area)} m²" disabled></div>
-        <div><label>Wp/m²</label><input type="number" data-zwp="${z.zid}" value="${z.wp||200}"></div>
+      <div class="fk-grid3"><div><label>Oriëntatie</label><select data-zk="${z.zid}"><option value="Z" ${z.kind!=='OW'?'selected':''}>Zuid</option><option value="OW" ${z.kind==='OW'?'selected':''}>Oost-West</option></select></div>
+        <div><label>Opp.</label><input value="${Math.round(area)} m²" disabled></div>
+        <div><label>Wp/m² paneel</label><input type="number" data-zwp="${z.zid}" value="${z.wp||200}"></div></div>
+      <div class="fk-grid2" style="margin-top:6px"><div><label>Bezetting (GCR)</label><input value="${Math.round(gcr*100)} %" disabled></div>
         <div><label>kWp</label><input value="${kwp.toFixed(1)}" disabled></div></div></div>`);
   });
   $("fk-zones").innerHTML=zHtml.join("")||`<div class="fk-note">Nog geen PV-zones.</div>`;
@@ -502,6 +562,7 @@ function bindInputs(){
   document.querySelectorAll("[data-bk]").forEach(el=>el.onchange=e=>{ snapshot(); const o=objects.find(o=>o.oid===e.target.dataset.bk); if(o){o.props.kwh=+e.target.value; recalc();}});
   document.querySelectorAll("[data-ox]").forEach(el=>el.onclick=e=>{ const o=objects.find(o=>o.oid===e.target.dataset.ox); if(o){ snapshot(); map.removeLayer(o.marker); objects.splice(objects.indexOf(o),1); recalc(); }});
   document.querySelectorAll("[data-zwp]").forEach(el=>el.onchange=e=>{ const z=zones.find(z=>z.zid===e.target.dataset.zwp); if(z){ snapshot(); z.wp=+e.target.value; recalc(); }});
+  document.querySelectorAll("[data-zk]").forEach(el=>el.onchange=e=>{ const z=zones.find(z=>z.zid===e.target.dataset.zk); if(z){ snapshot(); z.kind=e.target.value; try{z.layer.setStyle({color:z.kind==="OW"?"#0a7d3a":GREEN});}catch(_e){} recalc(); }});
   document.querySelectorAll("[data-zx]").forEach(el=>el.onclick=e=>{ const z=zones.find(z=>z.zid===e.target.dataset.zx); if(z)removeZone(z); });
   document.querySelectorAll("[data-sg]").forEach(el=>el.onchange=e=>{ const s=subs.find(s=>s.sid===e.target.dataset.sg); if(s){ snapshot(); s.ground=e.target.value; recalc(); }});
   document.querySelectorAll("[data-sx]").forEach(el=>el.onclick=e=>{ const s=subs.find(s=>s.sid===e.target.dataset.sx); if(s)removeSub(s); });
@@ -517,7 +578,7 @@ function serialize(){ return {
   traces:traces.map(t=>({pw:t.pw,auto:t.auto,srcType:t.srcType,coords:t.layer.toGeoJSON().geometry.coordinates})),
   zones:zones.map(z=>({kind:z.kind,wp:z.wp,omvIdx:z.omvOid?objects.findIndex(o=>o.oid===z.omvOid):-1,coords:z.layer.toGeoJSON().geometry.coordinates})),
   subs:subs.map(s=>({ground:s.ground,coords:s.layer.toGeoJSON().geometry.coordinates})) }; }
-function clearAll(){ objects.splice(0).forEach(o=>map.removeLayer(o.marker)); traces.splice(0).forEach(t=>map.removeLayer(t.layer)); zones.splice(0).forEach(z=>map.removeLayer(z.layer)); subs.splice(0).forEach(s=>map.removeLayer(s.layer)); }
+function clearAll(){ objects.splice(0).forEach(o=>map.removeLayer(o.marker)); traces.splice(0).forEach(t=>map.removeLayer(t.layer)); zones.splice(0).forEach(z=>{ clearZonePanels(z); map.removeLayer(z.layer); }); subs.splice(0).forEach(s=>map.removeLayer(s.layer)); }
 function rebuild(d,keepView){
   clearAll(); $("fk-name").value=d.name||"";
   if(d.params){ const p=d.params; $("fk-U").value=p.U;$("fk-cos").value=p.cos;$("fk-du").value=p.du;$("fk-mat").value=p.mat;
@@ -555,20 +616,26 @@ if(rbtn) rbtn.onclick=function(){
   // kaart-bounds — zodat de simulator ze kan tonen, in het scenario bewaren en later regenereren.
   var comps=objects.map(function(o){ var ll=o.marker.getLatLng();
     return {type:o.type, lat:Math.round(ll.lat*1e6)/1e6, lng:Math.round(ll.lng*1e6)/1e6, kwp:Math.round((o._pvKwp||0)*10)/10}; });
-  var pvz=zones.map(function(z){ var hoek=[], area=0;
+  var pvz=zones.map(function(z){ var hoek=[], area=0, gcr=zoneGcr(z);
     try{ var g=z.layer.toGeoJSON(); var ring=(g.geometry&&g.geometry.coordinates&&g.geometry.coordinates[0])||[];
       hoek=ring.map(function(c){ return [Math.round(c[1]*1e6)/1e6, Math.round(c[0]*1e6)/1e6]; });   // [lat,lng]
       area=turf.area(g); }catch(e){}
-    return {wp:(z.wp||200), kwp:Math.round(area*((z.wp||200)/1000)*10)/10, hoekpunten:hoek}; });
+    return {kind:z.kind||'Z', wp:(z.wp||200), gcr:gcr, kwp:Math.round(area*((z.wp||200)/1000)*gcr*10)/10, hoekpunten:hoek}; });
   var pvKwpTot=pvz.reduce(function(s,z){return s+(+z.kwp||0);},0);
+  // v1.5: tracé-polylijnen mee terug ([lat,lng] per punt) zodat de simulator ze op de luchtfoto tekent.
+  var tracers=traces.map(function(t){ try{ var cs=t.layer.toGeoJSON().geometry.coordinates;
+    return cs.map(function(c){ return [Math.round(c[1]*1e6)/1e6, Math.round(c[0]*1e6)/1e6]; }); }catch(e){ return []; }
+  }).filter(function(a){ return a&&a.length>=2; });
+  var ekwpVal=+$('fk-ekwp').value||350;
   var kaart=null; try{ var b=map.getBounds(); var cc=map.getCenter();
     kaart={center:[Math.round(cc.lat*1e6)/1e6, Math.round(cc.lng*1e6)/1e6], zoom:map.getZoom(),
            bounds:[[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]]}; }catch(e){}
   var payload={ts:Date.now(), kabeltrace_eur:Math.round(lastKabel+lastGrond),
     detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)},
-    componenten:comps, pv_zones:pvz, pv_kwp_getekend:Math.round(pvKwpTot*10)/10, kaart:kaart};
+    componenten:comps, pv_zones:pvz, pv_kwp_getekend:Math.round(pvKwpTot*10)/10,
+    pv_eur:Math.round(pvKwpTot*ekwpVal), tracers:tracers, kaart:kaart};
   try{ localStorage.setItem(KBL_RESULT_KEY, JSON.stringify(payload)); }catch(e){}
-  toast('Prijs + layout ('+comps.length+' componenten · '+payload.pv_kwp_getekend+' kWp PV) teruggestuurd naar de simulator');
+  toast('Prijs + layout ('+comps.length+' componenten · '+tracers.length+' tracés · '+payload.pv_kwp_getekend+' kWp PV) teruggestuurd naar de simulator');
 };
 (function(){
   var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
