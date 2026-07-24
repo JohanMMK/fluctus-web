@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     FLUCTUS GEMEENTEPLAN  v1.0
+     App-pagina voor Mijn Fluctus (public/apps/gemeenteplan.html).
+     - Enkel voor ingelogde gebruikers (FluctusAppAuth-gate → /portal.html).
+     - Slimme gemeente-zoekbalk (typeahead, accent-ongevoelig).
+     - Klik of kies een gemeente → vraag de bestemmeling-adressen →
+       verstuur het laadplan (PPTX + PDF) via Brevo naar die adressen,
+       met de ingelogde gebruiker in cc en oekene@gmail.com in bcc.
+     Mail loopt via de fluctus-academy-backend (POST /api/laadplan-mail),
+     exact dezelfde Brevo-HTTP-API-methode als de invite/offerte.
+     ============================================================ -->
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gemeenteplan — Fluctus</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html,body{margin:0;padding:0;background:#F4F7FB;}
+    #fluctus-belgiekaart{font-family:Arial,Helvetica,sans-serif;color:#1F3864;max-width:1100px;margin:0 auto;padding:0 14px 40px;}
+    /* ---- app-topbar ---- */
+    .fk-topbar{max-width:1100px;margin:0 auto;padding:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+    .fk-topbar .brand{display:flex;align-items:center;gap:9px;font-weight:bold;font-size:17px;color:#1F3864;}
+    .fk-topbar .brand em{font-style:normal;color:#05B050;}
+    .fk-topbar a.back{color:#1F3864;text-decoration:none;font-size:13px;border:1px solid #C9D6EC;border-radius:8px;padding:7px 12px;background:#fff;}
+    .fk-topbar a.back:hover{background:#EAF0F8;}
+    .fk-topbar .who{font-size:12.5px;color:#5b6b85;}
+    #fluctus-belgiekaart h1{font-size:20px;margin:6px 2px 2px;}
+    #fluctus-belgiekaart .sub{font-size:13px;color:#5b6b85;margin:0 2px 14px;}
+    #fluctus-belgiekaart .fk-bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 10px;}
+    #fluctus-belgiekaart .fk-bar label{font-weight:bold;font-size:14px;}
+    #fluctus-belgiekaart select{font-family:inherit;font-size:14px;padding:7px 10px;border:1px solid #C9D6EC;border-radius:8px;color:#1F3864;background:#fff;cursor:pointer;}
+    #fluctus-belgiekaart .fk-map{height:620px;width:100%;border-radius:12px;border:1px solid #E2E8F2;}
+    #fluctus-belgiekaart .fk-hint{font-size:12px;color:#5b6b85;margin:8px 2px 0;}
+    #fluctus-belgiekaart .fk-regio{vertical-align:-2px;margin-right:4px;}
+    #fluctus-belgiekaart .fk-regio-lbl{font-weight:normal !important;cursor:pointer;}
+    #fluctus-belgiekaart .fk-sep{width:1px;height:20px;background:#D6E0EF;}
+    #fluctus-belgiekaart .leaflet-tooltip.fk-tip{background:#1F3864;color:#fff;border:none;border-radius:8px;padding:8px 11px;font-family:Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25);}
+    #fluctus-belgiekaart .leaflet-tooltip.fk-tip:before{display:none;}
+    #fluctus-belgiekaart .fk-tip b{font-size:14px;}
+    #fluctus-belgiekaart .fk-tip .r{display:flex;justify-content:space-between;gap:18px;font-size:12px;margin-top:3px;color:#DCE6F5;}
+    #fluctus-belgiekaart .fk-tip .r span:last-child{font-weight:bold;color:#fff;}
+    #fluctus-belgiekaart .fk-legend{background:#fff;padding:9px 11px;border-radius:8px;border:1px solid #E2E8F2;font-size:12px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+    #fluctus-belgiekaart .fk-legend i{width:16px;height:12px;display:inline-block;margin-right:6px;border-radius:2px;vertical-align:-1px;}
+    #fluctus-belgiekaart .fk-legend .t{font-weight:bold;margin-bottom:5px;}
+    #fluctus-belgiekaart .fk-legend .grad{height:12px;width:190px;border-radius:6px;margin:2px 0 4px;}
+    #fluctus-belgiekaart .fk-legend .lbls{display:flex;justify-content:space-between;width:190px;font-size:11px;color:#1F3864;}
+    #fluctus-belgiekaart .fk-legend .lbls span:nth-child(2){color:#5b6b85;}
+    #fluctus-belgiekaart .fk-legend .nd{margin-top:7px;}
+    #fluctus-belgiekaart .fk-status{font-size:13px;color:#9E480E;padding:6px 2px;}
+    #fluctus-belgiekaart .fk-panel{background:#1F3864;color:#fff;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,.18);max-width:260px;}
+    #fluctus-belgiekaart .fk-panel b{font-size:15px;}
+    #fluctus-belgiekaart .fk-panel .s{color:#C9D6EC;}
+    #fluctus-belgiekaart .fk-panel .g{color:#7BE0A8;font-weight:bold;}
+    #fluctus-belgiekaart .fk-panel .ln{display:flex;justify-content:space-between;gap:16px;margin-top:4px;}
+    #fluctus-belgiekaart .fk-panel .ln span{color:#C9D6EC;}
+
+    /* ---- slimme zoekbalk (typeahead) ---- */
+    .fk-search{position:relative;flex:1 1 320px;max-width:420px;}
+    .fk-search input{width:100%;box-sizing:border-box;font-family:inherit;font-size:15px;padding:10px 12px;border:1px solid #C9D6EC;border-radius:8px;color:#1F3864;background:#fff;}
+    .fk-search input:focus{outline:none;border-color:#05B050;box-shadow:0 0 0 3px rgba(5,176,80,.12);}
+    .fk-gem-list{position:absolute;z-index:1200;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #C9D6EC;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);max-height:280px;overflow:auto;display:none;}
+    .fk-gem-list.open{display:block;}
+    .fk-gem-item{padding:9px 12px;font-size:14px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #F0F4FA;}
+    .fk-gem-item:last-child{border-bottom:none;}
+    .fk-gem-item.active,.fk-gem-item:hover{background:#EAF0F8;}
+    .fk-gem-item .prov{color:#8a99b5;font-size:12px;}
+    .fk-gem-empty{padding:10px 12px;font-size:13px;color:#8a99b5;}
+
+    /* ---- mail-modal ---- */
+    .fk-modal-backdrop{position:fixed;inset:0;background:rgba(15,25,50,.55);display:none;align-items:center;justify-content:center;z-index:99998;padding:16px;}
+    .fk-modal-backdrop.open{display:flex;}
+    .fk-modal{background:#fff;border-radius:14px;max-width:520px;width:100%;padding:24px 24px 20px;box-shadow:0 18px 50px rgba(0,0,0,.32);position:relative;font-family:Arial,sans-serif;color:#1F3864;max-height:90vh;overflow:auto;}
+    .fk-modal h3{margin:0 26px 4px 0;font-size:19px;}
+    .fk-modal .fk-modal-x{position:absolute;top:12px;right:14px;border:none;background:none;font-size:26px;line-height:1;color:#8a99b5;cursor:pointer;}
+    .fk-modal-stats{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 16px;}
+    .fk-modal-stats .chip{background:#EAF0F8;border-radius:8px;padding:6px 10px;font-size:12.5px;}
+    .fk-modal-stats .chip b{color:#1F3864;}
+    .fk-modal-lbl{display:block;font-weight:bold;font-size:13.5px;margin:6px 0 6px;}
+    .fk-modal textarea{width:100%;box-sizing:border-box;font-family:inherit;font-size:14.5px;padding:10px 12px;border:1px solid #C9D6EC;border-radius:8px;color:#1F3864;resize:vertical;}
+    .fk-modal textarea:focus{outline:none;border-color:#05B050;box-shadow:0 0 0 3px rgba(5,176,80,.12);}
+    .fk-modal-hint{font-size:12.5px;color:#5b6b85;margin:8px 2px 0;}
+    .fk-modal-prev{margin:12px 0 4px;}
+    .fk-modal-prev summary{cursor:pointer;font-size:13px;color:#1F3864;}
+    .fk-modal-prev pre{white-space:pre-wrap;background:#F4F7FB;border:1px solid #E2E8F2;border-radius:8px;padding:12px;font-family:Arial,sans-serif;font-size:12.5px;line-height:1.5;color:#33425e;margin:8px 0 0;}
+    .fk-modal-msg{font-size:13px;margin:12px 2px 0;min-height:16px;}
+    .fk-modal-msg.err{color:#B42318;}
+    .fk-modal-msg.ok{color:#05803B;}
+    .fk-modal-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+    .fk-btn-ghost{border:1px solid #C9D6EC;background:#fff;color:#1F3864;font-size:14px;padding:10px 16px;border-radius:8px;cursor:pointer;}
+    .fk-btn-ghost:hover{background:#EAF0F8;}
+    .fk-btn-primary{border:none;background:#05B050;color:#fff;font-weight:bold;font-size:14px;padding:10px 20px;border-radius:8px;cursor:pointer;}
+    .fk-btn-primary:hover{background:#049544;}
+    .fk-btn-primary:disabled{opacity:.6;cursor:default;}
+
+    /* ---- login/geen-toegang overlay ---- */
+    #fk-gate{position:fixed;inset:0;background:#F4F7FB;display:none;align-items:center;justify-content:center;z-index:99999;font-family:Arial,sans-serif;}
+    #fk-gate .box{background:#fff;border:1px solid #E2E8F2;border-radius:14px;padding:30px 34px;max-width:400px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.1);}
+    #fk-gate h2{color:#1F3864;margin:0 0 8px;font-size:20px;}
+    #fk-gate p{color:#5b6b85;font-size:14px;line-height:1.5;margin:0 0 18px;}
+    #fk-gate a{display:inline-block;background:#05B050;color:#fff;text-decoration:none;font-weight:bold;font-size:14px;padding:11px 22px;border-radius:8px;}
+    #fk-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1F3864;color:#fff;padding:13px 18px;border-radius:10px;font-size:13px;line-height:1.45;max-width:440px;box-shadow:0 6px 22px rgba(0,0,0,.28);z-index:99999;text-align:center;display:none;}
+    #fk-toast b{color:#7BE0A8;}
+  </style>
+</head>
+<body>
+
+  <div class="fk-topbar">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" width="26" height="26"><circle cx="20" cy="20" r="17" fill="none" stroke="#05B050" stroke-width="4.5"></circle><circle cx="20" cy="20" r="6.5" fill="#05B050"></circle></svg>
+      FLUCTUS<em>·NET</em>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span class="who" id="fk-who"></span>
+      <a class="back" href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+
+  <div id="fluctus-belgiekaart">
+    <h1>Gemeenteplan — laadpleinen per gemeente</h1>
+    <p class="sub">Zoek of klik een gemeente en verstuur het laadplan (PowerPoint + PDF) rechtstreeks per e-mail.</p>
+
+    <div class="fk-bar">
+      <div class="fk-search">
+        <input id="fk-gem-input" type="text" placeholder="Typ een gemeentenaam…" autocomplete="off" spellcheck="false">
+        <div id="fk-gem-list" class="fk-gem-list"></div>
+      </div>
+      <label for="fk-metric" style="margin-left:4px">Toon per gemeente:</label>
+      <select id="fk-metric">
+        <option value="parkings">Aantal parkings per gemeente</option>
+        <option value="besparingEur">Besparing op de km-kost</option>
+        <option value="energiePct">Extra energie via het bestaande net</option>
+      </select>
+    </div>
+    <div class="fk-bar"><span class="fk-hint">Kies een gemeente in de zoekbalk of klik op de kaart → een venster vraagt naar de bestemmeling en verstuurt de mail.</span></div>
+
+    <div class="fk-bar" id="fk-regiobar">
+      <label style="font-weight:bold;font-size:14px">Gewesten:</label>
+      <label class="fk-regio-lbl"><input type="checkbox" class="fk-regio" data-gw="VLA" checked>Vlaanderen</label>
+      <label class="fk-regio-lbl"><input type="checkbox" class="fk-regio" data-gw="WAL" checked>Wallonië</label>
+      <label class="fk-regio-lbl"><input type="checkbox" class="fk-regio" data-gw="BRU" checked>Brussel</label>
+    </div>
+    <div class="fk-bar" id="fk-kempenbar">
+      <label style="font-weight:bold;font-size:14px;cursor:pointer"><input type="checkbox" id="fk-kempen" style="vertical-align:-2px;margin-right:5px">Toon enkel de Kempen</label>
+      <span class="fk-hint" id="fk-kempeninfo"></span>
+    </div>
+    <div class="fk-bar" id="fk-agentbar" style="display:none">
+      <label style="font-weight:bold;font-size:14px;cursor:pointer"><input type="checkbox" id="fk-agent" style="vertical-align:-2px;margin-right:5px">Toon enkel agent-gemeenten</label>
+      <span class="fk-hint" id="fk-agentinfo"></span>
+    </div>
+    <div id="fk-status" class="fk-status">Kaart laden…</div>
+    <div id="fk-map" class="fk-map"></div>
+  </div>
+
+  <!-- mail-modal -->
+  <div id="fk-modal" class="fk-modal-backdrop">
+    <div class="fk-modal">
+      <button class="fk-modal-x" id="fk-modal-x" aria-label="Sluiten">&times;</button>
+      <h3 id="fk-modal-title">Laadplan versturen</h3>
+      <div class="fk-modal-stats" id="fk-modal-stats"></div>
+      <label class="fk-modal-lbl" for="fk-modal-to">E-mailadres(sen) van de bestemmeling</label>
+      <textarea id="fk-modal-to" rows="2" placeholder="dienst@gemeente.be, schepen@stad.be"></textarea>
+      <div class="fk-modal-hint">Meerdere adressen? Scheid met een komma. Een kopie gaat automatisch naar <b id="fk-modal-me">u</b> en naar oekene@gmail.com.</div>
+      <div class="fk-modal-hint" id="fk-modal-att"></div>
+      <details class="fk-modal-prev"><summary>Toon de mailtekst</summary><pre id="fk-modal-body"></pre></details>
+      <div class="fk-modal-msg" id="fk-modal-msg"></div>
+      <div class="fk-modal-btns">
+        <button class="fk-btn-ghost" id="fk-modal-cancel">Annuleren</button>
+        <button class="fk-btn-primary" id="fk-modal-send">Verstuur</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- login/geen-toegang overlay -->
+  <div id="fk-gate">
+    <div class="box">
+      <h2 id="fk-gate-t">Even aanmelden</h2>
+      <p id="fk-gate-p">Deze app is enkel beschikbaar voor ingelogde Fluctus-gebruikers.</p>
+      <a href="/portal.html">Naar Mijn Fluctus</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  (function(){
+    // ------------------------------------------------------------- configuratie
+    var SUPA_URL  = 'https://haagysosdaorrxkrwkcj.supabase.co';
+    var SUPA_ANON = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
+    var PROXY_BASE = 'https://lucid-amazement-production.up.railway.app';   // app-access/check
+    // TODO Johan: bevestig de publieke URL van de fluctus-academy-backend (Brevo draait daar).
+    var MAIL_BACKEND = 'https://fluctus-academy-backend-production.up.railway.app';
+    var APP_ID = 'gemeenteplan';
+
+    var REPO_BASE = 'https://johanmmk.github.io/gemeenten/';
+    var GEO_URL   = REPO_BASE + 'gemeenten_be.geojson';
+    var STATS_URL = REPO_BASE + 'gemeenten_stats.json';
+
+    var PALETTE = ['#EAF0F8','#C5D4E8','#93AAD0','#5C7BB0','#34568C','#1F3864'];
+    var NO_DATA = '#E6E6E6';
+
+    var METRICS = {
+      parkings:    { label:'Aantal parkings per gemeente', fmt:function(v){return v==null?'—':v.toLocaleString('nl-BE');} },
+      besparingEur:{ label:'Besparing op de km-kost',       fmt:function(v){return v==null?'—':'€ '+(v/1e6).toLocaleString('nl-BE',{maximumFractionDigits:2})+' mln';} },
+      energiePct:  { label:'Extra energie via het bestaande net', fmt:function(v){return v==null?'—':'+'+v+'%';} }
+    };
+
+    // ---------------------------------------------------------------- auth-gate
+    var sb = window.supabase.createClient(SUPA_URL, SUPA_ANON);
+    var CURRENT_EMAIL = null, CURRENT_TOKEN = null;
+
+    function showGate(title, msg){
+      var g = document.getElementById('fk-gate');
+      if (title) document.getElementById('fk-gate-t').textContent = title;
+      if (msg)   document.getElementById('fk-gate-p').textContent = msg;
+      g.style.display = 'flex';
+    }
+
+    function guard(){
+      return sb.auth.getSession().then(function(r){
+        var session = r && r.data && r.data.session;
+        if (!session){ location.replace('/portal.html'); return false; }
+        CURRENT_EMAIL = (session.user && session.user.email) || null;
+        CURRENT_TOKEN = session.access_token || null;
+        // best-effort RBAC: managers = impliciet toegang; blokkeer enkel bij expliciete weigering.
+        return fetch(PROXY_BASE + '/api/app-access/check', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + CURRENT_TOKEN },
+          body: JSON.stringify({ app_id: APP_ID })
+        }).then(function(res){
+          return res.json().catch(function(){ return {}; }).then(function(j){
+            var denied = res.ok && j && (j.toegang === false || j.access === false || j.ok === false)
+                         && j.role !== 'manager' && j.manager !== true;
+            if (denied){ showGate('Geen toegang', 'Vraag toegang tot “Gemeenteplan” aan je manager.'); return false; }
+            return true;
+          });
+        }).catch(function(){ return true; });   // netwerkfout → ingelogd volstaat
+      }).catch(function(){ location.replace('/portal.html'); return false; });
+    }
+
+    // ---------------------------------------------------------------- helpers
+    function norm(s){
+      return String(s || '').toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g,'')   // accenten weg
+        .replace(/[^a-z0-9]+/g,' ').trim();
+    }
+    function eurMln(v){ return 'EUR '+((v||0)/1e6).toLocaleString('nl-BE',{maximumFractionDigits:2})+' mln'; }
+
+    function buildMail(nis, feat){
+      var s = STATS[nis] || {};
+      var gem      = s.naam || (feat && feat.properties.namedut) || 'uw gemeente';
+      var parkings = (s.parkings!=null) ? s.parkings.toLocaleString('nl-BE') : '-';
+      var wagens   = (s.besparingEur!=null) ? Math.round(s.besparingEur/1500).toLocaleString('nl-BE') : '-';
+      var besp     = eurMln(s.besparingEur);
+      var inv      = eurMln((s.besparingEur||0)*2);
+      var energie  = (s.energiePct!=null) ? ('+'+s.energiePct+'%') : '-';
+      var p50zin   = (s.parkings50) ? (' We identificeerden daarbij een '+s.parkings50+'-tal parkings waar vandaag al meer dan 40 kW laadcapaciteit beschikbaar is.') : '';
+
+      var subject = 'Slim laden in '+gem+' - analyse en voorstel';
+      var body =
+'Beste,\n\n'+
+'We hebben een analyse gemaakt van locaties in en rond '+gem+' waar bestaande netaansluitingen een kans bieden om elektrisch laden rendabel uit te bouwen - zonder netverzwaring.\n\n'+
+'Concreet bekeken we '+parkings+' bedrijfsparkings in en rond '+gem+'. Per locatie keken we naar de grootte van de parkeerruimte en de laadinfrastructuur die daarbij past.'+p50zin+'\n\n'+
+'Samen goed voor zo\'n '+wagens+' laadbare plaatsen. Die leveren jaarlijks een bruto besparing van '+besp+' op, tegenover een investering van '+inv+'. Voor die investering zien we een gezond rendement (ca. 10%), waardoor ze voor bedrijven en publieke entiteiten kan werken als een leasing die zichzelf terugbetaalt.\n\n'+
+'Bovendien verhoogt het programma de bruikbare energie uit het bestaande distributienet in '+gem+' met '+energie+' - wat gezinnen en bedrijven mee beschermt tegen congestie.\n\n'+
+'Belangrijk: aan publieke entiteiten kunnen we dit aanbieden via een aankoopcentrale (opdrachtencentrale), waardoor er geen afzonderlijke aanbesteding meer nodig is.\n\n'+
+'Deze cijfers zijn inschattingen op basis van de analyse; een definitieve business case vraagt een studie per locatie. Die kunnen we voor de stad/gemeente en haar eigen locaties maken, en de stad kan ze aan de andere locaties (bedrijven en organisaties) aanbieden.\n\n'+
+'In bijlage vindt u de presentatie (PowerPoint en PDF) met het volledige overzicht. We lichten dit graag verder toe in een werkvergadering.';
+
+      return { subject: subject, body: body };
+    }
+
+    var toastTimer = null;
+    function showToast(msg){
+      var t = document.getElementById('fk-toast');
+      if(!t){ t = document.createElement('div'); t.id = 'fk-toast'; document.body.appendChild(t); }
+      t.innerHTML = msg; t.style.display = 'block';
+      if(toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function(){ t.style.display = 'none'; }, 6000);
+    }
+
+    // ------------------------------------------------- gewest afleiden uit NIS
+    function gewestVan(nis){
+      var n = String(nis); while (n.length < 5) n = '0' + n;
+      var p2 = n.slice(0,2);
+      if (p2 === '21') return 'BRU';
+      if (p2 === '25') return 'WAL';
+      if (p2 === '23' || p2 === '24') return 'VLA';
+      var d = n.charAt(0);
+      if (d==='1'||d==='3'||d==='4'||d==='7') return 'VLA';
+      if (d==='5'||d==='6'||d==='8'||d==='9') return 'WAL';
+      return '?';
+    }
+    var regioAan = { VLA:true, WAL:true, BRU:true };
+
+    var KEMPEN_EXTRA = { /* '72004':true, '12014':true */ };
+    function isKempen(nis){
+      var n = String(nis); while (n.length < 5) n = '0' + n;
+      return n.slice(0,2) === '13' || KEMPEN_EXTRA[n] === true;
+    }
+    var kempenOnly = false;
+
+    var statusEl = document.getElementById('fk-status');
+    function setStatus(t){ statusEl.textContent = t; statusEl.style.display = t? 'block':'none'; }
+
+    var map, STATS = {}, layer = null, currentMetric = 'parkings', breaks = [];
+    var AGENT_NIS = {}, agentMode = false, GEOFEATS = [];
+    var NIS_FEAT = {}, NIS_LAYER = {}, GEM_INDEX = [];
+
+    function gemeenteZichtbaar(nis){
+      if (regioAan[gewestVan(nis)] === false) return false;
+      if (kempenOnly && !isKempen(nis)) return false;
+      if (agentMode && !AGENT_NIS[nis]) return false;
+      return true;
+    }
+    function computeBreaks(metric){
+      var vals = [];
+      for (var k in STATS){ var v = STATS[k][metric]; if (typeof v === 'number') vals.push(v); }
+      vals.sort(function(a,b){return a-b;});
+      var br = [];
+      for (var i=1;i<=5;i++){ br.push(vals[Math.floor(i*vals.length/6)] || 0); }
+      return br;
+    }
+    function colorFor(v){
+      if (v==null) return NO_DATA;
+      for (var i=0;i<breaks.length;i++){ if (v <= breaks[i]) return PALETTE[i]; }
+      return PALETTE[PALETTE.length-1];
+    }
+    function styleFor(feat){
+      var nis = feat.properties.niscode;
+      if (!gemeenteZichtbaar(nis))
+        return { fillColor: NO_DATA, weight:0.5, color:'#ffffff', fillOpacity:0.45 };
+      var s = STATS[nis];
+      var v = s ? s[currentMetric] : null;
+      return { fillColor: colorFor(v), weight:0.6, color:'#ffffff', fillOpacity:0.92 };
+    }
+    function tipHtml(nis){
+      var s = STATS[nis] || {};
+      var naam = s.naam || '?';
+      function row(lbl, metric){ return '<div class="r"><span>'+lbl+'</span><span>'+METRICS[metric].fmt(s[metric]==null?null:s[metric])+'</span></div>'; }
+      return '<b>'+naam+'</b>'
+           + row('Parkings', 'parkings')
+           + row('Besparing', 'besparingEur')
+           + row('Extra energie', 'energiePct')
+           + '<div class="r" style="margin-top:5px;color:#7BE0A8"><span>klik</span><span>&#9993; mail versturen</span></div>';
+    }
+    function onEachFeature(feat, lyr){
+      var nis = feat.properties.niscode;
+      NIS_LAYER[nis] = lyr;
+      lyr.bindTooltip(tipHtml(nis), { className:'fk-tip', sticky:true, direction:'top', opacity:1 });
+      lyr.on({
+        mouseover:function(e){ e.target.setStyle({weight:2, color:'#05B050'}); e.target.bringToFront(); },
+        mouseout:function(e){ layer.resetStyle(e.target); },
+        click:function(){ openMailDialog(nis, feat); }
+      });
+    }
+
+    var legend = L.control({position:'bottomright'});
+    legend.onAdd = function(){ var div = L.DomUtil.create('div','fk-legend'); div.id='fk-legend'; return div; };
+
+    var CENTROIDS = {};
+    function centroidOfGeom(g){
+      var la=0,lo=0,n=0;
+      var polys = g.type==='MultiPolygon'?g.coordinates:[g.coordinates];
+      polys.forEach(function(p){ p[0].forEach(function(c){ lo+=c[0]; la+=c[1]; n++; }); });
+      return n?[la/n, lo/n]:null;
+    }
+    var panel = L.control({position:'topright'});
+    panel.onAdd = function(){ var d=L.DomUtil.create('div','fk-panel'); d.id='fk-panel'; d.innerHTML=''; return d; };
+    function updateInView(){
+      var el=document.getElementById('fk-panel'); if(!el) return;
+      var b=map.getBounds();
+      var nPark=0, eur=0, eSum=0, eCnt=0, n50=0, has50=false, gem=0;
+      for (var nis in STATS){
+        var c=CENTROIDS[nis]; if(!c) continue;
+        if (!b.contains(L.latLng(c[0],c[1]))) continue;
+        if (!gemeenteZichtbaar(nis)) continue;
+        var s=STATS[nis]; gem++;
+        nPark += (s.parkings||0);
+        eur += (s.besparingEur||0);
+        if (typeof s.energiePct==='number'){ eSum+=s.energiePct; eCnt++; }
+        if (typeof s.parkings50==='number'){ has50=true; n50+=s.parkings50; }
+      }
+      var eAvg = eCnt ? Math.round(eSum/eCnt) : 0;
+      var scopeBits = [];
+      if (kempenOnly) scopeBits.push('Kempen');
+      if (agentMode) scopeBits.push('agent');
+      var scope = (scopeBits.length ? scopeBits.join('+')+'-gemeenten' : 'gemeenten') + ' in beeld';
+      var html =
+        '<div class="s">Totaal &mdash; '+gem.toLocaleString('nl-BE')+' '+scope+'</div>'+
+        '<div class="ln"><span>Laadpleinen</span><b>'+nPark.toLocaleString('nl-BE')+'</b></div>'+
+        '<div class="ln"><span>Besparing km-kost</span><b>'+METRICS.besparingEur.fmt(eur)+'</b></div>'+
+        '<div class="ln"><span>Extra energie (gem.)</span><b>+'+eAvg+'%</b></div>';
+      if (has50) html += '<div class="s" style="margin-top:6px">waarvan al snelladen &ge;40 kW: <span class="g">'+n50.toLocaleString('nl-BE')+'</span></div>';
+      el.innerHTML = html;
+    }
+
+    // ----------------- agent-gemeenten via punt-in-polygoon ------
+    function pointInRing(x, y, ring){
+      var inside=false;
+      for (var i=0,j=ring.length-1;i<ring.length;j=i++){
+        var xi=ring[i][0], yi=ring[i][1], xj=ring[j][0], yj=ring[j][1];
+        if (((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+      }
+      return inside;
+    }
+    function featContains(feat, lng, lat){
+      var g=feat.geometry, polys = g.type==='MultiPolygon'?g.coordinates:[g.coordinates];
+      for (var p=0;p<polys.length;p++){
+        if (pointInRing(lng, lat, polys[p][0])){
+          var hole=false;
+          for (var h=1;h<polys[p].length;h++){ if (pointInRing(lng,lat,polys[p][h])){ hole=true; break; } }
+          if (!hole) return true;
+        }
+      }
+      return false;
+    }
+    function loadAgents(){
+      fetch(REPO_BASE+'vanmossel.json?t='+Date.now()).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+        if(!d) return;
+        var pts = Array.isArray(d) ? d : (d.points||d.locations||d.agents||d.niscodes||[]);
+        var count=0;
+        pts.forEach(function(p){
+          count++;
+          if (typeof p === 'string' || typeof p === 'number'){ AGENT_NIS[String(p)] = true; return; }
+          if (p && p.niscode != null){ AGENT_NIS[String(p.niscode)] = true; return; }
+          var lat=(p&&p.lat!=null)?p.lat:(Array.isArray(p)?p[0]:null);
+          var lng=(p&&p.lng!=null)?p.lng:(Array.isArray(p)?p[1]:null);
+          if(lat==null||lng==null){ count--; return; }
+          for (var i=0;i<GEOFEATS.length;i++){
+            var bb=GEOFEATS[i]._bb;
+            if (lng<bb[0]||lng>bb[2]||lat<bb[1]||lat>bb[3]) continue;
+            if (featContains(GEOFEATS[i], lng, lat)){ AGENT_NIS[GEOFEATS[i].properties.niscode]=true; break; }
+          }
+        });
+        var nGem = Object.keys(AGENT_NIS).length;
+        if (count){
+          document.getElementById('fk-agentbar').style.display='flex';
+          document.getElementById('fk-agentinfo').textContent = count+' agenten in '+nGem+' gemeenten';
+        }
+      }).catch(function(){});
+    }
+
+    function renderLegend(){
+      var div = document.getElementById('fk-legend'); if(!div) return;
+      var m = METRICS[currentMetric];
+      var vals = [];
+      for (var k in STATS){ var v = STATS[k][currentMetric]; if (typeof v === 'number') vals.push(v); }
+      vals.sort(function(a,b){return a-b;});
+      var lo  = vals.length ? vals[0] : 0;
+      var hi  = vals.length ? vals[vals.length-1] : 0;
+      var mid = vals.length ? vals[Math.floor(vals.length/2)] : 0;
+      var grad = 'linear-gradient(to right,'+PALETTE.join(',')+')';
+      div.innerHTML =
+        '<div class="t">'+m.label+'</div>'+
+        '<div class="grad" style="background:'+grad+'"></div>'+
+        '<div class="lbls"><span>'+m.fmt(lo)+'</span><span>'+m.fmt(mid)+'</span><span>'+m.fmt(hi)+'</span></div>'+
+        '<div class="nd"><i style="background:'+NO_DATA+'"></i>geen data</div>';
+    }
+    function applyMetric(metric){
+      currentMetric = metric;
+      breaks = computeBreaks(metric);
+      if (layer) layer.setStyle(styleFor);
+      renderLegend();
+    }
+
+    // =====================================================================
+    //  SLIMME GEMEENTE-ZOEKBALK (typeahead)
+    // =====================================================================
+    function slugVan(nis, feat){
+      var s = STATS[nis];
+      if (s && s.slug) return s.slug;
+      return (feat && feat.properties.namedut) || (s && s.naam) || '';
+    }
+    function buildIndex(){
+      GEM_INDEX = [];
+      GEOFEATS.forEach(function(f){
+        var nis = f.properties.niscode;
+        var s = STATS[nis] || {};
+        var naam = s.naam || f.properties.namedut || String(nis);
+        GEM_INDEX.push({ nis:nis, naam:naam, gw:gewestVan(nis), norm:norm(naam) });
+      });
+      GEM_INDEX.sort(function(a,b){ return a.naam.localeCompare(b.naam,'nl'); });
+    }
+    var GW_LABEL = { VLA:'Vlaanderen', WAL:'Wallonië', BRU:'Brussel', '?':'' };
+    var searchInput = document.getElementById('fk-gem-input');
+    var searchList  = document.getElementById('fk-gem-list');
+    var searchActive = -1, searchHits = [];
+
+    function renderSearch(hits){
+      searchHits = hits; searchActive = -1;
+      if (!hits.length){
+        searchList.innerHTML = '<div class="fk-gem-empty">Geen gemeente gevonden.</div>';
+        searchList.classList.add('open'); return;
+      }
+      searchList.innerHTML = hits.map(function(h,i){
+        return '<div class="fk-gem-item" data-i="'+i+'"><span>'+h.naam+'</span><span class="prov">'+(GW_LABEL[h.gw]||'')+'</span></div>';
+      }).join('');
+      searchList.classList.add('open');
+    }
+    function closeSearch(){ searchList.classList.remove('open'); searchList.innerHTML=''; searchActive=-1; searchHits=[]; }
+
+    function doSearch(q){
+      var nq = norm(q);
+      if (nq.length < 2){ closeSearch(); return; }
+      var starts = [], contains = [];
+      for (var i=0;i<GEM_INDEX.length;i++){
+        var g = GEM_INDEX[i];
+        var pos = g.norm.indexOf(nq);
+        if (pos === 0) starts.push(g);
+        else if (pos > 0) contains.push(g);
+        if (starts.length >= 8) break;
+      }
+      var hits = starts.concat(contains).slice(0,8);
+      renderSearch(hits);
+    }
+    function chooseHit(h){
+      if (!h) return;
+      closeSearch();
+      searchInput.value = h.naam;
+      flyToGemeente(h.nis);
+      openMailDialog(h.nis, NIS_FEAT[h.nis]);
+    }
+    function flyToGemeente(nis){
+      var lyr = NIS_LAYER[nis];
+      if (lyr && lyr.getBounds){ try{ map.fitBounds(lyr.getBounds(), { maxZoom:12, padding:[40,40] }); }catch(e){} }
+      else { var c = CENTROIDS[nis]; if (c) map.setView(c, 11); }
+      if (lyr){ lyr.setStyle({weight:3, color:'#05B050'}); lyr.bringToFront();
+        setTimeout(function(){ try{ layer.resetStyle(lyr); }catch(e){} }, 2200); }
+    }
+
+    searchInput.addEventListener('input', function(){ doSearch(this.value); });
+    searchInput.addEventListener('focus', function(){ if (this.value.trim().length>=2) doSearch(this.value); });
+    searchInput.addEventListener('keydown', function(e){
+      if (!searchList.classList.contains('open')) return;
+      if (e.key === 'ArrowDown'){ e.preventDefault(); searchActive = Math.min(searchActive+1, searchHits.length-1); paintActive(); }
+      else if (e.key === 'ArrowUp'){ e.preventDefault(); searchActive = Math.max(searchActive-1, 0); paintActive(); }
+      else if (e.key === 'Enter'){ e.preventDefault(); chooseHit(searchHits[searchActive>=0?searchActive:0]); }
+      else if (e.key === 'Escape'){ closeSearch(); }
+    });
+    function paintActive(){
+      Array.prototype.forEach.call(searchList.querySelectorAll('.fk-gem-item'), function(el,i){
+        el.classList.toggle('active', i===searchActive);
+      });
+    }
+    searchList.addEventListener('click', function(e){
+      var it = e.target.closest('.fk-gem-item'); if(!it) return;
+      chooseHit(searchHits[+it.getAttribute('data-i')]);
+    });
+    document.addEventListener('click', function(e){
+      if (!e.target.closest('.fk-search')) closeSearch();
+    });
+
+    // =====================================================================
+    //  MAIL-MODAL
+    // =====================================================================
+    var modal = document.getElementById('fk-modal');
+    var mTitle = document.getElementById('fk-modal-title');
+    var mStats = document.getElementById('fk-modal-stats');
+    var mTo    = document.getElementById('fk-modal-to');
+    var mBody  = document.getElementById('fk-modal-body');
+    var mMsg   = document.getElementById('fk-modal-msg');
+    var mAtt   = document.getElementById('fk-modal-att');
+    var mSend  = document.getElementById('fk-modal-send');
+    var CURRENT = null;   // { nis, slug, gemeente, subject, body }
+
+    function chip(lbl, val){ return '<span class="chip">'+lbl+' <b>'+val+'</b></span>'; }
+
+    function openMailDialog(nis, feat){
+      if (!feat) feat = NIS_FEAT[nis];
+      var s = STATS[nis] || {};
+      var gem = s.naam || (feat && feat.properties.namedut) || 'deze gemeente';
+      var mail = buildMail(nis, feat);
+      CURRENT = { nis:nis, slug:slugVan(nis, feat), gemeente:gem, subject:mail.subject, body:mail.body };
+
+      mTitle.textContent = 'Laadplan versturen — ' + gem;
+      mStats.innerHTML =
+        chip('Parkings', METRICS.parkings.fmt(s.parkings==null?null:s.parkings)) +
+        chip('Besparing', METRICS.besparingEur.fmt(s.besparingEur==null?null:s.besparingEur)) +
+        chip('Extra energie', METRICS.energiePct.fmt(s.energiePct==null?null:s.energiePct));
+      mBody.textContent = 'Onderwerp: ' + mail.subject + '\n\n' + mail.body;
+      mAtt.textContent = 'Bijlagen: Fluctus_Laadplan_' + CURRENT.slug + '.pptx + .pdf (best effort uit de gemeenten-repo).';
+      mMsg.textContent = ''; mMsg.className = 'fk-modal-msg';
+      mTo.value = '';
+      mSend.disabled = false; mSend.textContent = 'Verstuur';
+      document.getElementById('fk-modal-me').textContent = CURRENT_EMAIL || 'u';
+      modal.classList.add('open');
+      setTimeout(function(){ mTo.focus(); }, 60);
+    }
+    function closeModal(){ modal.classList.remove('open'); CURRENT = null; }
+
+    function parseEmails(raw){
+      return String(raw||'').split(/[\s,;]+/).map(function(x){return x.trim();}).filter(Boolean);
+    }
+    var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    function sendMail(){
+      if (!CURRENT) return;
+      var list = parseEmails(mTo.value);
+      var bad = list.filter(function(e){ return !EMAIL_RE.test(e); });
+      if (!list.length){ mMsg.className='fk-modal-msg err'; mMsg.textContent='Geef minstens één e-mailadres in.'; return; }
+      if (bad.length){ mMsg.className='fk-modal-msg err'; mMsg.textContent='Ongeldig adres: '+bad.join(', '); return; }
+
+      mSend.disabled = true; mSend.textContent = 'Versturen…';
+      mMsg.className='fk-modal-msg'; mMsg.textContent='';
+
+      fetch(MAIL_BACKEND + '/api/laadplan-mail', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + CURRENT_TOKEN },
+        body: JSON.stringify({
+          gemeente: CURRENT.gemeente,
+          slug:     CURRENT.slug,
+          niscode:  CURRENT.nis,
+          subject:  CURRENT.subject,
+          body:     CURRENT.body,
+          to:       list
+        })
+      }).then(function(res){
+        return res.json().catch(function(){ return {}; }).then(function(j){ return { ok:res.ok, j:j }; });
+      }).then(function(r){
+        if (r.ok && r.j && r.j.ok){
+          var att = (r.j.attachments!=null) ? r.j.attachments : 0;
+          mMsg.className='fk-modal-msg ok';
+          mMsg.textContent = 'Verstuurd naar '+list.length+' adres(sen)'+(att?(' met '+att+' bijlage(n)'):' (bijlagen niet gevonden)')+'. Kopie naar u + oekene@gmail.com.';
+          showToast('Laadplan van <b>'+CURRENT.gemeente+'</b> verstuurd.');
+          setTimeout(closeModal, 1800);
+        } else {
+          var detail = (r.j && (r.j.detail || r.j.error)) || 'onbekende fout';
+          mMsg.className='fk-modal-msg err';
+          mMsg.textContent = 'Versturen mislukt: '+detail+'. Controleer de backend-URL/CORS.';
+          mSend.disabled=false; mSend.textContent='Opnieuw versturen';
+        }
+      }).catch(function(err){
+        mMsg.className='fk-modal-msg err';
+        mMsg.textContent = 'Geen verbinding met de mail-backend: '+((err&&err.message)||err)+'.';
+        mSend.disabled=false; mSend.textContent='Opnieuw versturen';
+      });
+    }
+
+    document.getElementById('fk-modal-x').addEventListener('click', closeModal);
+    document.getElementById('fk-modal-cancel').addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); });
+    mSend.addEventListener('click', sendMail);
+    mTo.addEventListener('keydown', function(e){ if (e.key==='Enter' && (e.metaKey||e.ctrlKey)) sendMail(); });
+
+    // =====================================================================
+    //  BOOT (na auth)
+    // =====================================================================
+    function boot(){
+      document.getElementById('fk-who').textContent = CURRENT_EMAIL ? ('Aangemeld als ' + CURRENT_EMAIL) : '';
+
+      map = L.map('fk-map', { zoomControl:true, scrollWheelZoom:true, attributionControl:true }).setView([50.64, 4.66], 8);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+        attribution:'© OpenStreetMap · CARTO', subdomains:'abcd', maxZoom:19
+      }).addTo(map);
+      legend.addTo(map);
+      panel.addTo(map);
+      map.on('moveend zoomend', updateInView);
+
+      document.getElementById('fk-metric').addEventListener('change', function(e){ applyMetric(e.target.value); });
+      document.getElementById('fk-agent').addEventListener('change', function(e){
+        agentMode = e.target.checked; if (layer) layer.setStyle(styleFor); updateInView();
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.fk-regio'), function(cb){
+        cb.addEventListener('change', function(){
+          regioAan[this.getAttribute('data-gw')] = this.checked;
+          if (layer) layer.setStyle(styleFor); updateInView();
+        });
+      });
+      document.getElementById('fk-kempen').addEventListener('change', function(e){
+        kempenOnly = e.target.checked; if (layer) layer.setStyle(styleFor); updateInView();
+      });
+
+      Promise.all([
+        fetch(GEO_URL).then(function(r){ if(!r.ok) throw new Error('geojson '+r.status); return r.json(); }),
+        fetch(STATS_URL).then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; })
+      ]).then(function(res){
+        var geo = res[0]; STATS = res[1] || {};
+        geo.features.forEach(function(f){
+          NIS_FEAT[f.properties.niscode] = f;
+          var c=centroidOfGeom(f.geometry); if(c) CENTROIDS[f.properties.niscode]=c;
+          var g=f.geometry, polys=g.type==='MultiPolygon'?g.coordinates:[g.coordinates];
+          var mnx=180,mny=90,mxx=-180,mxy=-90;
+          polys.forEach(function(p){ p[0].forEach(function(co){
+            if(co[0]<mnx)mnx=co[0]; if(co[0]>mxx)mxx=co[0]; if(co[1]<mny)mny=co[1]; if(co[1]>mxy)mxy=co[1];
+          }); });
+          f._bb=[mnx,mny,mxx,mxy];
+        });
+        GEOFEATS = geo.features;
+        buildIndex();
+        breaks = computeBreaks(currentMetric);
+        layer = L.geoJSON(geo, { style: styleFor, onEachFeature: onEachFeature }).addTo(map);
+        try { map.fitBounds(layer.getBounds(), { padding:[10,10] }); } catch(e){}
+        renderLegend();
+        updateInView();
+        loadAgents();
+        var nKemp=0; for (var kk in STATS){ if (isKempen(kk)) nKemp++; }
+        document.getElementById('fk-kempeninfo').textContent = nKemp+' gemeenten (arr. Turnhout)';
+        var n = Object.keys(STATS).length;
+        setStatus(n ? '' : 'Geometrie geladen, maar geen cijfers gevonden (gemeenten_stats.json ontbreekt nog).');
+      }).catch(function(err){
+        setStatus('Kon de kaartdata niet laden: '+err.message+'. Staat gemeenten_be.geojson al in de repo?');
+      });
+    }
+
+    // start: eerst de auth-gate, dan pas de kaart
+    guard().then(function(ok){ if (ok) boot(); });
+  })();
+  </script>
+</body>
+</html>
