@@ -1,5 +1,5 @@
 <!-- ============================================================
-     FLUCTUS KABELPLANNER  v1.6  (simulator-koppeling)
+     FLUCTUS KABELPLANNER  v1.7  (simulator-koppeling)
      Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
      Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
      ondergrond-zones, densiteit per PV-zone, undo, bugfix draw.
@@ -10,6 +10,8 @@
      v1.6: OW = Zuid 90° gedraaid + aaneengesloten; donkerder panelen met grijs randje; tracés
            altijd boven de PV; volledige ontwerp-state + statische luchtfoto (html2canvas) mee terug;
            herstel van een eerder ontwerp bij terugkeer vanuit de simulator.
+     v1.7: PV-zone-knooppunten verleggen → kWp verandert live mee; de meegestuurde luchtfoto zoomt
+           maximaal in op alle elementen (componenten + PV-invulling Zuid/OW + tracés zichtbaar).
      ============================================================ -->
 
 <div id="fk-app">
@@ -278,6 +280,17 @@ document.getElementById("fk-draw-zoneOW").onclick=()=>{ clearPlacing(); zoneMode
 document.getElementById("fk-draw-sub").onclick=()=>{ clearPlacing(); zoneMode="SUB"; map.pm.enableDraw("Polygon",{}); };
 document.getElementById("fk-edit").onclick=()=>{ clearPlacing(); snapshot(); map.pm.toggleGlobalEditMode(); };
 
+// v1.7: knooppunten van een PV-zone verleggen → de kWp van die zone verandert mee.
+// Discrete edit-events herrekenen alles (kWp + panelen); tijdens het slepen updaten we de PV-KPI live.
+function _liveZoneKwp(){
+  var tot=0; zones.forEach(function(z){ tot+=zoneKwp(z); });
+  var el2=document.getElementById("fk-kpi-pv"); if(el2) el2.textContent=Math.round(tot).toLocaleString('nl-BE');
+}
+function _bindZoneEdit(layer){
+  ["pm:edit","pm:markerdragend","pm:vertexadded","pm:vertexremoved","pm:update","pm:dragend"].forEach(function(ev){ layer.on(ev, recalc); });
+  var _t=null;
+  layer.on("pm:markerdrag", function(){ if(_t) return; _t=setTimeout(function(){ _t=null; try{_liveZoneKwp();}catch(e){} }, 120); });
+}
 map.on("pm:create",e=>{
   const layer=e.layer, shape=e.shape; snapshot();
   if(shape==="Line"){ const tr={tid:"t"+Date.now(),layer,pw:50,auto:false};
@@ -285,7 +298,7 @@ map.on("pm:create",e=>{
   } else if(shape==="Polygon" && zoneMode==="SUB"){ const s={sid:"s"+Date.now(),layer,ground:"klinkers"};
     layer.setStyle({color:BROWN,fillOpacity:.30,dashArray:"5,4"}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeSub(s)); subs.push(s);
   } else if(shape==="Polygon"){ const z={zid:"z"+Date.now(),layer,kind:zoneMode,wp:+$("fk-wp").value||200};
-    layer.setStyle({color:zoneMode==="Z"?GREEN:"#0a7d3a",fillOpacity:.35}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeZone(z)); zones.push(z);
+    layer.setStyle({color:zoneMode==="Z"?GREEN:"#0a7d3a",fillOpacity:.35}); _bindZoneEdit(layer); layer.on("contextmenu",()=>removeZone(z)); zones.push(z);
     const c=turf.centroid(layer.toGeoJSON()).geometry.coordinates;   // omvormer op zwaartepunt zone
     const omv=addObject("omv",L.latLng(c[1],c[0])); z.omvOid=omv.oid;
   }
@@ -603,7 +616,7 @@ function rebuild(d,keepView){
   (d.zones||[]).forEach(z=>{ const ll=z.coords[0].map(c=>[c[1],c[0]]); const layer=L.polygon(ll,{color:z.kind==="OW"?"#0a7d3a":GREEN,fillOpacity:.35}).addTo(map);
     const zo={zid:"z"+Date.now()+Math.random(),layer,kind:z.kind||"Z",wp:z.wp||200};
     if(z.omvIdx>=0 && createdObjs[z.omvIdx]) zo.omvOid=createdObjs[z.omvIdx].oid;
-    layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeZone(zo)); zones.push(zo); });
+    _bindZoneEdit(layer); layer.on("contextmenu",()=>removeZone(zo)); zones.push(zo); });
   (d.subs||[]).forEach(s=>{ const ll=s.coords[0].map(c=>[c[1],c[0]]); const layer=L.polygon(ll,{color:BROWN,fillOpacity:.30,dashArray:"5,4"}).addTo(map);
     const so={sid:"s"+Date.now()+Math.random(),layer,ground:s.ground||"klinkers"}; layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeSub(so)); subs.push(so); });
   if(!restoring) recalc();
@@ -652,6 +665,16 @@ if(rbtn) rbtn.onclick=function(){
   // een luchtfoto opnieuw opbouwen in de simulator. Faalt de capture (CORS) → simulator valt terug op Esri.
   _fkVerstuur(payload, comps.length, tracers.length);
 };
+// v1.7: bounding-box van ALLES (componenten + PV-zones + tracés + verharde zones) — zodat de
+// meegestuurde luchtfoto maximaal inzoomt maar alles zichtbaar blijft.
+function _boundsAlles(){
+  var b=L.latLngBounds([]);
+  objects.forEach(function(o){ try{ b.extend(o.marker.getLatLng()); }catch(e){} });
+  zones.forEach(function(z){ try{ b.extend(z.layer.getBounds()); }catch(e){} });
+  traces.forEach(function(t){ try{ b.extend(t.layer.getBounds()); }catch(e){} });
+  subs.forEach(function(s){ try{ b.extend(s.layer.getBounds()); }catch(e){} });
+  return b;
+}
 function _fkVerstuur(payload, nComp, nTrace){
   function schrijf(dataUrl){
     if(dataUrl) payload.foto_dataurl=dataUrl;
@@ -661,14 +684,29 @@ function _fkVerstuur(payload, nComp, nTrace){
     }
     toast('Ontwerp ('+nComp+' componenten · '+nTrace+' tracés · '+payload.pv_kwp_getekend+' kWp PV'+(dataUrl?' + luchtfoto':'')+') teruggestuurd naar de simulator');
   }
+  var _started=false;
+  function capture(){
+    if(_started) return; _started=true;   // slechts één keer capturen (moveend of fallback)
+    try{
+      if(typeof html2canvas!=='function'){ return schrijf(null); }
+      var elMap=document.getElementById('fk-map'); if(!elMap){ return schrijf(null); }
+      recalc();   // zorg dat panelen (Zuid/OW-invulling) + tracés op de kaart staan vóór de capture
+      var sc=Math.min(1, 1000/(elMap.offsetWidth||1000));
+      html2canvas(elMap,{useCORS:true, logging:false, scale:sc, backgroundColor:'#e9edf2'})
+        .then(function(cv){ var u=null; try{ u=cv.toDataURL('image/jpeg',0.72); }catch(e){ u=null; } schrijf(u); })
+        .catch(function(){ schrijf(null); });
+    }catch(e){ schrijf(null); }
+  }
+  // Eerst maximaal inzoomen op alle elementen, tegels laten laden, dan pas capturen.
   try{
-    if(typeof html2canvas!=='function'){ return schrijf(null); }
-    var elMap=document.getElementById('fk-map'); if(!elMap){ return schrijf(null); }
-    var sc=Math.min(1, 1000/(elMap.offsetWidth||1000));
-    html2canvas(elMap,{useCORS:true, logging:false, scale:sc, backgroundColor:'#e9edf2'})
-      .then(function(cv){ var u=null; try{ u=cv.toDataURL('image/jpeg',0.72); }catch(e){ u=null; } schrijf(u); })
-      .catch(function(){ schrijf(null); });
-  }catch(e){ schrijf(null); }
+    var b=_boundsAlles();
+    if(b && b.isValid()){
+      if(frozen){ try{ map.dragging.enable(); map.scrollWheelZoom.enable(); }catch(e){} }   // even losmaken zodat fitBounds mag zoomen
+      map.once('moveend', function(){ setTimeout(capture, 850); });   // wacht op de tegels na de zoom
+      map.fitBounds(b, {padding:[30,30], maxZoom:20, animate:false});
+      setTimeout(capture, 1500);   // fallback als moveend niet vuurt (bounds ≈ huidige view) — guard voorkomt dubbel
+    } else { capture(); }
+  }catch(e){ capture(); }
 }
 (function(){
   var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
