@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.62.6  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.62.7  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.62.7: (1) heatmaps duidelijker (95-percentiel-schaal + gamma 0,6 + diepere groen/rood + hoger canvas);
+              (2) FIX factuuranalyse — de maand-sim gebruikte het JAARvolume zodra STATE.jaar van 'specifiek'
+              afweek (na terugstappen via de Periode-stap) → dynamische maandpost ~13× te hoog; nu draait de
+              maand-sim altijd op de factuurperiode + periodeVolumeMwh.
      v1.62.6: SolarActive-rapportknop robuust (Blob-URL + inline-overlay-terugval i.p.v. document.write in
               een leeg venster — dat faalde stil bij pop-up-blockers); guards op a.periode/a.invoer.
      v1.62.5: SolarActive-injectie = eigen predict-nominate-steer-simulatie (labels + capture van het
@@ -238,7 +242,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.62.6</span>
+    <span class="fdsim-version">v1.62.7</span>
   </div>
 </div>
 
@@ -3806,7 +3810,7 @@ function _openSolarActiveRapport(a){
     'table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}td,th{padding:5px 8px;border-bottom:1px solid #E3E8EF;text-align:left}'+
     'th{color:#1F3864}.r{text-align:right}.hm{margin:6px 0 2px}.cap{font-size:11px;color:#5A6577;margin-bottom:12px}'+
     '.note{font-size:11px;color:#8A93A3;font-style:italic}.foot{margin-top:24px;font-size:10.5px;color:#8A93A3;border-top:1px solid #E3E8EF;padding-top:10px}'+
-    'canvas{width:100%;height:auto;border:1px solid #D5DBE3;border-radius:5px;image-rendering:pixelated}'+
+    'canvas{width:100%;height:150px;border:1px solid #D5DBE3;border-radius:5px;image-rendering:pixelated;display:block}'+
     '@media print{.pg{max-width:none}}';
   var html='<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>SolarActive — injectie-optimalisatie</title><style>'+css+'</style></head><body><div class="pg">'+
     '<h1>SolarActive — optimalisatie van uw PV-injectie</h1>'+
@@ -3843,10 +3847,14 @@ function _openSolarActiveRapport(a){
     '</div>'+
     '<script>(function(){var D='+JSON.stringify(data)+';'+
     'function draw(id,arr,mode){var c=document.getElementById(id);if(!c)return;var W=D.dagen,H=D.uren;c.width=W;c.height=H;var ctx=c.getContext("2d");'+
-    'var mn=0,mx=0,i;for(i=0;i<arr.length;i++){if(arr[i]<mn)mn=arr[i];if(arr[i]>mx)mx=arr[i];}var amax=Math.max(Math.abs(mn),Math.abs(mx))||1;'+
-    'for(var u=0;u<H;u++){for(var d=0;d<W;d++){var v=arr[u*W+d]||0;var col;'+
-    'if(mode==="div"){var t=v/amax;if(t>=0){col="rgb("+Math.round(255-180*t)+","+Math.round(255-40*t)+","+Math.round(255-180*t)+")";}else{var uu=-t;col="rgb(255,"+Math.round(255-200*uu)+","+Math.round(255-200*uu)+")";}}'+
-    'else{var t2=(mx>0?v/mx:0);col="rgb("+Math.round(255-200*t2)+","+Math.round(255-40*t2)+","+Math.round(255-180*t2)+")";}'+
+    // robuuste schaal: 95-percentiel van |waarden| zodat enkele uitschieters niet alles wit maken
+    'var abs=[],i;for(i=0;i<arr.length;i++){var q=Math.abs(arr[i]||0);if(q>0)abs.push(q);}abs.sort(function(x,y){return x-y;});'+
+    'var p=abs.length?abs[Math.min(abs.length-1,Math.floor(abs.length*0.95))]:1;if(!(p>0))p=1;'+
+    'ctx.fillStyle="#f4f6f9";ctx.fillRect(0,0,W,H);'+   // lichte achtergrond i.p.v. hard wit
+    'for(var u=0;u<H;u++){for(var d=0;d<W;d++){var v=arr[u*W+d]||0;if(!v){continue;}var col;'+
+    'var t=Math.max(-1,Math.min(1,v/p));var g=(t<0?-1:1)*Math.pow(Math.abs(t),0.6);'+   // gamma → meer kleur bij kleine waarden
+    'if(mode==="div"){if(g>=0){col="rgb("+Math.round(255-235*g)+","+Math.round(255-115*g)+","+Math.round(255-195*g)+")";}else{var uu=-g;col="rgb("+Math.round(255-55*uu)+","+Math.round(255-215*uu)+","+Math.round(255-215*uu)+")";}}'+
+    'else{var g2=g<0?0:g;col="rgb("+Math.round(255-235*g2)+","+Math.round(255-115*g2)+","+Math.round(255-195*g2)+")";}'+
     'ctx.fillStyle=col;ctx.fillRect(d,u,1,1);}}}'+
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
@@ -8660,8 +8668,15 @@ function _gecontracteerdToegangsvermogenKw(){
 // worden in de vergelijking verbatim van de factuur overgenomen.
 //   mode 'specifiek' → invoice-periode (exacte maand); 'rolling12' → vol jaar (heatmap)
 function _bareSimInput(mode){
+  var bc=STATE.baseCase||{};
   var periode=getPeriodeRange();
-  var specifiek=(mode!=='rolling12') && STATE.jaar==='specifiek' && STATE.periodeVan && STATE.periodeTot;
+  // v1.62.7 FIX: de factuuranalyse-maandsim (mode 'specifiek') draait ALTIJD op de FACTUURPERIODE +
+  // het periode-volume, ongeacht STATE.jaar. Zonder deze ontkoppeling pakte hij na een periodewissel
+  // (STATE.jaar → rolling12/kalenderjaar, bv. na een stap terug) het JAARvolume en toonde de dynamische
+  // maandpost ~12× te hoog (huidig €2.177 → dynamisch €19.665).
+  var factuurMaand=(mode==='specifiek') && !!(bc.periodeVan && bc.periodeTot);
+  var specifiek=factuurMaand || ((mode!=='rolling12') && STATE.jaar==='specifiek' && STATE.periodeVan && STATE.periodeTot);
+  var pVan=factuurMaand?bc.periodeVan:STATE.periodeVan, pTot=factuurMaand?bc.periodeTot:STATE.periodeTot;
   var verbruik=specifiek ? (STATE.periodeVolumeMwh||STATE.jaarverbruik) : STATE.jaarverbruik;
   return {
     project:STATE.project, scenario:(STATE.scenario||'sc')+'_factuuranalyse',
@@ -8675,8 +8690,8 @@ function _bareSimInput(mode){
     aansluiting_kva:STATE.aansluitingKva||100,
     toegangsvermogen_kw:_gecontracteerdToegangsvermogenKw(),
     max_injectie_kw:0, jaar: specifiek?'specifiek':'rolling12',
-    periodeVan: specifiek?STATE.periodeVan:null, periodeTot: specifiek?STATE.periodeTot:null,
-    simulatieperiode:{ van:periode.van, tot:periode.tot, type: specifiek?'specifiek':'kalenderjaar' }
+    periodeVan: specifiek?pVan:null, periodeTot: specifiek?pTot:null,
+    simulatieperiode:{ van: factuurMaand?bc.periodeVan:periode.van, tot: factuurMaand?bc.periodeTot:periode.tot, type: specifiek?'specifiek':'kalenderjaar' }
   };
 }
 // v1.21.6: CONSISTENTIE-GUARD op de factuurscan. De ingelezen componenten
