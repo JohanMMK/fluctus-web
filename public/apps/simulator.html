@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.62.2  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.62.6  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.62.6: SolarActive-rapportknop robuust (Blob-URL + inline-overlay-terugval i.p.v. document.write in
+              een leeg venster — dat faalde stil bij pop-up-blockers); guards op a.periode/a.invoer.
+     v1.62.5: SolarActive-injectie = eigen predict-nominate-steer-simulatie (labels + capture van het
+              plafond, ijkbaar via de imby-webhook). server.js v15.41.0.
+     v1.62.4: SolarActive-injectie gekalibreerd op de imby-methode (fysieke curtailment, forecast-
+              efficiëntie i.p.v. 1,8% capture; investering €3.500, beheer €6,6/kVA/jr).
+     v1.62.3: SolarActive-kerncijfers tonen de payback-drempel (vanaf welke kVA 3/5/7 jaar haalbaar is).
      v1.62.2: bovenaan-versiecomment toegevoegd (geen functionele wijziging in dit bestand).
      v1.62.1: onbalans-injectie via forecast-nominatie/capture-rate (label + modus-selector).
      v1.62.0: bestaande PV (SolarActive) — injectie-optimalisatie + kerncijfers + rapport met heatmaps.
@@ -231,7 +238,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.62.2</span>
+    <span class="fdsim-version">v1.62.6</span>
   </div>
 </div>
 
@@ -3700,7 +3707,7 @@ function _renderBestaandePvSectie(){
   [['conservatief','Conservatief (−33%)'],['realistic','Realistisch'],['optimistisch','Optimistisch (+50%)']].forEach(function(o){ var op=el('option',{value:o[0]},o[1]); if((STATE.bspForecastModus||'realistic')===o[0])op.selected=true; fmSel.appendChild(op); });
   fmSel.onchange=function(){ STATE.bspForecastModus=fmSel.value; };
   fmBox.appendChild(fmSel);
-  fmBox.appendChild(el('div',{class:'fdsim-hint'},'Zelfde methode als de flex-nominatie: we nomineren op forecast en sturen de deviatie binnen een capture-budget (±1,8% van het volume). Geen perfecte vooruitzichten.'));
+  fmBox.appendChild(el('div',{class:'fdsim-hint'},'Fysieke bijsturing van de omvormer (curtailen + setteln op de betere van day-ahead/onbalans), gekalibreerd op de imby SolarActive-methode. De forecast-kwaliteit bepaalt de efficiëntie (conservatief 60% · realistisch 80% · optimistisch 100%) — geen perfecte vooruitzichten.'));
   sec.appendChild(fmBox);
 
   var rij=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px'});
@@ -3744,25 +3751,43 @@ function _renderInjectieKerncijfers(a){
   grid.innerHTML=
     tile('Injectie vandaag', fmtEur(vandaag), (a._injOpbrengstEur>0?'uit injectiefactuur':'geschat op spot'))+
     tile('+ Curtailen op spot', '+ '+fmtEur(o.meerwaarde_curtail_eur), 'vermijdt negatieve prijzen','#05B050')+
-    tile('+ Onbalans-sturing', '+ '+fmtEur(o.meerwaarde_onbalans_eur), 'genomineerd op forecast'+(a.sturing?' ('+a.sturing.forecast_modus+', '+fmtNum(a.sturing.capture_rate_pct,1)+'%)':''),'#05B050')+
+    tile('+ Onbalans-sturing', '+ '+fmtEur(o.meerwaarde_onbalans_eur), 'voorspeld → genomineerd → bijgestuurd'+(a.sturing?' ('+a.sturing.forecast_modus+')':''),'#05B050')+
     tile('Meerwaarde totaal', fmtEur(o.meerwaarde_totaal_eur), 'curtail + onbalans','#05B050')+
-    tile('Terugverdientijd', (pb.payback_beide_jaar!=null?fmtNum(pb.payback_beide_jaar,1)+' jaar':'—'), '€3.950 + €0,72/kVA/mnd')+
+    tile('Terugverdientijd', (pb.payback_beide_jaar!=null?fmtNum(pb.payback_beide_jaar,1)+' jaar':'—'), '€3.500 + €6,6/kVA/jr')+
     tile('PV / injectie', fmtNum(e.productie_mwh,0)+' / '+fmtNum(e.injectie_mwh,0)+' MWh', fmtNum(a.invoer.pv_kwp,0)+' kWp · '+fmtNum(a.invoer.inverter_kva,0)+' kVA');
   wrap.appendChild(grid);
+  // v1.62.3: vanaf welke grootte is een payback haalbaar? Beheerkost én meerwaarde schalen met kVA.
+  if(a.schaal){
+    var sc=a.schaal;
+    var sBox=el('div',{style:'margin-top:10px;padding:9px 11px;border-radius:6px;font-size:11.5px;line-height:1.5;'+
+      (sc.haalbaar?'background:#EAF7EE;border:1px solid #05B05055;color:#0A6B2E':'background:#FFF3E0;border:1px solid #E8A33D;color:#7A3608')});
+    if(sc.haalbaar){
+      sBox.innerHTML='<b>Schaal:</b> deze sturing levert netto € '+fmtNum(sc.netto_per_kva_eur,2)+'/kVA/jaar op (meerwaarde € '+fmtNum(sc.meerwaarde_per_kva_eur,2)+
+        ' − beheer € 6,60). Een payback van <b>3 jaar</b> wordt gehaald vanaf ± <b>'+fmtNum(sc.drempel_kva_3jaar,0)+' kVA</b> (± '+fmtNum(sc.drempel_kwp_3jaar,0)+' kWp); '+
+        '5 jaar vanaf ± '+fmtNum(sc.drempel_kva_5jaar,0)+' kVA, 7 jaar vanaf ± '+fmtNum(sc.drempel_kva_7jaar,0)+' kVA.';
+    } else {
+      sBox.innerHTML='<b>Schaal:</b> bij deze marktcondities levert de sturing € '+fmtNum(sc.meerwaarde_per_kva_eur,2)+'/kVA/jaar op — minder dan de beheerkost (€ 6,60/kVA/jaar). '+
+        'Omdat zowel de meerwaarde als de beheerkost met de kVA meeschalen, is er dan bij <b>geen enkele grootte</b> een payback (groter = evenredig meer beheerkost). '+
+        'Een payback wordt pas mogelijk zodra de meerwaarde boven € 6,60/kVA/jaar komt (andere marktcondities of forecast-modus optimistisch).';
+    }
+    wrap.appendChild(sBox);
+  }
   var rij=el('div',{style:'margin-top:12px;display:flex;gap:10px;flex-wrap:wrap'});
   var rBtn=el('button',{class:'fdsim-btn green'},'📄 SolarActive-rapport (injectie-optimalisatie)');
   rBtn.onclick=function(){ _openSolarActiveRapport(a); };
   rij.appendChild(rBtn);
   wrap.appendChild(rij);
   wrap.appendChild(el('div',{style:'margin-top:8px;font-size:10.5px;color:#8A93A3;font-style:italic'},
-    'De onbalans-meerwaarde wordt op dezelfde manier berekend als de flex-nominatie in de simulator: nomineren op forecast en de deviatie inzetten binnen een capture-budget ('+(a.sturing?fmtNum(a.sturing.capture_rate_pct,1)+'% van het volume, '+a.sturing.forecast_modus:'±1,8%')+') — geen perfecte vooruitzichten. Bespreek de concrete afspraken met de leverancier; Fluctus zet de sturing op (curtailement leverancier-onafhankelijk, onbalans i.f.v. leverancier).'));
+    'Eigen simulatie (voorspellen → nomineren → bijsturen → afrekenen): de omvormer wordt fysiek bijgestuurd, de injectie afgerekend op day-ahead + onbalans. De gerapporteerde onbalans-meerwaarde is een capture-aandeel van het theoretische plafond'+(a.sturing?' ('+fmtNum((a.sturing.capture||0)*100,0)+'% · '+a.sturing.forecast_modus+'; plafond '+fmtEur(a.sturing.onbalans_potentie_eur||0)+', forecast-ondergrens '+fmtEur(a.sturing.onbalans_gesimuleerd_eur||0)+')':'')+', geijkt op imby. Indicatief; imby blijft de officiële studie zolang beschikbaar. Fluctus zet de sturing op (curtailement leverancier-onafhankelijk, onbalans i.f.v. leverancier).'));
   return wrap;
 }
 // Zelfstandig SolarActive-rapport in een nieuw venster: conclusie op de voorpagina + kerncijfers +
 // drie heatmaps (netto injectieopbrengst, bespaarde curtailment, verdiende onbalans-sturing).
 function _openSolarActiveRapport(a){
+ try{
   if(!a||!a.opbrengst_jaar){ alert('Draai eerst de injectie-analyse.'); return; }
-  var o=a.opbrengst_jaar, pb=a.payback||{}, e=a.energie_jaar||{}, hm=a.heatmaps||{}, st=a.sturing||{forecast_modus:'realistic',capture_rate_pct:1.8};
+  var o=a.opbrengst_jaar, pb=a.payback||{}, e=a.energie_jaar||{}, hm=a.heatmaps||{}, st=a.sturing||{forecast_modus:'realistic',capture:0.72};
+  var per=a.periode||{}, inv=a.invoer||{};
   var klant=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
   var vandaag=(a._injOpbrengstEur>0)?a._injOpbrengstEur:o.vandaag_spot_eur;
   var pbTxt=(pb.payback_beide_jaar!=null?fmtNum(pb.payback_beide_jaar,1)+' jaar':'—');
@@ -3785,10 +3810,10 @@ function _openSolarActiveRapport(a){
     '@media print{.pg{max-width:none}}';
   var html='<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>SolarActive — injectie-optimalisatie</title><style>'+css+'</style></head><body><div class="pg">'+
     '<h1>SolarActive — optimalisatie van uw PV-injectie</h1>'+
-    '<div class="sub">'+esc(klant)+' · '+esc(a.periode.van)+' → '+esc(a.periode.tot)+' · indicatief op basis van 900 kWh/kWp, de huidige spot- en onbalansdata en uw verbruiksprofiel</div>'+
-    '<div class="concl"><b>Conclusie.</b> Uw bestaande PV van '+fmtNum(a.invoer.pv_kwp,0)+' kWp ('+fmtNum(a.invoer.inverter_kva,0)+' kVA omvormer) injecteert vandaag ± '+fmtNum(e.injectie_mwh,0)+' MWh/jaar, goed voor ± '+fmtEur(vandaag)+'. '+
+    '<div class="sub">'+esc(klant)+' · '+esc(per.van)+' → '+esc(per.tot)+' · indicatief op basis van 900 kWh/kWp, de huidige spot- en onbalansdata en uw verbruiksprofiel</div>'+
+    '<div class="concl"><b>Conclusie.</b> Uw bestaande PV van '+fmtNum(inv.pv_kwp,0)+' kWp ('+fmtNum(inv.inverter_kva,0)+' kVA omvormer) injecteert vandaag ± '+fmtNum(e.injectie_mwh,0)+' MWh/jaar, goed voor ± '+fmtEur(vandaag)+'. '+
       'Door de injectie te <b>curtailen op de spotmarkt</b> en te <b>sturen op de onbalansmarkt</b> — zónder ooit uw zelfconsumptie te verminderen — kan die injectie ± <b>'+fmtEur(o.meerwaarde_totaal_eur)+'/jaar</b> extra opbrengen. '+
-      'Tegenover een eenmalige investering van €'+fmtNum(pb.investering_eur,0)+' en een beheerkost van €'+String(pb.management_eur_per_kva_maand).replace('.',',')+'/kVA/maand is dat een terugverdientijd van <b>± '+pbTxt+'</b>. '+
+      'Tegenover een eenmalige investering van €'+fmtNum(pb.investering_eur,0)+' en een beheerkost van €'+String(pb.management_eur_per_kva_jaar).replace('.',',')+'/kVA/jaar is dat een terugverdientijd van <b>± '+pbTxt+'</b>. '+
       'Wij raden aan dit met uw leverancier te bespreken; Fluctus zet vervolgens de sturing op (curtailement leverancier-onafhankelijk, onbalans in functie van uw leverancier).</div>'+
     '<h2>Kerncijfers (per jaar, indicatief)</h2>'+
     '<div class="grid">'+
@@ -3797,7 +3822,7 @@ function _openSolarActiveRapport(a){
       '<div class="t"><div class="l">+ Onbalans-sturing</div><div class="v" style="color:#05B050">+ '+fmtEur(o.meerwaarde_onbalans_eur)+'</div><div class="s">imbalance settlement</div></div>'+
       '<div class="t"><div class="l">Meerwaarde totaal</div><div class="v" style="color:#05B050">'+fmtEur(o.meerwaarde_totaal_eur)+'</div><div class="s">curtail + onbalans</div></div>'+
       '<div class="t"><div class="l">Terugverdientijd</div><div class="v">'+pbTxt+'</div><div class="s">enkel curtail: '+pbCurt+'</div></div>'+
-      '<div class="t"><div class="l">Beheerkost</div><div class="v">'+fmtEur(pb.management_jaar_eur)+'</div><div class="s">€0,72/kVA/maand</div></div>'+
+      '<div class="t"><div class="l">Beheerkost</div><div class="v">'+fmtEur(pb.management_jaar_eur)+'</div><div class="s">€'+String(pb.management_eur_per_kva_jaar||'').replace('.',',')+'/kVA/jaar</div></div>'+
     '</div>'+
     '<h2>Vergelijking van de scenario\'s</h2>'+
     '<table><tr><th>Scenario</th><th class="r">Injectieopbrengst/jaar</th><th class="r">Meerwaarde t.o.v. vandaag</th></tr>'+
@@ -3811,10 +3836,10 @@ function _openSolarActiveRapport(a){
     '<h2>Heatmap 2 — bespaarde injectie door curtailment (€/kwartier)</h2>'+
     '<canvas id="hm2"></canvas><div class="cap">Waar de injectie geblokkeerd wordt omdat de spotprijs negatief is — vermeden verlies.</div>'+
     '<h2>Heatmap 3 — verdiende injectie door onbalans-sturing (€/kwartier)</h2>'+
-    '<canvas id="hm3"></canvas><div class="cap">Extra opbrengst uit het nomineren op forecast en het inzetten van de deviatie binnen het capture-budget ('+fmtNum(st.capture_rate_pct,1)+'% van het volume, modus '+esc(st.forecast_modus)+').</div>'+
+    '<canvas id="hm3"></canvas><div class="cap">Extra opbrengst uit het nomineren en bijsturen van de injectie op day-ahead + onbalans (capture '+fmtNum((st.capture||0)*100,0)+'% van het plafond, modus '+esc(st.forecast_modus)+').</div>'+
     '<div class="foot">Model (indicatief): productie = 900 kWh/kWp × genormaliseerde zonvorm; zelfconsumptie = productie − injectie; gebouw-demand = afname (factuur) + zelfconsumptie, verdeeld via het gekozen verbruiksprofiel; injectie = het kwartieroverschot. '+
       'Waardering: injectie × day-ahead-spotprijs (vandaag) en × max(0, spot) (curtailen — de day-ahead is de dag vooraf gekend). '+
-      'De onbalans-sturing gebruikt dezelfde methode als de flex-nominatie in de simulator: nomineren op forecast, de deviatie per dag begrensd op een capture-budget ('+fmtNum(st.capture_rate_pct,1)+'% van het dagvolume, modus '+esc(st.forecast_modus)+') en ingezet op de kwartieren met de grootste onbalans-spread — geen perfecte vooruitzichten. Fluctus.net CVSO.</div>'+
+      'De onbalans-sturing komt uit een eigen simulatie (voorspellen → nomineren → bijsturen → afrekenen op day-ahead + onbalans). De gerapporteerde meerwaarde is een capture-aandeel ('+fmtNum((st.capture||0)*100,0)+'%, modus '+esc(st.forecast_modus)+') van het theoretische plafond, geijkt op imby. Indicatief; imby blijft de officiële studiemotor zolang beschikbaar. Fluctus.net CVSO.</div>'+
     '</div>'+
     '<script>(function(){var D='+JSON.stringify(data)+';'+
     'function draw(id,arr,mode){var c=document.getElementById(id);if(!c)return;var W=D.dagen,H=D.uren;c.width=W;c.height=H;var ctx=c.getContext("2d");'+
@@ -3825,8 +3850,37 @@ function _openSolarActiveRapport(a){
     'ctx.fillStyle=col;ctx.fillRect(d,u,1,1);}}}'+
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
-  try{ var w=window.open('','fluctus_solaractive'); if(w){ w.document.open(); w.document.write(html); w.document.close(); } else { alert('Pop-up geblokkeerd — sta pop-ups toe voor fluctus.net.'); } }
-  catch(err){ alert('Rapport openen mislukt: '+err.message); }
+  // Robuust openen: eerst een nieuw venster via Blob-URL (betrouwbaarder dan document.write in een leeg
+  // venster — sommige pop-up-blockers geven een blanco venster terug). Lukt dat niet → toon het rapport
+  // INLINE in een overlay, zodat er ALTIJD een reactie is.
+  var _geopend=false;
+  try{
+    var _blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    var _url=URL.createObjectURL(_blob);
+    var _w=window.open(_url,'_blank');
+    if(_w && !_w.closed){ _geopend=true; } else { try{ URL.revokeObjectURL(_url); }catch(e){} }
+  }catch(e){}
+  if(!_geopend){ _toonRapportInline(html,'SolarActive-rapport (injectie-optimalisatie)'); }
+ }catch(err){ alert('Rapport openen mislukt: '+(err&&err.message||err)); }
+}
+// v1.62.6: algemeen — toon een zelfstandig HTML-rapport INLINE in een overlay (iframe srcdoc), voor het
+// geval een pop-up geblokkeerd wordt. Herbruikbaar (bv. later ook voor het financieel rapport).
+function _toonRapportInline(html, titel){
+  try{
+    var ov=el('div',{style:'position:fixed;inset:0;z-index:99999;background:rgba(15,23,36,.55);display:flex;flex-direction:column'});
+    var bar=el('div',{style:'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:#1F3864;color:#fff'});
+    bar.appendChild(el('div',{style:'font-weight:700;font-size:13px'}, titel||'Rapport'));
+    var rechts=el('div',{style:'display:flex;gap:8px'});
+    var prt=el('button',{style:'cursor:pointer;border:0;border-radius:5px;padding:5px 12px;background:#05B050;color:#fff;font-weight:700'},'Afdrukken / PDF');
+    var cls=el('button',{style:'cursor:pointer;border:0;border-radius:5px;padding:5px 12px;background:#fff;color:#1F3864;font-weight:700'},'Sluiten ✕');
+    rechts.appendChild(prt); rechts.appendChild(cls); bar.appendChild(rechts);
+    var ifr=el('iframe',{style:'flex:1;width:100%;border:0;background:#fff'});
+    ifr.setAttribute('srcdoc', html);
+    cls.onclick=function(){ try{ ov.parentNode.removeChild(ov); }catch(e){} };
+    prt.onclick=function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(e){} };
+    ov.appendChild(bar); ov.appendChild(ifr);
+    (document.getElementById('fdsim-root')||document.body).appendChild(ov);
+  }catch(e){ alert('Kon het rapport niet tonen: '+(e&&e.message||e)); }
 }
 
 // v1.20.10: auto-dimensionering. Vult PV en batterij VOORAF in op basis van het
