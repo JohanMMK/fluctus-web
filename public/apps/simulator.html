@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.62.9  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.62.10  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.62.10: (1) SolarActive-kerncijfers + rapport herwerkt: uitgangspunt (incl. investering + beheerkost)
+               en twee scenariokaarten (A curtail / B curtail+onbalans) elk met eigen terugverdientijd +
+               "hoe berekend"-uitleg. (2) Geen geflikker meer van de geselecteerde stap tijdens het rekenen:
+               _logTick ververst enkel de log-boxen in-place (geen volledige re-render); Larson trager (2,4s).
+               (3) "Scenario"-recapblok verwijderd van het ontwerpscherm. (4) SolarActive-rapportknop ook in
+               het Rapporten-blok onderaan (bij bestaande PV).
      v1.62.9: bestaande PV wordt nu FYSIEK meegenomen in de LP-run (opstellingen/batterij): pv.kwp = nieuw +
               bestaand, bruto-demand hersteld via de zelfconsumptie-aanvulling op de zonvorm (server.js v15.43,
               simulator.py v1.10.3). Facturatie blijft neutraal; de batterij ziet nu het bestaande PV-surplus.
@@ -151,7 +157,7 @@
 @keyframes fdsim-spin{to{transform:rotate(360deg)}}
 /* v1.62.8: blauw Larson-scannerlicht — enkel op de ontwerp-stap die op dat moment effectief rekent. */
 #fdsim-root .ontw-larson{position:absolute;left:0;right:0;bottom:0;height:3px;overflow:hidden;border-radius:0 0 6px 6px;background:rgba(46,110,220,.14)}
-#fdsim-root .ontw-larson::before{content:"";position:absolute;bottom:0;left:-30%;height:3px;width:28%;border-radius:3px;background:linear-gradient(90deg,rgba(46,110,220,0),#2E6EDC 55%,#8FB6FF);box-shadow:0 0 8px 1px rgba(46,110,220,.85);animation:fdsim-larson 1.15s ease-in-out infinite}
+#fdsim-root .ontw-larson::before{content:"";position:absolute;bottom:0;left:-30%;height:3px;width:28%;border-radius:3px;background:linear-gradient(90deg,rgba(46,110,220,0),#2E6EDC 55%,#8FB6FF);box-shadow:0 0 8px 1px rgba(46,110,220,.85);animation:fdsim-larson 2.4s ease-in-out infinite}
 @keyframes fdsim-larson{0%{left:-30%}50%{left:100%}100%{left:-30%}}
 
 /* ============ MODAL (nieuwe batterij) ============ */
@@ -256,7 +262,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.62.9</span>
+    <span class="fdsim-version">v1.62.10</span>
   </div>
 </div>
 
@@ -2258,6 +2264,7 @@ function validateStep(i){
 function renderStage(){
   var s=$('fdsim-stage');
   if(!s)return;  // defensive: niet crashen als DOM nog niet klaar
+  _LOGBOXEN=[];   // v1.62.10: register van live-log-boxen resetten bij elke echte render
   s.innerHTML='';
   switch(STATE.currentStep){
     case 0:s.appendChild(renderStep1Project());break;
@@ -3739,7 +3746,7 @@ function _renderBestaandePvSectie(){
   if(STATE.injectieAnalyse){ var kc=_renderInjectieKerncijfers(STATE.injectieAnalyse); if(kc) sec.appendChild(kc); }
   return sec;
 }
-function _runInjectieAnalyse(){
+function _runInjectieAnalyse(onKlaar){
   var bp=STATE.bestaandePv||{};
   if(!(+bp.kwp>0 || +bp.kva>0 || +bp.piekKw>0)){ alert('Geef minstens het PV-vermogen (kWp), de omvormer-kVA of het piekvermogen op.'); return; }
   STATE.injectieAnalyseLoading=true; STATE.injectieAnalyseFout=null; renderStage();
@@ -3753,27 +3760,69 @@ function _runInjectieAnalyse(){
     STATE.injectieAnalyse=(r&&r.analyse)||null; STATE.injectieAnalyseLoading=false;
     if(STATE.injectieAnalyse) STATE.injectieAnalyse._injOpbrengstEur=+bp.injOpbrengstEur||0;
     renderStage();
+    if(typeof onKlaar==='function' && STATE.injectieAnalyse){ try{ onKlaar(STATE.injectieAnalyse); }catch(e){} }
   }).catch(function(e){ STATE.injectieAnalyseLoading=false; STATE.injectieAnalyseFout='Analyse mislukt: '+(e&&e.message); renderStage(); });
 }
 function _renderInjectieKerncijfers(a){
   if(!a||!a.opbrengst_jaar) return null;
   var o=a.opbrengst_jaar, pb=a.payback||{}, e=a.energie_jaar||{};
+  var invEur=(pb.investering_eur!=null?pb.investering_eur:3500);
+  var mgmtEur=(pb.management_jaar_eur!=null?pb.management_jaar_eur:0);
+  var mgmtPerKva=(pb.management_eur_per_kva_jaar!=null?pb.management_eur_per_kva_jaar:6.6);
+  var nettoCurtail=(pb.netto_curtail_jaar_eur!=null?pb.netto_curtail_jaar_eur:(o.meerwaarde_curtail_eur-mgmtEur));
+  var nettoBeide=(pb.netto_beide_jaar_eur!=null?pb.netto_beide_jaar_eur:(o.meerwaarde_totaal_eur-mgmtEur));
+  var vandaag=(a._injOpbrengstEur>0)?a._injOpbrengstEur:o.vandaag_spot_eur;
   var wrap=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #E8A33D66;border-radius:6px'});
-  wrap.appendChild(el('div',{style:'font-weight:800;color:#9E480E;font-size:13px;margin-bottom:8px'},'Kerncijfers injectie-optimalisatie (indicatief, per jaar)'));
+  wrap.appendChild(el('div',{style:'font-weight:800;color:#9E480E;font-size:13px;margin-bottom:2px'},'Kerncijfers injectie-optimalisatie (indicatief, per jaar)'));
+  wrap.appendChild(el('div',{style:'font-size:11px;color:#5A6577;margin-bottom:10px'},'Wat levert het sturen van uw bestaande injectie op — en wanneer is het terugverdiend?'));
+
   function tile(t,g,sub,kl){ return '<div style="padding:9px 11px;background:#FFFCF5;border:1px solid #E8A33D40;border-radius:6px">'+
     '<div style="font-size:10px;color:#9E480E;text-transform:uppercase">'+t+'</div>'+
     '<div style="font-size:16px;font-weight:800;color:'+(kl||'#1F3864')+'">'+g+'</div>'+
     (sub?'<div style="font-size:11px;color:#5A6577">'+sub+'</div>':'')+'</div>'; }
-  var vandaag=(a._injOpbrengstEur>0)?a._injOpbrengstEur:o.vandaag_spot_eur;
-  var grid=el('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'});
-  grid.innerHTML=
+
+  // ── BLOK 1: uitgangspunt (waar we vertrekken + wat het kost) ──
+  wrap.appendChild(el('div',{style:'font-size:10.5px;font-weight:700;color:#9E480E;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px'},'1 · Uw uitgangspunt'));
+  var g0=el('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'});
+  g0.innerHTML=
     tile('Injectie vandaag', fmtEur(vandaag), (a._injOpbrengstEur>0?'uit injectiefactuur':'geschat op spot'))+
-    tile('+ Curtailen op spot', '+ '+fmtEur(o.meerwaarde_curtail_eur), 'vermijdt negatieve prijzen','#05B050')+
-    tile('+ Onbalans-sturing', '+ '+fmtEur(o.meerwaarde_onbalans_eur), 'voorspeld → genomineerd → bijgestuurd'+(a.sturing?' ('+a.sturing.forecast_modus+')':''),'#05B050')+
-    tile('Meerwaarde totaal', fmtEur(o.meerwaarde_totaal_eur), 'curtail + onbalans','#05B050')+
-    tile('Terugverdientijd', (pb.payback_beide_jaar!=null?fmtNum(pb.payback_beide_jaar,1)+' jaar':'—'), '€3.500 + €6,6/kVA/jr')+
-    tile('PV / injectie', fmtNum(e.productie_mwh,0)+' / '+fmtNum(e.injectie_mwh,0)+' MWh', fmtNum(a.invoer.pv_kwp,0)+' kWp · '+fmtNum(a.invoer.inverter_kva,0)+' kVA');
-  wrap.appendChild(grid);
+    tile('PV / injectie', fmtNum(e.productie_mwh,0)+' / '+fmtNum(e.injectie_mwh,0)+' MWh', fmtNum(a.invoer.pv_kwp,0)+' kWp · '+fmtNum(a.invoer.inverter_kva,0)+' kVA')+
+    tile('Investering (eenmalig)', fmtEur(invEur), 'gateway/sturing, eenmalig')+
+    tile('Beheerkost (per jaar)', fmtEur(mgmtEur), '€ '+fmtNum(mgmtPerKva,2)+'/kVA/jaar');
+  wrap.appendChild(g0);
+
+  // ── BLOK 2: de twee sturingsscenario's naast elkaar, elk met eigen payback ──
+  wrap.appendChild(el('div',{style:'font-size:10.5px;font-weight:700;color:#9E480E;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px'},'2 · Wat de sturing u oplevert'));
+  function scenario(titel,uitleg,meerwaarde,netto,payback,paybackNull){
+    var pbTxt = (payback!=null) ? fmtNum(payback,1)+' jaar' : '—';
+    var pbSub = (payback!=null) ? 'investering / netto-meerwaarde'
+              : 'geen payback: netto-meerwaarde (€ '+fmtNum(netto,0)+') ≤ 0 bij deze grootte';
+    var randKl = (payback!=null) ? '#05B050' : '#E8A33D';
+    return '<div style="flex:1 1 260px;min-width:240px;border:1.5px solid '+randKl+'66;border-radius:8px;overflow:hidden">'+
+      '<div style="padding:8px 12px;background:'+randKl+'14;font-weight:800;color:#1F3864;font-size:12.5px">'+titel+'</div>'+
+      '<div style="padding:6px 12px 2px;font-size:11px;color:#5A6577;line-height:1.45">'+uitleg+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:8px 12px 12px">'+
+        '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Meerwaarde/jaar</div><div style="font-size:15px;font-weight:800;color:#05B050">+ '+fmtEur(meerwaarde)+'</div></div>'+
+        '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Netto na beheer</div><div style="font-size:15px;font-weight:800;color:'+(netto>0?'#05B050':'#C0392B')+'">'+(netto>0?'+ ':'')+fmtEur(netto)+'</div></div>'+
+        '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Terugverdientijd</div><div style="font-size:15px;font-weight:800;color:#1F3864">'+pbTxt+'</div><div style="font-size:9.5px;color:#8A93A3;line-height:1.3">'+pbSub+'</div></div>'+
+      '</div></div>';
+  }
+  var g2=el('div',{style:'display:flex;gap:12px;flex-wrap:wrap'});
+  g2.innerHTML=
+    scenario('A · Curtailen op de spotmarkt',
+             'Injectie wordt geblokkeerd wanneer de spotprijs negatief is (dag vooraf zeker gekend). Leverancier-onafhankelijk.',
+             o.meerwaarde_curtail_eur, nettoCurtail, pb.payback_curtail_jaar)+
+    scenario('B · Curtailen + sturen op onbalans',
+             'Bovenop A: de injectie wordt voorspeld, genomineerd en real-time bijgestuurd en afgerekend op day-ahead + onbalans'+(a.sturing?' ('+a.sturing.forecast_modus+')':'')+'. In functie van uw leverancier.',
+             o.meerwaarde_totaal_eur, nettoBeide, pb.payback_beide_jaar);
+  wrap.appendChild(g2);
+
+  // kleine uitleg hoe de berekening liep
+  wrap.appendChild(el('div',{style:'margin-top:10px;font-size:10.5px;color:#5A6577;line-height:1.5;background:#F7F9FB;border:1px solid #E5EAF1;border-radius:6px;padding:8px 11px'},
+    'Hoe berekend: de meerwaarde/jaar is het verschil in injectieopbrengst t.o.v. vandaag (injectie aan de spotprijs). '+
+    'Netto na beheer = meerwaarde/jaar − beheerkost (€ '+fmtNum(mgmtPerKva,2)+'/kVA/jaar × '+fmtNum(a.invoer.inverter_kva,0)+' kVA = '+fmtEur(mgmtEur)+'). '+
+    'Terugverdientijd = investering ('+fmtEur(invEur)+') ÷ netto na beheer. Is die netto ≤ 0, dan is er bij deze grootte geen payback (—). '+
+    'Scenario A rekent enkel het vermijden van negatieve prijzen; scenario B telt daar de onbalans-sturing (imbalance settlement) bovenop.'));
   // v1.62.3: vanaf welke grootte is een payback haalbaar? Beheerkost én meerwaarde schalen met kVA.
   if(a.schaal){
     var sc=a.schaal;
@@ -3799,6 +3848,22 @@ function _renderInjectieKerncijfers(a){
     'Eigen simulatie (voorspellen → nomineren → bijsturen → afrekenen): de omvormer wordt fysiek bijgestuurd, de injectie afgerekend op day-ahead + onbalans. De gerapporteerde onbalans-meerwaarde is een capture-aandeel van het theoretische plafond'+(a.sturing?' ('+fmtNum((a.sturing.capture||0)*100,0)+'% · '+a.sturing.forecast_modus+'; plafond '+fmtEur(a.sturing.onbalans_potentie_eur||0)+', forecast-ondergrens '+fmtEur(a.sturing.onbalans_gesimuleerd_eur||0)+')':'')+', geijkt op imby. Indicatief; imby blijft de officiële studie zolang beschikbaar. Fluctus zet de sturing op (curtailement leverancier-onafhankelijk, onbalans i.f.v. leverancier).'));
   return wrap;
 }
+// v1.62.10: één scenariokaart (curtail-only of curtail+onbalans) voor het SolarActive-rapport —
+// meerwaarde/jaar, netto na beheer en de eigen terugverdientijd, elk apart zodat de klant het verschil ziet.
+function _rapportScenarioKaart(titel, uitleg, meerwaarde, netto, payback){
+  var pbTxt=(payback!=null)?fmtNum(payback,1)+' jaar':'—';
+  var pbSub=(payback!=null)?'investering / netto-meerwaarde':'netto-meerwaarde ≤ 0 bij deze grootte';
+  var kl=(payback!=null)?'#05B050':'#E8A33D';
+  var nettoKl=(netto>0)?'#05B050':'#C0392B';
+  return '<div style="flex:1 1 260px;min-width:240px;border:1.5px solid '+kl+'66;border-radius:8px;overflow:hidden">'+
+    '<div style="padding:8px 12px;background:'+kl+'14;font-weight:800;color:#1F3864;font-size:13px">'+titel+'</div>'+
+    '<div style="padding:6px 12px 2px;font-size:11px;color:#5A6577;line-height:1.45">'+uitleg+'</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:8px 12px 12px">'+
+      '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Meerwaarde/jaar</div><div style="font-size:16px;font-weight:800;color:#05B050">+ '+fmtEur(meerwaarde)+'</div></div>'+
+      '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Netto na beheer</div><div style="font-size:16px;font-weight:800;color:'+nettoKl+'">'+(netto>0?'+ ':'')+fmtEur(netto)+'</div></div>'+
+      '<div><div style="font-size:9.5px;color:#9E480E;text-transform:uppercase">Terugverdientijd</div><div style="font-size:16px;font-weight:800;color:#1F3864">'+pbTxt+'</div><div style="font-size:9px;color:#8A93A3;line-height:1.3">'+pbSub+'</div></div>'+
+    '</div></div>';
+}
 // Zelfstandig SolarActive-rapport in een nieuw venster: conclusie op de voorpagina + kerncijfers +
 // drie heatmaps (netto injectieopbrengst, bespaarde curtailment, verdiende onbalans-sturing).
 function _openSolarActiveRapport(a){
@@ -3810,6 +3875,11 @@ function _openSolarActiveRapport(a){
   var vandaag=(a._injOpbrengstEur>0)?a._injOpbrengstEur:o.vandaag_spot_eur;
   var pbTxt=(pb.payback_beide_jaar!=null?fmtNum(pb.payback_beide_jaar,1)+' jaar':'—');
   var pbCurt=(pb.payback_curtail_jaar!=null?fmtNum(pb.payback_curtail_jaar,1)+' jaar':'—');
+  var invEur=(pb.investering_eur!=null?pb.investering_eur:3500);
+  var mgmtEur=(pb.management_jaar_eur!=null?pb.management_jaar_eur:0);
+  var mgmtPerKva=(pb.management_eur_per_kva_jaar!=null?pb.management_eur_per_kva_jaar:6.6);
+  var nettoCurtail=(pb.netto_curtail_jaar_eur!=null?pb.netto_curtail_jaar_eur:(o.meerwaarde_curtail_eur-mgmtEur));
+  var nettoBeide=(pb.netto_beide_jaar_eur!=null?pb.netto_beide_jaar_eur:(o.meerwaarde_totaal_eur-mgmtEur));
   var esc=function(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
   var data={ uren:hm.uren||24, dagen:hm.dagen||365,
     netto:hm.netto_injectie_eur||[], bespaard:hm.bespaard_curtail_eur||[], verdiend:hm.verdiend_onbalans_eur||[] };
@@ -3833,14 +3903,27 @@ function _openSolarActiveRapport(a){
       'Door de injectie te <b>curtailen op de spotmarkt</b> en te <b>sturen op de onbalansmarkt</b> — zónder ooit uw zelfconsumptie te verminderen — kan die injectie ± <b>'+fmtEur(o.meerwaarde_totaal_eur)+'/jaar</b> extra opbrengen. '+
       'Tegenover een eenmalige investering van €'+fmtNum(pb.investering_eur,0)+' en een beheerkost van €'+String(pb.management_eur_per_kva_jaar).replace('.',',')+'/kVA/jaar is dat een terugverdientijd van <b>± '+pbTxt+'</b>. '+
       'Wij raden aan dit met uw leverancier te bespreken; Fluctus zet vervolgens de sturing op (curtailement leverancier-onafhankelijk, onbalans in functie van uw leverancier).</div>'+
-    '<h2>Kerncijfers (per jaar, indicatief)</h2>'+
+    '<h2>1 · Uw uitgangspunt</h2>'+
     '<div class="grid">'+
       '<div class="t"><div class="l">Injectie vandaag</div><div class="v">'+fmtEur(vandaag)+'</div><div class="s">'+(a._injOpbrengstEur>0?'uit injectiefactuur':'geschat op spot')+'</div></div>'+
-      '<div class="t"><div class="l">+ Curtailen op spot</div><div class="v" style="color:#05B050">+ '+fmtEur(o.meerwaarde_curtail_eur)+'</div><div class="s">vermijdt negatieve prijzen</div></div>'+
-      '<div class="t"><div class="l">+ Onbalans-sturing</div><div class="v" style="color:#05B050">+ '+fmtEur(o.meerwaarde_onbalans_eur)+'</div><div class="s">imbalance settlement</div></div>'+
-      '<div class="t"><div class="l">Meerwaarde totaal</div><div class="v" style="color:#05B050">'+fmtEur(o.meerwaarde_totaal_eur)+'</div><div class="s">curtail + onbalans</div></div>'+
-      '<div class="t"><div class="l">Terugverdientijd</div><div class="v">'+pbTxt+'</div><div class="s">enkel curtail: '+pbCurt+'</div></div>'+
-      '<div class="t"><div class="l">Beheerkost</div><div class="v">'+fmtEur(pb.management_jaar_eur)+'</div><div class="s">€'+String(pb.management_eur_per_kva_jaar||'').replace('.',',')+'/kVA/jaar</div></div>'+
+      '<div class="t"><div class="l">PV / injectie</div><div class="v">'+fmtNum(e.productie_mwh,0)+' / '+fmtNum(e.injectie_mwh,0)+' MWh</div><div class="s">'+fmtNum(inv.pv_kwp,0)+' kWp · '+fmtNum(inv.inverter_kva,0)+' kVA</div></div>'+
+      '<div class="t"><div class="l">Investering (eenmalig)</div><div class="v">'+fmtEur(invEur)+'</div><div class="s">gateway/sturing</div></div>'+
+      '<div class="t"><div class="l">Beheerkost (per jaar)</div><div class="v">'+fmtEur(mgmtEur)+'</div><div class="s">€ '+fmtNum(mgmtPerKva,2)+'/kVA/jaar</div></div>'+
+    '</div>'+
+    '<h2>2 · Wat de sturing u oplevert</h2>'+
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0">'+
+      _rapportScenarioKaart('A · Curtailen op de spotmarkt',
+        'Injectie geblokkeerd bij negatieve spotprijs (dag vooraf zeker gekend). Leverancier-onafhankelijk.',
+        o.meerwaarde_curtail_eur, nettoCurtail, pb.payback_curtail_jaar)+
+      _rapportScenarioKaart('B · Curtailen + sturen op onbalans',
+        'Bovenop A: voorspellen → nomineren → bijsturen → afrekenen op day-ahead + onbalans ('+esc(st.forecast_modus)+'). In functie van uw leverancier.',
+        o.meerwaarde_totaal_eur, nettoBeide, pb.payback_beide_jaar)+
+    '</div>'+
+    '<div style="font-size:11px;color:#5A6577;line-height:1.55;background:#F5F7FA;border:1px solid #E3E8EF;border-radius:6px;padding:9px 12px;margin:6px 0 4px">'+
+      '<b>Hoe berekend.</b> De meerwaarde/jaar is het verschil in injectieopbrengst t.o.v. vandaag (injectie aan de spotprijs). '+
+      'Netto na beheer = meerwaarde/jaar − beheerkost (€ '+fmtNum(mgmtPerKva,2)+'/kVA/jaar × '+fmtNum(inv.inverter_kva,0)+' kVA = '+fmtEur(mgmtEur)+'). '+
+      'Terugverdientijd = investering ('+fmtEur(invEur)+') ÷ netto na beheer; is die netto ≤ 0 dan is er bij deze grootte geen payback (—). '+
+      'Scenario A rekent enkel het vermijden van negatieve prijzen; scenario B telt daar de onbalans-sturing (imbalance settlement) bovenop.'+
     '</div>'+
     '<h2>Vergelijking van de scenario\'s</h2>'+
     '<table><tr><th>Scenario</th><th class="r">Injectieopbrengst/jaar</th><th class="r">Meerwaarde t.o.v. vandaag</th></tr>'+
@@ -6385,6 +6468,20 @@ function _renderRapportKnoppen(){
     fmBtn.onclick=function(){ _openFactuurrapport(); };
     frKnoppen.appendChild(fmBtn);
   }
+  // v1.62.10: SolarActive-injectierapport ook onderaan ophalen wanneer er bestaande PV is. Bestaat er al een
+  // analyse, dan opent de knop ze direct; anders draait ze eerst de analyse en opent ze het rapport nadien.
+  var _bpR=STATE.bestaandePv||{};
+  var _heeftBestaandePv=!!(_bpR.aanwezig && (+_bpR.kwp>0||+_bpR.kva>0||+_bpR.piekKw>0));
+  if(_heeftBestaandePv){
+    var saBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#9E480E;border:1px solid #E8A33D'},
+      STATE.injectieAnalyseLoading?'⏳ SolarActive analyseren…':'📄 SolarActive-rapport (bestaande PV)');
+    saBtn.disabled=!!STATE.injectieAnalyseLoading;
+    saBtn.onclick=function(){
+      if(STATE.injectieAnalyse){ _openSolarActiveRapport(STATE.injectieAnalyse); }
+      else { _runInjectieAnalyse(function(a){ _openSolarActiveRapport(a); }); }
+    };
+    frKnoppen.appendChild(saBtn);
+  }
   frSec.appendChild(frKnoppen);
   return frSec;
 }
@@ -7271,28 +7368,40 @@ function _pvSweepConfig(){
 // De endpoints draaien synchroon (geen server-progress), dus we tonen een client-side
 // activiteitenlog met verstreken tijd + een schatting van welke stap loopt. Eén interval
 // hertekent elke seconde zolang er iets laadt; het stopt zichzelf zodra alles klaar is.
+// v1.62.10: het knipperen van de geselecteerde stap tijdens het rekenen kwam doordat _logTick elke seconde
+// de VOLLEDIGE stage herrenderde. Nu verversen we enkel de live-log-boxen in-place (geen re-render van de
+// stepper/nav) — het Larson-licht animeert via CSS en heeft geen re-render nodig.
+var _LOGBOXEN=[]; var _logBoxSeq=0;
 function _logTick(){
   var bezig=(STATE.currentStep===10 && (STATE.pvSweepLoading||STATE.groeipadLoading||STATE.groeistap1Loading));
-  if(bezig){ if(STATE.currentStep===10) renderStage(); }
+  if(bezig){ if(!_refreshLogBoxen()){ if(STATE.currentStep===10) renderStage(); } }
   else if(STATE._logTimer){ clearInterval(STATE._logTimer); STATE._logTimer=null; }
 }
 function _startLogTimer(){ if(!STATE._logTimer){ try{ STATE._logTimer=setInterval(_logTick,1000); }catch(e){} } }
 function _elapsedS(t0){ return t0?Math.max(0,Math.round((Date.now()-t0)/1000)):0; }
-// Rendert een klein log-kader: titel + verstreken tijd + een reeks stap-regels (geschatte voortgang).
-function _logBox(titel, t0, aantal, stapLabel){
+function _logBoxContent(titel, t0, aantal, stapLabel){
   var s=_elapsedS(t0);
-  // schatting: ~4 s per dispatch-stap → hoeveel stappen zijn wellicht al klaar.
-  var klaar=Math.max(0, Math.min(aantal||0, Math.floor(s/4)));
-  var el0=el('div',{style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
-  el0.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px'},titel));
-  el0.appendChild(el('div',{style:'font-size:12px;color:#5A6577;margin-bottom:6px'},
-    '⏳ Rekent — verstreken tijd: '+s+' s'+(aantal?(' · ~'+klaar+'/'+aantal+' stappen'):'')));
-  var box=el('div',{style:'font-family:monospace;font-size:11px;color:#3A424C;background:#F5F7FA;border:1px solid #E3E8EF;border-radius:5px;padding:8px 10px;line-height:1.6'});
+  var klaar=Math.max(0, Math.min(aantal||0, Math.floor(s/4)));   // ~4 s per dispatch-stap
   var rows='';
   if(aantal){ for(var i=1;i<=aantal;i++){ rows+=((i<=klaar)?'✓ ':((i===klaar+1)?'▸ ':'· '))+stapLabel(i)+'<br>'; } }
   rows+='<span style="color:#8A94A6">De motor draait per stap een echte dispatch (spot × profiel × batterij) — dit duurt even.</span>';
-  box.innerHTML=rows; el0.appendChild(box);
+  return '<div style="font-weight:800;color:#1F3864;font-size:13px;margin-bottom:4px">'+titel+'</div>'+
+    '<div style="font-size:12px;color:#5A6577;margin-bottom:6px">⏳ Rekent — verstreken tijd: '+s+' s'+(aantal?(' · ~'+klaar+'/'+aantal+' stappen'):'')+'</div>'+
+    '<div style="font-family:monospace;font-size:11px;color:#3A424C;background:#F5F7FA;border:1px solid #E3E8EF;border-radius:5px;padding:8px 10px;line-height:1.6">'+rows+'</div>';
+}
+// Rendert een klein log-kader met stabiele id; _refreshLogBoxen() ververst de inhoud in-place per seconde.
+function _logBox(titel, t0, aantal, stapLabel){
+  var id='fdsim-logbox-'+(++_logBoxSeq);
+  _LOGBOXEN.push({id:id, titel:titel, t0:t0, aantal:aantal, stapLabel:stapLabel});
+  var el0=el('div',{id:id,style:'margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #1F386440;border-radius:6px'});
+  el0.innerHTML=_logBoxContent(titel, t0, aantal, stapLabel);
   return el0;
+}
+function _refreshLogBoxen(){
+  var any=false;
+  for(var i=0;i<_LOGBOXEN.length;i++){ var d=_LOGBOXEN[i]; var node=document.getElementById(d.id);
+    if(node){ node.innerHTML=_logBoxContent(d.titel, d.t0, d.aantal, d.stapLabel); any=true; } }
+  return any;
 }
 function _startPvSweep(){
   if((+STATE.pvKwp||0)>0) return;                      // PV al gekozen/manueel → geen suggestie
@@ -8270,6 +8379,9 @@ function renderStep9Resultaat(){
     }
   }
 
+  // v1.62.10: het "Scenario"-recapblok is van het ontwerpscherm verwijderd (redundant — de invoer staat al
+  // in de samenvatting op stap 10 Periode). Het blok wordt niet meer aan de pagina toegevoegd.
+  var _TOON_SCENMETA=false;
   // Scenario-meta box: toont alle invoerparameters bovenaan stap 9
   // Zo zie je in ''n oogopslag waar de cijfers vandaan komen.
   var scenMeta=el('div',{class:'fdsim-section',style:'background:#FFFFFF;border:2px solid #1F3864'});
@@ -8335,7 +8447,7 @@ function renderStep9Resultaat(){
   grid.appendChild(metaRow('Aansluiting',fmtNum(STATE.aansluitingKva,0)+' kVA'));
   grid.appendChild(metaRow('Contract',(STATE.leverancier||'Enwyse')+' · '+modusLabel));
   scenMeta.appendChild(grid);
-  box.appendChild(scenMeta);
+  if(_TOON_SCENMETA){ box.appendChild(scenMeta); }
 
   // v1.16 sessie 5a (Features 2+3+4): factuur-vergelijking + besparingsdecompositie.
   // Alleen actief bij STATE.jaar='specifiek' EN STATE.baseCase aanwezig EN sim klaar.
