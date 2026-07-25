@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.62.7  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.62.8  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.62.8: (1) SolarActive-heatmap-x-as = kalenderdag (1 jan → 31 dec) i.p.v. sim-index — bij een
+              rolling-12-maand-venster viel de winter voorheen in het midden (vergt server.js v15.42.1);
+              (2) input-samenvatting toont nu ook de BESTAANDE PV (30 kWp / 20 kVA SolarActive) — voorheen
+              "(geen)"; (3) blauw Larson-scannerlicht enkel op de ontwerp-stap die effectief rekent
+              (stap 1 opstellingen / 2 PV-sweep / 4 groeipad), + de 4-stappen-nav toont al tijdens de
+              opstellingen-simulatie i.p.v. enkel de log.
      v1.62.7: (1) heatmaps duidelijker (95-percentiel-schaal + gamma 0,6 + diepere groen/rood + hoger canvas);
               (2) FIX factuuranalyse — de maand-sim gebruikte het JAARvolume zodra STATE.jaar van 'specifiek'
               afweek (na terugstappen via de Periode-stap) → dynamische maandpost ~13× te hoog; nu draait de
@@ -139,6 +145,10 @@
 /* ============ SPINNER ============ */
 #fdsim-root .fdsim-spin{display:inline-block;width:12px;height:12px;border:2px solid #D5DBE3;border-top-color:#1F3864;border-radius:50%;animation:fdsim-spin 0.7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes fdsim-spin{to{transform:rotate(360deg)}}
+/* v1.62.8: blauw Larson-scannerlicht — enkel op de ontwerp-stap die op dat moment effectief rekent. */
+#fdsim-root .ontw-larson{position:absolute;left:0;right:0;bottom:0;height:3px;overflow:hidden;border-radius:0 0 6px 6px;background:rgba(46,110,220,.14)}
+#fdsim-root .ontw-larson::before{content:"";position:absolute;bottom:0;left:-30%;height:3px;width:28%;border-radius:3px;background:linear-gradient(90deg,rgba(46,110,220,0),#2E6EDC 55%,#8FB6FF);box-shadow:0 0 8px 1px rgba(46,110,220,.85);animation:fdsim-larson 1.15s ease-in-out infinite}
+@keyframes fdsim-larson{0%{left:-30%}50%{left:100%}100%{left:-30%}}
 
 /* ============ MODAL (nieuwe batterij) ============ */
 #fdsim-root .fdsim-modal-overlay{position:fixed;inset:0;background:rgba(26,31,43,.5);display:none !important;align-items:center;justify-content:center;z-index:9999}
@@ -242,7 +252,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.62.7</span>
+    <span class="fdsim-version">v1.62.8</span>
   </div>
 </div>
 
@@ -3836,7 +3846,7 @@ function _openSolarActiveRapport(a){
     '</table>'+
     '<div class="note">Nooit wordt de zelfconsumptie verminderd — enkel de injectie wordt zo gestuurd dat ze op jaarbasis maximale waarde geeft.</div>'+
     '<h2>Heatmap 1 — netto injectieopbrengst per kwartier (vandaag, zonder sturing)</h2>'+
-    '<canvas id="hm1"></canvas><div class="cap">Uur van de dag (verticaal) × dag van het jaar (horizontaal). Rood = kost bij negatieve injectieprijs, groen = opbrengst.</div>'+
+    '<canvas id="hm1"></canvas><div class="cap">Uur van de dag (verticaal) × kalenderdag (horizontaal: 1 jan links → 31 dec rechts, maandlijnen). Rood = kost bij negatieve injectieprijs, groen = opbrengst.</div>'+
     '<h2>Heatmap 2 — bespaarde injectie door curtailment (€/kwartier)</h2>'+
     '<canvas id="hm2"></canvas><div class="cap">Waar de injectie geblokkeerd wordt omdat de spotprijs negatief is — vermeden verlies.</div>'+
     '<h2>Heatmap 3 — verdiende injectie door onbalans-sturing (€/kwartier)</h2>'+
@@ -3855,7 +3865,10 @@ function _openSolarActiveRapport(a){
     'var t=Math.max(-1,Math.min(1,v/p));var g=(t<0?-1:1)*Math.pow(Math.abs(t),0.6);'+   // gamma → meer kleur bij kleine waarden
     'if(mode==="div"){if(g>=0){col="rgb("+Math.round(255-235*g)+","+Math.round(255-115*g)+","+Math.round(255-195*g)+")";}else{var uu=-g;col="rgb("+Math.round(255-55*uu)+","+Math.round(255-215*uu)+","+Math.round(255-215*uu)+")";}}'+
     'else{var g2=g<0?0:g;col="rgb("+Math.round(255-235*g2)+","+Math.round(255-115*g2)+","+Math.round(255-195*g2)+")";}'+
-    'ctx.fillStyle=col;ctx.fillRect(d,u,1,1);}}}'+
+    'ctx.fillStyle=col;ctx.fillRect(d,u,1,1);}}'+
+    // v1.62.8: dunne maand-scheidingslijnen (1 feb … 1 dec) zodat de kalender-x-as leesbaar is
+    'if(W>=360){var mb=[31,59,90,120,151,181,212,243,273,304,334];ctx.fillStyle="rgba(90,101,119,0.30)";for(var mi=0;mi<mb.length;mi++){ctx.fillRect(mb[mi],0,1,H);}}'+
+    '}'+
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
   // Robuust openen: eerst een nieuw venster via Blob-URL (betrouwbaarder dan document.write in een leeg
@@ -4477,6 +4490,25 @@ function renderStep7Aansluiting(){
   return box;
 }
 
+// v1.62.8: PV-samenvatting toont zowel nieuw ontworpen PV (STATE.pvKwp) als reeds aanwezige PV
+// (STATE.bestaandePv, SolarActive-injectie-optimalisatie). Voorheen enkel STATE.pvKwp → een klant
+// met bestaande PV (bv. 30 kWp / 20 kVA) zag "(geen)" in de samenvatting vóór de simulaties.
+function _pvSamenvattingTekst(){
+  var delen=[];
+  if(STATE.pvKwp>0){ delen.push(STATE.pvKwp+' kWp nieuw (~'+fmtNum(STATE.pvKwp*0.95,1)+' MWh/jaar)'); }
+  var bp=STATE.bestaandePv||{};
+  if(bp.aanwezig && (+bp.kwp>0 || +bp.kva>0 || +bp.piekKw>0)){
+    var kwp=+bp.kwp||0, kva=+bp.kva||0, piek=+bp.piekKw||0;
+    if(kva<=0 && piek>0) kva=piek;
+    if(kwp<=0 && kva>0) kwp=Math.round(1.3*kva);
+    var t='bestaand: '+fmtNum(kwp,0)+' kWp';
+    if(kva>0) t+=' / '+fmtNum(kva,0)+' kVA';
+    t+=' (SolarActive-injectie)';
+    delen.push(t);
+  }
+  return delen.length ? delen.join(' &nbsp;·&nbsp; ') : '(geen)';
+}
+
 // ---------- STAP 8: PERIODE ----------
 function renderStep8Periode(){
   var box=el('div');
@@ -4559,7 +4591,7 @@ function renderStep8Periode(){
     '<b>Project:</b> '+escapeHtml(STATE.project)+' / '+escapeHtml(STATE.scenario)+'<br>'+
     '<b>Locatie:</b> '+STATE.postcode+' ('+STATE.grd+', '+STATE.spanning+')<br>'+
     '<b>Profiel:</b> '+escapeHtml(STATE.profielNaam)+' — '+STATE.jaarverbruik+' MWh/jaar<br>'+
-    '<b>PV:</b> '+(STATE.pvKwp>0?(STATE.pvKwp+' kWp (~'+fmtNum(STATE.pvKwp*0.95,1)+' MWh/jaar)'):'(geen)')+'<br>'+
+    '<b>PV:</b> '+_pvSamenvattingTekst()+'<br>'+
     '<b>Batterij:</b> '+(STATE.batterijId?STATE.batterijId:'(geen)')+'<br>'+
     '<b>Contract:</b> '+escapeHtml(STATE.leverancier||'Enwyse')+' — '+(STATE.modus==='passthrough'?'M passthrough':'Imbalance forfaitair')+' / schijf <i>'+escapeHtml(schijfText)+'</i><br>'+
     '<b>Vergroening:</b> '+fmtNum(STATE.contractVergroening,2)+' €/MWh &nbsp; <b>Vast:</b> '+fmtNum(STATE.contractVastMaand,2)+' €/maand<br>'+
@@ -7941,14 +7973,26 @@ var ONTW_STAPPEN=[
   {id:'ontw-3', nr:3, kort:'Kabelplanning'},
   {id:'ontw-4', nr:4, kort:'Groeipad — stap 1'}
 ];
+// v1.62.8: welke ontwerp-substap rekent op dit moment effectief? Enkel díe stap krijgt het Larson-licht
+// (niet meer de volledige geselecteerde stap die flikkerde bij elke herrender). -1 = niets aan het rekenen.
+function _ontwerpBusyStap(){
+  if(STATE.isRunning) return 0;                                     // stap 1 — opstellingen worden vergeleken
+  if(STATE.pvSweepLoading) return 1;                                // stap 2 — PV-sweep
+  if(STATE.groeipadLoading || STATE.groeistap1Loading) return 3;    // stap 4 — groeipad / groeistap 1
+  return -1;
+}
 function _ontwerpNav(){
+  var busyIdx=_ontwerpBusyStap();
   var bar=el('div',{id:'ontw-nav',style:'position:sticky;top:56px;z-index:20;display:flex;gap:6px;flex-wrap:wrap;'+
     'background:#fff;border:1px solid #1F386430;border-radius:8px;padding:6px;margin:0 0 16px;box-shadow:0 2px 8px rgba(31,56,100,.08)'});
-  ONTW_STAPPEN.forEach(function(s){
-    var chip=el('button',{'class':'ontw-chip','data-target':s.id,
-      style:'flex:1 1 120px;min-width:118px;cursor:pointer;border:1px solid #D5DBE3;background:#F5F7FA;color:#5A6577;'+
+  ONTW_STAPPEN.forEach(function(s,ix){
+    var busy=(ix===busyIdx);
+    var chip=el('button',{'class':'ontw-chip'+(busy?' busy':''),'data-target':s.id,
+      style:'position:relative;overflow:hidden;flex:1 1 120px;min-width:118px;cursor:pointer;'+
+      'border:1px solid '+(busy?'#2E6EDC':'#D5DBE3')+';background:'+(busy?'#EAF2FF':'#F5F7FA')+';color:'+(busy?'#1F3864':'#5A6577')+';'+
       'border-radius:6px;padding:7px 8px;font-family:inherit;text-align:center;line-height:1.25;transition:background .15s,color .15s,border-color .15s'},
       [ el('div',{style:'font-size:10px;opacity:.75'},'Stap '+s.nr), el('div',{style:'font-size:11.5px;font-weight:700'},s.kort) ]);
+    if(busy){ chip.appendChild(el('div',{class:'ontw-larson'})); }
     chip.onclick=function(){ var t=document.getElementById(s.id); if(t){ try{ t.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){ t.scrollIntoView(); } } };
     bar.appendChild(chip);
   });
@@ -7971,6 +8015,7 @@ function _initOntwerpNavSpy(){
     var chips=bar.querySelectorAll('.ontw-chip');
     function setActive(idx){
       for(var i=0;i<chips.length;i++){ var on=(i===idx);
+        if(chips[i].classList.contains('busy')) continue;   // v1.62.8: rekenende stap houdt zijn eigen (blauwe) look + Larson
         chips[i].style.background=on?'#1F3864':'#F5F7FA';
         chips[i].style.color=on?'#fff':'#5A6577';
         chips[i].style.borderColor=on?'#1F3864':'#D5DBE3';
@@ -7994,7 +8039,9 @@ function renderStep9Resultaat(){
   var box=el('div');
   box.appendChild(el('h2',null,'Ontwerp'));
   // v1.59.0: navigatiebalk met de 4 ontwerp-stappen — alleen als het resultaat klaar is.
-  if(!STATE.isRunning && STATE.resultaat && STATE.opstellingen){ box.appendChild(_ontwerpNav()); }
+  // v1.62.8: toon de 4-stappen-nav ook TIJDENS de opstellingen-simulatie (met het Larson-licht op stap 1),
+  // niet enkel wanneer het resultaat klaar is — zo zie je bovenaan al de vier stappen i.p.v. enkel de log.
+  if(STATE.isRunning || (STATE.resultaat && STATE.opstellingen)){ box.appendChild(_ontwerpNav()); }
 
   // v1.26.0 (blok 1): heading — waar dit scherm over gaat (de drie KPI's).
   if(!STATE.isRunning && STATE.opstellingen){
