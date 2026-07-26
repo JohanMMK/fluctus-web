@@ -1,4 +1,6 @@
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
+//        Managers zien ze meteen (impliciet alle apps); sellers via een user_app_access-rij.
 // Bouwt voort op het bestaande 9a-toegangsmodel: de fluctus-proxy valideert de
 // Supabase-JWT en checkt user_app_access via POST /api/app-access/check.
 // Niet-toegankelijke apps worden VERBORGEN (geen disabled).
@@ -8,6 +10,7 @@ const $ = (id) => document.getElementById(id);
 // App-catalogus = de 9a-apps. url is configureerbaar; de eigenlijke inbedding
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
 const APP_CATALOG = [
+  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '20 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
