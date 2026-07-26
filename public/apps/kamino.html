@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.3 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.4 (Mijn Fluctus-app · testmodus)
+     v0.4: PROJECT-CENTRISCH. Eerste factuur-upload maakt een project (FLX-XXX-XXX, mock lokaalId; productie /api/project-id).
+           Volgende tegels zetten datzelfde project voort — geen her-invoer: contact + velden geprefild, antwoorden
+           per project-ID gemarkeerd. Portaal toont "Actief project"-banner + "Nieuw project". Bestaand project kiesbaar
+           zolang er geen actief project loopt. Eén factuur per project.
      v0.3: app-guard (ingelogd, /portal.html) + "← Mijn Fluctus"-topbar; routeringslogica naar de rapporten
            (V1 → factuurrapport, V3/V5 → ontwerp-rapport, teasers → voorbeeldstudie). Betaalde rapporten gaan
            in deze testfase gewoon door. Rapporten openen (nog) met voorbeelddata; echte-data-koppeling volgt.
@@ -31,6 +35,8 @@
   h1 span{color:var(--groen-d)}
   .baseline{font-size:15px;color:var(--grijs);max-width:760px;margin:6px auto 0;line-height:1.5}
   .subprompt{font-size:13px;color:var(--blauw);font-weight:700;margin-top:12px}
+  .projbanner{display:flex;align-items:center;gap:10px;max-width:720px;margin:14px auto 0;background:#F3FBF5;border:1px solid #05B05055;border-radius:10px;padding:9px 14px;font-size:13px;color:#0A6B2E}
+  .projbanner b{color:var(--blauw)}
   .bar{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin:14px 0 16px}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--grijs)}
   .legend .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
@@ -76,6 +82,8 @@
   .radio label{flex:1;min-width:180px;border:1px solid var(--lijn);border-radius:8px;padding:9px 12px;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:center}
   .radio label.on{border-color:var(--blauw);background:#1F386408}
   .prijs{background:#FFF7EC;border:1px solid #E8A33D66;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--oranje-d);margin:8px 0}
+  .projkies{background:#F3FBF5;border:1px solid #05B05055;border-radius:8px;padding:10px 12px;font-size:13px;color:#0A6B2E}
+  .projkies b{color:var(--blauw)}
   .andere{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
   .chip{font-size:11px;border:1px solid var(--lijn);border-radius:20px;padding:5px 11px;color:var(--grijs);cursor:pointer}
   .chip:hover{border-color:var(--blauw);color:var(--blauw)}
@@ -166,10 +174,28 @@ var ROUTES={
 };
 function routeVan(slug){ return ROUTES[slug] || { sells:ONTWERP, naam:'Ontwerpstudie (voorbeeld)' }; }
 
-// ---------- gedeelde state (prefill + beantwoord) ----------
-var STATE={ contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
-  project:{mode:'nieuw', id:'', factuur:''}, velden:{}, beantwoord:{} };
-var PROJECTEN_MOCK=[ {id:'FLX-KMK-A1B', naam:'Kiemkracht VZW', datum:'25-07-2026'} ]; // dropdown-demo
+// ---------- gedeelde state: PROJECT-CENTRISCH ----------
+// contact = sessie-breed (prefill overal). werk = het ACTIEVE project (id null = nog geen project).
+// projecten = alle projecten in deze sessie. beantwoord = per project-ID → { slug: kerncijfer }.
+// Eén factuur per project: een nieuwe factuur = een nieuw project (werk.id wordt gezet bij eerste submit).
+var STATE={
+  contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
+  werk:{ id:null, naam:'', factuur:'', velden:{} },
+  projecten:[],
+  beantwoord:{}
+};
+// Demo-seed: één bestaand project zodat "Bestaand project" meteen te kiezen valt.
+STATE.projecten.push({ id:'FLX-KMK-A1B', naam:'Kiemkracht VZW', datum:'25-07-2026', factuur:'factuur_kiemkracht_2026.pdf', velden:{} });
+var _projMode='nieuw';  // keuze in het vraagscherm zolang er nog geen actief project is
+
+// Client-side project-ID voor de mockup (productie: POST /api/project-id → FNV-1a).
+function lokaalId(){ var a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',s=function(){var o='';for(var i=0;i<3;i++)o+=a[Math.floor(Math.random()*a.length)];return o;};return 'FLX-'+s()+'-'+s(); }
+function heeftActief(){ return !!STATE.werk.id; }
+function projById(id){ return STATE.projecten.find(function(p){return p.id===id;}); }
+function antwMap(){ var id=STATE.werk.id; if(!id) return {}; return STATE.beantwoord[id]||(STATE.beantwoord[id]={}); }
+function activeer(id){ var p=projById(id); if(!p) return; STATE.werk={ id:p.id, naam:p.naam, factuur:p.factuur||'', velden:Object.assign({},p.velden||{}) }; }
+function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', velden:{} }; _projMode='nieuw'; }
+function vandaag(){ var d=new Date(); return ('0'+d.getDate()).slice(-2)+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+d.getFullYear(); }
 
 function tagLabel(t){return t==='gratis'?'gratis':(t==='betaald'?'studie':'teaser');}
 function shuffle(a){var r=a.slice();for(var i=r.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=r[i];r[i]=r[j];r[j]=t;}return r;}
@@ -178,19 +204,25 @@ var app=document.getElementById('app');
 
 // ---------- PORTAAL ----------
 function renderPortaal(){
+  var ant=antwMap();
   var tiles=shuffle(VRAGEN).map(function(v){
-    var done=STATE.beantwoord[v.slug];
+    var done=ant[v.slug];
     return '<a class="tile '+v.type+(done?' done':'')+'" href="#/vraag/'+v.slug+'">'+
       (done?'<span class="check">✓</span>':'')+
       '<span class="tag '+v.type+'">'+tagLabel(v.type)+'</span>'+
       '<div class="ic">'+v.ic+'</div><div class="vr">'+v.vr+'</div>'+
       '<div class="kern">'+(done?done:v.kern)+'</div></a>';
   }).join('');
+  var banner = heeftActief()
+    ? '<div class="projbanner">📁 Actief project: <b>'+STATE.werk.id+'</b>'+(STATE.werk.naam?' · '+STATE.werk.naam:'')+
+        '<button class="btn ghost" style="margin-left:auto;padding:5px 11px" onclick="nieuwWerk();renderPortaal()">+ Nieuw project</button></div>'
+    : '';
   app.innerHTML=
     '<header class="k"><div class="brand" onclick="location.hash=\'#/\'">Fluctus.net · Kamino</div>'+
     '<h1>Uw pad naar <span>maximale elektrificatie</span></h1>'+
     '<div class="baseline">Stap voor stap, met groeiend inzicht — elke stap rendabel en in de juiste richting, zonder ooit te veel te investeren. Kies een vraag om te starten.</div>'+
     '<div class="subprompt">Welke vraag houdt u vandaag bezig?</div></header>'+
+    banner+
     '<div class="bar"><div class="legend">'+
       '<span><span class="dot" style="background:#05B050"></span>Gratis inzicht + rapport</span>'+
       '<span><span class="dot" style="background:#9E480E"></span>Betaalde ontwerpstudie</span>'+
@@ -202,29 +234,44 @@ function renderPortaal(){
 
 // ---------- VRAAGSCHERM (generiek) ----------
 function veldInput(f){
-  var val=STATE.velden[f.k]||'';
-  if(f.opts){ return '<div class="fld"><label>'+f.lbl+'</label><select onchange="STATE.velden[\''+f.k+'\']=this.value">'+
+  var val=STATE.werk.velden[f.k]||'';
+  if(f.opts){ return '<div class="fld"><label>'+f.lbl+'</label><select onchange="STATE.werk.velden[\''+f.k+'\']=this.value">'+
     '<option value="">– kies –</option>'+f.opts.map(function(o){return '<option'+(val===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'; }
-  return '<div class="fld"><label>'+f.lbl+'</label><input value="'+val.replace(/"/g,'&quot;')+'" oninput="STATE.velden[\''+f.k+'\']=this.value">'+
+  return '<div class="fld"><label>'+f.lbl+'</label><input value="'+val.replace(/"/g,'&quot;')+'" oninput="STATE.werk.velden[\''+f.k+'\']=this.value">'+
     (f.hint?'<div class="hint">'+f.hint+'</div>':'')+'</div>';
 }
 function ci(k){ return (STATE.contact[k]||'').replace(/"/g,'&quot;'); }
+// keuze in het projectblok terwijl er nog geen actief project is
+function kiesMode(m,slug){ _projMode=m; renderVraag(slug); }
+function kiesBestaand(id,slug){ if(id){ activeer(id); } renderVraag(slug); }
 function renderVraag(slug){
   var v=bySlug(slug); if(!v){ location.hash='#/'; return; }
-  var nieuw=STATE.project.mode!=='bestaand';
-  var projBlok = '<div class="radio">'+
-      '<label class="'+(nieuw?'on':'')+'" onclick="STATE.project.mode=\'nieuw\';renderVraag(\''+slug+'\')"><input type="radio" '+(nieuw?'checked':'')+'> Nieuwe factuur opladen</label>'+
-      '<label class="'+(!nieuw?'on':'')+'" onclick="STATE.project.mode=\'bestaand\';renderVraag(\''+slug+'\')"><input type="radio" '+(!nieuw?'checked':'')+'> Bestaand project</label>'+
-    '</div>'+
-    (nieuw
-      ? '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label><input type="file" onchange="STATE.project.factuur=(this.files[0]?this.files[0].name:\'\')"><div class="hint">Per project laadt u de factuur één keer op — een nieuwe factuur start een nieuw project.</div></div>'
-      : '<div class="fld"><label>Kies uw project</label><select onchange="STATE.project.id=this.value"><option value="">– kies project –</option>'+
-         PROJECTEN_MOCK.map(function(p){return '<option value="'+p.id+'"'+(STATE.project.id===p.id?' selected':'')+'>'+p.id+' · '+p.naam+' · '+p.datum+'</option>';}).join('')+'</select></div>');
+  var projBlok;
+  if(heeftActief()){
+    // Er loopt al een project → dit scherm zet dat gewoon voort (geen her-invoer).
+    var p=projById(STATE.werk.id)||{};
+    projBlok='<div class="projkies">📁 U werkt verder aan project <b>'+STATE.werk.id+'</b>'+(STATE.werk.naam?' · '+STATE.werk.naam:'')+
+        (p.factuur?'<div class="hint" style="margin-top:4px">Factuur: '+p.factuur+' — één factuur per project.</div>':'')+
+      '</div>'+
+      '<div class="andere" style="margin-top:8px"><span class="chip" onclick="nieuwWerk();renderVraag(\''+slug+'\')">+ Nieuwe factuur / nieuw project</span></div>';
+  } else {
+    // Nog geen actief project → factuur opladen (nieuw) of een bestaand project kiezen.
+    var nieuw=_projMode!=='bestaand';
+    projBlok='<div class="radio">'+
+        '<label class="'+(nieuw?'on':'')+'" onclick="kiesMode(\'nieuw\',\''+slug+'\')"><input type="radio" '+(nieuw?'checked':'')+'> Nieuwe factuur opladen</label>'+
+        '<label class="'+(!nieuw?'on':'')+'" onclick="kiesMode(\'bestaand\',\''+slug+'\')"><input type="radio" '+(!nieuw?'checked':'')+'> Bestaand project</label>'+
+      '</div>'+
+      (nieuw
+        ? '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label><input type="file" onchange="STATE.werk.factuur=(this.files[0]?this.files[0].name:\'\')"><div class="hint">Per project laadt u de factuur één keer op — een nieuwe factuur start een nieuw project.</div></div>'
+        : '<div class="fld"><label>Kies uw project</label><select onchange="kiesBestaand(this.value,\''+slug+'\')"><option value="">– kies project –</option>'+
+           STATE.projecten.map(function(p){return '<option value="'+p.id+'">'+p.id+' · '+p.naam+' · '+p.datum+'</option>';}).join('')+'</select></div>');
+  }
 
   var velden = v.velden.length ? '<div class="sec"><h3>Voor deze vraag</h3>'+v.velden.map(veldInput).join('')+'</div>' : '';
 
+  var ant=antwMap();
   var andere = VRAGEN.filter(function(x){return x.slug!==slug;}).slice(0,6).map(function(x){
-    var d=STATE.beantwoord[x.slug];
+    var d=ant[x.slug];
     return '<span class="chip'+(d?' done':'')+'" onclick="location.hash=\'#/vraag/'+x.slug+'\'">'+(d?'✓ ':'')+x.vr+'</span>';
   }).join('');
 
@@ -258,8 +305,19 @@ function renderVraag(slug){
 
 function verstuur(slug){
   var v=bySlug(slug), r=routeVan(slug);
-  STATE.beantwoord[slug]=v.mock;                 // markeer beantwoord + kerncijfer op de tegel
-  var actie='', melding='';
+  // Eerste submit zonder actief project → maak nu het project aan (uit de factuur + klantnaam).
+  if(!STATE.werk.id){
+    var naam=(STATE.contact.k_naam||'').trim() || (STATE.werk.factuur?STATE.werk.factuur.replace(/\.[^.]+$/,''):'Nieuw project');
+    var p={ id:lokaalId(), naam:naam, datum:vandaag(), factuur:STATE.werk.factuur||'', velden:Object.assign({},STATE.werk.velden) };
+    STATE.projecten.unshift(p);
+    STATE.werk.id=p.id; STATE.werk.naam=p.naam;
+  } else {
+    // Bestaand project → velden/naam terugschrijven zodat de volgende vraag ze prefilt.
+    var pe=projById(STATE.werk.id);
+    if(pe){ pe.velden=Object.assign({},STATE.werk.velden); if((STATE.contact.k_naam||'').trim()) pe.naam=STATE.werk.naam=STATE.contact.k_naam.trim(); }
+  }
+  antwMap()[slug]=v.mock;                         // markeer beantwoord onder het ACTIEVE project-ID
+  var actie='', melding='', pid=STATE.werk.id;
   if(r.report){
     // rapport-vraag → open het rapport-app (same-origin, uw sessie → project-ID + Supabase-opslag werken)
     try{ window.open(r.report,'_blank'); }catch(e){}
@@ -275,7 +333,7 @@ function verstuur(slug){
   }
   app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar Kamino</div>'+
     '<div class="card"><div class="qh"><div class="ic">✅</div><div><h2>Bedankt — we gaan ermee aan de slag</h2></div></div>'+
-    '<div class="bevestig">Uw vraag <b>“'+v.vr+'”</b> is verwerkt.<br><br>'+melding+
+    '<div class="bevestig">Uw vraag <b>“'+v.vr+'”</b> is verwerkt onder project <b>'+pid+'</b>'+(STATE.werk.naam?' ('+STATE.werk.naam+')':'')+'.<br><br>'+melding+
       '<br><br><span style="font-size:12px;color:#5A6577">Testfase: rapporten openen met voorbeelddata. De koppeling aan úw factuur (run → Supabase → mail via de academy-backend) is de volgende stap.</span></div>'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+actie+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar Kamino</button></div></div></div>';
