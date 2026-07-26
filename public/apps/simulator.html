@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.62.10  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.63.0  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.63.1: KPI-fijnmapping (echte _kpiEngine beste-rij: €/km, NPV, loadfactor voor/ná, rendement + extra-PV
+              bijdrage); PDF-opslag ook voor SolarActive (drop-in via postMessage-brug) en factuurrapport
+              (project-ID meegegeven; drop-in fluctus-rapport-pdf.js met 1 include-regel).
+     v1.63.0: ontwerp-rapport (klant + management) gekoppeld aan de echte data (_ontwerpRapportData); project-
+              ID opgehaald via /api/project-id; knoppen Klant-/Managementrapport in het Rapporten-blok. PDF-
+              opslag in Supabase gebeurt in het rapport zelf (jsPDF → /api/rapport-opslaan).
      v1.62.10: (1) SolarActive-kerncijfers + rapport herwerkt: uitgangspunt (incl. investering + beheerkost)
                en twee scenariokaarten (A curtail / B curtail+onbalans) elk met eigen terugverdientijd +
                "hoe berekend"-uitleg. (2) Geen geflikker meer van de geselecteerde stap tijdens het rekenen:
@@ -262,7 +268,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.62.10</span>
+    <span class="fdsim-version">v1.63.1</span>
   </div>
 </div>
 
@@ -2786,10 +2792,14 @@ function _parseBEdate(s){ if(!s)return null; var m=String(s).match(/(\d{1,2})[\/
 //   3) niets        → eerlijk melden. NOOIT stil terugvallen op de −12%-schatting:
 //                     dat zou een ander cijfer tonen dan het bewaarde rapport.
 function _openFactuurrapportMet(data){
-  try{ sessionStorage.setItem('FLUCTUS_FACTUURRAPPORT', JSON.stringify(data)); }catch(e){
-    alert('De analyse is te groot voor de browseropslag — rapport kan niet geopend worden.'); return;
-  }
-  window.open('/apps/factuurrapport.html','_blank');
+  // v1.63.1: project-ID meegeven zodat het factuurrapport het projectnummer + PDF-opslag (drop-in) kan tonen.
+  _metProjectId(function(pid){
+    try{ data.project_id=pid; }catch(e){}
+    try{ sessionStorage.setItem('FLUCTUS_FACTUURRAPPORT', JSON.stringify(data)); }catch(e){
+      alert('De analyse is te groot voor de browseropslag — rapport kan niet geopend worden.'); return;
+    }
+    window.open('/apps/factuurrapport.html','_blank');
+  });
 }
 function _factuuranalysePad(){
   return (STATE.baseCase && STATE.baseCase._factuuranalyse_pad) || STATE._factuuranalyse_pad || null;
@@ -3038,9 +3048,125 @@ function _financieelRapportData(){
 }
 function _openFinancieelRapport(){
   if(!_financieelRapportBeschikbaar()){ alert('Draai eerst een simulatie (stap 10) — dan kan het financieel rapport worden opgebouwd.'); return; }
-  try{ sessionStorage.setItem('FLUCTUS_RAPPORT', JSON.stringify(_financieelRapportData())); }catch(e){}
-  window.open('/apps/financieel-rapport.html','_blank');
+  _metProjectId(function(pid){
+    var d=_financieelRapportData(); d.project_id=pid;
+    try{ sessionStorage.setItem('FLUCTUS_RAPPORT', JSON.stringify(d)); }catch(e){}
+    window.open('/apps/financieel-rapport.html','_blank');
+  });
 }
+
+// v1.63.0: project-identificatienummer ophalen/aanmaken (server: stabiel FLX-nummer per project), en dan cb(pid).
+// Faalt de call (offline/niet-ingelogd), dan gaan we door zonder nummer — het rapport blijft werken.
+function _metProjectId(cb){
+  var proj=STATE.project||STATE.scenario||'';
+  if(!proj){ cb(''); return; }
+  apiPost('/api/project-id',{ project:proj }).then(function(r){ cb((r&&r.id)||''); }).catch(function(){ cb(''); });
+}
+
+// v1.63.0: data-contract voor het nieuwe ontwerp-rapport (klant + management). Hergebruikt _financieelRapportData
+// voor de financiële kern en vult de narratief-velden uit STATE + injectieAnalyse + groeipad.
+function _ontwerpCapexTot(pvKwp, battKwh, lp){
+  var C={pv_kwp:450,batterij_kwh:350,laadpaal_ac:2500,laadpaal_dc160:40000,laadpaal_dc400:70000};
+  return (pvKwp||0)*C.pv_kwp+(battKwh||0)*C.batterij_kwh+(lp.ac||0)*C.laadpaal_ac+(lp.dc160||0)*C.laadpaal_dc160+(lp.dc400||0)*C.laadpaal_dc400;
+}
+function _ontwerpRapportData(projectId, mode){
+  var fd=_financieelRapportData();
+  var comp=fd.componenten||{}, fac=fd.facturen||{}, en=fd.energie||{};
+  var capMin=function(k){ return (comp[k]&&comp[k].minder)||0; };
+  var capaciteit=(comp.waarvan_capaciteit&&comp.waarvan_capaciteit.minder)||0;
+  var factuurComp={ energie:capMin('energie'), capaciteit:capaciteit,
+    distributie:Math.max(0,capMin('distributie')-capaciteit), heffingen:capMin('heffingen') };
+  var bt=_frBatterij(), lp=_frLaadpalen();
+  var pvKwp=+STATE.pvKwp||0, bpv=STATE.bestaandePv||{};
+  // v1.63.1: echte KPI's uit de KPI-engine (beste opstelling) i.p.v. schattingen.
+  var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
+  var beste=(eng&&eng.beste)||null;
+  var cregKm=(eng&&eng.opstelling0&&eng.opstelling0.kostKm!=null)?eng.opstelling0.kostKm:0.0501;
+  var kpiKm=(beste&&beste.kostKm!=null)?beste.kostKm:0;
+  var kpiNpv=(beste&&beste.npv!=null)?beste.npv:0;
+  var lfNa=(beste&&beste.loadfactor!=null)?beste.loadfactor:0;
+  var lfVoor=(eng&&eng.huidigLoadfactor!=null)?eng.huidigLoadfactor:0;
+  var capexTot=(beste&&beste.capex)?beste.capex:_ontwerpCapexTot(pvKwp, bt.kwh, lp);
+  var kpi2=(beste&&beste.rendement!=null)?beste.rendement:(capexTot>0?fd.besparing_jaar1/capexTot*100:0);
+  var a=STATE.injectieAnalyse||null;
+  var bestaande_pv=(bpv.aanwezig && a) ? {
+    aanwezig:true, kwp:+bpv.kwp||0, kva:+bpv.kva||0,
+    injectie_mwh:(a.energie_jaar&&a.energie_jaar.injectie_mwh)||0,
+    productie_mwh:(a.energie_jaar&&a.energie_jaar.productie_mwh)||0,
+    opbrengst_vandaag:(a._injOpbrengstEur>0?a._injOpbrengstEur:(a.opbrengst_jaar&&a.opbrengst_jaar.vandaag_spot_eur))||0,
+    meerwaarde_curtail:(a.opbrengst_jaar&&a.opbrengst_jaar.meerwaarde_curtail_eur)||0,
+    meerwaarde_onbalans:(a.opbrengst_jaar&&a.opbrengst_jaar.meerwaarde_onbalans_eur)||0,
+    meerwaarde_totaal:(a.opbrengst_jaar&&a.opbrengst_jaar.meerwaarde_totaal_eur)||0,
+    netto_curtail:(a.payback&&a.payback.netto_curtail_jaar_eur)||0,
+    netto_beide:(a.payback&&a.payback.netto_beide_jaar_eur)||0,
+    payback_curtail:(a.payback&&a.payback.payback_curtail_jaar!=null)?a.payback.payback_curtail_jaar:null,
+    payback_beide:(a.payback&&a.payback.payback_beide_jaar!=null)?a.payback.payback_beide_jaar:null,
+    investering:(a.payback&&a.payback.investering_eur)||3500,
+    beheer_jaar:(a.payback&&a.payback.management_jaar_eur)||0
+  } : { aanwezig:false };
+  var heeftLp=!!(STATE.laadpleinen&&STATE.laadpleinen.length>0);
+  var laadplein=heeftLp ? {
+    aanwezig:true, mwh_jaar:en.laadplein_mwh||0, km_jaar:Math.round((eng&&eng.km)||((en.laadplein_mwh||0)*1000/0.16)),
+    kost_per_km:kpiKm, creg_per_km:cregKm,
+    voertuigen:'', pleinen:((fd.laadpleinen&&fd.laadpleinen.pleinen)||[]).map(function(p){ return {naam:p.naam||p.label||'plein', type:p.type||'', aantal:p.aantal||0, mwh:Math.round(p.mwh||p.ev_last_mwh||0)}; })
+  } : { aanwezig:false };
+  var xpProd=Math.round((pvKwp*0.9)*10)/10;
+  var _totMwh=(+STATE.jaarverbruik||0)+(en.laadplein_mwh||0);
+  var _ePrijsMwh=(factuurComp.energie>0 && _totMwh>0)?factuurComp.energie/_totMwh:150;
+  var extra_pv={ kwp:pvKwp, productie_mwh:en.pv_productie_mwh||xpProd,
+    zelfverbruik_pct:(en.pv_productie_mwh>0?Math.round((en.pv_zelfverbruik_mwh||0)/en.pv_productie_mwh*100):64),
+    meerwaarde_eur:Math.round((en.pv_zelfverbruik_mwh||0)*_ePrijsMwh),
+    direct_mwh:en.pv_naar_gebouw_mwh!=null?en.pv_naar_gebouw_mwh+ (en.pv_naar_laadplein_mwh||0):null,
+    via_batterij_mwh:en.pv_via_batterij_mwh!=null?en.pv_via_batterij_mwh:null,
+    injectie_mwh:(en.pv_productie_mwh!=null?Math.max(0,en.pv_productie_mwh-(en.pv_zelfverbruik_mwh||0)-(en.pv_via_batterij_mwh||0)):null) };
+  var gs=STATE.groeistap1||null;
+  var groeistap = gs ? {
+    label:(gs.label||gs.naam||'START'), batterij_kw:(gs.batterij_kw||gs.kw||0), batterij_kwh:(gs.batterij_kwh||gs.kwh||0),
+    aansluiting_kw:(gs.aansluiting_kw||gs.toegangsvermogen_kw||STATE.aansluitingKva||0),
+    pv_kwp:(gs.pv_kwp||0), laadpalen:(gs.laadpalen||{ac:0,dc160:0,dc400:0}),
+    besparing_jaar:(gs.besparing_jaar||gs.besparing||0), motivatie:(gs.motivatie||'De kleinste opstelling die vandaag al volstaat en met de vloot meegroeit.')
+  } : null;
+  var groeipad = (STATE.groeipad&&STATE.groeipad.stappen) ? { stappen:STATE.groeipad.stappen } : null;
+  var out=Object.assign({}, fd);
+  out._mode=(mode==='management')?'management':'klant';
+  out.project_id=projectId||'';
+  out.scenario_naam=STATE.scenario||'';
+  out.factuur={ afrekening_periode_mnd:fac.afrekening_periode_mnd||1, afrekening_bedrag:fac.afrekening_bedrag||0,
+    bestaand_jaar:fac.bestaand_jaar||0, scherp_dynamisch_jaar:fac.scherp_dynamisch_jaar||fac.bestaand_jaar||0, componenten:factuurComp };
+  out.profiel={ naam:STATE.profielNaam||'', jaarverbruik_mwh:+STATE.jaarverbruik||0,
+    toegangsvermogen_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():(STATE.aansluitingKva||0)),
+    maandpiek_kw:Math.round(en.sitepiek_met_batterij_kw||0), spanning:STATE.spanning||'LS',
+    beschrijving:(STATE.profielBeschrijving||'') };
+  out.laadplein=laadplein;
+  out.bestaande_pv=bestaande_pv;
+  out.optimaal={ pv_kwp:pvKwp, batterij_kw:bt.kw, batterij_kwh:bt.kwh,
+    aansluiting_kw:+STATE.aansluitingKva||0, aansluiting_vandaag_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():0),
+    spanning_nieuw:STATE.spanning||'', laadpalen:lp, npv:kpiNpv,
+    kpi1_eur_per_km:kpiKm, kpi1_creg_per_km:cregKm,
+    kpi2_rendement:kpi2, kpi3_loadfactor_voor:lfVoor, kpi3_loadfactor_na:lfNa };
+  out.extra_pv=extra_pv;
+  if(groeistap) out.groeistap=groeistap;
+  if(groeipad) out.groeipad=groeipad;
+  out.financieel={ besparing_jaar1:fd.besparing_jaar1||0, besparing_energie_deel:fd.besparing_energie_deel||0.72, onbalans_windfall_jaar1:fd.onbalans_windfall_jaar1||0 };
+  return out;
+}
+function _openOntwerpRapport(mode){
+  if(!_financieelRapportBeschikbaar()){ alert('Draai eerst een simulatie (stap 10) — dan kan het ontwerp-rapport worden opgebouwd.'); return; }
+  _metProjectId(function(pid){
+    try{ sessionStorage.setItem('FLUCTUS_ONTWERP_RAPPORT', JSON.stringify(_ontwerpRapportData(pid, mode))); }catch(e){}
+    window.open('/apps/ontwerp-rapport.html'+(mode==='management'?'?mode=management':''),'_blank');
+  });
+}
+// v1.63.1: upload-brug voor rapporten die in een Blob/iframe draaien (bv. het inline SolarActive-rapport) en
+// zelf geen token/same-origin-fetch hebben: zij posten de PDF hierheen; de simulator doet de authenticated upload.
+window.addEventListener('message', function(e){
+  var d=e&&e.data; if(!d || d.type!=='fluctus-rapport-pdf' || !d.payload) return;
+  apiPost('/api/rapport-opslaan', d.payload).then(function(){
+    try{ e.source && e.source.postMessage({type:'fluctus-rapport-saved', ok:true}, '*'); }catch(x){}
+  }).catch(function(err){
+    try{ e.source && e.source.postMessage({type:'fluctus-rapport-saved', ok:false, error:(err&&err.message)||'upload mislukt'}, '*'); }catch(x){}
+  });
+});
 
 function fillProfielSelect(){
   var sel=$('fdsim-profiel-sel');
@@ -3958,17 +4084,22 @@ function _openSolarActiveRapport(a){
     '}'+
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
-  // Robuust openen: eerst een nieuw venster via Blob-URL (betrouwbaarder dan document.write in een leeg
-  // venster — sommige pop-up-blockers geven een blanco venster terug). Lukt dat niet → toon het rapport
-  // INLINE in een overlay, zodat er ALTIJD een reactie is.
-  var _geopend=false;
-  try{
-    var _blob=new Blob([html],{type:'text/html;charset=utf-8'});
-    var _url=URL.createObjectURL(_blob);
-    var _w=window.open(_url,'_blank');
-    if(_w && !_w.closed){ _geopend=true; } else { try{ URL.revokeObjectURL(_url); }catch(e){} }
-  }catch(e){}
-  if(!_geopend){ _toonRapportInline(html,'SolarActive-rapport (injectie-optimalisatie)'); }
+  // v1.63.1: project-ID ophalen en de PDF-opslag-drop-in injecteren (projectnr in de voettekst + "PDF
+  // opslaan"-knop → Supabase). Daarna robuust openen: nieuw venster via Blob-URL, met inline-overlay-terugval.
+  _metProjectId(function(pid){
+    var klant2=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
+    var inject='<script>window.FLUCTUS_RAPPORT_META={project_id:'+JSON.stringify(pid||'')+',type:"solaractive",klant:'+JSON.stringify(klant2)+'};<\/script>'+
+               '<script src="'+location.origin+'/apps/fluctus-rapport-pdf.js"><\/script>';
+    var html2=html.replace('</body></html>', inject+'</body></html>');
+    var _geopend=false;
+    try{
+      var _blob=new Blob([html2],{type:'text/html;charset=utf-8'});
+      var _url=URL.createObjectURL(_blob);
+      var _w=window.open(_url,'_blank');
+      if(_w && !_w.closed){ _geopend=true; } else { try{ URL.revokeObjectURL(_url); }catch(e){} }
+    }catch(e){}
+    if(!_geopend){ _toonRapportInline(html2,'SolarActive-rapport (injectie-optimalisatie)'); }
+  });
  }catch(err){ alert('Rapport openen mislukt: '+(err&&err.message||err)); }
 }
 // v1.62.6: algemeen — toon een zelfstandig HTML-rapport INLINE in een overlay (iframe srcdoc), voor het
@@ -6463,6 +6594,13 @@ function _renderRapportKnoppen(){
   var frBtn=el('button',{class:'fdsim-btn green'},'📊 Genereer financieel rapport');
   frBtn.onclick=function(){ _openFinancieelRapport(); };
   frKnoppen.appendChild(frBtn);
+  // v1.63.0: nieuw ontwerp-rapport (klant + management), met project-ID + PDF-opslag in Supabase.
+  var korBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'📄 Klantrapport (ontwerp)');
+  korBtn.onclick=function(){ _openOntwerpRapport('klant'); };
+  frKnoppen.appendChild(korBtn);
+  var kmgBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#9E480E;border:1px solid #E8A33D'},'🔒 Managementrapport');
+  kmgBtn.onclick=function(){ _openOntwerpRapport('management'); };
+  frKnoppen.appendChild(kmgBtn);
   if(STATE.baseCase && STATE.baseCase.totaalExclBtw>0){
     var fmBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},'📄 Onderhandelingsmarge-rapport');
     fmBtn.onclick=function(){ _openFactuurrapport(); };
