@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     KAMINO — single-page front v0.3 (Mijn Fluctus-app · testmodus)
+     v0.3: app-guard (ingelogd, /portal.html) + "← Mijn Fluctus"-topbar; routeringslogica naar de rapporten
+           (V1 → factuurrapport, V3/V5 → ontwerp-rapport, teasers → voorbeeldstudie). Betaalde rapporten gaan
+           in deze testfase gewoon door. Rapporten openen (nog) met voorbeelddata; echte-data-koppeling volgt.
+     v0.2: single-page front (mockup)
+     Eén HTML, dynamisch: portaal (20 tegels, 5×4, geschud per bezoek) + een generiek
+     vraag-/invoerscherm dat per vraag reageert (hash-router #/vraag/<slug>). Gedeelde
+     state → prefill van contact + project over alle vragen. Beantwoorde tegels kleuren
+     en tonen hun kerncijfer. Front-end mockup: submit toont een bevestiging; de echte
+     run→opslag→mail (via de bestaande endpoints/academy-backend) plugt hier later in.
+     ============================================================ -->
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kamino — uw pad naar maximale elektrificatie</title>
+<style>
+  :root{--blauw:#1F3864;--blauw-l:#2d4f8e;--groen:#05B050;--groen-d:#048443;--oranje:#E8A33D;--oranje-d:#9E480E;
+    --grijs:#5A6577;--lijn:#DCE3EC;--bg:#EEF2F7;--zwart:#1A1F2B;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Poppins','Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);
+    background:radial-gradient(1200px 600px at 50% -10%,#fff,var(--bg));min-height:100vh}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 40px}
+  a{color:inherit;text-decoration:none}
+  /* header */
+  header.k{text-align:center;margin-bottom:6px}
+  .brand{font-size:12.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--grijs);font-weight:700;cursor:pointer}
+  h1{font-size:38px;color:var(--blauw);font-weight:800;line-height:1.05;margin:6px 0 4px}
+  h1 span{color:var(--groen-d)}
+  .baseline{font-size:15px;color:var(--grijs);max-width:760px;margin:6px auto 0;line-height:1.5}
+  .subprompt{font-size:13px;color:var(--blauw);font-weight:700;margin-top:12px}
+  .bar{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin:14px 0 16px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--grijs)}
+  .legend .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .btn{border:1px solid var(--blauw);background:#fff;color:var(--blauw);font-family:inherit;font-weight:700;font-size:12.5px;
+    border-radius:8px;padding:9px 14px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{background:var(--blauw);color:#fff}
+  .btn.green{border-color:var(--groen-d);background:var(--groen-d);color:#fff}
+  .btn.green:hover{filter:brightness(1.08)}
+  .btn.ghost{border-color:var(--lijn);color:var(--grijs)}.btn.ghost:hover{background:#fff;color:var(--blauw);border-color:var(--blauw)}
+  /* grid */
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:13px}
+  .tile{position:relative;background:#fff;border:1px solid var(--lijn);border-top:4px solid var(--blauw);border-radius:12px;
+    padding:15px 13px 13px;min-height:150px;cursor:pointer;display:flex;flex-direction:column;box-shadow:0 2px 8px rgba(31,56,100,.06);
+    transition:transform .16s,box-shadow .16s}
+  .tile:hover{transform:translateY(-4px);box-shadow:0 10px 24px rgba(31,56,100,.16)}
+  .tile.gratis{border-top-color:var(--groen)}.tile.betaald{border-top-color:var(--oranje-d)}.tile.teaser{border-top-color:var(--blauw-l)}
+  .tile.done{background:#F3FBF5;border-color:#05B05055}
+  .tile .ic{font-size:25px;line-height:1}
+  .tile .vr{font-size:14px;font-weight:700;color:var(--blauw);margin-top:9px;line-height:1.25}
+  .tile .kern{font-size:11.5px;color:var(--grijs);margin-top:auto;padding-top:9px}
+  .tile.done .kern{color:var(--groen-d);font-weight:700}
+  .tag{position:absolute;top:11px;right:11px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:10px}
+  .tag.gratis{background:#05B05018;color:var(--groen-d)}.tag.betaald{background:#E8A33D22;color:var(--oranje-d)}.tag.teaser{background:#1F386414;color:var(--blauw)}
+  .tile .check{position:absolute;top:10px;left:11px;color:var(--groen-d);font-weight:800;font-size:13px}
+  /* vraagscherm */
+  .screen{max-width:720px;margin:0 auto}
+  .crumb{font-size:12.5px;color:var(--grijs);margin-bottom:10px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+  .crumb:hover{color:var(--blauw)}
+  .card{background:#fff;border:1px solid var(--lijn);border-radius:14px;padding:22px 24px;box-shadow:0 4px 16px rgba(31,56,100,.08)}
+  .qh{display:flex;align-items:flex-start;gap:12px;margin-bottom:4px}
+  .qh .ic{font-size:30px}
+  .qh h2{font-size:22px;color:var(--blauw);font-weight:800;line-height:1.15}
+  .qintro{font-size:13.5px;color:var(--grijs);margin:4px 0 16px;line-height:1.5}
+  .sec{border-top:1px solid var(--lijn);padding-top:14px;margin-top:14px}
+  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--oranje-d);font-weight:800;margin-bottom:10px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .fld{margin-bottom:10px}
+  .fld label{display:block;font-size:12px;color:var(--grijs);font-weight:600;margin-bottom:4px}
+  .fld input,.fld select{width:100%;font-family:inherit;font-size:13.5px;border:1px solid var(--lijn);border-radius:8px;padding:9px 10px;background:#fff}
+  .fld input:focus,.fld select:focus{outline:none;border-color:var(--blauw)}
+  .fld .hint{font-size:10.5px;color:#8A93A3;margin-top:3px}
+  .radio{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .radio label{flex:1;min-width:180px;border:1px solid var(--lijn);border-radius:8px;padding:9px 12px;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .radio label.on{border-color:var(--blauw);background:#1F386408}
+  .prijs{background:#FFF7EC;border:1px solid #E8A33D66;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--oranje-d);margin:8px 0}
+  .andere{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .chip{font-size:11px;border:1px solid var(--lijn);border-radius:20px;padding:5px 11px;color:var(--grijs);cursor:pointer}
+  .chip:hover{border-color:var(--blauw);color:var(--blauw)}
+  .chip.done{border-color:#05B05055;color:var(--groen-d);background:#F3FBF5}
+  .bevestig{background:#EAF7EE;border:1px solid #05B05055;border-radius:10px;padding:16px;color:#0A6B2E;font-size:13.5px;line-height:1.5}
+  .foot{text-align:center;font-size:11px;color:var(--grijs);margin-top:26px;border-top:1px solid var(--lijn);padding-top:12px}
+  /* Mijn Fluctus topbar (zelfde conventie als de simulator-app) */
+  .sim-topbar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid #e2ebe4;background:#fff;position:sticky;top:0;z-index:100}
+  .sim-topbar a{color:#2b8f3a;font-weight:600;text-decoration:none;font-size:.95rem}
+  .sim-topbar a:hover{text-decoration:underline}
+  .sim-topbar .titel{font-weight:800;color:#1a2b22}
+  .sim-topbar .test{margin-left:auto;font-size:11px;font-weight:700;color:#9E480E;background:#FFF3E0;border:1px solid #E8A33D66;border-radius:20px;padding:3px 10px}
+  @media (max-width:980px){.grid{grid-template-columns:repeat(4,1fr)}h1{font-size:30px}}
+  @media (max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1fr}}
+  @media (max-width:440px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<!-- App-toegang: enkel ingelogd (zelfde guard als de simulator). Publieke/LinkedIn-versie met e-mail-OTP komt later. -->
+<script>(function(){try{var has=false;for(var i=0;i<localStorage.length;i++){if(/^sb-.+-auth-token$/.test(localStorage.key(i)))has=true;}if(!has)location.replace('/portal.html');}catch(e){}})();</script>
+<div class="sim-topbar"><a href="/portal.html">← Mijn Fluctus</a><span class="titel">Kamino</span><span class="test">TESTMODUS · betaalde rapporten gaan door</span></div>
+<div class="wrap" id="app"></div>
+
+<script>
+// ---------- 20 vragen (config) ----------
+// velden: extra vraag-specifieke invoer (bovenop factuur/project + contact). type: gratis|betaald|teaser.
+var PV_VELDEN=[
+  {k:'pv_kwp',lbl:'PV-vermogen (kWp)',hint:'laat leeg als u enkel kVA/piek kent'},
+  {k:'pv_kva',lbl:'Omvormer (kVA)'},
+  {k:'pv_inj',lbl:'Injectie (MWh/jaar)',hint:'of voeg uw injectiefactuur toe'}
+];
+var VRAGEN=[
+ {id:'V1',slug:'onderhandelen',ic:'🧾',type:'gratis',vr:'Kan ik beter onderhandelen?',kern:'Uw onderhandelingsmarge',
+   intro:'We lezen uw factuur in en simuleren exact hetzelfde verbruik op een scherp dynamisch contract. Het verschil is uw onderhandelingsmarge.',velden:[],mock:'− € 12.200/jaar marge'},
+ {id:'V2',slug:'injectie',ic:'☀️',type:'gratis',vr:'Meer verdienen aan mijn injectie?',kern:'SolarActive-meerwaarde',
+   intro:'We berekenen wat uw bestaande PV extra kan opbrengen door slim te sturen op de spot- en onbalansmarkt — zonder uw eigen verbruik te raken.',velden:PV_VELDEN,mock:'+ € 473/jaar'},
+ {id:'V3',slug:'batteryactive',ic:'🔋',type:'betaald',vr:'Extra PV + opslag: lagere jaarkost?',kern:'BatteryActive-ontwerp',
+   intro:'We rekenen de ideale opstelling én uw groeipad door op uw echte verbruik (afschrijving 15 jaar, batterij die 15 jaar meegaat).',velden:[{k:'pv_best',lbl:'Bestaande PV (kWp, optioneel)'}],prijs:'Betaalde ontwerpstudie — € 2.950',mock:'− € 90.000/jaar'},
+ {id:'V4',slug:'kan-het-beter',ic:'📈',type:'teaser',vr:'Kan het beter op mijn aansluiting?',kern:'Verwacht rendement',
+   intro:'Op basis van uw factuur schatten we het rendement dat een slimme opstelling u kan opleveren — nog vóór u beslist.',velden:[],mock:'rendement ± 12 %'},
+ {id:'V5',slug:'laadplein',ic:'🔌',type:'teaser',vr:'Laadplein op mijn aansluiting?',kern:'Kost per km + rendement',
+   intro:'We tonen de kernindicatoren (kost per km, rendement) voor het laden van uw vloot binnen uw huidige aansluiting.',
+   velden:[{k:'voertuig',lbl:'Voertuigtype',opts:['Bestelwagens','Personenwagens','Vrachtwagens','Gemengd']},{k:'km',lbl:'Km/jaar (totaal)'},{k:'aantal',lbl:'Aantal voertuigen'}],mock:'± € 0,04/km'},
+ {id:'V6',slug:'capaciteitspiek',ic:'⚡',type:'teaser',vr:'Mijn capaciteitspiek verlagen?',kern:'Vermeden kW + besparing',
+   intro:'We schatten hoeveel een batterij uw maandpiek — en dus uw capaciteitstarief — kan verlagen, binnen uw bestaande aansluiting.',velden:[],mock:'− 60 kW piek'},
+ {id:'V7',slug:'netkosten',ic:'🛡️',type:'teaser',vr:'Weerbaar tegen stijgende netkosten?',kern:'Impact over 15 jaar',
+   intro:'We tonen hoe uw factuur evolueert bij stijgende netkosten — en hoeveel eigen productie en opslag die stijging dempen.',velden:[],mock:'scenario’s 15 jaar'},
+ {id:'V8',slug:'elektrificatie',ic:'🏭',type:'teaser',vr:'Houdt mijn aansluiting het?',kern:'Aansluitingscheck',
+   intro:'U elektrificeert (warmtepomp, machines, laadpunten). We checken of uw aansluiting het haalt — of een batterij een verzwaring vermijdt.',
+   velden:[{k:'extra',lbl:'Extra vermogen (kW) of extra verbruik (MWh/jaar)'}],mock:'verzwaring vermeden'},
+ {id:'V9',slug:'wachten',ic:'⏳',type:'teaser',vr:'Wat kost het mij om te wachten?',kern:'Gemiste besparing',
+   intro:'Elke maand zonder optimalisatie is gemiste besparing — én de netkosten stijgen ondertussen door. We zetten de kost van wachten zwart op wit.',velden:[],mock:'± € 7.500/6 mnd'},
+ {id:'V10',slug:'dak',ic:'🔆',type:'teaser',vr:'Hoeveel van mijn dak benut ik nog niet?',kern:'PV-potentieel',
+   intro:'We schatten hoeveel extra zonne-energie u kunt opwekken en zelf verbruiken, op basis van uw verbruiksprofiel.',velden:[{k:'dak',lbl:'Beschikbaar dakoppervlak (m², optioneel)'}],mock:'+ 160 kWp mogelijk'},
+ {id:'V11',slug:'terugverdientijd',ic:'💶',type:'teaser',vr:'Wanneer sta ik cashflow-positief?',kern:'Terugverdientijd & financiering',
+   intro:'We tonen wanneer uw project cashflow-positief wordt en welke financieringsvorm (eigen kas, lening, lease, derde partij) het best bij u past.',velden:[],mock:'positief vanaf jaar 4'},
+ {id:'V12',slug:'co2',ic:'🌱',type:'teaser',vr:'Hoe groen ben ik — en hoeveel groener?',kern:'CO₂ + factuur',
+   intro:'We tonen hoeveel CO₂ u vermijdt met eigen productie en opslag — naast de euro’s.',velden:[],mock:'− 120 ton CO₂/jaar'},
+ {id:'V13',slug:'prijszekerheid',ic:'🔒',type:'teaser',vr:'Wat kost prijszekerheid mij écht?',kern:'Risicopremie',
+   intro:'Het verschil tussen uw vaste tarief en de dynamische marktprijs is uw risicopremie. We maken die zichtbaar op basis van uw factuur.',velden:[],mock:'premie ± € 9/MWh'},
+ {id:'V14',slug:'flexibiliteit',ic:'🔀',type:'teaser',vr:'Wat is mijn flexibiliteit waard?',kern:'Verborgen inkomst',
+   intro:'Wie zijn verbruik of batterij slim kan verschuiven, kan verdienen op de spot- en onbalansmarkt — passief. We schatten in hoeveel.',velden:[],mock:'+ € 26.000/jaar'},
+ {id:'V15',slug:'batterijmaat',ic:'📏',type:'teaser',vr:'Is mijn batterij de juiste maat?',kern:'Te groot of te klein?',
+   intro:'Overweegt u een bepaalde batterijgrootte? We toetsen ze aan uw echte verbruik en zeggen u of u in de juiste richting zit.',
+   velden:[{k:'batt_kw',lbl:'Batterij die u overweegt — vermogen (kW)'},{k:'batt_kwh',lbl:'… capaciteit (kWh)'}],mock:'richting: te groot'},
+ {id:'V16',slug:'prijspiek',ic:'🌩️',type:'teaser',vr:'Beschermd tegen een prijspiek (2022)?',kern:'Crisisbescherming',
+   intro:'Hoe hard raakt een volgende prijspiek uw factuur — en hoeveel dempt eigen productie en opslag die klap? We tonen het scenario.',velden:[],mock:'− 40 % impact'},
+ {id:'V17',slug:'fiscaal',ic:'🧮',type:'teaser',vr:'Hoeveel fiscaal voordeel laat ik liggen?',kern:'Investeringsaftrek',
+   intro:'Investeringen in PV en batterijen komen vaak in aanmerking voor een verhoogde investeringsaftrek. We nemen het mee in de berekening.',velden:[],mock:'aftrek verrekend'},
+ {id:'V18',slug:'startpunt',ic:'🚀',type:'teaser',vr:'Waar begin ik best?',kern:'Uw eerste rendabele stap',
+   intro:'Kamino toont u, op basis van uw factuur, waar u best begint — stap voor stap, zonder ooit te veel te investeren.',velden:[],mock:'start: batterij 120/260'},
+ {id:'V19',slug:'noodstroom',ic:'🔦',type:'teaser',vr:'Kan mijn batterij ook noodstroom leveren?',kern:'Back-up als bonus',
+   intro:'Een batterij kan ook uw kritische processen overeind houden bij een stroomonderbreking. We nemen de mogelijkheid mee in uw ontwerp.',velden:[],mock:'back-up mogelijk'},
+ {id:'V20',slug:'geheel',ic:'🧩',type:'teaser',vr:'PV, batterij en laden als één geheel?',kern:'Alles rendabel samen',
+   intro:'PV, batterij en laadinfrastructuur leveren pas hun volle waarde als ze samen worden aangestuurd. We tonen hoe de stukken samen het meeste opbrengen.',velden:[],mock:'+ € 118k NPV'}
+];
+
+// ---------- routering naar de rapporten ----------
+// report = open direct het rapport-app (same-origin nieuwe tab). stub = rapport bestaat nog niet standalone.
+// sells  = teaser → toont KPI's + knop naar het voorbeeldrapport (de studie die de teaser verkoopt).
+// betaald = true → in TESTMODUS gaat dit gewoon door (geen betaalpoort).
+var ONTWERP='/apps/ontwerp-rapport.html?mode=klant&bron=kamino';
+var ROUTES={
+  onderhandelen : { report:'/apps/factuurrapport.html?bron=kamino', naam:'Onderhandelingsmarge-rapport' },
+  injectie      : { stub:'Het SolarActive-rapport wordt nu nog in de simulator (injectie-analyse) gegenereerd — koppeling naar Kamino volgt.', naam:'SolarActive-rapport' },
+  batteryactive : { report:ONTWERP, naam:'BatteryActive-ontwerp (zonder laadplein)', betaald:true },
+  laadplein     : { report:ONTWERP, naam:'Laadplein-ontwerpstudie', betaald:true }
+};
+function routeVan(slug){ return ROUTES[slug] || { sells:ONTWERP, naam:'Ontwerpstudie (voorbeeld)' }; }
+
+// ---------- gedeelde state (prefill + beantwoord) ----------
+var STATE={ contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
+  project:{mode:'nieuw', id:'', factuur:''}, velden:{}, beantwoord:{} };
+var PROJECTEN_MOCK=[ {id:'FLX-KMK-A1B', naam:'Kiemkracht VZW', datum:'25-07-2026'} ]; // dropdown-demo
+
+function tagLabel(t){return t==='gratis'?'gratis':(t==='betaald'?'studie':'teaser');}
+function shuffle(a){var r=a.slice();for(var i=r.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=r[i];r[i]=r[j];r[j]=t;}return r;}
+function bySlug(s){return VRAGEN.find(function(v){return v.slug===s;});}
+var app=document.getElementById('app');
+
+// ---------- PORTAAL ----------
+function renderPortaal(){
+  var tiles=shuffle(VRAGEN).map(function(v){
+    var done=STATE.beantwoord[v.slug];
+    return '<a class="tile '+v.type+(done?' done':'')+'" href="#/vraag/'+v.slug+'">'+
+      (done?'<span class="check">✓</span>':'')+
+      '<span class="tag '+v.type+'">'+tagLabel(v.type)+'</span>'+
+      '<div class="ic">'+v.ic+'</div><div class="vr">'+v.vr+'</div>'+
+      '<div class="kern">'+(done?done:v.kern)+'</div></a>';
+  }).join('');
+  app.innerHTML=
+    '<header class="k"><div class="brand" onclick="location.hash=\'#/\'">Fluctus.net · Kamino</div>'+
+    '<h1>Uw pad naar <span>maximale elektrificatie</span></h1>'+
+    '<div class="baseline">Stap voor stap, met groeiend inzicht — elke stap rendabel en in de juiste richting, zonder ooit te veel te investeren. Kies een vraag om te starten.</div>'+
+    '<div class="subprompt">Welke vraag houdt u vandaag bezig?</div></header>'+
+    '<div class="bar"><div class="legend">'+
+      '<span><span class="dot" style="background:#05B050"></span>Gratis inzicht + rapport</span>'+
+      '<span><span class="dot" style="background:#9E480E"></span>Betaalde ontwerpstudie</span>'+
+      '<span><span class="dot" style="background:#2d4f8e"></span>Gratis teaser (KPI’s)</span>'+
+    '</div><button class="btn" onclick="renderPortaal()">🔀 Andere volgorde</button></div>'+
+    '<div class="grid">'+tiles+'</div>'+
+    '<div class="foot">Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</div>';
+}
+
+// ---------- VRAAGSCHERM (generiek) ----------
+function veldInput(f){
+  var val=STATE.velden[f.k]||'';
+  if(f.opts){ return '<div class="fld"><label>'+f.lbl+'</label><select onchange="STATE.velden[\''+f.k+'\']=this.value">'+
+    '<option value="">– kies –</option>'+f.opts.map(function(o){return '<option'+(val===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'; }
+  return '<div class="fld"><label>'+f.lbl+'</label><input value="'+val.replace(/"/g,'&quot;')+'" oninput="STATE.velden[\''+f.k+'\']=this.value">'+
+    (f.hint?'<div class="hint">'+f.hint+'</div>':'')+'</div>';
+}
+function ci(k){ return (STATE.contact[k]||'').replace(/"/g,'&quot;'); }
+function renderVraag(slug){
+  var v=bySlug(slug); if(!v){ location.hash='#/'; return; }
+  var nieuw=STATE.project.mode!=='bestaand';
+  var projBlok = '<div class="radio">'+
+      '<label class="'+(nieuw?'on':'')+'" onclick="STATE.project.mode=\'nieuw\';renderVraag(\''+slug+'\')"><input type="radio" '+(nieuw?'checked':'')+'> Nieuwe factuur opladen</label>'+
+      '<label class="'+(!nieuw?'on':'')+'" onclick="STATE.project.mode=\'bestaand\';renderVraag(\''+slug+'\')"><input type="radio" '+(!nieuw?'checked':'')+'> Bestaand project</label>'+
+    '</div>'+
+    (nieuw
+      ? '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label><input type="file" onchange="STATE.project.factuur=(this.files[0]?this.files[0].name:\'\')"><div class="hint">Per project laadt u de factuur één keer op — een nieuwe factuur start een nieuw project.</div></div>'
+      : '<div class="fld"><label>Kies uw project</label><select onchange="STATE.project.id=this.value"><option value="">– kies project –</option>'+
+         PROJECTEN_MOCK.map(function(p){return '<option value="'+p.id+'"'+(STATE.project.id===p.id?' selected':'')+'>'+p.id+' · '+p.naam+' · '+p.datum+'</option>';}).join('')+'</select></div>');
+
+  var velden = v.velden.length ? '<div class="sec"><h3>Voor deze vraag</h3>'+v.velden.map(veldInput).join('')+'</div>' : '';
+
+  var andere = VRAGEN.filter(function(x){return x.slug!==slug;}).slice(0,6).map(function(x){
+    var d=STATE.beantwoord[x.slug];
+    return '<span class="chip'+(d?' done':'')+'" onclick="location.hash=\'#/vraag/'+x.slug+'\'">'+(d?'✓ ':'')+x.vr+'</span>';
+  }).join('');
+
+  app.innerHTML=
+    '<div class="screen">'+
+      '<div class="crumb" onclick="location.hash=\'#/\'">← Terug naar Kamino</div>'+
+      '<div class="card">'+
+        '<div class="qh"><div class="ic">'+v.ic+'</div><div><h2>'+v.vr+'</h2></div></div>'+
+        '<div class="qintro">'+v.intro+'</div>'+
+        (v.prijs?'<div class="prijs">💳 '+v.prijs+' — betaling vóór het finale rapport (offerte volgt).</div>':'')+
+        '<div class="sec"><h3>Uw project</h3>'+projBlok+'</div>'+
+        velden+
+        '<div class="sec"><h3>Wie bent u?</h3><div class="row">'+
+          '<div class="fld"><label>Uw naam</label><input value="'+ci('k_naam')+'" oninput="STATE.contact.k_naam=this.value"></div>'+
+          '<div class="fld"><label>Uw e-mail</label><input value="'+ci('k_mail')+'" oninput="STATE.contact.k_mail=this.value"></div>'+
+          '<div class="fld"><label>Uw telefoon</label><input value="'+ci('k_tel')+'" oninput="STATE.contact.k_tel=this.value"></div>'+
+        '</div></div>'+
+        '<div class="sec"><h3>Uw adviseur</h3><div class="row">'+
+          '<div class="fld"><label>Naam adviseur</label><input value="'+ci('a_naam')+'" oninput="STATE.contact.a_naam=this.value"></div>'+
+          '<div class="fld"><label>E-mail adviseur</label><input value="'+ci('a_mail')+'" oninput="STATE.contact.a_mail=this.value"></div>'+
+          '<div class="fld"><label>Telefoon adviseur</label><input value="'+ci('a_tel')+'" oninput="STATE.contact.a_tel=this.value"></div>'+
+        '</div><div class="hint">We mailen het antwoord naar u én uw adviseur.</div></div>'+
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">'+
+          '<button class="btn green" onclick="verstuur(\''+slug+'\')">'+(v.type==='betaald'?'Doorrekenen & offerte ontvangen':'Bereken & mail mij het antwoord')+'</button>'+
+          '<button class="btn ghost" onclick="location.hash=\'#/\'">Annuleren</button>'+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-top:16px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8A93A3;font-weight:700;margin-bottom:6px">Andere vragen</div><div class="andere">'+andere+'</div></div>'+
+    '</div>';
+}
+
+function verstuur(slug){
+  var v=bySlug(slug), r=routeVan(slug);
+  STATE.beantwoord[slug]=v.mock;                 // markeer beantwoord + kerncijfer op de tegel
+  var actie='', melding='';
+  if(r.report){
+    // rapport-vraag → open het rapport-app (same-origin, uw sessie → project-ID + Supabase-opslag werken)
+    try{ window.open(r.report,'_blank'); }catch(e){}
+    melding='Uw <b>'+r.naam+'</b> wordt geopend in een nieuw tabblad.'+(r.betaald?' <i>(Testmodus: de betaalde studie gaat door zonder betaling.)</i>':'')+
+      ' U en uw adviseur ontvangen het ook per mail.';
+    actie='<button class="btn green" onclick="window.open(\''+r.report+'\',\'_blank\')">📄 '+r.naam+' openen</button>';
+  } else if(r.stub){
+    melding=r.stub;
+    actie='';
+  } else { // teaser
+    melding='<b>Teaser-antwoord:</b> '+v.kern+' — <b>'+v.mock+'</b>. U en uw adviseur ontvangen deze kerncijfers per mail, met een link naar de volledige (betaalde) ontwerpstudie.';
+    actie='<button class="btn green" onclick="window.open(\''+r.sells+'\',\'_blank\')">📄 Voorbeeld van de volledige studie (test)</button>';
+  }
+  app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar Kamino</div>'+
+    '<div class="card"><div class="qh"><div class="ic">✅</div><div><h2>Bedankt — we gaan ermee aan de slag</h2></div></div>'+
+    '<div class="bevestig">Uw vraag <b>“'+v.vr+'”</b> is verwerkt.<br><br>'+melding+
+      '<br><br><span style="font-size:12px;color:#5A6577">Testfase: rapporten openen met voorbeelddata. De koppeling aan úw factuur (run → Supabase → mail via de academy-backend) is de volgende stap.</span></div>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+actie+
+      '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar Kamino</button></div></div></div>';
+}
+
+// ---------- router ----------
+function router(){
+  var h=location.hash||'#/';
+  var m=h.match(/#\/vraag\/([a-z0-9-]+)/i);
+  if(m){ renderVraag(m[1]); window.scrollTo(0,0); } else { renderPortaal(); }
+}
+window.addEventListener('hashchange',router);
+router();
+</script>
+</body>
+</html>
