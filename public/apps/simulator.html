@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.0  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.63.2  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     v1.63.2: FIX rapport-knoppen "reageren niet". _metProjectId deed een async apiPost('/api/project-id')
+              vóór window.open → de user-gesture verliep → de browser blokkeerde de nieuwe tab stilletjes.
+              Nu: project-ID SYNCHROON client-side (_projectIdLokaal, identieke FNV-1a als de server),
+              server-registratie op de achtergrond. Geldt voor factuur-, ontwerp-, financieel- en SolarActive-rapport.
      v1.63.1: KPI-fijnmapping (echte _kpiEngine beste-rij: €/km, NPV, loadfactor voor/ná, rendement + extra-PV
               bijdrage); PDF-opslag ook voor SolarActive (drop-in via postMessage-brug) en factuurrapport
               (project-ID meegegeven; drop-in fluctus-rapport-pdf.js met 1 include-regel).
@@ -3055,12 +3059,26 @@ function _openFinancieelRapport(){
   });
 }
 
-// v1.63.0: project-identificatienummer ophalen/aanmaken (server: stabiel FLX-nummer per project), en dan cb(pid).
-// Faalt de call (offline/niet-ingelogd), dan gaan we door zonder nummer — het rapport blijft werken.
+// v1.63.2: project-ID SYNCHROON berekenen (identiek aan server _projectId: FNV-1a).
+// Cruciaal: window.open() in de rapport-knoppen moet binnen de user-gesture blijven. Een async
+// apiPost('/api/project-id') vóór window.open liet de klik-context verlopen → de browser blokkeerde
+// de nieuwe tab stilletjes ("knop reageert niet"). Nu: pid lokaal berekenen (zelfde uitkomst), de
+// server-registratie op de ACHTERGROND (fire-and-forget), en cb(pid) meteen synchroon aanroepen.
+function _projectIdLokaal(project){
+  var s=String(project||'').trim().toLowerCase();
+  var h=0x811c9dc5>>>0;
+  for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  var code=h.toString(36).toUpperCase();
+  while(code.length<7) code='0'+code;
+  code=code.slice(-7);
+  return 'FLX-'+code.slice(0,3)+'-'+code.slice(3);
+}
 function _metProjectId(cb){
   var proj=STATE.project||STATE.scenario||'';
-  if(!proj){ cb(''); return; }
-  apiPost('/api/project-id',{ project:proj }).then(function(r){ cb((r&&r.id)||''); }).catch(function(){ cb(''); });
+  var pid=proj?_projectIdLokaal(proj):'';
+  // registreer het project op de achtergrond (niet-blokkerend; behoudt de user-gesture voor window.open)
+  if(proj){ try{ apiPost('/api/project-id',{ project:proj }).catch(function(){}); }catch(e){} }
+  cb(pid);
 }
 
 // v1.63.0: data-contract voor het nieuwe ontwerp-rapport (klant + management). Hergebruikt _financieelRapportData
