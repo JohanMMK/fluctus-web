@@ -1,9 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.5 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.6 (Mijn Fluctus-app · testmodus)
+     v0.6 (input-logica): een teaser die een betaalde studie verkoopt, verzamelt meteen de input van díé studie
+           (STUDIE_VELDEN v3/v5b via effectieveVelden) → naadloze conversie. Wat we al weten (eerdere antwoorden;
+           later ook uit de factuur/baseCase) tonen/vragen we NIET opnieuw. Studies: V1, V2, V3 (Jacops zonder
+           laadplein), V5b (full Jacops mét laadplein) worden de echte rapporten; teasers leiden ernaartoe.
+     v0.6: SLICE 1a — ECHTE OPSLAG. Nieuwe factuur + ingelogd → echt oplaadt via /api/factuur-extract (proxy
+           bewaart de factuur meteen in Supabase) + echt project-ID (client-side FNV-1a, identiek aan de server;
+           registratie via /api/project-id op de achtergrond). Laad-/foutscherm rond de ± 40s extract.
+           Niet ingelogd of geen factuur → mock-fallback (lokaalId, "nog niet opgeslagen"). De marge-run + echt
+           rapport + mail = slice 2/3.
      v0.5: BELOFTE / risk-reversal in de hele interactie — belofteBlok() volledig op betaalde studies, compact op
            teasers (versterkt de CTA), en herhaald op de bevestiging. 10%-rendementsgarantie met terugbetaling,
-           uitvoeringsbegeleiding samen met de aannemer, terugbetaling door de aannemer bij de eerste bestelling.
+           uitvoeringsbegeleiding samen met de installateur, terugbetaling door de installateur bij de eerste bestelling.
      v0.4: PROJECT-CENTRISCH. Eerste factuur-upload maakt een project (FLX-XXX-XXX, mock lokaalId; productie /api/project-id).
            Volgende tegels zetten datzelfde project voort — geen her-invoer: contact + velden geprefild, antwoorden
            per project-ID gemarkeerd. Portaal toont "Actief project"-banner + "Nieuw project". Bestaand project kiesbaar
@@ -211,15 +220,52 @@ function activeer(id){ var p=projById(id); if(!p) return; STATE.werk={ id:p.id, 
 function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', velden:{} }; _projMode='nieuw'; }
 function vandaag(){ var d=new Date(); return ('0'+d.getDate()).slice(-2)+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+d.getFullYear(); }
 
+// ========== SLICE 1a: echte opslag (auth + factuur-extract + project-id) ==========
+// De proxy (lucid-amazement) draait de endpoints; auth via het ingelogde Supabase-token
+// (zelfde bron als de simulator/portal). Niet ingelogd of geen factuur → mock-fallback (lokaalId).
+var API_BASE='https://lucid-amazement-production.up.railway.app';
+var _factuurFile=null;   // het echte File-object van de laatste factuur-upload (buiten STATE, niet serialiseerbaar)
+
+// sb-JWT uit localStorage (identiek aan de drop-in fluctus-rapport-pdf.js).
+function kToken(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i);
+  if(/^sb-.+-auth-token$/.test(k)){ var v=JSON.parse(localStorage.getItem(k)||'null');
+    return (v&&(v.access_token||(v.currentSession&&v.currentSession.access_token)))||null; } } }catch(e){} return null; }
+function ingelogd(){ return !!kToken(); }
+
+function kApiPost(path, body){
+  var tok=kToken();
+  var h={'Content-Type':'application/json'}; if(tok) h['Authorization']='Bearer '+tok;
+  return fetch(API_BASE+path,{method:'POST',headers:h,body:JSON.stringify(body)}).then(function(r){
+    if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP '+r.status+': '+t); });
+    return r.json();
+  });
+}
+function fileNaarB64(file){ return new Promise(function(res,rej){ var fr=new FileReader();
+  fr.onload=function(){ try{ res(String(fr.result).split(',')[1]); }catch(e){ rej(e); } };
+  fr.onerror=function(){ rej(new Error('bestand lezen mislukt')); }; fr.readAsDataURL(file); }); }
+
+// Project-ID SYNCHROON (identiek aan server _projectId: FNV-1a) — voor onmiddellijke weergave.
+function projectIdLokaal(project){ var s=String(project||'').trim().toLowerCase(); var h=0x811c9dc5>>>0;
+  for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  var code=h.toString(36).toUpperCase(); while(code.length<7) code='0'+code; code=code.slice(-7);
+  return 'FLX-'+code.slice(0,3)+'-'+code.slice(3); }
+
+// Factuur echt oplaadt + extraheert (proxy bewaart ze meteen in Supabase). Geeft baseCase terug.
+function extractFactuur(file){
+  return fileNaarB64(file).then(function(b64){
+    return kApiPost('/api/factuur-extract',{ files:[{ base64:b64, mediaType:(file.type||'application/pdf'), fileName:file.name }] });
+  }).then(function(r){ return (r&&r.baseCase)||r||{}; });
+}
+
 // Belofte / risk-reversal — dezelfde filosofie in de hele interactie.
 function belofteBlok(compact){
   if(compact){
-    return '<div class="belofte compact"><div class="txt"><b>U neemt geen risico.</b> We bewijzen minstens <b>10 % rendement</b> of we betalen de studie terug — en bij uitvoering betaalt uw aannemer ze u met plezier terug. Zo verdwijnt de kost volledig.</div></div>';
+    return '<div class="belofte compact"><div class="txt"><b>U neemt geen risico.</b> We bewijzen minstens <b>10 % rendement</b> of we betalen de studie terug — en bij uitvoering betaalt uw installateur ze u met plezier terug. Zo verdwijnt de kost volledig.</div></div>';
   }
   return '<div class="belofte"><div class="bt">Onze belofte — u neemt geen risico</div><ul>'+
     '<li><b>Rendementsgarantie.</b> Tonen we geen rendement van minstens 10 % aan? Dan betalen we u de studie integraal terug.</li>'+
-    '<li><b>Wij begeleiden de uitvoering.</b> We staan uw aannemer bij om de juiste opstelling correct op te zetten en aan te sturen, zodat u de berekende resultaten ook effectief haalt.</li>'+
-    '<li><b>Bij uitvoering kost ze u niets.</b> Ernstige aannemers vinden die begeleiding belangrijk en betalen de studie met plezier terug bij uw eerste bestelling.</li>'+
+    '<li><b>Wij begeleiden de uitvoering.</b> We staan uw installateur bij om de juiste opstelling correct op te zetten en aan te sturen, zodat u de berekende resultaten ook effectief haalt.</li>'+
+    '<li><b>Bij uitvoering kost ze u niets.</b> Ernstige installateurs vinden die begeleiding belangrijk en betalen de studie met plezier terug bij uw eerste bestelling.</li>'+
     '</ul></div>';
 }
 
@@ -227,6 +273,32 @@ function tagLabel(t){return t==='gratis'?'gratis':(t==='betaald'?'studie':'tease
 function shuffle(a){var r=a.slice();for(var i=r.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=r[i];r[i]=r[j];r[j]=t;}return r;}
 function bySlug(s){return VRAGEN.find(function(v){return v.slug===s;});}
 var app=document.getElementById('app');
+
+// ---------- input-logica: teaser erft studie-input + verberg wat we al weten ----------
+// Input die de betaalde studies nodig hebben (zodat een teaser die ernaar leidt ze meteen verzamelt).
+var STUDIE_VELDEN={
+  v3:[ {k:'pv_best',lbl:'Bestaande PV (kWp, optioneel)'} ],                              // BatteryActive-ontwerp (zonder laadplein)
+  v5b:[ {k:'voertuig',lbl:'Voertuigtype',opts:['Bestelwagens','Personenwagens','Vrachtwagens','Gemengd']},
+        {k:'km',lbl:'Km/jaar (totaal)'}, {k:'aantal',lbl:'Aantal voertuigen'},
+        {k:'pv_best',lbl:'Bestaande PV (kWp, optioneel)'} ]                              // laadplein-ontwerp (full Jacops)
+};
+// Welke betaalde studie verkoopt deze (teaser)vraag? Default = V3; laadplein/vloot-thema → V5b.
+function studieVan(slug){ return /laadplein|km|vloot|voertuig/.test(slug) ? 'v5b' : 'v3'; }
+// Is deze vraag een teaser die een betaalde studie verkoopt?
+function isTeaserSell(slug){ var r=routeVan(slug); return !r.report && !r.stub; }
+// Reeds gekende waarde voor een veld: uit eerdere antwoorden (werk.velden) of afleidbaar uit de factuur (baseCase).
+function veldGekend(k){
+  var v=STATE.werk.velden[k]; if(v!=null && String(v)!=='') return v;
+  return null;   // (factuur-afleiding komt in slice 2 zodra de baseCase-velden gemapt zijn)
+}
+// Effectieve velden voor een vraag: eigen velden + (bij teaser) de velden van de studie waarnaar ze leidt,
+// ontdubbeld, en ZONDER wat we al weten.
+function effectieveVelden(v,slug){
+  var lijst=(v.velden||[]).slice();
+  if(isTeaserSell(slug)){ (STUDIE_VELDEN[studieVan(slug)]||[]).forEach(function(f){
+    if(!lijst.some(function(x){return x.k===f.k;})) lijst.push(f); }); }
+  return lijst.filter(function(f){ return veldGekend(f.k)==null; });   // verberg wat al gekend is
+}
 
 // ---------- PORTAAL ----------
 function renderPortaal(){
@@ -288,12 +360,16 @@ function renderVraag(slug){
         '<label class="'+(!nieuw?'on':'')+'" onclick="kiesMode(\'bestaand\',\''+slug+'\')"><input type="radio" '+(!nieuw?'checked':'')+'> Bestaand project</label>'+
       '</div>'+
       (nieuw
-        ? '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label><input type="file" onchange="STATE.werk.factuur=(this.files[0]?this.files[0].name:\'\')"><div class="hint">Per project laadt u de factuur één keer op — een nieuwe factuur start een nieuw project.</div></div>'
+        ? '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label><input type="file" accept="application/pdf,image/*" onchange="_factuurFile=(this.files[0]||null);STATE.werk.factuur=(this.files[0]?this.files[0].name:\'\')"><div class="hint">Per project laadt u de factuur één keer op — een nieuwe factuur start een nieuw project.'+(ingelogd()?'':' <b>Log in via Mijn Fluctus om echt op te slaan.</b>')+'</div></div>'
         : '<div class="fld"><label>Kies uw project</label><select onchange="kiesBestaand(this.value,\''+slug+'\')"><option value="">– kies project –</option>'+
            STATE.projecten.map(function(p){return '<option value="'+p.id+'">'+p.id+' · '+p.naam+' · '+p.datum+'</option>';}).join('')+'</select></div>');
   }
 
-  var velden = v.velden.length ? '<div class="sec"><h3>Voor deze vraag</h3>'+v.velden.map(veldInput).join('')+'</div>' : '';
+  var vl=effectieveVelden(v,slug);
+  var aantalGekend=((v.velden||[]).length+(isTeaserSell(slug)?(STUDIE_VELDEN[studieVan(slug)]||[]).length:0))-vl.length;
+  var velden = vl.length
+    ? '<div class="sec"><h3>Voor deze vraag</h3>'+vl.map(veldInput).join('')+(aantalGekend>0?'<div class="hint">De rest halen we uit uw factuur en eerdere antwoorden — dat vragen we niet opnieuw.</div>':'')+'</div>'
+    : (heeftActief()?'<div class="sec"><h3>Voor deze vraag</h3><div class="hint">We hebben alles al — uit uw factuur en eerdere antwoorden. U hoeft niets extra in te vullen.</div></div>':'');
 
   // belofte: volledig op betaalde studies, compact op teasers (verkoopt de studie) — niet op de gratis rapporten.
   var rt=routeVan(slug), betaald=!!v.prijs||rt.betaald===true, teaserSell=!rt.report&&!rt.stub;
@@ -334,20 +410,48 @@ function renderVraag(slug){
     '</div>';
 }
 
+function _toonBezig(msg){
+  app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
+    '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
+    '<div class="hint" style="margin-top:8px">Een factuur inlezen duurt ± 30–45 seconden. Even geduld — sluit dit scherm niet.</div></div></div>';
+}
+function _toonFout(slug, msg){
+  app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar Kamino</div>'+
+    '<div class="card"><div class="qh"><div class="ic">⚠️</div><div><h2>Er liep iets mis</h2></div></div>'+
+    '<div class="bevestig" style="background:#FDECEC;border-color:#E88;color:#8A1F1F">'+msg+'</div>'+
+    '<div style="display:flex;gap:10px;margin-top:14px"><button class="btn green" onclick="renderVraag(\''+slug+'\')">← Opnieuw proberen</button>'+
+    '<button class="btn ghost" onclick="location.hash=\'#/\'">Naar Kamino</button></div></div></div>';
+}
 function verstuur(slug){
-  var v=bySlug(slug), r=routeVan(slug);
-  // Eerste submit zonder actief project → maak nu het project aan (uit de factuur + klantnaam).
+  // Nieuw project + echte factuur + ingelogd → écht oplaadt/extraheert (async, factuur → Supabase), dan bevestigen.
+  if(!STATE.werk.id && _factuurFile && ingelogd()){
+    _toonBezig('Uw factuur wordt gelezen en veilig opgeslagen…');
+    extractFactuur(_factuurFile).then(function(bc){
+      var naam=(STATE.contact.k_naam||'').trim() || (bc&&(bc.klant||bc.klantNaam||bc.leveringsadres)) || (STATE.werk.factuur?STATE.werk.factuur.replace(/\.[^.]+$/,''):'Nieuw project');
+      var pid=projectIdLokaal(naam);
+      kApiPost('/api/project-id',{ project:naam }).catch(function(){});   // registreer op de achtergrond
+      STATE.projecten.unshift({ id:pid, naam:naam, datum:vandaag(), factuur:STATE.werk.factuur||'', velden:Object.assign({},STATE.werk.velden), baseCase:bc, opgeslagen:true });
+      STATE.werk.id=pid; STATE.werk.naam=naam; _factuurFile=null;
+      _toonBevestiging(slug);
+    }).catch(function(e){ _toonFout(slug, 'Het inlezen/opslaan van uw factuur is mislukt: '+((e&&e.message)||e)+'. Bent u ingelogd in Mijn Fluctus?'); });
+    return;
+  }
+  // Anders: bestaand project (voortzetten) of mock-fallback (niet ingelogd / geen factuur gekozen).
   if(!STATE.werk.id){
     var naam=(STATE.contact.k_naam||'').trim() || (STATE.werk.factuur?STATE.werk.factuur.replace(/\.[^.]+$/,''):'Nieuw project');
-    var p={ id:lokaalId(), naam:naam, datum:vandaag(), factuur:STATE.werk.factuur||'', velden:Object.assign({},STATE.werk.velden) };
-    STATE.projecten.unshift(p);
-    STATE.werk.id=p.id; STATE.werk.naam=p.naam;
+    STATE.projecten.unshift({ id:lokaalId(), naam:naam, datum:vandaag(), factuur:STATE.werk.factuur||'', velden:Object.assign({},STATE.werk.velden), opgeslagen:false });
+    STATE.werk.id=STATE.projecten[0].id; STATE.werk.naam=naam;
   } else {
-    // Bestaand project → velden/naam terugschrijven zodat de volgende vraag ze prefilt.
     var pe=projById(STATE.werk.id);
     if(pe){ pe.velden=Object.assign({},STATE.werk.velden); if((STATE.contact.k_naam||'').trim()) pe.naam=STATE.werk.naam=STATE.contact.k_naam.trim(); }
   }
+  _toonBevestiging(slug);
+}
+
+function _toonBevestiging(slug){
+  var v=bySlug(slug), r=routeVan(slug);
   antwMap()[slug]=v.mock;                         // markeer beantwoord onder het ACTIEVE project-ID
+  var actief=projById(STATE.werk.id)||{}, echt=!!actief.opgeslagen;
   var actie='', melding='', pid=STATE.werk.id;
   if(r.report){
     // rapport-vraag → open het rapport-app (same-origin, uw sessie → project-ID + Supabase-opslag werken)
@@ -368,7 +472,11 @@ function verstuur(slug){
   app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar Kamino</div>'+
     '<div class="card"><div class="qh"><div class="ic">✅</div><div><h2>Bedankt — we gaan ermee aan de slag</h2></div></div>'+
     '<div class="bevestig">Uw vraag <b>“'+v.vr+'”</b> is verwerkt onder project <b>'+pid+'</b>'+(STATE.werk.naam?' ('+STATE.werk.naam+')':'')+'.<br><br>'+melding+
-      '<br><br><span style="font-size:12px;color:#5A6577">Testfase: rapporten openen met voorbeelddata. De koppeling aan úw factuur (run → Supabase → mail via de academy-backend) is de volgende stap.</span></div>'+
+      '<br><br><span style="font-size:12px;color:#5A6577">'+
+      (echt
+        ? '✅ Uw factuur is ingelezen en <b>opgeslagen in Supabase</b> onder dit project. Het rapport toont in deze testfase nog voorbeelddata — het koppelen van úw cijfers (run → rapport → mail) is de volgende stap.'
+        : '⚠️ Voorlopig projectnummer — <b>nog niet opgeslagen</b>. Log in via Mijn Fluctus én laad een factuur op om uw project echt te bewaren.')+
+      '</span></div>'+
     belofteBev+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+actie+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar Kamino</button></div></div></div>';
