@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.8 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9 (Mijn Fluctus-app · testmodus)
+     v0.9: STUDIE 1 ECHT — de onderhandelingsmarge wordt live berekend via /api/kamino/onderhandel
+           (dezelfde buildSimInput → simulator.py als de simulator, dus drift-vrij). Kerncijfers op de kaart
+           en het resultaat komen uit de echte run; verbruiksprofielen geladen uit /api/profielen-lijst.
+           Studies 2–4 volgen hetzelfde patroon (nog placeholder).
      v0.8: TOEGANGSPOORT — bestaand project openen met project-ID + e-mail (klant of adviseur). Zo werken
            klant en adviseur samen verder op hetzelfde project (volgende studie), zonder mailverkeer.
            Projectrecord (incl. e-mails, factuurref, baseCase, gedane studies) wordt bewaard via
@@ -144,7 +148,8 @@ var STATE={
   contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
   werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false },
   projecten:[],
-  gedaan:{}   // { projectId: { puntId: true } }
+  gedaan:{},  // { projectId: { puntId: true } }
+  kern:{}     // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
 };
 var _factuurFile=null;
 
@@ -157,6 +162,12 @@ function ingelogd(){ return !!kToken(); }
 function kApiPost(path, body){ var tok=kToken(), h={'Content-Type':'application/json'}; if(tok) h['Authorization']='Bearer '+tok;
   return fetch(API_BASE+path,{method:'POST',headers:h,body:JSON.stringify(body)}).then(function(r){
     if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP '+r.status+': '+t); }); return r.json(); }); }
+function kApiGet(path){ var tok=kToken(), h={}; if(tok) h['Authorization']='Bearer '+tok;
+  return fetch(API_BASE+path,{headers:h}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
+// echte kerncijfers per project+studie
+function kernOf(pid,id){ return (STATE.kern[pid]||{})[id]||null; }
+function bewaarKern(id,kern){ var pid=STATE.werk.id; if(!pid) return; (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern; }
+function eurJaar(n){ n=Math.round(+n||0); var s=(''+Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); return '€ '+s+'/j'; }
 function fileNaarB64(file){ return new Promise(function(res,rej){ var fr=new FileReader();
   fr.onload=function(){ try{ res(String(fr.result).split(',')[1]); }catch(e){ rej(e); } };
   fr.onerror=function(){ rej(new Error('bestand lezen mislukt')); }; fr.readAsDataURL(file); }); }
@@ -192,12 +203,13 @@ function renderOverzicht(){
   var kaarten=PUNTEN.map(function(p){
     var done=g[p.id], kls=p.gratis?'gratis':'betaald';
     var badge=p.gratis?'<span class="p-badge badge-gratis">gratis</span>':'<span class="p-badge badge-betaald">'+p.prijs+(p.cashback?' + cash back':'')+'</span>';
+    var kern=kernOf(STATE.werk.id,p.id)||p.kern;   // echte cijfers als beschikbaar, anders voorbeeld
     return '<div class="punt '+kls+(done?' done':'')+'" onclick="location.hash=\'#/punt/'+p.id+'\'">'+
       (done?'<span class="p-check">✓</span>':'')+
       '<div class="p-top"><div class="p-nr">'+p.nr+'</div><div class="p-ic">'+p.ic+'</div><div class="p-punt">'+p.punt+'</div></div>'+
       '<div class="p-vr">'+p.vr+'</div>'+
       '<div class="p-studie">Studie: <b>'+p.studie+'</b>'+badge+'</div>'+
-      '<div class="kern3">'+p.kern.map(function(k){return '<div class="kern"><div class="kl">'+k.l+'</div><div class="kv">'+k.v+'</div></div>';}).join('')+'</div>'+
+      '<div class="kern3">'+kern.map(function(k){return '<div class="kern"><div class="kl">'+k.l+'</div><div class="kv">'+k.v+'</div></div>';}).join('')+'</div>'+
       '<div class="p-open">'+(done?'Bekijk opnieuw →':'Start deze studie →')+'</div>'+
     '</div>';
   }).join('');
@@ -331,17 +343,37 @@ function _maakProject(bc){
 
 function resultaat(id){
   var p=byId(id); gedaanMap()[id]=true;
+  // Studie 1 (contract): echte onderhandelingsmarge draaien op de baseCase — zelfde sim als de simulator.
+  if(id==='contract' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
+    _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…');
+    kApiPost('/api/kamino/onderhandel',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel }).then(function(r){
+      var kern=[
+        {l:'Onderhandelingsmarge', v:'− '+eurJaar(r.marge_jaar)},
+        {l:'Energiekost nu → dynamisch', v:(r.energiekost_nu_mwh!=null?('€'+r.energiekost_nu_mwh+' → €'+r.energiekost_dyn_mwh):'—')},
+        {l:'Besparing op totaal', v:'− '+r.besparing_pct+' %'}
+      ];
+      bewaarKern(id,kern); persistProject(); _toonResultaat(id);
+    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    return;
+  }
   persistProject();   // projectrecord bewaren → later heropenbaar via de toegangspoort (ID + e-mail)
+  _toonResultaat(id);
+}
+function _toonResultaat(id, waarschuwing){
+  var p=byId(id);
   var actief=projById(STATE.werk.id)||{}, echt=!!actief.opgeslagen;
-  var kern='<div class="kernbig">'+p.kern.map(function(k){return '<div class="k"><div class="kl">'+k.l+'</div><div class="kv" style="color:'+(p.gratis?'#048443':'#9E480E')+'">'+k.v+'</div></div>';}).join('')+'</div>';
+  var kernData=kernOf(STATE.werk.id,id)||p.kern, echteKern=!!kernOf(STATE.werk.id,id);
+  var kern='<div class="kernbig">'+kernData.map(function(k){return '<div class="k"><div class="kl">'+k.l+'</div><div class="kv" style="color:'+(p.gratis?'#048443':'#9E480E')+'">'+k.v+'</div></div>';}).join('')+'</div>';
   var tweestaps=p.tweestaps?'<div class="tweestaps"><b>Volgende stap:</b> dit rapport draait op een standaardprofiel. We plannen een videovergadering + kabelplanner om te bekijken of uw specifiek profiel meerwaarde geeft (met uw mandaat).</div>':'';
   app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar het overzicht</div>'+
     '<div class="card"><div class="qh"><div class="ic">✅</div><div><h2>'+p.studie+' — uw kerncijfers</h2>'+
       '<div class="qsub" style="color:#5A6577">Project '+STATE.werk.id+(STATE.werk.naam?' · '+STATE.werk.naam:'')+'</div></div></div>'+
     kern+
-    '<div class="bevestig">'+(echt
-      ? '✅ Uw factuur is ingelezen en <b>opgeslagen in Supabase</b>. Deze kerncijfers zijn in deze testfase nog voorbeelddata — het koppelen van úw echte cijfers (de run per studie) is de volgende stap. U en uw adviseur ontvangen het volledige rapport per mail.'
-      : '⚠️ Voorlopig projectnummer — <b>nog niet opgeslagen</b>. Log in via Mijn Fluctus én laad een factuur op om echt te bewaren.')+'</div>'+
+    '<div class="bevestig">'+(waarschuwing?('⚠️ '+waarschuwing+'<br><br>'):'')+(echteKern
+      ? '✅ Deze kerncijfers zijn <b>écht berekend op uw factuur</b> (zelfde simulatie als de Fluctus-simulator). Uw factuur is veilig opgeslagen; u en uw adviseur ontvangen het volledige rapport per mail.'
+      : (echt
+        ? '✅ Uw factuur is opgeslagen in Supabase. Voor deze studie zijn dit nog voorbeeldcijfers — de echte run wordt hier aangehaakt (studie 1 is al echt).'
+        : '⚠️ Voorlopig projectnummer — <b>nog niet opgeslagen</b>. Log in via Mijn Fluctus én laad een factuur op om echt te bewaren.'))+'</div>'+
     (p.gratis?'':belofteBlok())+
     tweestaps+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
@@ -397,6 +429,12 @@ function router(){ var h=location.hash||'#/', m=h.match(/#\/punt\/([a-z]+)/i);
   if(/#\/open/.test(h)){ renderOpen(); window.scrollTo(0,0); }
   else if(m){ renderPunt(m[1]); window.scrollTo(0,0); }
   else { renderOverzicht(); } }
+// Echte verbruiksprofielen uit de simulator laden (zodat de naam matcht met wat de sim verwacht).
+kApiGet('/api/profielen-lijst').then(function(r){
+  var lijst=(r&&r.profielen)||[];
+  var namen=lijst.map(function(x){ return (typeof x==='string')?x:(x&&(x.naam||x.name)||''); }).filter(Boolean);
+  if(namen.length){ PROFIELEN=namen; if(PROFIELEN.indexOf(STATE.werk.profiel)<0) STATE.werk.profiel=PROFIELEN[0]; router(); }
+}).catch(function(){});
 window.addEventListener('hashchange',router); router();
 </script>
 </body>
