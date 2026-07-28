@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.1 (Mijn Fluctus-app · testmodus)
      v0.9: STUDIE 1 ECHT — de onderhandelingsmarge wordt live berekend via /api/kamino/onderhandel
            (dezelfde buildSimInput → simulator.py als de simulator, dus drift-vrij). Kerncijfers op de kaart
            en het resultaat komen uit de echte run; verbruiksprofielen geladen uit /api/profielen-lijst.
@@ -149,7 +149,8 @@ var STATE={
   werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false },
   projecten:[],
   gedaan:{},  // { projectId: { puntId: true } }
-  kern:{}     // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
+  kern:{},    // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
+  diag:{}     // { projectId: { puntId: 'toelichting' } }
 };
 var _factuurFile=null;
 
@@ -167,6 +168,8 @@ function kApiGet(path){ var tok=kToken(), h={}; if(tok) h['Authorization']='Bear
 // echte kerncijfers per project+studie
 function kernOf(pid,id){ return (STATE.kern[pid]||{})[id]||null; }
 function bewaarKern(id,kern){ var pid=STATE.werk.id; if(!pid) return; (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern; }
+function bewaarDiag(id,txt){ var pid=STATE.werk.id; if(!pid) return; (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=txt; }
+function diagOf(pid,id){ return (STATE.diag[pid]||{})[id]||''; }
 function eurJaar(n){ n=Math.round(+n||0); var s=(''+Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); return '€ '+s+'/j'; }
 function fileNaarB64(file){ return new Promise(function(res,rej){ var fr=new FileReader();
   fr.onload=function(){ try{ res(String(fr.result).split(',')[1]); }catch(e){ rej(e); } };
@@ -352,7 +355,11 @@ function resultaat(id){
         {l:'Energiekost nu → dynamisch', v:(r.energiekost_nu_mwh!=null?('€'+r.energiekost_nu_mwh+' → €'+r.energiekost_dyn_mwh):'—')},
         {l:'Besparing op totaal', v:'− '+r.besparing_pct+' %'}
       ];
-      bewaarKern(id,kern); persistProject(); _toonResultaat(id);
+      bewaarKern(id,kern);
+      var d=r._debug||{}, di=d.in||{}, pr=d.pricing||{};
+      var dbg='<br><span style="font-family:monospace;font-size:10px;color:#8A93A3">debug · vergroening '+(di.vergroening)+' €/MWh · effectief jaarverbr. '+(d.effectief_jaarverbruik_mwh!=null?Math.round(d.effectief_jaarverbruik_mwh):'?')+' MWh · schijf '+(pr.schijf_label||pr.schijf_code||r.schijf||'?')+' · markup '+(pr.markup_dam!=null?pr.markup_dam:(r.markup!=null?r.markup:'?'))+' €/MWh · energiepost dyn € '+((d.A_energiekost&&d.A_energiekost._subtotaal!=null)?Math.round(d.A_energiekost._subtotaal):'?')+'</span>';
+      bewaarDiag(id,'Berekend op verbruiksprofiel <b>'+(STATE.werk.profiel||'?')+'</b>'+(r.geprojecteerd_mwh!=null?(' · geprojecteerd '+r.geprojecteerd_mwh+' MWh/jaar'):'')+'. Kies in de simulator hetzelfde profiel voor een identiek cijfer.'+dbg);
+      persistProject(); _toonResultaat(id);
     }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
@@ -364,11 +371,13 @@ function _toonResultaat(id, waarschuwing){
   var actief=projById(STATE.werk.id)||{}, echt=!!actief.opgeslagen;
   var kernData=kernOf(STATE.werk.id,id)||p.kern, echteKern=!!kernOf(STATE.werk.id,id);
   var kern='<div class="kernbig">'+kernData.map(function(k){return '<div class="k"><div class="kl">'+k.l+'</div><div class="kv" style="color:'+(p.gratis?'#048443':'#9E480E')+'">'+k.v+'</div></div>';}).join('')+'</div>';
+  var diag=diagOf(STATE.werk.id,id);
+  var diagHtml=diag?'<div class="hint" style="margin:2px 0 6px">'+diag+'</div>':'';
   var tweestaps=p.tweestaps?'<div class="tweestaps"><b>Volgende stap:</b> dit rapport draait op een standaardprofiel. We plannen een videovergadering + kabelplanner om te bekijken of uw specifiek profiel meerwaarde geeft (met uw mandaat).</div>':'';
   app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar het overzicht</div>'+
     '<div class="card"><div class="qh"><div class="ic">✅</div><div><h2>'+p.studie+' — uw kerncijfers</h2>'+
       '<div class="qsub" style="color:#5A6577">Project '+STATE.werk.id+(STATE.werk.naam?' · '+STATE.werk.naam:'')+'</div></div></div>'+
-    kern+
+    kern+diagHtml+
     '<div class="bevestig">'+(waarschuwing?('⚠️ '+waarschuwing+'<br><br>'):'')+(echteKern
       ? '✅ Deze kerncijfers zijn <b>écht berekend op uw factuur</b> (zelfde simulatie als de Fluctus-simulator). Uw factuur is veilig opgeslagen; u en uw adviseur ontvangen het volledige rapport per mail.'
       : (echt
