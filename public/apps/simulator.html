@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.2  (Kamino ontwerpscherm + bestaande PV / SolarActive)
+     FLUCTUS SIMULATOR  v1.63.4  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT)
+     v1.63.4: KAMINO AUTOPILOT. De tegels bedienen de simulator: localStorage['FLUCTUS_AUTOPILOT'] met
+              {tegel, baseCase, profielNaam, …} → de simulator legt volautomatisch zijn eigen stappen af
+              (optimale opstelling → extra PV @90% → groeistappen → groeistap 1) en toont ZIJN eigen
+              ontwerp-rapport (same-tab, geen popup). ISOLATIE: enkel actief bij een payload, anders no-op.
+     v1.63.3: PV-zelfconsumptie-drempel voor de standaardkeuze standaard op 90% (was 80%) — spiegelt de
+              Kamino-regel "extra PV die nog ≥90% lokaal verbruikt wordt" (Johan 28-07). Instelbaar blijft.
      v1.63.2: FIX rapport-knoppen "reageren niet". _metProjectId deed een async apiPost('/api/project-id')
               vóór window.open → de user-gesture verliep → de browser blokkeerde de nieuwe tab stilletjes.
               Nu: project-ID SYNCHROON client-side (_projectIdLokaal, identieke FNV-1a als de server),
@@ -272,7 +278,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.63.1</span>
+    <span class="fdsim-version">v1.63.4</span>
   </div>
 </div>
 
@@ -7606,7 +7612,7 @@ function _renderPvSuggestie(){
   if(npvMax!=null && npvMax<=0) sugg=0;
   // v1.57.2: STANDAARD = de GROOTSTE PV waarvan de zelfconsumptie nog ≥ drempel% is (instelbaar).
   // Zo maximaliseren we het zelf benutte PV-volume zonder in te veel injectie te vervallen.
-  var drempel=(STATE.pvZelfDrempel!=null)?+STATE.pvZelfDrempel:80;
+  var drempel=(STATE.pvZelfDrempel!=null)?+STATE.pvZelfDrempel:90;   // v1.63.3: standaard 90% (= Kamino-regel, Johan 28-07)
   var suggZelf=0, zelfBij=null;
   data.forEach(function(d){ if(d.pv>0 && d.zelf!=null && d.zelf>=drempel){ if(suggZelf===0 || d.pv>suggZelf){ suggZelf=d.pv; zelfBij=d.zelf; } } });
   if(suggZelf===0){ var _zm=null; data.forEach(function(d){ if(d.pv>0 && d.zelf!=null && (_zm==null||d.zelf>_zm)){ _zm=d.zelf; suggZelf=d.pv; zelfBij=d.zelf; } }); }
@@ -7661,7 +7667,7 @@ function _renderPvSuggestie(){
   drRow.appendChild(el('span',null,'Zelfconsumptie-drempel voor de standaardkeuze:'));
   var drIn=el('input',{type:'number',min:'0',max:'100',step:'5',value:String(drempel),
     style:'width:64px;padding:3px 6px;border:1px solid #D5DBE3;border-radius:4px;font-size:12px;text-align:right'});
-  drIn.onchange=function(){ var v=parseFloat(drIn.value); if(!isFinite(v)) v=80; v=Math.max(0,Math.min(100,v));
+  drIn.onchange=function(){ var v=parseFloat(drIn.value); if(!isFinite(v)) v=90; v=Math.max(0,Math.min(100,v));
     STATE.pvZelfDrempel=v; STATE.pvKeuzeKwp=null; if(STATE.currentStep===10) renderStage(); };
   drRow.appendChild(drIn); drRow.appendChild(el('span',null,'%'));
   sec.appendChild(drRow);
@@ -10486,7 +10492,124 @@ function _fdsimInit(){
           try { renderAll(); } catch(e){ /* niets */ }
         }, 250);
         log('Fluctus Simulator v1.20.9 — initialisatie klaar (fase 1.1: twee opstellingen × 3 sturingen bij ontoereikend toegangsvermogen)','ok');
+        _autopilotCheck();   // v1.63.4: Kamino-autopilot — alleen actief bij een handoff-payload, anders no-op.
       }catch(e){console.error('[fdsim] init error:',e);}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  v1.63.4 — KAMINO AUTOPILOT
+//  De Kamino-tegels zijn "agents die de simulator bedienen": ze zetten de ingegeven
+//  keuzes in localStorage['FLUCTUS_AUTOPILOT'] en openen de simulator, die dan
+//  volautomatisch zijn EIGEN stappen aflegt tot het ontwerp en ZIJN EIGEN rapport
+//  toont — identiek aan een manuele run (zelfde functies, zelfde volgorde).
+//  ISOLATIE-GARANTIE: alles hieronder draait ENKEL als er een payload staat. Zonder
+//  payload is de simulator byte-identiek in gedrag. Alle helpers zijn _ap*-geprefixt.
+//  Volgorde tegel 3/4 = simulator-volgorde: optimale opstelling → extra PV @90% →
+//  groeistappen → groeistap 1 → ontwerp-rapport.
+// ═══════════════════════════════════════════════════════════════════════════════
+function _apStatus(msg, isFout){
+  var id='fdsim-autopilot-overlay', o=document.getElementById(id);
+  if(!o){ o=document.createElement('div'); o.id=id;
+    o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(31,56,100,.97);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,Segoe UI,Arial,sans-serif;text-align:center;padding:24px';
+    document.body.appendChild(o); }
+  o.innerHTML='<div style="font-size:40px;margin-bottom:14px">'+(isFout?'⚠️':'⏳')+'</div>'+
+    '<div style="font-size:16px;font-weight:700;max-width:520px">Kamino bedient de simulator</div>'+
+    '<div style="font-size:14px;opacity:.9;margin-top:8px;max-width:520px">'+String(msg||'')+'</div>'+
+    (isFout?'<div style="font-size:12px;opacity:.7;margin-top:14px">U kan dit venster sluiten en het opnieuw proberen.</div>':'');
+}
+function _apWait(test, timeoutMs, label){
+  return new Promise(function(res,rej){ var t0=Date.now();
+    (function tick(){ var ok=false; try{ ok=!!test(); }catch(e){}
+      if(ok){ res(); return; }
+      if(Date.now()-t0>(timeoutMs||300000)){ rej(new Error('time-out bij '+(label||'stap'))); return; }
+      setTimeout(tick, 700);
+    })();
+  });
+}
+function _apSetState(h){
+  var bc=h.baseCase||{};
+  STATE.project = (typeof _cleanProjectName==='function') ? _cleanProjectName(bc.klantNaam||h.project||'Kamino') : (bc.klantNaam||h.project||'Kamino');
+  STATE.scenario = (typeof _buildScenario1Naam==='function' && bc.periodeVan && bc.periodeTot) ? _buildScenario1Naam(bc.periodeVan,bc.periodeTot) : (STATE.scenario||'kamino');
+  STATE.scenarioActie='nieuw';
+  STATE.postcode = String(bc.postcode||h.postcode||'').trim();
+  STATE.grd = bc.dnb||h.grd||STATE.grd||'';
+  if(bc.spanningsniveau==='MS'||bc.spanningsniveau==='LS') STATE.spanning=bc.spanningsniveau;
+  else STATE.spanning=(((+bc.aansluitVermogenKva||0)*0.95)>=100?'MS':'LS');
+  STATE.profielNaam = h.profielNaam||STATE.profielNaam;
+  STATE.aansluitingKva = +bc.aansluitVermogenKva||+h.aansluitingKva||100; STATE._aansluitingManueel=false;
+  STATE.jaar='specifiek'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
+  if(bc.afnameKwh!=null) STATE.periodeVolumeMwh=(+bc.afnameKwh)/1000;
+  // geprojecteerd jaarverbruik (MWh): handoff → anders annualiseren op de periode.
+  var dg=(typeof _periodeDagen==='function')?_periodeDagen(bc.periodeVan,bc.periodeTot):30;
+  STATE.jaarverbruik = (h.jaarverbruikMwh!=null)?+h.jaarverbruikMwh
+    : ((STATE.periodeVolumeMwh>0 && dg>0)? STATE.periodeVolumeMwh*(365/dg) : (STATE.jaarverbruik||0));
+  STATE.pvKwp = (h.pvKwp!=null)?+h.pvKwp:0; STATE.pvInjStrategie = STATE.pvInjStrategie||'geen';
+  STATE.pvZelfDrempel = (h.pvDrempel!=null)?+h.pvDrempel:90;
+  STATE.laadpleinen = Array.isArray(h.laadpleinen)?h.laadpleinen:[];
+  STATE.batterijId = h.batterijId||''; STATE.batterijCustom=h.batterijCustom||null;
+  if(bc.factuur_bestanden) STATE.baseCase=bc; STATE.baseCase=bc;
+  STATE.currentStep=9;
+  if(!Array.isArray(STATE.visited)) STATE.visited=[];
+  for(var i=0;i<=9;i++) STATE.visited[i]=true;
+}
+function _apRunSim(){
+  STATE.currentStep=9;
+  try{ runSimulatie(); }catch(e){ return Promise.reject(e); }
+  return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 720000, 'simulatie');
+}
+function _apPickPv(drempel){
+  drempel=drempel||90;
+  if(+STATE.pvKwp>0) return Promise.resolve();   // PV al vast → sweep sloeg over
+  return _apWait(function(){ return STATE.pvSweep && !STATE.pvSweepLoading; }, 300000, 'PV-sweep').then(function(){
+    var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[], keuze=0;
+    st.forEach(function(s){ var pv=+s.pv_kwp||0, z=(s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null;
+      if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
+    if(keuze===0){ var best=null; st.forEach(function(s){ if(s.zelfconsumptie_pct!=null && (!best||+s.zelfconsumptie_pct>+best.zelfconsumptie_pct)) best=s; }); if(best) keuze=+best.pv_kwp||0; }
+    STATE.pvKwp=keuze; STATE.pvKeuzeKwp=keuze;
+    _apStatus('Extra PV op '+keuze+' kWp (≥'+drempel+'% zelfverbruik) — groeistappen herrekenen…');
+    return _apRunSim();   // herrun mét PV → groeipad mét PV
+  });
+}
+function _apGroeistap1(){
+  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 300000, 'groeipad').then(function(){
+    var _in=JSON.parse(JSON.stringify(STATE.lastSimInput||{}));
+    _in.aansluiting_kva=STATE.aansluitingKva; _in.aantal_batterijen=1;   // eerste groeistap, vaste aansluiting (gebouw)
+    STATE.groeipadKeuze={k:1,c:STATE.aansluitingKva};
+    return apiPost('/api/opstelling',_in).then(function(r){ STATE.groeistap1=(r&&r.opstelling)||null; })
+      .catch(function(){ /* groeistap 1 niet-blokkerend: ontwerp toont dan het groeipad */ });
+  });
+}
+function _apOpenOntwerp(mode){
+  var pid=(typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'FLX-KAMINO';
+  var data=_ontwerpRapportData(pid, mode||'klant');
+  try{ sessionStorage.setItem('FLUCTUS_ONTWERP_RAPPORT', JSON.stringify(data)); }catch(e){}
+  location.href='/apps/ontwerp-rapport.html'+((mode==='management')?'?mode=management':'');
+}
+function _autopilotDrive(h){
+  var tegel=h.tegel||'aansluiting';
+  _apStatus('Uw gegevens worden ingeladen…');
+  try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
+  if(tegel==='productie'){
+    _apStatus('SolarActive — injectie-opbrengst berekenen…');
+    _runInjectieAnalyse(function(a){ try{ _openSolarActiveRapport(a); }catch(e){ _apStatus('Rapport bouwen mislukte: '+e.message, true); } });
+    return;
+  }
+  // tegel 3 (aansluiting) / 4 (mobiliteit): simulator-volgorde tot ontwerp.
+  _apStatus('Optimale opstelling berekenen…');
+  _apRunSim()
+    .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||90)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||90); })
+    .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
+    .then(function(){ _apStatus('Ontwerp-rapport openen…'); _apOpenOntwerp(h.rapportModus||'klant'); })
+    .catch(function(e){ _apStatus('De automatische studie liep vast ('+((e&&e.message)||e)+').', true); console.error('[autopilot]',e); });
+}
+function _autopilotCheck(){
+  var raw=null;
+  try{ raw=localStorage.getItem('FLUCTUS_AUTOPILOT'); if(raw) localStorage.removeItem('FLUCTUS_AUTOPILOT'); }catch(e){}
+  if(!raw){ try{ var m=(location.hash||'').match(/autopilot=([^&]+)/); if(m) raw=decodeURIComponent(m[1]); }catch(e){} }
+  if(!raw) return;
+  var h=null; try{ h=JSON.parse(raw); }catch(e){ console.error('[autopilot] payload parse-fout',e); return; }
+  if(!h || !h.baseCase){ return; }
+  setTimeout(function(){ try{ _autopilotDrive(h); }catch(e){ _apStatus('Autopilot-fout: '+e.message, true); } }, 300);
 }
 
 if(document.readyState==='loading'){

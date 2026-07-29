@@ -310,6 +310,45 @@ function renderPunt(id){
 function _bezig(msg){ app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
   '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
   '<div class="hint" style="margin-top:8px">Een factuur inlezen duurt ± 30–45 seconden. Sluit dit scherm niet.</div></div></div>'; }
+// async job-poller (studie 3/4): pollt /api/sim-voortgang tot 'klaar' of 'fout'; toont de laatste logregel.
+function _pollKamino(jobId, onKlaar, onFout){
+  var pogingen=0, max=260; // ~6,5 min @ 1,5s
+  (function tick(){
+    pogingen++;
+    kApiGet('/api/sim-voortgang/'+encodeURIComponent(jobId)).then(function(j){
+      if(j&&j.status==='klaar'){ onKlaar(j.resultaat||{}); return; }
+      if(j&&j.status==='fout'){ onFout(j.fout||'onbekende fout'); return; }
+      if(pogingen>=max){ onFout('time-out — probeer opnieuw'); return; }
+      var laatste=(j&&j.log&&j.log.length)?j.log[j.log.length-1]:null;
+      if(laatste&&laatste.tekst) _bezig(laatste.tekst);
+      setTimeout(tick,1500);
+    }).catch(function(e){ if(pogingen>=max){ onFout((e&&e.message)||e); } else setTimeout(tick,1500); });
+  })();
+}
+function _tegel3Klaar(id, r){
+  var tvt=(r.terugverdientijd_jaar!=null)?(String(r.terugverdientijd_jaar).replace('.',',')+' j'):'—';
+  var kern=[
+    {l:'Besparing (instap)', v:'− '+eurJaar(r.besparing_jaar)},
+    {l:'Rendement', v:(r.rendement_pct!=null?(String(Math.round(r.rendement_pct*10)/10).replace('.',',')+' %'):'—')},
+    {l:'Terugverdientijd', v:tvt}
+  ];
+  bewaarKern(id,kern);
+  var opt=r.optimaal||{}, ins=r.instap||{}, drempel=(r._debug&&r._debug.drempel)||90;
+  bewaarDiag(id,'Eerste groeistap: <b>'+(ins.batterijen||1)+' batterij</b> ('+(ins.kw||120)+' kW / '+(ins.kwh||260)+' kWh) + extra PV <b>'+r.pv_kwp+' kWp</b> (≥'+drempel+'% zelfverbruik). Optimale opstelling (advies): <b>'+(opt.batterijen||'?')+' batterijen</b>. Het volledige rapport = dezelfde simulator, op autopilot.');
+  persistProject(); _toonResultaat(id);
+}
+// v0.9.2: tegels = agents die de simulator bedienen. Zet de keuzes in localStorage en open de
+// simulator; die legt dan volautomatisch zijn eigen stappen af tot het ontwerp-rapport.
+var SIM_URL='/apps/simulator.html';
+function _startAutopilot(id){
+  var bc=STATE.werk.baseCase;
+  if(!bc){ alert('Laad eerst een factuur op om de studie te starten.'); return; }
+  if(id!=='aansluiting'){ alert('De automatische simulator-studie voor deze tegel volgt binnenkort. “Mijn aansluiting” is al live.'); return; }
+  var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90 };
+  try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
+  catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
+  window.open(SIM_URL, '_blank');
+}
 function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug</div>'+
   '<div class="card"><div class="qh"><div class="ic">⚠️</div><div><h2>Er liep iets mis</h2></div></div>'+
   '<div class="bevestig" style="background:#FDECEC;border-color:#E88;color:#8A1F1F">'+msg+'</div>'+
@@ -379,6 +418,16 @@ function resultaat(id){
     }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
+  // Studie 3 (aansluiting/BatteryActive): PV-dimensionering @90% + batterij-groeipad — ASYNC (job + polling), ZELFDE server-pijplijn als de simulator.
+  if(id==='aansluiting' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
+    _bezig('Uw ideale opstelling wordt doorgerekend (PV-dimensionering + batterij-groeipad)…');
+    kApiPost('/api/kamino/aansluiting',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel }).then(function(r){
+      if(!r||!r.job_id) throw new Error('geen job_id ontvangen');
+      _pollKamino(r.job_id, function(res){ _tegel3Klaar(id,res); },
+        function(err){ persistProject(); _toonResultaat(id, 'De echte berekening lukte niet ('+err+'). Hieronder voorbeeldcijfers.'); });
+    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    return;
+  }
   persistProject();   // projectrecord bewaren → later heropenbaar via de toegangspoort (ID + e-mail)
   _toonResultaat(id);
 }
@@ -402,7 +451,7 @@ function _toonResultaat(id, waarschuwing){
     (p.gratis?'':belofteBlok())+
     tweestaps+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
-      '<button class="btn green" onclick="alert(\'(testfase) hier opent straks uw volledige '+p.studie+'-rapport\')">📄 Volledig rapport openen</button>'+
+      '<button class="btn green" onclick="_startAutopilot(\''+id+'\')">📄 Volledig rapport openen</button>'+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div>'+
     '</div></div>';
 }
