@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.7  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.11  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.11: BASISLIJN = BESTAANDE JAARFACTUUR (Johan-keuze optie 2, 28-07 — vervangt optie 1). besparing_jaar1
+              = bestaand − ontwerp (i.p.v. cM − cB); basislijn_jaar = bestaand_jaar. Eén coherente basislijn
+              overal, uitgelijnd met _kpiEngine (dat de bestaande factuur al als rendement-basis gebruikte).
+     v1.63.10: BASISLIJN = betere (dynamische) factuur (Johan-keuze optie 1, 28-07). _ontwerpRapportData geeft
+              nu basislijn_jaar (= minder-scenario) mee; het rapport deelt de besparing en de €/MWh dáárdoor
+              i.p.v. door de oorspronkelijke factuur. Teller én noemer = dezelfde basis. (ontwerp-rapport.html v2.6.0)
+     v1.63.9: TWEE cijfer-fixes. (1) Scenario-vergelijking normaliseert nu OP JAARBASIS — een 'specifiek'
+              (maand)-scenario werd tegen een jaarontwerp gezet ("88,5% goedkoper" = onzin); nu ×365/dagen.
+              (2) Extra-PV bijdrage op ENKEL de nieuwe kWp (en.pv_* zijn totaal incl. bestaande PV), begrensd
+              op de totale besparing (sluitcontrole). Eerste stap van de besparings-reconciliatie.
+     v1.63.8: kern uit de rapportdata i.p.v. beste.rendement/payback (die zijn null bij een PV-only optimaal).
+              Rendement = optimaal.kpi2_rendement, TVT = capex/besparing — kaart toont nu alle 3 = rapport.
      v1.63.7: EMBED veronderstelt de manager — in een verborgen Kamino-iframe wordt de login-drempel
               (FluctusAppAuth.requireAccess) overgeslagen en meteen geïnitialiseerd (Johan 28-07).
      v1.63.6: EMBED-modus. De simulator draait als ONZICHTBARE rekenmachine in een Kamino-iframe; de klant
@@ -287,7 +299,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.63.7</span>
+    <span class="fdsim-version">v1.63.11</span>
   </div>
 </div>
 
@@ -3056,7 +3068,11 @@ function _financieelRapportData(){
       waarvan_capaciteit:{ minder:cM.capaciteit, beter:cB.capaciteit },
       heffingen:{ minder:cM.heffingen, beter:cB.heffingen }
     },
-    besparing_jaar1:cM.subtotaal-cB.subtotaal,
+    // v1.63.11 (Johan-keuze optie 2, 28-07): besparing t.o.v. de BESTAANDE JAARFACTUUR (de realiteit als de
+    // klant niets anders doet — geen heronderhandeling, geen contractswitch). Eén basislijn overal, en dit
+    // lijnt uit met _kpiEngine (dat de bestaande factuur al als basis gebruikt voor rendement). Was cM−cB
+    // (t.o.v. de dynamische factuur). bestaandJaar valt bij ontbrekende marge-data terug op cM.
+    besparing_jaar1:bestaandJaar-cB.subtotaal,
     besparing_energie_deel:0.72,
     onbalans_windfall_jaar1:Math.max(0,windfall)
     // v1.21.8: de factuuranalyse zit BEWUST NIET in het financieel rapport. Dat rapport
@@ -3143,15 +3159,22 @@ function _ontwerpRapportData(projectId, mode){
     kost_per_km:kpiKm, creg_per_km:cregKm,
     voertuigen:'', pleinen:((fd.laadpleinen&&fd.laadpleinen.pleinen)||[]).map(function(p){ return {naam:p.naam||p.label||'plein', type:p.type||'', aantal:p.aantal||0, mwh:Math.round(p.mwh||p.ev_last_mwh||0)}; })
   } : { aanwezig:false };
-  var xpProd=Math.round((pvKwp*0.9)*10)/10;
+  // v1.63.9 FIX: extra-PV sectie op ENKEL de nieuwe kWp. De sim voegt bestaande + nieuwe PV samen in
+  // pv.kwp (server v15.43), dus en.pv_* zijn TOTAAL-cijfers — die crediteren de bestaande panelen mee en
+  // laten de "extra PV bijdrage" (€6.549) boven de totale besparing (€5.883) uitkomen. We rekenen op de
+  // nieuwe kWp, met de zelfverbruik-fractie uit de sim, en begrenzen op de totale besparing (sluitcontrole).
+  var xpProd=Math.round((pvKwp*0.9)*10)/10;            // productie van enkel de nieuwe kWp (~900 kWh/kWp)
   var _totMwh=(+STATE.jaarverbruik||0)+(en.laadplein_mwh||0);
   var _ePrijsMwh=(factuurComp.energie>0 && _totMwh>0)?factuurComp.energie/_totMwh:150;
-  var extra_pv={ kwp:pvKwp, productie_mwh:en.pv_productie_mwh||xpProd,
-    zelfverbruik_pct:(en.pv_productie_mwh>0?Math.round((en.pv_zelfverbruik_mwh||0)/en.pv_productie_mwh*100):64),
-    meerwaarde_eur:Math.round((en.pv_zelfverbruik_mwh||0)*_ePrijsMwh),
-    direct_mwh:en.pv_naar_gebouw_mwh!=null?en.pv_naar_gebouw_mwh+ (en.pv_naar_laadplein_mwh||0):null,
-    via_batterij_mwh:en.pv_via_batterij_mwh!=null?en.pv_via_batterij_mwh:null,
-    injectie_mwh:(en.pv_productie_mwh!=null?Math.max(0,en.pv_productie_mwh-(en.pv_zelfverbruik_mwh||0)-(en.pv_via_batterij_mwh||0)):null) };
+  var _zvFrac=(en.pv_productie_mwh>0)?Math.min(1,Math.max(0,(en.pv_zelfverbruik_mwh||0)/en.pv_productie_mwh)):0.6;
+  var xpZelf=Math.round(xpProd*_zvFrac*10)/10;         // zelfverbruik van de nieuwe kWp (zelfde fractie als de sim)
+  var _xpMeer=Math.round(xpZelf*_ePrijsMwh);
+  if((fd.besparing_jaar1||0)>0) _xpMeer=Math.min(_xpMeer, Math.round(fd.besparing_jaar1));   // nooit meer dan het totaal
+  var extra_pv={ kwp:pvKwp, productie_mwh:xpProd,
+    zelfverbruik_pct:Math.round(_zvFrac*100),
+    meerwaarde_eur:_xpMeer,
+    direct_mwh:xpZelf, via_batterij_mwh:null,
+    injectie_mwh:Math.round(Math.max(0,xpProd-xpZelf)*10)/10 };
   var gs=STATE.groeistap1||null;
   var groeistap = gs ? {
     label:(gs.label||gs.naam||'START'), batterij_kw:(gs.batterij_kw||gs.kw||0), batterij_kwh:(gs.batterij_kwh||gs.kwh||0),
@@ -3165,7 +3188,10 @@ function _ontwerpRapportData(projectId, mode){
   out.project_id=projectId||'';
   out.scenario_naam=STATE.scenario||'';
   out.factuur={ afrekening_periode_mnd:fac.afrekening_periode_mnd||1, afrekening_bedrag:fac.afrekening_bedrag||0,
-    bestaand_jaar:fac.bestaand_jaar||0, scherp_dynamisch_jaar:fac.scherp_dynamisch_jaar||fac.bestaand_jaar||0, componenten:factuurComp };
+    bestaand_jaar:fac.bestaand_jaar||0, scherp_dynamisch_jaar:fac.scherp_dynamisch_jaar||fac.bestaand_jaar||0,
+    // v1.63.11 (optie 2): de BASISLIJN = de BESTAANDE JAARFACTUUR. besparing_jaar1 = bestaand − ontwerp,
+    // dus het rapport deelt de besparing én de €/MWh hierdoor. Teller en noemer = de échte factuur, overal.
+    basislijn_jaar:fac.bestaand_jaar||fac.scherp_dynamisch_jaar||0, componenten:factuurComp };
   out.profiel={ naam:STATE.profielNaam||'', jaarverbruik_mwh:+STATE.jaarverbruik||0,
     toegangsvermogen_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():(STATE.aansluitingKva||0)),
     maandpiek_kw:Math.round(en.sitepiek_met_batterij_kw||0), spanning:STATE.spanning||'LS',
@@ -10163,6 +10189,25 @@ function _renderScenarioDiff(geladen){
   var hHuidig  = _buildResultaatSamenvattingExt(STATE.resultaat || {}, STATE);
   var hGeladen = geladen.resultaat_samenvatting || {};
 
+  // v1.63.9 FIX: NORMALISEER OP JAARBASIS. Een scenario bewaard in 'specifiek'-modus (factuurmaand) draagt
+  // PERIODE-bedragen; een rolling12-ontwerp draagt jaarbedragen. Zonder dit vergeleek de diff een jaarontwerp
+  // met een maandfactuur ("€26.676 goedkoper, 88,5%" — onzin). We annualiseren elk scenario met zijn eigen
+  // factor (365/periode-dagen bij 'specifiek', anders 1) vóór de vergelijking.
+  function _diffAnnFactor(s){
+    if(s && s.jaar==='specifiek' && s.periodeVan && s.periodeTot){ var d=_periodeDagen(s.periodeVan,s.periodeTot); return (d&&d>0)?(365/d):1; }
+    return 1;
+  }
+  function _diffAnnualiseer(s){
+    var f=_diffAnnFactor(s); if(f===1 || !s) return s;
+    var o=Object.assign({}, s);
+    ['energie_excl','distributie_excl','capaciteit_excl','heffingen_excl','subtotaal_excl_btw','totaal_incl_btw','factuur_totaal',
+     'pv_productie_mwh','pv_eigen_verbruik_mwh','pv_injectie_mwh','cycli_verbruikt'].forEach(function(k){
+      if(typeof o[k]==='number') o[k]=Math.round(o[k]*f); });
+    o._annFactor=f; return o;
+  }
+  hHuidig=_diffAnnualiseer(hHuidig);
+  hGeladen=_diffAnnualiseer(hGeladen);
+
   // Hulpfunctie voor veld-resolutie met fallback-paden (backwards-compat).
   function val(o, paden, dflt){
     for(var i=0;i<paden.length;i++){
@@ -10605,23 +10650,29 @@ function _apOpenOntwerp(mode){
 // beste.payback) naar localStorage; de Kamino-tab pikt dat op via een storage-event → kaart = rapport.
 // EMBED = de simulator draait in een verborgen Kamino-iframe (de klant ziet dit NOOIT).
 function _apEmbed(){ try{ return window.self!==window.top; }catch(e){ return true; } }
-function _apBouwKern(h){
+// De kern komt RECHTSTREEKS uit de rapportdata (rd) → kaart = rapport, gegarandeerd dezelfde getallen.
+// Rendement = rd.optimaal.kpi2_rendement (zelfde als het rapport toont, incl. fallback); besparing =
+// rd.financieel.besparing_jaar1; TVT = capex/besparing met capex = beste.capex of _ontwerpCapexTot
+// (identiek aan de rapport-tegel "terugverdientijd volledige opstelling").
+function _apBouwKern(h, rd){
   var kern={};
   if(h.tegel==='aansluiting' || h.tegel==='mobiliteit'){
-    var fd=(typeof _financieelRapportData==='function')?_financieelRapportData():{};
+    var fin=(rd&&rd.financieel)||{}, opt=(rd&&rd.optimaal)||{};
+    var besparing=Math.round(fin.besparing_jaar1||0);
+    var rendement=(opt.kpi2_rendement!=null)?Math.round(opt.kpi2_rendement*10)/10:null;
+    var pvKwp=+((opt.pv_kwp!=null)?opt.pv_kwp:STATE.pvKwp)||0, battKwh=+opt.batterij_kwh||0, lp=opt.laadpalen||{ac:0,dc160:0,dc400:0};
     var eng=(typeof _kpiEngine==='function')?_kpiEngine():null, b=(eng&&eng.beste)||null;
-    kern={ besparing_jaar: Math.round((fd&&fd.besparing_jaar1)||0),
-           rendement_pct: (b&&b.rendement!=null)?Math.round(b.rendement*10)/10:null,
-           terugverdientijd_jaar: (b&&b.payback!=null)?Math.round(b.payback*10)/10:null,
-           pv_kwp: Math.round(+STATE.pvKwp||0),
-           kost_km: (b&&b.kostKm!=null)?b.kostKm:null };
+    var capexTot=(b&&b.capex)?b.capex:((typeof _ontwerpCapexTot==='function')?_ontwerpCapexTot(pvKwp,battKwh,lp):0);
+    var tvt=(besparing>0 && capexTot>0)?Math.round((capexTot/besparing)*10)/10:null;
+    kern={ besparing_jaar:besparing, rendement_pct:rendement, terugverdientijd_jaar:tvt,
+           pv_kwp:Math.round(pvKwp), kost_km:(opt.kpi1_eur_per_km!=null)?opt.kpi1_eur_per_km:null };
   }
   return kern;
 }
 // Eén eindpunt. EMBED: postMessage kern + rapportdata naar de Kamino-parent — de klant blijft in Kamino,
 // het rapport wordt DAAR getoond. STANDALONE (los tabblad): oude gedrag — kern wegschrijven + rapport openen.
 function _apKlaar(h, reportData, reportKey){
-  var kern=_apBouwKern(h);
+  var kern=_apBouwKern(h, reportData);
   if(_apEmbed()){
     try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:h.projectId, tegel:h.tegel,
       kern:kern, reportData:(reportData||null), reportKey:(reportKey||null) }, location.origin); }
