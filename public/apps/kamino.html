@@ -325,29 +325,62 @@ function _pollKamino(jobId, onKlaar, onFout){
     }).catch(function(e){ if(pogingen>=max){ onFout((e&&e.message)||e); } else setTimeout(tick,1500); });
   })();
 }
-function _tegel3Klaar(id, r){
-  var tvt=(r.terugverdientijd_jaar!=null)?(String(r.terugverdientijd_jaar).replace('.',',')+' j'):'—';
-  var kern=[
-    {l:'Besparing (instap)', v:'− '+eurJaar(r.besparing_jaar)},
-    {l:'Rendement', v:(r.rendement_pct!=null?(String(Math.round(r.rendement_pct*10)/10).replace('.',',')+' %'):'—')},
-    {l:'Terugverdientijd', v:tvt}
-  ];
-  bewaarKern(id,kern);
-  var opt=r.optimaal||{}, ins=r.instap||{}, drempel=(r._debug&&r._debug.drempel)||90;
-  bewaarDiag(id,'Eerste groeistap: <b>'+(ins.batterijen||1)+' batterij</b> ('+(ins.kw||120)+' kW / '+(ins.kwh||260)+' kWh) + extra PV <b>'+r.pv_kwp+' kWp</b> (≥'+drempel+'% zelfverbruik). Optimale opstelling (advies): <b>'+(opt.batterijen||'?')+' batterijen</b>. Het volledige rapport = dezelfde simulator, op autopilot.');
-  persistProject(); _toonResultaat(id);
-}
-// v0.9.2: tegels = agents die de simulator bedienen. Zet de keuzes in localStorage en open de
-// simulator; die legt dan volautomatisch zijn eigen stappen af tot het ontwerp-rapport.
+// v0.9.3 — LAUNCHER-model: de simulator is de ENIGE rekenmachine. De tegel opent de autopilot; die
+// schrijft na de run zijn rapport-headlinecijfers terug (localStorage) → kaart = rapport, één berekening.
 var SIM_URL='/apps/simulator.html';
-function _startAutopilot(id){
+var LAUNCHERS={ aansluiting:1 };   // tegels met een werkende simulator-autopilot; groeit mee (productie/contract/mobiliteit volgen)
+var _kResultListener=null;
+function _startStudieAutopilot(id){
+  if(!LAUNCHERS[id]){ alert('De automatische simulator-studie voor deze tegel volgt binnenkort. “Mijn aansluiting” is al live.'); return; }
   var bc=STATE.werk.baseCase;
   if(!bc){ alert('Laad eerst een factuur op om de studie te starten.'); return; }
-  if(id!=='aansluiting'){ alert('De automatische simulator-studie voor deze tegel volgt binnenkort. “Mijn aansluiting” is al live.'); return; }
-  var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90 };
+  var pid=STATE.werk.id;
+  var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid };
+  if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; }
+  if(id==='mobiliteit'){ payload.laadpleinen=STATE.werk.pleinen||[]; }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
+  _luisterNaarKern(id, pid);
   window.open(SIM_URL, '_blank');
+  _toonWachten(id);
+}
+function _luisterNaarKern(id, pid){
+  if(_kResultListener){ try{ window.removeEventListener('storage', _kResultListener); }catch(e){} }
+  _kResultListener=function(e){
+    if(e.key!=='FLUCTUS_KAMINO_RESULT' || !e.newValue) return;
+    var r=null; try{ r=JSON.parse(e.newValue); }catch(x){ return; }
+    if(!r || r.projectId!==pid || r.tegel!==id) return;
+    try{ window.removeEventListener('storage', _kResultListener); }catch(e){} _kResultListener=null;
+    _ontvangKern(id, pid, r.kern||{});
+  };
+  window.addEventListener('storage', _kResultListener);
+}
+function _ontvangKern(id, pid, k){
+  var kern=null, diag='';
+  if(id==='aansluiting' || id==='mobiliteit'){
+    var tvt=(k.terugverdientijd_jaar!=null)?(String(Math.round(k.terugverdientijd_jaar*10)/10).replace('.',',')+' j'):'—';
+    kern=[
+      {l:'Besparing/jaar', v:'− '+eurJaar(k.besparing_jaar)},
+      {l:'Rendement', v:(k.rendement_pct!=null?(String(Math.round(k.rendement_pct*10)/10).replace('.',',')+' %'):'—')},
+      {l:'Terugverdientijd', v:tvt}
+    ];
+    diag='Berekend door de simulator (autopilot)'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. Kaart en rapport tonen exact dezelfde cijfers — één berekening.';
+  }
+  if(kern){
+    (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern;
+    (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=diag;
+    (STATE.gedaan[pid]||(STATE.gedaan[pid]={}))[id]=true;
+  }
+  if(STATE.werk.id===pid){ persistProject(); _toonResultaat(id); }
+}
+function _toonWachten(id){
+  var p=byId(id);
+  app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar het overzicht</div>'+
+    '<div class="card" style="text-align:center;padding:36px 24px">'+
+    '<div style="font-size:34px">🛰️</div>'+
+    '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie draait in de simulator</div>'+
+    '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">De simulator is in een nieuw tabblad geopend en rekent uw ontwerp volautomatisch door (± 30–60 s). Het volledige rapport verschijnt daar; dezelfde kerncijfers verschijnen hier zodra de studie klaar is.</div>'+
+    '<div style="margin-top:16px"><button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div></div></div>';
 }
 function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug</div>'+
   '<div class="card"><div class="qh"><div class="ic">⚠️</div><div><h2>Er liep iets mis</h2></div></div>'+
@@ -385,6 +418,9 @@ function _maakProject(bc){
 
 function resultaat(id){
   var p=byId(id); gedaanMap()[id]=true;
+  // LAUNCHER-model: tegels met een simulator-autopilot rekenen NIET zelf — ze openen de simulator (de enige
+  // rekenmachine), die na de run de kerncijfers terugschrijft → kaart = rapport, één berekening.
+  if(LAUNCHERS[id] && STATE.werk.baseCase && ingelogd()){ persistProject(); _startStudieAutopilot(id); return; }
   // Studie 1 (contract): echte onderhandelingsmarge draaien op de baseCase — zelfde sim als de simulator.
   if(id==='contract' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
     _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…');
@@ -418,16 +454,7 @@ function resultaat(id){
     }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
-  // Studie 3 (aansluiting/BatteryActive): PV-dimensionering @90% + batterij-groeipad — ASYNC (job + polling), ZELFDE server-pijplijn als de simulator.
-  if(id==='aansluiting' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
-    _bezig('Uw ideale opstelling wordt doorgerekend (PV-dimensionering + batterij-groeipad)…');
-    kApiPost('/api/kamino/aansluiting',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel }).then(function(r){
-      if(!r||!r.job_id) throw new Error('geen job_id ontvangen');
-      _pollKamino(r.job_id, function(res){ _tegel3Klaar(id,res); },
-        function(err){ persistProject(); _toonResultaat(id, 'De echte berekening lukte niet ('+err+'). Hieronder voorbeeldcijfers.'); });
-    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
-    return;
-  }
+  // (Studie 3 aansluiting is nu een LAUNCHER — zie de LAUNCHERS-check bovenaan resultaat().)
   persistProject();   // projectrecord bewaren → later heropenbaar via de toegangspoort (ID + e-mail)
   _toonResultaat(id);
 }
@@ -451,7 +478,7 @@ function _toonResultaat(id, waarschuwing){
     (p.gratis?'':belofteBlok())+
     tweestaps+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
-      '<button class="btn green" onclick="_startAutopilot(\''+id+'\')">📄 Volledig rapport openen</button>'+
+      '<button class="btn green" onclick="_startStudieAutopilot(\''+id+'\')">📄 Volledig rapport openen</button>'+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div>'+
     '</div></div>';
 }

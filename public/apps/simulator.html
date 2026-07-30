@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.4  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT)
+     FLUCTUS SIMULATOR  v1.63.5  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT + kern-terugkoppeling)
+     v1.63.5: kern-terugkoppeling — de autopilot schrijft na de run de rapport-headlinecijfers naar
+              localStorage['FLUCTUS_KAMINO_RESULT'] zodat de Kamino-kaart EXACT dezelfde cijfers toont
+              als het rapport. Eén berekening (deze simulator), één set resultaten. handoff-payload draagt projectId.
      v1.63.4: KAMINO AUTOPILOT. De tegels bedienen de simulator: localStorage['FLUCTUS_AUTOPILOT'] met
               {tegel, baseCase, profielNaam, …} → de simulator legt volautomatisch zijn eigen stappen af
               (optimale opstelling → extra PV @90% → groeistappen → groeistap 1) en toont ZIJN eigen
@@ -278,7 +281,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.63.4</span>
+    <span class="fdsim-version">v1.63.5</span>
   </div>
 </div>
 
@@ -10585,13 +10588,32 @@ function _apOpenOntwerp(mode){
   try{ sessionStorage.setItem('FLUCTUS_ONTWERP_RAPPORT', JSON.stringify(data)); }catch(e){}
   location.href='/apps/ontwerp-rapport.html'+((mode==='management')?'?mode=management':'');
 }
+// v1.63.5: kern-terugkoppeling. Één berekening (deze simulator) voedt ZOWEL het rapport ALS de
+// Kamino-kaart. We schrijven exact de rapport-headlinecijfers (fd.besparing_jaar1, beste.rendement,
+// beste.payback) naar localStorage; de Kamino-tab pikt dat op via een storage-event → kaart = rapport.
+function _apSchrijfKern(h){
+  try{
+    if(!h || !h.projectId) return;
+    var kern={};
+    if(h.tegel==='aansluiting' || h.tegel==='mobiliteit'){
+      var fd=(typeof _financieelRapportData==='function')?_financieelRapportData():{};
+      var eng=(typeof _kpiEngine==='function')?_kpiEngine():null, b=(eng&&eng.beste)||null;
+      kern={ besparing_jaar: Math.round((fd&&fd.besparing_jaar1)||0),
+             rendement_pct: (b&&b.rendement!=null)?Math.round(b.rendement*10)/10:null,
+             terugverdientijd_jaar: (b&&b.payback!=null)?Math.round(b.payback*10)/10:null,
+             pv_kwp: Math.round(+STATE.pvKwp||0),
+             kost_km: (b&&b.kostKm!=null)?b.kostKm:null };
+    }
+    localStorage.setItem('FLUCTUS_KAMINO_RESULT', JSON.stringify({ projectId:h.projectId, tegel:h.tegel, kern:kern, ts:Date.now() }));
+  }catch(e){ console.error('[autopilot] kern-terugkoppeling faalde:',e); }
+}
 function _autopilotDrive(h){
   var tegel=h.tegel||'aansluiting';
   _apStatus('Uw gegevens worden ingeladen…');
   try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
   if(tegel==='productie'){
     _apStatus('SolarActive — injectie-opbrengst berekenen…');
-    _runInjectieAnalyse(function(a){ try{ _openSolarActiveRapport(a); }catch(e){ _apStatus('Rapport bouwen mislukte: '+e.message, true); } });
+    _runInjectieAnalyse(function(a){ try{ _apSchrijfKern(h); _openSolarActiveRapport(a); }catch(e){ _apStatus('Rapport bouwen mislukte: '+e.message, true); } });
     return;
   }
   // tegel 3 (aansluiting) / 4 (mobiliteit): simulator-volgorde tot ontwerp.
@@ -10599,7 +10621,7 @@ function _autopilotDrive(h){
   _apRunSim()
     .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||90)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||90); })
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
-    .then(function(){ _apStatus('Ontwerp-rapport openen…'); _apOpenOntwerp(h.rapportModus||'klant'); })
+    .then(function(){ _apStatus('Kerncijfers terugkoppelen…'); _apSchrijfKern(h); _apStatus('Ontwerp-rapport openen…'); _apOpenOntwerp(h.rapportModus||'klant'); })
     .catch(function(e){ _apStatus('De automatische studie liep vast ('+((e&&e.message)||e)+').', true); console.error('[autopilot]',e); });
 }
 function _autopilotCheck(){
