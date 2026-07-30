@@ -227,7 +227,7 @@ function renderOverzicht(){
     '<div class="baseline">Eén factuur ontsluit vier invalshoeken op uw energie. Elke studie geeft u drie kerncijfers — kies waar u wil beginnen.</div></header>'+
     banner+
     '<div class="punten">'+kaarten+'</div>'+
-    (heeftActief()?'':'<div class="poort" onclick="location.hash=\'#/open\'">🔑 Al een project? <b>Open het met uw project-ID en e-mail</b> — u en uw adviseur werken samen verder.</div>')+
+    '<div class="poort" onclick="location.hash=\'#/open\'">🔑 Al een project? <b>Roep het terug met uw project-ID + e-mail</b> (klant óf adviseur) — de combinatie geldt als toegang. U en uw adviseur werken samen verder.</div>'+
     '<div class="voet">Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</div>';
 }
 
@@ -236,8 +236,7 @@ function veldFactuurBlok(){
   if(heeftActief()){
     var p=projById(STATE.werk.id)||{};
     return '<div class="projkies">📁 U werkt verder op project <b>'+STATE.werk.id+'</b>'+(STATE.werk.naam?' · '+STATE.werk.naam:'')+
-      (p.factuur?'<div class="hint" style="margin-top:4px">Factuur: '+p.factuur+' — we hergebruiken ze voor deze studie.</div>':'')+'</div>'+
-      '<div style="margin-top:8px"><span class="btn ghost" style="padding:6px 12px" onclick="nieuwWerk();renderPunt(_HUIDIG)">+ Andere factuur / nieuw project</span></div>';
+      (p.factuur?'<div class="hint" style="margin-top:4px">Factuur: '+p.factuur+' — we hergebruiken ze voor deze studie.</div>':'')+'</div>';
   }
   return '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label>'+
     '<input type="file" accept="application/pdf,image/*" onchange="_factuurFile=(this.files[0]||null);STATE.werk.factuur=(this.files[0]?this.files[0].name:\'\')">'+
@@ -246,8 +245,15 @@ function veldFactuurBlok(){
 function veldProfielPv(){
   return '<div class="fld"><label>Verbruiksprofiel</label><select onchange="STATE.werk.profiel=this.value">'+
       PROFIELEN.map(function(o){return '<option'+(STATE.werk.profiel===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'+
-    '<div class="row"><div class="fld"><label>Bestaande PV — vermogen (kWp)</label><input value="'+(STATE.werk.pv_kwp||'')+'" oninput="STATE.werk.pv_kwp=this.value" placeholder="optioneel"></div>'+
-      '<div class="fld"><label>Injectie (MWh/jaar)</label><input value="'+(STATE.werk.pv_inj||'')+'" oninput="STATE.werk.pv_inj=this.value" placeholder="optioneel"></div></div>';
+    veldPvAlleen('optioneel');
+}
+// Enkel de PV-parameters (kWp + injectie). Voor SolarActive (tegel 2) zijn deze essentieel — ze staan niet
+// op de factuur, dus we tonen ze ALTIJD, ook op een bestaand project. De kVA van de omvormer = kWp / 1,3.
+function veldPvAlleen(ph){
+  ph=ph||'';
+  return '<div class="row"><div class="fld"><label>PV-vermogen (kWp)</label><input value="'+(STATE.werk.pv_kwp||'')+'" oninput="STATE.werk.pv_kwp=this.value" placeholder="'+ph+'"></div>'+
+      '<div class="fld"><label>Injectie (MWh/jaar)</label><input value="'+(STATE.werk.pv_inj||'')+'" oninput="STATE.werk.pv_inj=this.value" placeholder="'+ph+'"></div></div>'+
+    '<div class="hint" style="margin-top:4px">De kVA van de omvormer schatten we op kWp / 1,3.</div>';
 }
 // kWh/km per voertuigtype (rekenstandaard personenwagen 0,16 kWh/km · 15.000 km/j).
 var KWH_PER_KM={ 'Bestelwagens':0.25, 'Personenwagens':0.16, 'Vrachtwagens':1.0, 'Gemengd':0.30 };
@@ -282,11 +288,19 @@ var _HUIDIG=null;
 function renderPunt(id){
   var p=byId(id); if(!p){ location.hash='#/'; return; } _HUIDIG=id;
   var kleur=p.gratis?'#048443':'#9E480E';
-  var inputSec = (p.input==='laadpleinen')
-    ? '<div class="sec"><h3>Uw aansluiting</h3>'+veldFactuurBlok()+'</div>'+
-      '<div class="sec"><h3>Uw laadpleinen</h3>'+(STATE.werk.pleinen.length?'':'<div class="hint" style="margin-bottom:8px">Voeg per plein toe: autotype, aantal laadpalen, laadtijd/dag en dagen/week. Voeg zoveel pleinen toe als nodig.</div>')+pleinBlok()+'</div>'
-    : '<div class="sec"><h3>Uw factuur</h3>'+veldFactuurBlok()+'</div>'+
-      (heeftActief()?'':'<div class="sec"><h3>Uw verbruik & PV</h3>'+veldProfielPv()+'</div>');
+  var inputSec;
+  if(p.input==='laadpleinen'){
+    inputSec = '<div class="sec"><h3>Uw aansluiting</h3>'+veldFactuurBlok()+'</div>'+
+      '<div class="sec"><h3>Uw laadpleinen</h3>'+(STATE.werk.pleinen.length?'':'<div class="hint" style="margin-bottom:8px">Voeg per plein toe: autotype, aantal laadpalen, laadtijd/dag en dagen/week. Voeg zoveel pleinen toe als nodig.</div>')+pleinBlok()+'</div>';
+  } else {
+    inputSec = '<div class="sec"><h3>Uw factuur</h3>'+veldFactuurBlok()+'</div>';
+    if(p.id==='productie'){
+      // SolarActive: PV-grootte (kWp) + injectie (MWh/jaar) altijd tonen — ook op een bestaand project.
+      inputSec += '<div class="sec"><h3>Uw bestaande PV</h3>'+veldPvAlleen('bv. 40')+'</div>';
+    } else if(!heeftActief()){
+      inputSec += '<div class="sec"><h3>Uw verbruik & PV</h3>'+veldProfielPv()+'</div>';
+    }
+  }
 
   var tweestaps = p.tweestaps
     ? '<div class="tweestaps"><b>Zo verloopt deze studie:</b> u krijgt eerst een rapport op basis van een <b>standaardprofiel</b>. Daarna plannen we een korte <b>videovergadering</b> waarin we samen de <b>kabelplanner</b> doorlopen en bekijken of het zinvol is met úw specifieke verbruiksprofiel te rekenen — daarvoor vragen we dan uw mandaat.</div>'
@@ -356,7 +370,7 @@ function _startStudieAutopilot(id){
   if(!bc){ alert('Laad eerst een factuur op om de studie te starten.'); return; }
   var pid=STATE.werk.id;
   var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid, embed:true };
-  if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; }
+  if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; payload.inverterKva=Math.round(((+STATE.werk.pv_kwp||0)/1.3)*10)/10; }
   if(id==='mobiliteit'){ payload.laadpleinen=(STATE.werk.pleinen||[]).map(_pleinNaarSim); }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
