@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.12  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.13  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.13: AUTOPILOT voor ALLE VIER de tegels. Nieuwe branches in _autopilotDrive: 'contract'
+              (_runFactuurAnalyse 'specifiek' → factuurrapport/onderhandelingsmarge) en 'productie'
+              (_runInjectieAnalyse → SolarActive, HTML via _solarActiveHtml/postMessage). _apSetState zet de
+              modus per tegel (contract=specifiek, rest=rolling12) + vult STATE.bestaandePv voor productie.
+              _apKlaar draagt reportHtml + kiest de rapport-URL per tegel; _apBouwKern geeft kern per tegel.
      v1.63.12: AUTOPILOT-MODUS FIX. Het ontwerp draaide op de factuurperiode ('specifiek' × 365/dagen) i.p.v.
               op rolling12 (vol jaar) — bij seizoensprofielen (bv. "Industrie met zomersluiting") gaf dat een
               zwaar vertekende, veel te lage ontwerpfactuur (€76,9/MWh → besparing €24.995 uit enkel 47 kWp PV,
@@ -303,7 +308,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version">v1.63.12</span>
+    <span class="fdsim-version">v1.63.13</span>
   </div>
 </div>
 
@@ -4055,9 +4060,10 @@ function _rapportScenarioKaart(titel, uitleg, meerwaarde, netto, payback){
 }
 // Zelfstandig SolarActive-rapport in een nieuw venster: conclusie op de voorpagina + kerncijfers +
 // drie heatmaps (netto injectieopbrengst, bespaarde curtailment, verdiende onbalans-sturing).
-function _openSolarActiveRapport(a){
+// v1.63.13: HTML-builder afgesplitst zodat de Kamino-autopilot (embed) de SolarActive-HTML kan meesturen (postMessage).
+function _solarActiveHtml(a){
  try{
-  if(!a||!a.opbrengst_jaar){ alert('Draai eerst de injectie-analyse.'); return; }
+  if(!a||!a.opbrengst_jaar){ return null; }
   var o=a.opbrengst_jaar, pb=a.payback||{}, e=a.energie_jaar||{}, hm=a.heatmaps||{}, st=a.sturing||{forecast_modus:'realistic',capture:0.72};
   var per=a.periode||{}, inv=a.invoer||{};
   var klant=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
@@ -4147,23 +4153,23 @@ function _openSolarActiveRapport(a){
     '}'+
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
-  // v1.63.1: project-ID ophalen en de PDF-opslag-drop-in injecteren (projectnr in de voettekst + "PDF
-  // opslaan"-knop → Supabase). Daarna robuust openen: nieuw venster via Blob-URL, met inline-overlay-terugval.
-  _metProjectId(function(pid){
-    var klant2=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
-    var inject='<script>window.FLUCTUS_RAPPORT_META={project_id:'+JSON.stringify(pid||'')+',type:"solaractive",klant:'+JSON.stringify(klant2)+'};<\/script>'+
-               '<script src="'+location.origin+'/apps/fluctus-rapport-pdf.js"><\/script>';
-    var html2=html.replace('</body></html>', inject+'</body></html>');
+  // v1.63.13: synchrone project-ID (embed-veilig) + PDF-drop-in inject → geef de volledige HTML-string terug.
+  var pid=(typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'';
+  var klant2=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
+  var inject='<script>window.FLUCTUS_RAPPORT_META={project_id:'+JSON.stringify(pid||'')+',type:"solaractive",klant:'+JSON.stringify(klant2)+'};<\/script>'+
+             '<script src="'+location.origin+'/apps/fluctus-rapport-pdf.js"><\/script>';
+  return html.replace('</body></html>', inject+'</body></html>');
+ }catch(err){ return null; }
+}
+// SolarActive-rapport openen (standalone tabblad of inline overlay). Gebruikt _solarActiveHtml.
+function _openSolarActiveRapport(a){
+  try{
+    var html2=_solarActiveHtml(a);
+    if(!html2){ alert('Draai eerst de injectie-analyse.'); return; }
     var _geopend=false;
-    try{
-      var _blob=new Blob([html2],{type:'text/html;charset=utf-8'});
-      var _url=URL.createObjectURL(_blob);
-      var _w=window.open(_url,'_blank');
-      if(_w && !_w.closed){ _geopend=true; } else { try{ URL.revokeObjectURL(_url); }catch(e){} }
-    }catch(e){}
+    try{ var _blob=new Blob([html2],{type:'text/html;charset=utf-8'}); var _url=URL.createObjectURL(_blob); var _w=window.open(_url,'_blank'); if(_w && !_w.closed){ _geopend=true; } else { try{ URL.revokeObjectURL(_url); }catch(e){} } }catch(e){}
     if(!_geopend){ _toonRapportInline(html2,'SolarActive-rapport (injectie-optimalisatie)'); }
-  });
- }catch(err){ alert('Rapport openen mislukt: '+(err&&err.message||err)); }
+  }catch(err){ alert('Rapport openen mislukt: '+(err&&err.message||err)); }
 }
 // v1.62.6: algemeen — toon een zelfstandig HTML-rapport INLINE in een overlay (iframe srcdoc), voor het
 // geval een pop-up geblokkeerd wordt. Herbruikbaar (bv. later ook voor het financieel rapport).
@@ -10601,12 +10607,11 @@ function _apSetState(h){
   else STATE.spanning=(((+bc.aansluitVermogenKva||0)*0.95)>=100?'MS':'LS');
   STATE.profielNaam = h.profielNaam||STATE.profielNaam;
   STATE.aansluitingKva = +bc.aansluitVermogenKva||+h.aansluitingKva||100; STATE._aansluitingManueel=false;
-  // v1.63.12 FIX: de ONTWERPFASE draait op ROLLING12 (vol jaar), NIET op de factuurperiode. De simulator
-  // documenteert dit zelf (regel ~7895): 'specifiek' is enkel voor de factuuranalyse; het ontwerp hoort
-  // op rolling12. De autopilot maakte die overgang nooit → één factuurmaand ×12, wat bij seizoensprofielen
-  // (bv. "Industrie met zomersluiting") de ontwerpfactuur zwaar vertekent (te lage €/MWh → absurde besparing).
-  // periodeVan/Tot blijven staan voor _margeData (de bestaande jaarfactuur = besparings-basislijn).
-  STATE.jaar='rolling12'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
+  // v1.63.12/13: MODUS per tegel. Tegel 1 (contract) = de FACTUURANALYSE → 'specifiek' (de factuurperiode,
+  // want de onderhandelingsmarge slaat op je échte factuur). Tegels 2/3/4 (ontwerp) → 'rolling12' (vol jaar),
+  // want de ontwerpfase hoort NIET op de factuurmaand (simulator-eigen regel ~7895; anders vertekent één
+  // factuurmaand ×12 de jaarfactuur bij seizoensprofielen). periodeVan/Tot blijven staan voor _margeData.
+  STATE.jaar=(h.tegel==='contract')?'specifiek':'rolling12'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
   if(bc.afnameKwh!=null) STATE.periodeVolumeMwh=(+bc.afnameKwh)/1000;
   // geprojecteerd jaarverbruik (MWh): handoff → anders annualiseren op de periode.
   var dg=(typeof _periodeDagen==='function')?_periodeDagen(bc.periodeVan,bc.periodeTot):30;
@@ -10614,6 +10619,12 @@ function _apSetState(h){
     : ((STATE.periodeVolumeMwh>0 && dg>0)? STATE.periodeVolumeMwh*(365/dg) : (STATE.jaarverbruik||0));
   STATE.pvKwp = (h.pvKwp!=null)?+h.pvKwp:0; STATE.pvInjStrategie = STATE.pvInjStrategie||'geen';
   STATE.pvZelfDrempel = (h.pvDrempel!=null)?+h.pvDrempel:90;
+  // v1.63.13: tegel 2 (productie/SolarActive) draait op de BESTAANDE PV → STATE.bestaandePv vullen uit de handoff.
+  if(h.tegel==='productie'){
+    STATE.bestaandePv = { aanwezig:true, kwp:(+h.pvKwp||0), kva:(+h.inverterKva|| +h.pvKwp||0), piekKw:0,
+      injMwhJaar:(+h.injectieMwh||0), injMwhMaand:0, maand:6, injOpbrengstEur:(+h.injOpbrengstEur||0) };
+    STATE.bspForecastModus = STATE.bspForecastModus||'realistic';
+  }
   STATE.laadpleinen = Array.isArray(h.laadpleinen)?h.laadpleinen:[];
   STATE.batterijId = h.batterijId||''; STATE.batterijCustom=h.batterijCustom||null;
   if(bc.factuur_bestanden) STATE.baseCase=bc; STATE.baseCase=bc;
@@ -10676,30 +10687,69 @@ function _apBouwKern(h, rd){
     kern={ besparing_jaar:besparing, rendement_pct:rendement, terugverdientijd_jaar:tvt,
            pv_kwp:Math.round(pvKwp), kost_km:(opt.kpi1_eur_per_km!=null)?opt.kpi1_eur_per_km:null };
   }
+  else if(h.tegel==='contract'){
+    var d=(typeof _margeData==='function')?_margeData():null;
+    if(d && d.jaar && d.maand){
+      var mj=Math.round((d.jaar.bestaand.subtotaal||0)-(d.jaar.dynamisch.subtotaal||0));
+      var volMwh=+STATE.periodeVolumeMwh||0, enNu=null, enDyn=null;
+      try{ enNu=d.maand.bestaand.posten[0].items[0][1]; enDyn=d.maand.dynamisch.posten[0].items[0][1]; }catch(e){}
+      kern={ marge_jaar:mj,
+             energie_nu_mwh:(volMwh>0&&enNu!=null)?Math.round(enNu/volMwh):null,
+             energie_dyn_mwh:(volMwh>0&&enDyn!=null)?Math.round(enDyn/volMwh):null,
+             besparing_pct:((d.jaar.bestaand.subtotaal||0)>0)?Math.round(mj/d.jaar.bestaand.subtotaal*1000)/10:null };
+    }
+  }
+  else if(h.tegel==='productie'){
+    var a2=STATE.injectieAnalyse||{}, o2=a2.opbrengst_jaar||{}, pb2=a2.payback||{};
+    kern={ extra_opbrengst_jaar:Math.round(+o2.meerwaarde_totaal_eur||0),
+           netto_jaar:Math.round(+pb2.netto_beide_jaar_eur||0),
+           terugverdientijd_jaar:(pb2.payback_beide_jaar!=null)?pb2.payback_beide_jaar:null };
+  }
   return kern;
 }
 // Eén eindpunt. EMBED: postMessage kern + rapportdata naar de Kamino-parent — de klant blijft in Kamino,
 // het rapport wordt DAAR getoond. STANDALONE (los tabblad): oude gedrag — kern wegschrijven + rapport openen.
-function _apKlaar(h, reportData, reportKey){
+function _apRapportUrl(reportKey){
+  return (reportKey==='FLUCTUS_FACTUURRAPPORT') ? '/apps/factuurrapport.html'
+       : (reportKey==='FLUCTUS_RAPPORT') ? '/apps/financieel-rapport.html'
+       : '/apps/ontwerp-rapport.html';
+}
+function _apKlaar(h, reportData, reportKey, reportHtml){
   var kern=_apBouwKern(h, reportData);
   if(_apEmbed()){
     try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:h.projectId, tegel:h.tegel,
-      kern:kern, reportData:(reportData||null), reportKey:(reportKey||null) }, location.origin); }
+      kern:kern, reportData:(reportData||null), reportKey:(reportKey||null), reportHtml:(reportHtml||null) }, location.origin); }
     catch(e){ console.error('[autopilot] postMessage faalde:',e); }
     try{ localStorage.setItem('FLUCTUS_KAMINO_RESULT', JSON.stringify({ projectId:h.projectId, tegel:h.tegel, kern:kern, ts:Date.now() })); }catch(e){}
     return;
   }
   try{ localStorage.setItem('FLUCTUS_KAMINO_RESULT', JSON.stringify({ projectId:h.projectId, tegel:h.tegel, kern:kern, ts:Date.now() })); }catch(e){}
+  if(reportHtml){ if(typeof _toonRapportInline==='function') _toonRapportInline(reportHtml,'Rapport'); return; }
   if(reportKey && reportData){ try{ sessionStorage.setItem(reportKey, JSON.stringify(reportData)); }catch(e){}
-    location.href='/apps/ontwerp-rapport.html'+((h.rapportModus==='management')?'?mode=management':''); }
+    location.href=_apRapportUrl(reportKey)+((h.rapportModus==='management' && reportKey==='FLUCTUS_ONTWERP_RAPPORT')?'?mode=management':''); }
 }
 function _autopilotDrive(h){
   var tegel=h.tegel||'aansluiting';
   _apStatus('Uw gegevens worden ingeladen…');
   try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
+  if(tegel==='contract'){
+    // tegel 1 — onderhandelingsmarge op de factuurperiode ('specifiek') → factuurrapport.
+    _apStatus('Uw onderhandelingsmarge wordt berekend…');
+    _runFactuurAnalyse('specifiek', function(r){
+      if(!r){ _apStatus('De factuuranalyse liep vast.', true); return; }
+      var d=(typeof _margeData==='function')?_margeData():null;
+      _apKlaar(h, d, 'FLUCTUS_FACTUURRAPPORT');
+    });
+    return;
+  }
   if(tegel==='productie'){
+    var bp=STATE.bestaandePv||{};
+    if(!(+bp.kwp>0 || +bp.kva>0 || +bp.piekKw>0)){ _apStatus('SolarActive vereist bestaande zonnepanelen — geef uw bestaande PV op.', true); return; }
     _apStatus('SolarActive — injectie-opbrengst berekenen…');
-    _runInjectieAnalyse(function(a){ try{ _apKlaar(h, null, null); if(!_apEmbed()) _openSolarActiveRapport(a); }catch(e){ _apStatus('Rapport bouwen mislukte: '+e.message, true); } });
+    _runInjectieAnalyse(function(a){
+      try{ var html=(typeof _solarActiveHtml==='function')?_solarActiveHtml(a):null; _apKlaar(h, null, null, html); if(!_apEmbed()) _openSolarActiveRapport(a); }
+      catch(e){ _apStatus('Rapport bouwen mislukte: '+((e&&e.message)||e), true); }
+    });
     return;
   }
   // tegel 3 (aansluiting) / 4 (mobiliteit): simulator-volgorde tot ontwerp.

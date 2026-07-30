@@ -249,21 +249,33 @@ function veldProfielPv(){
     '<div class="row"><div class="fld"><label>Bestaande PV — vermogen (kWp)</label><input value="'+(STATE.werk.pv_kwp||'')+'" oninput="STATE.werk.pv_kwp=this.value" placeholder="optioneel"></div>'+
       '<div class="fld"><label>Injectie (MWh/jaar)</label><input value="'+(STATE.werk.pv_inj||'')+'" oninput="STATE.werk.pv_inj=this.value" placeholder="optioneel"></div></div>';
 }
+// kWh/km per voertuigtype (rekenstandaard personenwagen 0,16 kWh/km · 15.000 km/j).
+var KWH_PER_KM={ 'Bestelwagens':0.25, 'Personenwagens':0.16, 'Vrachtwagens':1.0, 'Gemengd':0.30 };
 function pleinBlok(){
   var lijst=STATE.werk.pleinen.map(function(pl,i){
     return '<div class="plein"><div class="plein-top"><b>Laadplein '+(i+1)+'</b><span class="plein-del" onclick="delPlein('+i+')">verwijderen</span></div>'+
-      '<div class="row"><div class="fld"><label>Autotype</label><select onchange="STATE.werk.pleinen['+i+'].autotype=this.value">'+
+      '<div class="row"><div class="fld"><label>Voertuigtype</label><select onchange="STATE.werk.pleinen['+i+'].autotype=this.value">'+
         AUTOTYPES.map(function(o){return '<option'+(pl.autotype===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'+
-        '<div class="fld"><label>Aantal laadpalen</label><input value="'+(pl.palen||'')+'" oninput="STATE.werk.pleinen['+i+'].palen=this.value"></div></div>'+
-      '<div class="row"><div class="fld"><label>Tijd per dag (uren laden)</label><input value="'+(pl.tijd||'')+'" oninput="STATE.werk.pleinen['+i+'].tijd=this.value"></div>'+
-        '<div class="fld"><label>Dagen per week</label><div class="radio">'+
+        '<div class="fld"><label>Aantal voertuigen</label><input value="'+(pl.voertuigen||'')+'" oninput="STATE.werk.pleinen['+i+'].voertuigen=this.value" placeholder="bv. 10"></div></div>'+
+      '<div class="row"><div class="fld"><label>Dagen per week</label><div class="radio">'+
           [5,6,7].map(function(d){return '<label class="'+(pl.dagen===d?'on':'')+'" onclick="STATE.werk.pleinen['+i+'].dagen='+d+';renderPunt(_HUIDIG)">'+d+' dagen</label>';}).join('')+
         '</div></div></div>'+
     '</div>';
   }).join('');
-  return lijst+'<span class="btn ghost" onclick="addPlein()">+ Nog een laadplein toevoegen</span>';
+  return lijst+'<div class="hint" style="margin-top:4px">De rest (km/jaar, kWh/km, laadinfrastructuur) neemt de standaarden van de simulator — die dimensioneert de ideale laadpalen zelf.</div>'+
+    '<span class="btn ghost" onclick="addPlein()">+ Nog een laadplein toevoegen</span>';
 }
-function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[0],palen:'',tijd:'',dagen:5}); renderPunt(_HUIDIG); }
+function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[1],voertuigen:'',dagen:5}); renderPunt(_HUIDIG); }
+// map de MINIMALE Kamino-invoer → de laadplein-vorm van de simulator; ontbrekende velden = simulator-standaarden
+// (km/jaar 15.000, kWh/km per type, laadpunten 0 → de simulator dimensioneert de ideale infrastructuur zelf).
+function _pleinNaarSim(pl,i){
+  var type=pl.autotype||AUTOTYPES[1];
+  return { naam:'Laadplein '+(i+1), voertuigtype:type,
+    aantal:+pl.voertuigen||0, km_per_jaar:+pl.km_jaar||15000, kwh_per_km:KWH_PER_KM[type]||0.16,
+    venster_start:8, venster_eind:18, dagen_per_week:+pl.dagen||5,
+    laadpunten:[{type:'AC22',aantal:+pl.ac||0},{type:'DC160',aantal:+pl.dc||0},{type:'DC300',aantal:0}],
+    bestaand:false };
+}
 function delPlein(i){ STATE.werk.pleinen.splice(i,1); renderPunt(_HUIDIG); }
 
 var _HUIDIG=null;
@@ -331,7 +343,7 @@ function _pollKamino(jobId, onKlaar, onFout){
 // rapportdata terug. Kamino blijft op zijn eigen scherm en toont daar de kerncijfers + een knop "Bekijk
 // rapport", die het simulator-rapport IN Kamino opent. De simulator wordt nooit aan de klant getoond.
 var SIM_URL='/apps/simulator.html';
-var LAUNCHERS={ aansluiting:1 };   // tegels met een werkende simulator-autopilot; groeit mee (productie/contract/mobiliteit volgen)
+var LAUNCHERS={ contract:1, productie:1, aansluiting:1, mobiliteit:1 };   // alle vier de tegels draaien via de simulator-autopilot
 var _kMsgListener=null, _kIframe=null, _kTimeout=null;
 function _kOpruimen(){
   if(_kTimeout){ clearTimeout(_kTimeout); _kTimeout=null; }
@@ -345,7 +357,7 @@ function _startStudieAutopilot(id){
   var pid=STATE.werk.id;
   var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid, embed:true };
   if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; }
-  if(id==='mobiliteit'){ payload.laadpleinen=STATE.werk.pleinen||[]; }
+  if(id==='mobiliteit'){ payload.laadpleinen=(STATE.werk.pleinen||[]).map(_pleinNaarSim); }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
   _toonBerekenen(id);
@@ -355,7 +367,7 @@ function _startStudieAutopilot(id){
     var d=e.data; if(!d || d.__fluctus!=='kamino-result') return;
     if(d.projectId!==pid || d.tegel!==id) return;
     _kOpruimen();
-    _ontvangKern(id, pid, d.kern||{}, d.reportData||null, d.reportKey||null);
+    _ontvangKern(id, pid, d.kern||{}, d.reportData||null, d.reportKey||null, d.reportHtml||null);
   };
   window.addEventListener('message', _kMsgListener);
   // verborgen simulator-iframe = de rekenmachine. De klant ziet dit niet.
@@ -366,23 +378,49 @@ function _startStudieAutopilot(id){
   document.body.appendChild(_kIframe);
   _kTimeout=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De berekening duurde te lang. Probeer de studie opnieuw te starten.'); }, 240000);
 }
-function _ontvangKern(id, pid, k, reportData, reportKey){
+function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   var kern=null, diag='';
-  if(id==='aansluiting' || id==='mobiliteit'){
-    var tvt=(k.terugverdientijd_jaar!=null)?(String(Math.round(k.terugverdientijd_jaar*10)/10).replace('.',',')+' j'):'—';
+  var _pctv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' %'):'—'; };
+  var _tvtv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' j'):'—'; };
+  if(id==='aansluiting'){
     kern=[
       {l:'Besparing/jaar', v:'− '+eurJaar(k.besparing_jaar)},
-      {l:'Rendement', v:(k.rendement_pct!=null?(String(Math.round(k.rendement_pct*10)/10).replace('.',',')+' %'):'—')},
-      {l:'Terugverdientijd', v:tvt}
+      {l:'Rendement', v:_pctv(k.rendement_pct)},
+      {l:'Terugverdientijd', v:_tvtv(k.terugverdientijd_jaar)}
     ];
     diag='Berekend door de Fluctus-simulator'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. De kerncijfers en het rapport komen uit dezelfde berekening.';
+  }
+  else if(id==='mobiliteit'){
+    kern=[
+      {l:'Kost per km', v:(k.kost_km!=null?('€ '+String(Math.round(k.kost_km*1000)/1000).replace('.',',')+'/km'):'—')},
+      {l:'Rendement', v:_pctv(k.rendement_pct)},
+      {l:'Terugverdientijd', v:_tvtv(k.terugverdientijd_jaar)}
+    ];
+    diag='Berekend door de Fluctus-simulator op uw laadpleinen. Kaart en rapport uit dezelfde berekening.';
+  }
+  else if(id==='contract'){
+    kern=[
+      {l:'Onderhandelingsmarge', v:'− '+eurJaar(k.marge_jaar)},
+      {l:'Energiekost nu → dynamisch', v:(k.energie_nu_mwh!=null?('€'+k.energie_nu_mwh+' → €'+k.energie_dyn_mwh):'—')},
+      {l:'Besparing', v:(k.besparing_pct!=null?('− '+String(k.besparing_pct).replace('.',',')+' %'):'—')}
+    ];
+    diag='Onderhandelingsmarge op uw factuurperiode (scherp dynamisch contract vs uw huidige). Kaart en factuurrapport uit dezelfde berekening.';
+  }
+  else if(id==='productie'){
+    kern=[
+      {l:'Extra opbrengst', v:'+ '+eurJaar(k.extra_opbrengst_jaar)},
+      {l:'Netto na beheer', v:'+ '+eurJaar(k.netto_jaar)},
+      {l:'Terugverdientijd', v:_tvtv(k.terugverdientijd_jaar)}
+    ];
+    diag='SolarActive — extra opbrengst uit uw bestaande PV via slimme injectie-sturing. Kaart en rapport uit dezelfde berekening.';
   }
   if(kern){
     (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern;
     (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=diag;
     (STATE.gedaan[pid]||(STATE.gedaan[pid]={}))[id]=true;
   }
-  if(reportData && reportKey){ STATE.rapport[pid+'|'+id]={ key:reportKey, data:reportData }; }
+  if(reportHtml){ STATE.rapport[pid+'|'+id]={ html:reportHtml }; }
+  else if(reportData && reportKey){ STATE.rapport[pid+'|'+id]={ key:reportKey, data:reportData }; }
   if(STATE.werk.id===pid){ persistProject(); _toonResultaat(id); }
 }
 function _toonBerekenen(id){
@@ -397,9 +435,13 @@ function _toonBerekenen(id){
 // het simulator-rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
 function _bekijkRapport(id){
   var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
-  if(!r || !r.data){ alert('Het rapport is nog niet klaar. Start de studie opnieuw.'); return; }
-  try{ sessionStorage.setItem(r.key, JSON.stringify(r.data)); }catch(e){}
-  var url=(r.key==='FLUCTUS_ONTWERP_RAPPORT')?'/apps/ontwerp-rapport.html':'/apps/ontwerp-rapport.html';
+  if(!r || (!r.data && !r.html)){ alert('Het rapport is nog niet klaar. Start de studie opnieuw.'); return; }
+  var url;
+  if(r.html){ try{ url=URL.createObjectURL(new Blob([r.html],{type:'text/html;charset=utf-8'})); }catch(e){ url='about:blank'; } }
+  else {
+    try{ sessionStorage.setItem(r.key, JSON.stringify(r.data)); }catch(e){}
+    url=(r.key==='FLUCTUS_FACTUURRAPPORT')?'/apps/factuurrapport.html':(r.key==='FLUCTUS_RAPPORT')?'/apps/financieel-rapport.html':'/apps/ontwerp-rapport.html';
+  }
   var ov=document.createElement('div');
   ov.setAttribute('data-krap','1');
   ov.style.cssText='position:fixed;inset:0;z-index:9998;background:#fff;display:flex;flex-direction:column';
