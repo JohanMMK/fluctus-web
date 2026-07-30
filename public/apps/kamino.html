@@ -150,7 +150,8 @@ var STATE={
   projecten:[],
   gedaan:{},  // { projectId: { puntId: true } }
   kern:{},    // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
-  diag:{}     // { projectId: { puntId: 'toelichting' } }
+  diag:{},    // { projectId: { puntId: 'toelichting' } }
+  rapport:{}  // { 'projectId|puntId': { key, data } } — rapportdata uit de simulator, voor "Bekijk rapport"
 };
 var _factuurFile=null;
 
@@ -325,37 +326,47 @@ function _pollKamino(jobId, onKlaar, onFout){
     }).catch(function(e){ if(pogingen>=max){ onFout((e&&e.message)||e); } else setTimeout(tick,1500); });
   })();
 }
-// v0.9.3 — LAUNCHER-model: de simulator is de ENIGE rekenmachine. De tegel opent de autopilot; die
-// schrijft na de run zijn rapport-headlinecijfers terug (localStorage) → kaart = rapport, één berekening.
+// v0.9.4 — LAUNCHER-model, KLANTVRIENDELIJK. De klant ziet ALLEEN Kamino. De simulator draait als
+// ONZICHTBARE rekenmachine in een verborgen iframe; na de run stuurt hij (postMessage) de kerncijfers +
+// rapportdata terug. Kamino blijft op zijn eigen scherm en toont daar de kerncijfers + een knop "Bekijk
+// rapport", die het simulator-rapport IN Kamino opent. De simulator wordt nooit aan de klant getoond.
 var SIM_URL='/apps/simulator.html';
 var LAUNCHERS={ aansluiting:1 };   // tegels met een werkende simulator-autopilot; groeit mee (productie/contract/mobiliteit volgen)
-var _kResultListener=null;
+var _kMsgListener=null, _kIframe=null, _kTimeout=null;
+function _kOpruimen(){
+  if(_kTimeout){ clearTimeout(_kTimeout); _kTimeout=null; }
+  if(_kMsgListener){ try{ window.removeEventListener('message', _kMsgListener); }catch(e){} _kMsgListener=null; }
+  if(_kIframe){ try{ _kIframe.parentNode.removeChild(_kIframe); }catch(e){} _kIframe=null; }
+}
 function _startStudieAutopilot(id){
-  if(!LAUNCHERS[id]){ alert('De automatische simulator-studie voor deze tegel volgt binnenkort. “Mijn aansluiting” is al live.'); return; }
+  if(!LAUNCHERS[id]){ alert('De automatische studie voor deze tegel volgt binnenkort. “Mijn aansluiting” is al live.'); return; }
   var bc=STATE.werk.baseCase;
   if(!bc){ alert('Laad eerst een factuur op om de studie te starten.'); return; }
   var pid=STATE.werk.id;
-  var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid };
+  var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid, embed:true };
   if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; }
   if(id==='mobiliteit'){ payload.laadpleinen=STATE.werk.pleinen||[]; }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
-  _luisterNaarKern(id, pid);
-  window.open(SIM_URL, '_blank');
-  _toonWachten(id);
-}
-function _luisterNaarKern(id, pid){
-  if(_kResultListener){ try{ window.removeEventListener('storage', _kResultListener); }catch(e){} }
-  _kResultListener=function(e){
-    if(e.key!=='FLUCTUS_KAMINO_RESULT' || !e.newValue) return;
-    var r=null; try{ r=JSON.parse(e.newValue); }catch(x){ return; }
-    if(!r || r.projectId!==pid || r.tegel!==id) return;
-    try{ window.removeEventListener('storage', _kResultListener); }catch(e){} _kResultListener=null;
-    _ontvangKern(id, pid, r.kern||{});
+  _toonBerekenen(id);
+  _kOpruimen();
+  _kMsgListener=function(e){
+    if(e.origin!==location.origin) return;
+    var d=e.data; if(!d || d.__fluctus!=='kamino-result') return;
+    if(d.projectId!==pid || d.tegel!==id) return;
+    _kOpruimen();
+    _ontvangKern(id, pid, d.kern||{}, d.reportData||null, d.reportKey||null);
   };
-  window.addEventListener('storage', _kResultListener);
+  window.addEventListener('message', _kMsgListener);
+  // verborgen simulator-iframe = de rekenmachine. De klant ziet dit niet.
+  _kIframe=document.createElement('iframe');
+  _kIframe.title='rekenmotor';
+  _kIframe.style.cssText='position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;border:0;opacity:0;pointer-events:none';
+  _kIframe.src=SIM_URL;
+  document.body.appendChild(_kIframe);
+  _kTimeout=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De berekening duurde te lang. Probeer de studie opnieuw te starten.'); }, 240000);
 }
-function _ontvangKern(id, pid, k){
+function _ontvangKern(id, pid, k, reportData, reportKey){
   var kern=null, diag='';
   if(id==='aansluiting' || id==='mobiliteit'){
     var tvt=(k.terugverdientijd_jaar!=null)?(String(Math.round(k.terugverdientijd_jaar*10)/10).replace('.',',')+' j'):'—';
@@ -364,23 +375,39 @@ function _ontvangKern(id, pid, k){
       {l:'Rendement', v:(k.rendement_pct!=null?(String(Math.round(k.rendement_pct*10)/10).replace('.',',')+' %'):'—')},
       {l:'Terugverdientijd', v:tvt}
     ];
-    diag='Berekend door de simulator (autopilot)'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. Kaart en rapport tonen exact dezelfde cijfers — één berekening.';
+    diag='Berekend door de Fluctus-simulator'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. De kerncijfers en het rapport komen uit dezelfde berekening.';
   }
   if(kern){
     (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern;
     (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=diag;
     (STATE.gedaan[pid]||(STATE.gedaan[pid]={}))[id]=true;
   }
+  if(reportData && reportKey){ STATE.rapport[pid+'|'+id]={ key:reportKey, data:reportData }; }
   if(STATE.werk.id===pid){ persistProject(); _toonResultaat(id); }
 }
-function _toonWachten(id){
+function _toonBerekenen(id){
   var p=byId(id);
   app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug naar het overzicht</div>'+
-    '<div class="card" style="text-align:center;padding:36px 24px">'+
-    '<div style="font-size:34px">🛰️</div>'+
-    '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie draait in de simulator</div>'+
-    '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">De simulator is in een nieuw tabblad geopend en rekent uw ontwerp volautomatisch door (± 30–60 s). Het volledige rapport verschijnt daar; dezelfde kerncijfers verschijnen hier zodra de studie klaar is.</div>'+
-    '<div style="margin-top:16px"><button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div></div></div>';
+    '<div class="card" style="text-align:center;padding:40px 24px">'+
+    '<div style="font-size:34px">⏳</div>'+
+    '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie wordt berekend…</div>'+
+    '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">We rekenen uw ontwerp volautomatisch door op uw factuur (± 30–60 s). De kerncijfers verschijnen hier zodra het klaar is.</div>'+
+    '</div></div>';
+}
+// het simulator-rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
+function _bekijkRapport(id){
+  var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
+  if(!r || !r.data){ alert('Het rapport is nog niet klaar. Start de studie opnieuw.'); return; }
+  try{ sessionStorage.setItem(r.key, JSON.stringify(r.data)); }catch(e){}
+  var url=(r.key==='FLUCTUS_ONTWERP_RAPPORT')?'/apps/ontwerp-rapport.html':'/apps/ontwerp-rapport.html';
+  var ov=document.createElement('div');
+  ov.setAttribute('data-krap','1');
+  ov.style.cssText='position:fixed;inset:0;z-index:9998;background:#fff;display:flex;flex-direction:column';
+  ov.innerHTML='<div style="display:flex;align-items:center;gap:12px;padding:8px 14px;background:#1F3864;color:#fff;font-family:system-ui,Segoe UI,Arial,sans-serif">'+
+    '<button onclick="this.closest(\'[data-krap]\').remove()" style="background:#fff;color:#1F3864;border:0;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer">✕ Sluiten</button>'+
+    '<span style="font-weight:700">Uw volledige rapport</span></div>'+
+    '<iframe src="'+url+'" style="flex:1;border:0;width:100%"></iframe>';
+  document.body.appendChild(ov);
 }
 function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug</div>'+
   '<div class="card"><div class="qh"><div class="ic">⚠️</div><div><h2>Er liep iets mis</h2></div></div>'+
@@ -478,7 +505,7 @@ function _toonResultaat(id, waarschuwing){
     (p.gratis?'':belofteBlok())+
     tweestaps+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
-      '<button class="btn green" onclick="_startStudieAutopilot(\''+id+'\')">📄 Volledig rapport openen</button>'+
+      '<button class="btn green" onclick="_bekijkRapport(\''+id+'\')">📄 Bekijk uw volledige rapport</button>'+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div>'+
     '</div></div>';
 }
