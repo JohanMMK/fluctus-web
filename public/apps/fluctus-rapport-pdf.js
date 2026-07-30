@@ -17,6 +17,8 @@
  * ========================================================================== */
 (function(){
   'use strict';
+  // De apps draaien op fluctus.net maar de API leeft op de Railway-proxy → absolute URL (relatief = 404 op /api).
+  var API_BASE='https://lucid-amazement-production.up.railway.app';
   function _laad(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('kon '+src+' niet laden'));}; document.head.appendChild(s); }); }
   async function _libs(){
     if(!window.html2canvas) await _laad('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
@@ -91,7 +93,7 @@
     var tok=bearer();
     // 1) directe upload (same-origin rapport met token)
     if(tok){ try{
-      var r=await fetch('/api/rapport-opslaan',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},body:JSON.stringify(payload)});
+      var r=await fetch(API_BASE+'/api/rapport-opslaan',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},body:JSON.stringify(payload)});
       var j={}; try{ j=await r.json(); }catch(e){}
       if(r.ok) return {ok:true}; if(!(window.opener||window.parent!==window)) return {ok:false,error:j.error||('HTTP '+r.status)};
     }catch(e){ if(!(window.opener||window.parent!==window)) return {ok:false,error:e.message}; } }

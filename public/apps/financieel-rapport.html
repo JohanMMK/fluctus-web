@@ -1,10 +1,14 @@
 <!DOCTYPE html>
+<!-- FLUCTUS FINANCIEEL RAPPORT — v1.6 (+ project-ID in de voettekst van elke pagina + "PDF opslaan"-knop:
+     jsPDF/html2canvas → lokale download + upload naar de Supabase-bucket via /api/rapport-opslaan). -->
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fluctus — Financieel rapport (ontwerpvoorstel)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
     --blauw:#1F3864; --blauw-l:#2d4f8e; --groen:#05B050; --groen-d:#048443;
@@ -344,9 +348,10 @@ function el(tag, attrs, html){ var e=document.createElement(tag); if(attrs)for(v
 // lang (1 overzichtspagina + 1 pagina per plein), dus wordt er geteld in bronvolgorde.
 // Alle bestaande pagina()-oproepen staan al op volgorde → zelfde nummers als voorheen.
 var _pgTeller=0;
+var _PID = INV.project_id || '';
 function pagina(nr, inner){
   var p=el('div',{class:'a4'}); _pgTeller++;
-  p.innerHTML = inner + '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</span><span>p. '+_pgTeller+'</span></div>';
+  p.innerHTML = inner + '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies — verkoopt geen energie of installaties</span><span>'+(_PID?'Projectnr. '+_PID+' · ':'')+'p. '+_pgTeller+'</span></div>';
   R.appendChild(p);
   return p;
 }
@@ -967,6 +972,42 @@ setTimeout(function(){
                  x:{ ticks:{font:{size:8}}, grid:{display:false} } } } });
   });
 }, 60);
+</script>
+
+<style>#fdpdf-bar{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;gap:8px}
+#fdpdf-bar button{font-family:inherit;font-size:12px;font-weight:700;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
+#fdpdf-save{background:#05B050;color:#fff}#fdpdf-print{background:#fff;color:#1F3864;border:1px solid #D5DBE3}
+@media print{#fdpdf-bar{display:none}}</style>
+<div id="fdpdf-bar"><button id="fdpdf-print" onclick="window.print()">🖨️ Print</button><button id="fdpdf-save">⬇ PDF opslaan</button></div>
+<script>
+// PDF (jsPDF + html2canvas) → lokale download + opslag in de Supabase-bucket (rapporten/<project-id>/).
+(function(){
+  var btn=document.getElementById('fdpdf-save');
+  var API_BASE='https://lucid-amazement-production.up.railway.app'; // API op Railway-proxy, apps op fluctus.net → absolute URL
+  function bearer(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i);
+    if(/^sb-.+-auth-token$/.test(k)){ var v=JSON.parse(localStorage.getItem(k)||'null');
+      return (v&&(v.access_token||(v.currentSession&&v.currentSession.access_token)))||null; } } }catch(e){} return null; }
+  async function genPdf(){
+    if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internet?)');
+    var pages=document.querySelectorAll('.a4');
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+    for(var i=0;i<pages.length;i++){ var c=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var h=c.height*210/c.width; if(i>0) pdf.addPage(); pdf.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h>297?297:h); }
+    return pdf;
+  }
+  btn.onclick=async function(){ btn.disabled=true; var o=btn.textContent;
+    try{ btn.textContent='PDF genereren…'; var pdf=await genPdf();
+      var fn=((INV.klant||'financieel-rapport')+(_PID?'_'+_PID:'')).replace(/[^A-Za-z0-9._-]/g,'_')+'.pdf'; pdf.save(fn);
+      var tok=bearer();
+      if(tok){ btn.textContent='Opslaan in Supabase…'; var b64=pdf.output('datauristring').split(',')[1];
+        var r=await fetch(API_BASE+'/api/rapport-opslaan',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
+          body:JSON.stringify({project:INV.klant, project_id:_PID, type:'financieel', filenaam:fn, pdf_base64:b64})});
+        var j={}; try{ j=await r.json(); }catch(e){} btn.textContent=r.ok?'✓ Opgeslagen in Supabase':('Upload mislukt: '+(j.error||('HTTP '+r.status)));
+      } else { btn.textContent='✓ PDF gedownload (niet ingelogd → geen Supabase)'; }
+    }catch(e){ btn.textContent='Fout: '+((e&&e.message)||e); }
+    setTimeout(function(){ btn.disabled=false; btn.textContent=o; },4500);
+  };
+})();
 </script>
 </body>
 </html>

@@ -99,6 +99,8 @@
   .plein{border:1px solid var(--lijn);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#FBFCFE}
   .plein-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .plein-top b{color:var(--blauw);font-size:13px} .plein-del{font-size:11px;color:#B23;cursor:pointer;font-weight:700}
+  .pleinhint{display:block;clear:both;margin:8px 0 10px}
+  .pleinadd{display:block;clear:both;margin-top:4px}.pleinadd .btn{display:inline-block}
   .tweestaps{background:#F5F8FD;border:1px solid #1F386426;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#33404f;line-height:1.55;margin-top:12px}
   .tweestaps b{color:var(--blauw)}
   .btn{border:1px solid var(--blauw);background:#fff;color:var(--blauw);font-family:inherit;font-weight:700;font-size:12.5px;border-radius:8px;padding:10px 15px;cursor:pointer;transition:all .15s}
@@ -145,7 +147,16 @@ var PUNTEN=[
    input:'laadpleinen', tweestaps:true }
 ];
 var PROFIELEN=['Standaardprofiel (aanbevolen)','Kantoor / diensten','Winkel / retail','Productie / KMO','Opslag / magazijn','Landbouw','Horeca','Zorg / school'];
-var AUTOTYPES=['Bestelwagens','Personenwagens','Vrachtwagens','Gemengd'];
+// Voertuigtypes IDENTIEK aan LAADPLEIN_VOERTUIGEN in de simulator (zelfde dropdown, zelfde namen).
+var AUTOTYPES=['Personenwagen','Bestelwagen','Lichte vrachtwagen','Zware vrachtwagen','Bus'];
+// Per-type standaarden (kWh/km + km/jaar) — exact zoals de simulator ze hanteert.
+var VT_DEF={
+  'Personenwagen':      {kwh_per_km:0.16, km_per_jaar:15000},
+  'Bestelwagen':        {kwh_per_km:0.25, km_per_jaar:25000},
+  'Lichte vrachtwagen': {kwh_per_km:0.55, km_per_jaar:40000},
+  'Zware vrachtwagen':  {kwh_per_km:1.30, km_per_jaar:80000},
+  'Bus':                {kwh_per_km:1.40, km_per_jaar:50000}
+};
 
 // ---------- state: project-centrisch (één factuur → studies 1–3; 4 voegt laadpleinen toe) ----------
 var STATE={
@@ -271,31 +282,35 @@ function veldPvAlleen(ph){
       '<div class="fld"><label>Injectie (MWh/jaar)</label><input value="'+(STATE.werk.pv_inj||'')+'" oninput="STATE.werk.pv_inj=this.value" placeholder="'+ph+'"></div></div>'+
     '<div class="hint" style="margin-top:4px">De kVA van de omvormer schatten we op kWp / 1,3.</div>';
 }
-// kWh/km per voertuigtype (rekenstandaard personenwagen 0,16 kWh/km · 15.000 km/j).
-var KWH_PER_KM={ 'Bestelwagens':0.25, 'Personenwagens':0.16, 'Vrachtwagens':1.0, 'Gemengd':0.30 };
 function pleinBlok(){
   var lijst=STATE.werk.pleinen.map(function(pl,i){
+    var vs=(pl.start!=null&&pl.start!=='')?pl.start:8, ve=(pl.eind!=null&&pl.eind!=='')?pl.eind:18;
     return '<div class="plein"><div class="plein-top"><b>Laadplein '+(i+1)+'</b><span class="plein-del" onclick="delPlein('+i+')">verwijderen</span></div>'+
       '<div class="row"><div class="fld"><label>Voertuigtype</label><select onchange="STATE.werk.pleinen['+i+'].autotype=this.value">'+
         AUTOTYPES.map(function(o){return '<option'+(pl.autotype===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'+
         '<div class="fld"><label>Aantal voertuigen</label><input value="'+(pl.voertuigen||'')+'" oninput="STATE.werk.pleinen['+i+'].voertuigen=this.value" placeholder="bv. 10"></div></div>'+
-      '<div class="row"><div class="fld"><label>Dagen per week</label><div class="radio">'+
+      '<div class="row"><div class="fld"><label>Laadvenster — start (u)</label><input type="number" min="0" max="24" value="'+vs+'" oninput="STATE.werk.pleinen['+i+'].start=this.value"></div>'+
+        '<div class="fld"><label>Laadvenster — eind (u)</label><input type="number" min="0" max="24" value="'+ve+'" oninput="STATE.werk.pleinen['+i+'].eind=this.value"></div></div>'+
+      '<div class="fld"><label>Dagen per week</label><div class="radio">'+
           [5,6,7].map(function(d){return '<label class="'+(pl.dagen===d?'on':'')+'" onclick="STATE.werk.pleinen['+i+'].dagen='+d+';renderPunt(_HUIDIG)">'+d+' dagen</label>';}).join('')+
-        '</div></div></div>'+
+        '</div></div>'+
     '</div>';
   }).join('');
-  return lijst+'<div class="hint" style="margin-top:4px">De rest (km/jaar, kWh/km, laadinfrastructuur) neemt de standaarden van de simulator — die dimensioneert de ideale laadpalen zelf.</div>'+
-    '<span class="btn ghost" onclick="addPlein()">+ Nog een laadplein toevoegen</span>';
+  return '<div class="hint pleinhint">💡 Elk <b>voertuigtype</b> én elk <b>laadvenster</b> is in feite een apart laadplein. Rijden er verschillende types, of laden ze op verschillende uren? Voeg dan meerdere pleinen toe.</div>'+
+    lijst+
+    '<div class="hint pleinhint">De rest (km/jaar, kWh/km, laadinfrastructuur) neemt de standaarden van de simulator — die dimensioneert de ideale laadpalen zelf.</div>'+
+    '<div class="pleinadd"><span class="btn ghost" onclick="addPlein()">+ Nog een laadplein toevoegen</span></div>';
 }
-function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[1],voertuigen:'',dagen:5}); renderPunt(_HUIDIG); }
+function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[0],voertuigen:'',start:8,eind:18,dagen:5}); renderPunt(_HUIDIG); }
 // map de MINIMALE Kamino-invoer → de laadplein-vorm van de simulator; ontbrekende velden = simulator-standaarden
-// (km/jaar 15.000, kWh/km per type, laadpunten 0 → de simulator dimensioneert de ideale infrastructuur zelf).
+// (km/jaar + kWh/km per type, laadpunten 0 → de simulator dimensioneert de ideale infrastructuur zelf).
 function _pleinNaarSim(pl,i){
-  var type=pl.autotype||AUTOTYPES[1];
+  var type=pl.autotype||AUTOTYPES[0]; var def=VT_DEF[type]||VT_DEF['Personenwagen'];
+  var vs=(pl.start!=null&&pl.start!=='')?+pl.start:8, ve=(pl.eind!=null&&pl.eind!=='')?+pl.eind:18;
   return { naam:'Laadplein '+(i+1), voertuigtype:type,
-    aantal:+pl.voertuigen||0, km_per_jaar:+pl.km_jaar||15000, kwh_per_km:KWH_PER_KM[type]||0.16,
-    venster_start:8, venster_eind:18, dagen_per_week:+pl.dagen||5,
-    laadpunten:[{type:'AC22',aantal:+pl.ac||0},{type:'DC160',aantal:+pl.dc||0},{type:'DC300',aantal:0}],
+    aantal:+pl.voertuigen||0, km_per_jaar:def.km_per_jaar, kwh_per_km:def.kwh_per_km,
+    venster_start:vs, venster_eind:ve, dagen_per_week:+pl.dagen||5,
+    laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
     bestaand:false };
 }
 function delPlein(i){ STATE.werk.pleinen.splice(i,1); renderPunt(_HUIDIG); }
@@ -307,7 +322,7 @@ function renderPunt(id){
   var inputSec;
   if(p.input==='laadpleinen'){
     inputSec = '<div class="sec"><h3>Uw aansluiting</h3>'+veldFactuurBlok()+'</div>'+
-      '<div class="sec"><h3>Uw laadpleinen</h3>'+(STATE.werk.pleinen.length?'':'<div class="hint" style="margin-bottom:8px">Voeg per plein toe: autotype, aantal laadpalen, laadtijd/dag en dagen/week. Voeg zoveel pleinen toe als nodig.</div>')+pleinBlok()+'</div>';
+      '<div class="sec"><h3>Uw laadpleinen</h3>'+pleinBlok()+'</div>';
   } else {
     inputSec = '<div class="sec"><h3>Uw factuur</h3>'+veldFactuurBlok()+'</div>';
     if(p.id==='productie'){
@@ -451,6 +466,10 @@ function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   }
   if(reportHtml){ STATE.rapport[pid+'|'+id]={ html:reportHtml }; }
   else if(reportData && reportKey){ STATE.rapport[pid+'|'+id]={ key:reportKey, data:reportData }; }
+  // v0.9.5 — het rapport zit al klaar na de berekening → automatisch in de bucket zetten, nog vóór het
+  // geopend wordt. Zo hoeft niemand het rapport nog manueel (PDF) naar Supabase te laden.
+  kApiPost('/api/kamino/rapport-bewaar', { project_id:pid, tegel:id, kern:kern||null,
+    reportKey:reportKey||null, reportData:reportData||null, reportHtml:reportHtml||null }).catch(function(){});
   if(STATE.werk.id===pid){ persistProject(); _toonResultaat(id); }
 }
 function _toonBerekenen(id){
@@ -637,6 +656,17 @@ kApiGet('/api/profielen-lijst').then(function(r){
   var namen=lijst.map(function(x){ return (typeof x==='string')?x:(x&&(x.naam||x.name)||''); }).filter(Boolean);
   if(namen.length){ PROFIELEN=namen; if(PROFIELEN.indexOf(STATE.werk.profiel)<0) STATE.werk.profiel=PROFIELEN[0]; router(); }
 }).catch(function(){});
+// Upload-brug voor rapporten die als Blob in de rapport-overlay draaien (bv. het inline SolarActive-rapport):
+// zij hebben zelf geen token/same-origin-fetch, dus posten ze de PDF hierheen. Kamino doet de authenticated
+// upload naar de bucket (kApiPost = absolute Railway-URL + sb-JWT).
+window.addEventListener('message', function(e){
+  var d=e&&e.data; if(!d || d.type!=='fluctus-rapport-pdf' || !d.payload) return;
+  kApiPost('/api/rapport-opslaan', d.payload).then(function(){
+    try{ e.source && e.source.postMessage({type:'fluctus-rapport-saved', ok:true}, '*'); }catch(x){}
+  }).catch(function(err){
+    try{ e.source && e.source.postMessage({type:'fluctus-rapport-saved', ok:false, error:(err&&err.message)||'upload mislukt'}, '*'); }catch(x){}
+  });
+});
 window.addEventListener('hashchange',router); router();
 </script>
 </body>
