@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.18  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.19  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.19 (31-07): GROEIPAD + GROEISTAP 1 in het ontwerp-rapport gevuld. De server /api/groeipad levert RUWE
+              stappen (kw/kwh/factuur_sturing/distributie); het rapport verwacht presentatie-velden (extra_capex,
+              cum_capex, kpi1_eur_km, kpi2_rendement, kpi3_loadfactor, label, wat, is_optimaal) — die werden nooit
+              gemapt → p.9/p.10 stonden op €0/0%. Nieuwe helper _groeipadRapportData() spiegelt de _renderGroeipad-
+              transform (zelfde besparing-conventie base0 = E_base + CREG, capex-opbouw uit b.inv) en vult zowel het
+              groeipad als groeistap 1 (aanbevolen instap, k=1). Interactieve render ongemoeid = geen regressie.
      v1.63.18 (Johan-keuze A, 31-07): ENGINE = ENIGE BRON voor het ontwerp-rapport + de Kamino-card. De autopilot
               bouwde de optimale opstelling uit de LEGE handmatige batterij (_frBatterij → 0/0) en de besparing uit de
               no-batterij-factuur, terwijl _kpiEngine().beste (opstelling 2/3-winnaar op hoogste NPV) de échte batterij,
@@ -3232,6 +3238,84 @@ function _ontwerpCapexTot(pvKwp, battKwh, lp){
   var C={pv_kwp:450,batterij_kwh:350,laadpaal_ac:2500,laadpaal_dc160:40000,laadpaal_dc400:70000};
   return (pvKwp||0)*C.pv_kwp+(battKwh||0)*C.batterij_kwh+(lp.ac||0)*C.laadpaal_ac+(lp.dc160||0)*C.laadpaal_dc160+(lp.dc400||0)*C.laadpaal_dc400;
 }
+// v1.63.19: GROEIPAD + GROEISTAP 1 voor het ONTWERP-RAPPORT. De server /api/groeipad levert RUWE stappen
+// (kw/kwh/factuur_sturing_excl_btw/distributie_eur); het rapport verwacht PRESENTATIE-velden (extra_capex,
+// cum_capex, kpi1_eur_km, kpi2_rendement, kpi3_loadfactor, label, wat, is_optimaal). _ontwerpRapportData gaf
+// de ruwe stappen ongewijzigd door → alles €0/0%. Deze helper SPIEGELT de transform van _renderGroeipad
+// (zelfde besparing-conventie base0 = E_base + CREG, capex-opbouw uit b.inv) — de interactieve render blijft
+// ongemoeid (geen regressierisico). Terugval: null → _ontwerpRapportData houdt de oude bron.
+function _groeipadRapportData(){
+  var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
+  if(!eng||!eng.beste) return null;
+  var gp=STATE.groeipad;
+  if(!gp||!gp.stappen||!gp.stappen.length) return null;
+  var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
+  if(E_base==null) return null;
+  var base0=E_base+C;
+  var battUnitCost=INV_BATT_EUR_PER_KWH*BATT_UNIT_KWH;
+  var _bi=b.inv||{};
+  var fixedBase=(+_bi.pv||0)+(+_bi.trace||0);                 // PV + kabeltracé (batterij/aansluiting-onafhankelijk)
+  var fullLaadpalenB=(+_bi.laadpalen||0);
+  var kOpt=Math.max(1, Math.round(_dimKwh(b.o)/BATT_UNIT_KWH));
+  var _lpG=_frLaadpalen(), lpTot=_lpG.ac+_lpG.dc160+_lpG.dc400;
+  var kvaO3=+(b.o.config||{}).aansluiting_kva|| (+gp.aansluiting_kva) ||0;
+  var _o2row=(eng.rows||[]).filter(function(r){return r.key==='batterij';})[0]||null;
+  var kvaO2=(_o2row&&_o2row.o&&_o2row.o.config)?(+_o2row.o.config.aansluiting_kva||0):0;
+  var _o2i=(_o2row&&_o2row.inv)||{};
+  var connCost={}; connCost[Math.round(kvaO3)]=(+_bi.netaanpassing||0)+(+_bi.cabine||0);
+  if(kvaO2>0) connCost[Math.round(kvaO2)]=(+_o2i.netaanpassing||0)+(+_o2i.cabine||0);
+  function _connCost(c){ var v=connCost[Math.round(c)]; if(v!=null) return v;
+    return (Math.round(c)===Math.round(kvaO3))?((+_bi.netaanpassing||0)+(+_bi.cabine||0)):0; }
+  var vlootKm=_vlootKmJaar();
+  var _gbc=STATE.baseCase||{}, _gbd=_periodeDagen(_gbc.periodeVan,_gbc.periodeTot);
+  var pvKwp=+STATE.pvKwp||0, gebouwMwh=+STATE.jaarverbruik||0;
+  var data=gp.stappen.map(function(s){
+    var k=+s.aantal_batterijen||0;
+    var kw=(+s.kw||k*BATT_UNIT_KW), kwh=(+s.kwh||k*BATT_UNIT_KWH);
+    var c=(+s.aansluiting_kva)||kvaO3;
+    var geladenK=(+s.geladen_mwh)||0;
+    var pct=(s.geleverd_pct!=null)?(+s.geleverd_pct):null;
+    var pctF=(pct!=null)?pct/100:1;
+    var kmGeladen=(pct!=null)?vlootKm*pctF:vlootKm;
+    var notDelivered=(pct!=null)?Math.max(0,1-pctF):0;
+    var isOpt=(Math.round(c)===Math.round(kvaO3) && k===kOpt);
+    var factStap=(isOpt && b.factuur!=null)?b.factuur:((+s.factuur_sturing_excl_btw||0)*af);
+    var besparing=base0-(factStap+C*notDelivered);           // = E_base + CREG(geleverd) − factuur (zelfde als eng.beste)
+    var capex=fixedBase + fullLaadpalenB*pctF + k*battUnitCost + _connCost(c);
+    var oh1=pvKwp*TCO_AAN.onderhoud.pv_kwp + kw*TCO_AAN.onderhoud.batterij_kw + (lpTot*pctF)*TCO_AAN.onderhoud.laadpaal;
+    var besparingNetto=besparing-(oh1+capex*TCO_AAN.verzekering_promille/1000);
+    var rend=(capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
+    var kostKm=(kmGeladen>0)?((factStap-E_base)/kmGeladen):null;
+    var lf=(c>0)?(((gebouwMwh+geladenK)*1000)/(8760*c)):null;
+    return { k:k, kw:kw, kwh:kwh, c:c, pct:pct, besparing:Math.round(besparing), capex:Math.round(capex),
+             rend:rend, kostKm:kostKm, lf:lf, isOpt:isOpt };
+  });
+  var stappen=[];
+  data.forEach(function(d,i){
+    stappen.push({
+      nr:i+1,
+      label:(i===0?'START — ':'Groeistap '+(i+1)+' — ')+d.kw+'/'+d.kwh,
+      wat:'Batterij '+d.kw+' kW / '+d.kwh+' kWh op '+Math.round(d.c)+' kVA'+(d.pct!=null?(' — '+Math.round(d.pct)+'% van de laadvraag geleverd'):''),
+      extra_capex:Math.round(d.capex-(i>0?data[i-1].capex:0)),
+      cum_capex:Math.round(d.capex),
+      kpi1_eur_km:(d.kostKm!=null)?Math.round(d.kostKm*1000)/1000:null,
+      kpi2_rendement:(d.rend!=null)?Math.round(d.rend*10)/10:0,
+      kpi3_loadfactor:(d.isOpt && b.loadfactor!=null)?Math.round(b.loadfactor*100)/100:null,   // enkel de optimale stap heeft een betrouwbare loadfactor (eng.beste); rest → "—" (geen per-stap dispatch-piek beschikbaar)
+      is_optimaal:d.isOpt, voorbij_optimaal:(d.k>kOpt)
+    });
+  });
+  // groeistap 1 = aanbevolen instap = de kleinste batterij (k=1), met de hoogste besparing bij dat aantal.
+  var es=null; data.forEach(function(d){ if(d.k===1 && (es==null || d.besparing>es.besparing)) es=d; });
+  if(!es) es=data[0]||null;
+  var groeistap=es?{
+    label:'START — '+es.kw+'/'+es.kwh,
+    batterij_kw:es.kw, batterij_kwh:es.kwh, aansluiting_kw:Math.round(es.c),
+    pv_kwp:pvKwp, laadpalen:_lpG,
+    besparing_jaar:Math.round(es.besparing||0), capex:Math.round(es.capex||0),
+    motivatie:'De kleinste opstelling die vandaag al volstaat en met de vloot meegroeit naar de optimale opstelling.'
+  }:null;
+  return { stappen:stappen, groeistap:groeistap };
+}
 function _ontwerpRapportData(projectId, mode){
   var fd=_financieelRapportData();
   var comp=fd.componenten||{}, fac=fd.facturen||{}, en=fd.energie||{};
@@ -3297,14 +3381,18 @@ function _ontwerpRapportData(projectId, mode){
     meerwaarde_eur:_xpMeer,
     direct_mwh:xpZelf, via_batterij_mwh:null,
     injectie_mwh:Math.round(Math.max(0,xpProd-xpZelf)*10)/10 };
-  var gs=STATE.groeistap1||null;
-  var groeistap = gs ? {
-    label:(gs.label||gs.naam||'START'), batterij_kw:(gs.batterij_kw||gs.kw||0), batterij_kwh:(gs.batterij_kwh||gs.kwh||0),
-    aansluiting_kw:(gs.aansluiting_kw||gs.toegangsvermogen_kw||STATE.aansluitingKva||0),
-    pv_kwp:(gs.pv_kwp||0), laadpalen:(gs.laadpalen||{ac:0,dc160:0,dc400:0}),
-    besparing_jaar:(gs.besparing_jaar||gs.besparing||0), motivatie:(gs.motivatie||'De kleinste opstelling die vandaag al volstaat en met de vloot meegroeit.')
-  } : null;
-  var groeipad = (STATE.groeipad&&STATE.groeipad.stappen) ? { stappen:STATE.groeipad.stappen } : null;
+  // v1.63.19: groeipad + groeistap 1 uit de gedeelde transform (i.p.v. de ruwe server-stappen ongewijzigd door
+  // te geven, wat p.9/p.10 op €0/0% zette). Terugval op de oude bron als de helper geen data heeft.
+  var _gpr=(typeof _groeipadRapportData==='function')?_groeipadRapportData():null;
+  var groeistap = (_gpr&&_gpr.groeistap) ? _gpr.groeistap : (function(){
+    var gs=STATE.groeistap1||null; return gs ? {
+      label:(gs.label||gs.naam||'START'), batterij_kw:(gs.batterij_kw||gs.kw||0), batterij_kwh:(gs.batterij_kwh||gs.kwh||0),
+      aansluiting_kw:(gs.aansluiting_kw||gs.toegangsvermogen_kw||STATE.aansluitingKva||0),
+      pv_kwp:(gs.pv_kwp||0), laadpalen:(gs.laadpalen||{ac:0,dc160:0,dc400:0}),
+      besparing_jaar:(gs.besparing_jaar||gs.besparing||0), motivatie:(gs.motivatie||'De kleinste opstelling die vandaag al volstaat en met de vloot meegroeit.')
+    } : null; })();
+  var groeipad = (_gpr&&_gpr.stappen&&_gpr.stappen.length) ? { stappen:_gpr.stappen }
+    : ((STATE.groeipad&&STATE.groeipad.stappen) ? { stappen:STATE.groeipad.stappen } : null);
   var out=Object.assign({}, fd);
   out.ontwerp=Object.assign({}, fd.ontwerp, { batterij_kw:_bBattKw, batterij_kwh:_bBattKwh });   // v1.63.18: capex/afschrijving in het rapport op de winnaar-batterij (niet 0/0)
   out._mode=(mode==='management')?'management':'klant';
