@@ -2333,6 +2333,23 @@ function renderStep1Project(){
   box.appendChild(el('h2',null,'Project & scenario'));
   box.appendChild(el('div',{class:'fdsim-help'},'Geef een naam aan je project en scenario. Aan het eind kan je het scenario bewaren in de fluctus-scenarios repo zodat je het later opnieuw kan laden.'));
 
+  // ── MANAGER-ONDERSTEUNING (v1.63.16): open een bestaand Kamino-project op FLX-id. Laadt de factuurdata
+  //    (baseCase) in stap 1 zodat de manager nieuwe scenario's kan maken, + toont de bewaarde rapporten.
+  //    De server gate't dit op manager-rol; een niet-manager krijgt een nette 403-melding.
+  var mgr=el('div',{class:'fdsim-section',style:'margin-top:12px;border-color:#2d4f8e55;background:#F5F8FE'});
+  mgr.appendChild(el('h3',null,'🔑 Open een Kamino-project (manager)'));
+  mgr.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:8px'},'Laad de factuurdata van een bestaand project om te ondersteunen: bekijk de bewaarde rapporten en maak nieuwe scenario’s.'));
+  var mgrRow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'});
+  var mgrBox=el('div',{class:'fdsim-row col',style:'flex:1;min-width:200px'});
+  mgrBox.appendChild(el('label',{class:'fdsim-label'},'Project-ID'));
+  var mgrIn=el('input',{class:'fdsim-input',type:'text',id:'fdsim-mgr-id',placeholder:'FLX-XXX-XXXX'});
+  mgrBox.appendChild(mgrIn); mgrRow.appendChild(mgrBox);
+  mgrRow.appendChild(el('button',{class:'fdsim-btn small',type:'button',onclick:function(){ _managerOpenKamino($('fdsim-mgr-id').value); }},'Open project'));
+  mgr.appendChild(mgrRow);
+  mgr.appendChild(el('div',{id:'fdsim-mgr-msg',class:'fdsim-hint',style:'margin-top:6px'}));
+  mgr.appendChild(el('div',{id:'fdsim-mgr-rapporten',style:'margin-top:10px'}));
+  box.appendChild(mgr);
+
   // v1.14 — BaseCase Uitbreiding Fase 2: factuur-CTA.
   // v1.16 sessie 5a (Feature 6): conditioneel verbergen.
   //   - Zichtbaar bij scenarioActie='nieuw' EN geen bestaande base case.
@@ -2445,6 +2462,85 @@ function renderStep1Project(){
   };
 
   return box;
+}
+
+// ═══ MANAGER-ONDERSTEUNING: Kamino-project openen op FLX-id ═══════════════════════
+// Haalt het projectrecord (manager-only, zonder e-mail) op, laadt de baseCase in de wizard (stap 1) en
+// toont de bewaarde rapporten. De manager kan van daaruit nieuwe scenario's maken (opgeslagen onder het FLX-id).
+function _managerOpenKamino(id){
+  id=String(id||'').trim().toUpperCase();
+  var msg=$('fdsim-mgr-msg');
+  var zet=function(kleur,tekst){ if(msg){ msg.style.color=kleur; msg.textContent=tekst; } };
+  if(!/^FLX-[A-Z0-9]{3}-[A-Z0-9]{3,4}$/.test(id)){ zet('#B23','Vul een geldig project-ID in (FLX-…).'); return; }
+  zet('#5A6577','Project ophalen…');
+  apiGet('/api/kamino/project-get?id='+encodeURIComponent(id)).then(function(r){
+    var rec=(r&&r.project)||{}, bc=rec.baseCase;
+    if(!bc){ zet('#B23','Dit project heeft geen factuurdata (baseCase) om te laden.'); return; }
+    var applied=applyBaseCaseToWizard(bc,{strictTariefjaar:false});
+    if(applied.status==='BLOKKEER'){ zet('#B23','Kan niet laden: '+((applied.reasons||[]).map(function(x){return x.message;}).join(' ')||'geblokkeerd')); return; }
+    var pc=applied.state&&applied.state.postcode;
+    var pcP=pc?apiGet('/api/postcode-grd?postcode='+pc).catch(function(){ return apiPost('/api/postcode-fallback',{postcode:pc}).catch(function(){return null;}); }):Promise.resolve(null);
+    pcP.then(function(pcResp){
+      _managerCommit(id, rec, applied, pcResp);
+      renderAll();
+      _renderKaminoRapporten(id, (r.rapporten||{pdfs:[],studies:[]}));
+      zet('#0A6B2E','Project '+id+' geladen — je kan nu nieuwe scenario’s maken. De rapporten staan hieronder.');
+    });
+  }).catch(function(e){
+    var m=(e&&e.message)||String(e);
+    zet('#B23', /403/.test(m)?'Alleen managers kunnen een project rechtstreeks openen.':('Kon niet openen: '+m));
+  });
+}
+function _managerCommit(id, rec, applied, pcResp){
+  if(typeof _resetOntwerpState==='function'){ try{ _resetOntwerpState(); }catch(e){} }
+  var s=applied.state||{}, bc=rec.baseCase;
+  STATE.project=id;   // uniek keyen op het Kamino-FLX-id (niet de klantnaam → geen botsingen)
+  STATE.scenario=(typeof _buildScenario1Naam==='function' && bc.periodeVan && bc.periodeTot)?_buildScenario1Naam(bc.periodeVan,bc.periodeTot):'kamino';
+  STATE.scenarioActie='nieuw';
+  STATE.postcode=s.postcode||STATE.postcode;
+  if(pcResp && pcResp.grd){ STATE.grd=pcResp.grd||STATE.grd; STATE.dnbVolledig=pcResp.dnb_volledig||STATE.dnbVolledig;
+    var gms=pcResp.gemeenten||[]; if(s.gemeente && gms.indexOf(s.gemeente)>=0)STATE.gemeente=s.gemeente; else if(gms.length)STATE.gemeente=gms[0]; else if(s.gemeente)STATE.gemeente=s.gemeente;
+  } else { STATE.grd=bc.dnb||STATE.grd; if(s.gemeente)STATE.gemeente=s.gemeente; }
+  if(bc.spanningsniveau)STATE.spanning=bc.spanningsniveau;
+  else if(s.kVA!=null && s.kVA*0.95>=100)STATE.spanning='MS';
+  else if(s.kVA!=null)STATE.spanning='LS';
+  if(rec.profiel)STATE.profielNaam=rec.profiel;
+  if(s.jaarverbruikMWh)STATE.jaarverbruik=s.jaarverbruikMWh;
+  STATE.pvKwp=s.pvKwp||0; STATE.pvInjStrategie=s.pvInjStrategie||'geen';
+  if(s.kVA!=null){ STATE.aansluitingKva=s.kVA; STATE._aansluitingManueel=false; }
+  STATE.jaar='specifiek'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
+  if(bc.afnameKwh!=null)STATE.periodeVolumeMwh=bc.afnameKwh/1000;
+  if(rec.pv && (+rec.pv.kwp>0)){ STATE.bestaandePv={ aanwezig:true, kwp:+rec.pv.kwp||0, kva:Math.round(((+rec.pv.kwp||0)/1.3)*10)/10, piekKw:0, injMwhJaar:+rec.pv.inj||0, injMwhMaand:0, maand:6, injOpbrengstEur:0 }; }
+  STATE.baseCase=bc; STATE.baseCase.klantBtw=bc.klantBtw||null; STATE.baseCase.leveringsadres=bc.leveringsadres||null; STATE.baseCase._kaminoProjectId=id;
+  STATE.currentStep=0; if(!Array.isArray(STATE.visited))STATE.visited=[]; STATE.visited[0]=true;
+}
+function _renderKaminoRapporten(id, rap){
+  var host=$('fdsim-mgr-rapporten'); if(!host) return; host.innerHTML='';
+  var pdfs=(rap&&rap.pdfs)||[], studies=(rap&&rap.studies)||[];
+  if(!pdfs.length && !studies.length){ host.appendChild(el('div',{class:'fdsim-hint'},'Nog geen bewaarde rapporten voor dit project.')); return; }
+  host.appendChild(el('div',{class:'fdsim-label',style:'margin-bottom:4px'},'Rapporten van dit project'));
+  studies.forEach(function(st){
+    var row=el('div',{style:'display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap'});
+    row.appendChild(el('span',{style:'font-size:13px'},'📊 Studie '+st.tegel));
+    row.appendChild(el('button',{class:'fdsim-btn small',type:'button',onclick:function(){ _managerOpenStudie(id, st.tegel); }},'Bekijk'));
+    host.appendChild(row);
+  });
+  pdfs.forEach(function(p){
+    var row=el('div',{style:'display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap'});
+    row.appendChild(el('span',{style:'font-size:13px'},'📄 '+p.naam));
+    if(p.url) row.appendChild(el('a',{href:p.url,target:'_blank',class:'fdsim-btn small'},'Open PDF'));
+    host.appendChild(row);
+  });
+}
+function _managerOpenStudie(id, tegel){
+  apiGet('/api/kamino/rapport-open?project_id='+encodeURIComponent(id)+'&tegel='+encodeURIComponent(tegel)).then(function(r){
+    var a=(r&&r.rapport)||{};
+    if(a.reportHtml){ if(typeof _toonRapportInline==='function') _toonRapportInline(a.reportHtml,'Studie '+tegel); else { var w=window.open('','_blank'); if(w){ w.document.write(a.reportHtml); w.document.close(); } } return; }
+    if(a.reportKey && a.reportData){ try{ sessionStorage.setItem(a.reportKey, JSON.stringify(a.reportData)); }catch(e){}
+      var url=(typeof _apRapportUrl==='function')?_apRapportUrl(a.reportKey):'/apps/ontwerp-rapport.html';
+      window.open(url,'_blank'); return; }
+    alert('Geen weergeefbaar rapport voor deze studie.');
+  }).catch(function(e){ alert('Kon rapport niet openen: '+((e&&e.message)||e)); });
 }
 
 // v1.19 sessie 7 helpers — vullen dropdowns via LIVE $() lookup zodat het
@@ -4061,7 +4157,7 @@ function _rapportScenarioKaart(titel, uitleg, meerwaarde, netto, payback){
 // Zelfstandig SolarActive-rapport in een nieuw venster: conclusie op de voorpagina + kerncijfers +
 // drie heatmaps (netto injectieopbrengst, bespaarde curtailment, verdiende onbalans-sturing).
 // v1.63.13: HTML-builder afgesplitst zodat de Kamino-autopilot (embed) de SolarActive-HTML kan meesturen (postMessage).
-function _solarActiveHtml(a){
+function _solarActiveHtml(a, pidOverride){
  try{
   if(!a||!a.opbrengst_jaar){ return null; }
   var o=a.opbrengst_jaar, pb=a.payback||{}, e=a.energie_jaar||{}, hm=a.heatmaps||{}, st=a.sturing||{forecast_modus:'realistic',capture:0.72};
@@ -4154,7 +4250,8 @@ function _solarActiveHtml(a){
     'draw("hm1",D.netto,"div");draw("hm2",D.bespaard,"seq");draw("hm3",D.verdiend,"seq");'+
     '})();<\/script></body></html>';
   // v1.63.13: synchrone project-ID (embed-veilig) + PDF-drop-in inject → geef de volledige HTML-string terug.
-  var pid=(typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'';
+  // v1.63.15: pidOverride = het Kamino-ID (uniek per upload) heeft voorrang op het naam-afgeleide.
+  var pid=pidOverride||((typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'');
   var klant2=(STATE.baseCase&&STATE.baseCase.klantNaam)||STATE.klantNaam||STATE.project||'Klant';
   var inject='<script>window.FLUCTUS_RAPPORT_META={project_id:'+JSON.stringify(pid||'')+',type:"solaractive",klant:'+JSON.stringify(klant2)+'};<\/script>'+
              '<script src="'+location.origin+'/apps/fluctus-rapport-pdf.js"><\/script>';
@@ -10577,7 +10674,13 @@ function _fdsimInit(){
 //  Volgorde tegel 3/4 = simulator-volgorde: optimale opstelling → extra PV @90% →
 //  groeistappen → groeistap 1 → ontwerp-rapport.
 // ═══════════════════════════════════════════════════════════════════════════════
+var _apH=null;   // huidige handoff — nodig om een fout terug te melden aan Kamino (parent)
 function _apStatus(msg, isFout){
+  // v1.63.14: bij een fout in de embed-run (Kamino-launcher) meteen de parent verwittigen, i.p.v. Kamino
+  // 240s+ laten wachten tot zijn eigen time-out. Zo toont Kamino de échte fout onmiddellijk.
+  if(isFout && _apEmbed() && _apH){
+    try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:_apH.projectId, tegel:_apH.tegel, error:String(msg||'onbekende fout') }, '*'); }catch(e){}
+  }
   var id='fdsim-autopilot-overlay', o=document.getElementById(id);
   if(!o){ o=document.createElement('div'); o.id=id;
     o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(31,56,100,.97);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,Segoe UI,Arial,sans-serif;text-align:center;padding:24px';
@@ -10715,6 +10818,9 @@ function _apRapportUrl(reportKey){
        : '/apps/ontwerp-rapport.html';
 }
 function _apKlaar(h, reportData, reportKey, reportHtml){
+  // v1.63.15: het project-ID komt van Kamino (uniek per upload) → forceer het in het rapport, zodat het
+  // rapport, de PDF-opslag én de auto-bucket-opslag allemaal onder HETZELFDE ID landen (niet naam-afgeleid).
+  if(reportData && h && h.projectId){ try{ reportData.project_id=h.projectId; }catch(e){} }
   var kern=_apBouwKern(h, reportData);
   if(_apEmbed()){
     try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:h.projectId, tegel:h.tegel,
@@ -10730,6 +10836,7 @@ function _apKlaar(h, reportData, reportKey, reportHtml){
 }
 function _autopilotDrive(h){
   var tegel=h.tegel||'aansluiting';
+  _apH=h;   // onthoud de handoff zodat _apStatus een fout aan Kamino kan terugmelden
   _apStatus('Uw gegevens worden ingeladen…');
   try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
   if(tegel==='contract'){
@@ -10747,7 +10854,7 @@ function _autopilotDrive(h){
     if(!(+bp.kwp>0 || +bp.kva>0 || +bp.piekKw>0)){ _apStatus('SolarActive vereist bestaande zonnepanelen — geef uw bestaande PV op.', true); return; }
     _apStatus('SolarActive — injectie-opbrengst berekenen…');
     _runInjectieAnalyse(function(a){
-      try{ var html=(typeof _solarActiveHtml==='function')?_solarActiveHtml(a):null; _apKlaar(h, null, null, html); if(!_apEmbed()) _openSolarActiveRapport(a); }
+      try{ var html=(typeof _solarActiveHtml==='function')?_solarActiveHtml(a, h.projectId):null; _apKlaar(h, null, null, html); if(!_apEmbed()) _openSolarActiveRapport(a); }
       catch(e){ _apStatus('Rapport bouwen mislukte: '+((e&&e.message)||e), true); }
     });
     return;
@@ -10759,7 +10866,7 @@ function _autopilotDrive(h){
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
     .then(function(){
       _apStatus('Kerncijfers terugkoppelen…');
-      var pid=(typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'FLX-KAMINO';
+      var pid=h.projectId||((typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'FLX-KAMINO');
       var rd=null; try{ rd=_ontwerpRapportData(pid, h.rapportModus||'klant'); }catch(e){ console.error('[autopilot] rapportdata',e); }
       _apKlaar(h, rd, 'FLUCTUS_ONTWERP_RAPPORT');
     })
