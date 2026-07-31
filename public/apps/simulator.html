@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.21  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.22  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.22 (31-07): (1) LAADPUNTEN-TELLING — de launcher stuurt laadpunten op 0 ("sim dimensioneert zelf"); nieuwe
+              _dimLaadpalen leidt de telling af uit cap_kw per plein (≤44 kW → AC22, groter → DC160) → out.optimaal.
+              laadpalen toont nu een echte telling i.p.v. 0. ENKEL weergave — de laadpaal-kost hoort bij het aparte
+              Jacops-pad, niet in de ontwerp-capex (bevestigen met Johan indien anders gewenst). (2) CARD-TVT = RAPPORT-
+              TVT — nieuwe _rapportTvt spiegelt opRendement(realistisch).tvt (escalerende horizon) en zet het in
+              rd.financieel.terugverdientijd_jaar; _apBouwKern gebruikt dat → de kaart toont exact de rapport-TVT
+              (was simpel capex/besparing → 4,5j naast 2,3j).
      v1.63.21 (31-07): HARTSLAG naar de Kamino-launcher. De autopilot stuurt nu elke ~8s (+ bij elke statuswijziging)
               een `kamino-progress`-bericht met de huidige stap. Kamino toont dat live én gebruikt het als liveness-
               signaal i.p.v. een harde tijdscap → een lange-maar-werkende studie wordt niet meer afgekapt. Ticker start
@@ -3329,6 +3336,45 @@ function _groeipadRapportData(){
   }:null;
   return { stappen:stappen, groeistap:groeistap };
 }
+// v1.63.22: LAADPUNTEN-TELLING. De Kamino-launcher stuurt laadpunten bewust op 0 ("de simulator dimensioneert de
+// ideale infrastructuur zelf"). De sim berekent per plein cap_kw (benodigd laadvermogen). Hieruit leiden we een
+// nette laadpunten-telling af: klein plein (≤44 kW) → AC 22 kW, groter → DC 160 kW. ENKEL voor de weergave — de
+// laadpaal-kost hoort bij het aparte Jacops-pad (koop/lease/concessie), niet in de ontwerp-capex (PV+batterij).
+function _dimLaadpalen(fdLp){
+  var lp={ac:0,dc160:0,dc400:0};
+  var pleinen=(fdLp&&fdLp.pleinen)||[];
+  pleinen.forEach(function(p){
+    var cap=+p.cap_kw||0; if(cap<=0) return;
+    if(cap<=44) lp.ac += Math.max(1, Math.ceil(cap/22));
+    else lp.dc160 += Math.max(1, Math.ceil(cap/160));
+  });
+  return lp;
+}
+// v1.63.22: CARD-TVT = RAPPORT-TVT. Spiegelt exact opRendement(realistisch).tvt uit ontwerp-rapport.html (escalerende
+// horizon), zodat de Kamino-kaart dezelfde terugverdientijd toont als het rapport (was simpel capex/besparing → afwijkend).
+// Zelfde eenheidsprijzen (AAN.capex), onderhoud, verzekering (3,4‰), scenario (infl 2% / net +4% / sprong +30% @2029),
+// omvormervervanging jaar 10. Capex sluit — net als het rapport — de laadpalen uit (INV.ontwerp.laadpalen).
+function _rapportTvt(rd){
+  var fin=(rd&&rd.financieel)||{}, ont=(rd&&rd.ontwerp)||{};
+  var besp=+fin.besparing_jaar1||0; if(besp<=0) return null;
+  var edeel=(fin.besparing_energie_deel!=null)?+fin.besparing_energie_deel:0.72;
+  var C={pv_kwp:450,batterij_kwh:350,laadpaal_ac:2500,laadpaal_dc160:40000,laadpaal_dc400:70000};
+  var lp=ont.laadpalen||{ac:0,dc160:0,dc400:0};
+  var capex=(+ont.pv_kwp||0)*C.pv_kwp+(+ont.batterij_kwh||0)*C.batterij_kwh+(+lp.ac||0)*C.laadpaal_ac+(+lp.dc160||0)*C.laadpaal_dc160+(+lp.dc400||0)*C.laadpaal_dc400;
+  if(capex<=0) return null;
+  var oh1=(+ont.pv_kwp||0)*5+(+ont.batterij_kw||0)*5+((+lp.ac||0)+(+lp.dc160||0)+(+lp.dc400||0))*50;
+  var verz=capex*3.4/1000;
+  var infl=0.02, netExtra=0.04, netSprongJaar=2029, netSprong=0.30, startjaar=2026, horizon=15, omvormer=50;
+  var cum=0, tvt=null;
+  for(var y=0;y<horizon;y++){
+    var gNet=Math.pow(1+infl+netExtra,y); if((startjaar+y)>=netSprongJaar) gNet*=(1+netSprong);
+    var netto=(besp*edeel*Math.pow(1+infl,y) + besp*(1-edeel)*gNet) - (oh1*Math.pow(1+infl,y)+verz);
+    if(y===9) netto -= (+ont.pv_kwp||0)*omvormer;
+    cum += netto;
+    if(tvt===null && cum>=capex) tvt = y + (1-(cum-capex)/netto);
+  }
+  return (tvt!=null)?Math.round(tvt*10)/10:null;
+}
 function _ontwerpRapportData(projectId, mode){
   var fd=_financieelRapportData();
   var comp=fd.componenten||{}, fac=fd.facturen||{}, en=fd.energie||{};
@@ -3337,6 +3383,7 @@ function _ontwerpRapportData(projectId, mode){
   var factuurComp={ energie:capMin('energie'), capaciteit:capaciteit,
     distributie:Math.max(0,capMin('distributie')-capaciteit), heffingen:capMin('heffingen') };
   var bt=_frBatterij(), lp=_frLaadpalen();
+  var _lpDim=_dimLaadpalen(fd.laadpleinen);   // v1.63.22: gedimensioneerde laadpunten-telling (uit cap_kw) i.p.v. de 0-invoer
   var pvKwp=+STATE.pvKwp||0, bpv=STATE.bestaandePv||{};
   // v1.63.1: echte KPI's uit de KPI-engine (beste opstelling) i.p.v. schattingen.
   var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
@@ -3427,13 +3474,14 @@ function _ontwerpRapportData(projectId, mode){
   // (out.ontwerp.pv_kwp = STATE.pvKwp), want de bestaande panelen zijn al geplaatst.
   out.optimaal={ pv_kwp:pvKwp+(+bpv.kwp||0), batterij_kw:_bBattKw, batterij_kwh:_bBattKwh,
     aansluiting_kw:_bAansl, aansluiting_vandaag_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():0),
-    spanning_nieuw:STATE.spanning||'', laadpalen:lp, npv:kpiNpv,
+    spanning_nieuw:STATE.spanning||'', laadpalen:_lpDim, npv:kpiNpv,   // v1.63.22: getoonde laadpunten-telling (Jacops-infrastructuur; kost apart, niet in de ontwerp-capex)
     kpi1_eur_per_km:kpiKm, kpi1_creg_per_km:cregKm,
     kpi2_rendement:kpi2, kpi3_loadfactor_voor:lfVoor, kpi3_loadfactor_na:lfNa };
   out.extra_pv=extra_pv;
   if(groeistap) out.groeistap=groeistap;
   if(groeipad) out.groeipad=groeipad;
   out.financieel={ besparing_jaar1:_bBesp, besparing_energie_deel:fd.besparing_energie_deel||0.72, onbalans_windfall_jaar1:fd.onbalans_windfall_jaar1||0 };   // v1.63.18: besparing = eng.beste.besparing (incl. CREG + batterij) → card-TVT & rapport uit één bron
+  out.financieel.terugverdientijd_jaar = _rapportTvt(out);   // v1.63.22: rapport-TVT (escalerende horizon) → de Kamino-kaart toont exact dezelfde TVT als het rapport
   return out;
 }
 function _openOntwerpRapport(mode){
@@ -10927,7 +10975,7 @@ function _apBouwKern(h, rd){
     var pvKwp=+((opt.pv_kwp!=null)?opt.pv_kwp:STATE.pvKwp)||0, battKwh=+opt.batterij_kwh||0, lp=opt.laadpalen||{ac:0,dc160:0,dc400:0};
     var eng=(typeof _kpiEngine==='function')?_kpiEngine():null, b=(eng&&eng.beste)||null;
     var capexTot=(b&&b.capex)?b.capex:((typeof _ontwerpCapexTot==='function')?_ontwerpCapexTot(pvKwp,battKwh,lp):0);
-    var tvt=(besparing>0 && capexTot>0)?Math.round((capexTot/besparing)*10)/10:null;
+    var tvt=(fin.terugverdientijd_jaar!=null)?fin.terugverdientijd_jaar:((besparing>0 && capexTot>0)?Math.round((capexTot/besparing)*10)/10:null);   // v1.63.22: rapport-TVT (escalerende horizon) uit rd.financieel → kaart = rapport; terugval op simpel capex/besparing
     kern={ besparing_jaar:besparing, rendement_pct:rendement, terugverdientijd_jaar:tvt,
            pv_kwp:Math.round(pvKwp), kost_km:(opt.kpi1_eur_per_km!=null)?opt.kpi1_eur_per_km:null };
   }
