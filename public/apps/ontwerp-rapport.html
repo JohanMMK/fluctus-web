@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.5.0  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.7.0  (dual-mode: klant + management)
+     v2.7.0 (Johan 31-07): MOBILITEIT-BASELINE FIX. Bij een laadplein-case hoorde de nieuwe laadvraag gratis in de
+             besparing (besparing = bestaand − ontwerp), waardoor de besparing negatief werd zodra er een vloot bijkwam
+             (Kiemkracht: −€22.087, TVT "—", negatieve DSCR, rendement −49,6% naast KPI2 +21,3%). Correct: de vloot hoort
+             in de REFERENTIE. besparing = (bestaande factuur + geladen km @ CREG-forfait) − ontwerpfactuur. km_CREG_kost =
+             laadplein.km_jaar × creg_per_km; één reassign van FIN.besparing_jaar1 corrigeert de hele keten (headline, %,
+             €/MWh, financiering, TVT, DSCR, groeistap-tabel, flowstrip). p.4 toont nu de referentiebalk "Vloot @ CREG".
+             Zonder laadplein is km_CREG_kost = 0 → identiek aan v2.6.0 (geen regressie op tegel 3 / battery-only).
+             Extra guards: loadfactor toont "—" i.p.v. "NaN"; batterij-narratief ("snijdt de piek") alleen als er
+             effectief een batterij ≠ 0/0 én een vermeden verzwaring is. Kiemkracht → +€45.913/jaar (−42,7% vs referentie).
      v2.5.0: "Onze belofte"-pagina (risk-reversal) na de ontwerpstrategie — 10%-rendementsgarantie met
              terugbetaling, uitvoeringsbegeleiding samen met de installateur, en terugbetaling door de installateur bij
              de eerste bestelling. Filosofie die de betaalde studie risicoloos maakt en de CTA versterkt.
@@ -241,6 +250,7 @@ function eur2(v){ return '€ '+fmt2.format(v||0); }
 function pct(v){ return fmt1.format(v||0)+' %'; }
 function num(v){ return fmt.format(Math.round(v||0)); }
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function lf(v){ return (v==null||isNaN(v))?'—':fmt2.format(v); }   // v2.7.0: loadfactor-guard — nooit "NaN" naar de klant
 
 var O = INV.optimaal||{}, E = INV.energie||{}, F = INV.factuur||{}, FIN = INV.financieel||{}, P = INV.profiel||{};
 
@@ -318,9 +328,20 @@ var zelfcons_pct = (E.pv_productie_mwh||0)>0 ? (E.pv_zelfverbruik_mwh||0)/E.pv_p
 // doet (geen heronderhandeling, geen contractswitch). besparing_jaar1 = bestaand − ontwerp, en de −% en de
 // €/MWh delen door diezelfde bestaande factuur (F.basislijn_jaar = bestaand_jaar). Eén basislijn, overal.
 var _basis = (F.basislijn_jaar||F.bestaand_jaar||F.scherp_dynamisch_jaar||0);
-var kostpermwh_bestaand = totVerbruik>0 ? _basis/totVerbruik : 0;
-var kostpermwh_voorstel = totVerbruik>0 ? (_basis-FIN.besparing_jaar1)/totVerbruik : 0;
-var besp_pct = _basis>0 ? FIN.besparing_jaar1/_basis*100 : 0;
+// v2.7.0 (mobiliteit-baseline fix — Johan 31-07): bij een laadplein-case hoort de laadvraag in de
+// REFERENTIE, niet gratis in de besparing. Correct: besparing = (bestaande factuur + geladen km @ CREG) − ontwerp.
+// De geïnjecteerde besparing_jaar1 = bestaand − ontwerp; we reconstrueren de ontwerpfactuur (E_nieuw = bestaand −
+// besparing_jaar1) en tellen de CREG-referentie van de vloot erbij. Zonder laadplein is km_CREG_kost = 0 →
+// identiek aan v2.6.0 (géén regressie op tegel 3 / battery-only). Bron km_CREG: laadplein.km_jaar × creg_per_km.
+var _LP0 = INV.laadplein||{};
+var _kmCregKost = (_LP0.aanwezig && (+_LP0.km_jaar>0) && (+_LP0.creg_per_km>0)) ? (+_LP0.km_jaar)*(+_LP0.creg_per_km) : 0;
+var _heeftMobiliteit = _kmCregKost > 0;
+var _voorstelJaar = _basis - (FIN.besparing_jaar1||0);   // ontwerpfactuur E_nieuw (incl. slim laden) — invariant, vóór de reassign
+var _referentieJaar = _basis + _kmCregKost;              // bestaande factuur + vloot aan CREG-forfait
+FIN.besparing_jaar1 = _referentieJaar - _voorstelJaar;   // = oorspronkelijke besparing + km_CREG_kost → alle downstream-consumers rekenen nu correct
+var kostpermwh_bestaand = totVerbruik>0 ? _referentieJaar/totVerbruik : 0;
+var kostpermwh_voorstel = totVerbruik>0 ? _voorstelJaar/totVerbruik : 0;
+var besp_pct = _referentieJaar>0 ? FIN.besparing_jaar1/_referentieJaar*100 : 0;
 var rendReal = opRendement('realistisch');
 var aansluiting_vermeden = (E.sitepiek_zonder_batterij_kw||0) - (E.sitepiek_met_batterij_kw||0);
 
@@ -431,7 +452,7 @@ pagina(
   '<p class="note">We leggen elke stap op de volgende pagina uit met de kerncijfers. De <b style="color:#048443">optimale opstelling</b> is het einddoel; de <b style="color:#9E480E">eerste groeistap</b> is waar u vandaag start.</p>'+
   '<h3>De kerncijfers van het einddoel (volledige opstelling)</h3>'+
   '<div class="kpi-row">'+
-    '<div class="kpi groen"><div class="l">Lagere factuur / jaar</div><div class="v">−'+pct(besp_pct)+'</div><div class="s">'+eur(FIN.besparing_jaar1)+'/jaar (volledig)</div></div>'+
+    '<div class="kpi groen"><div class="l">'+(_heeftMobiliteit?'Lagere totale kost / jaar':'Lagere factuur / jaar')+'</div><div class="v">−'+pct(besp_pct)+'</div><div class="s">'+eur(FIN.besparing_jaar1)+'/jaar'+(_heeftMobiliteit?' (gebouw + vloot)':' (volledig)')+'</div></div>'+
     '<div class="kpi"><div class="l">Nieuwe energiekost</div><div class="v">'+eur1(kostpermwh_voorstel)+'</div><div class="s">/MWh (was '+eur1(kostpermwh_bestaand)+')</div></div>'+
     '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(rendReal.tvt!=null?fmt1.format(rendReal.tvt):'—')+' jr</div><div class="s">volledige opstelling</div></div>'+
     '<div class="kpi"><div class="l">Rendement (jaar 1)</div><div class="v">'+pct(rendReal.rendement)+'</div><div class="s">op de volledige investering</div></div>'+
@@ -496,12 +517,12 @@ pagina(
   '<p>We vertrekken van uw werkelijke afrekening ('+eur(F.afrekening_bedrag)+' over '+F.afrekening_periode_mnd+' maand'+(F.afrekening_periode_mnd>1?'en':'')+'), geëxtrapoleerd naar een vol jaar. Zo weten we exact waar de kosten zitten — pas dan kunnen we ze gericht aanpakken.</p>'+
   '<div class="split">'+
     '<div>'+chartBlok('ch-fact-pie')+'<p class="note">Verdeling van uw jaarfactuur: energie is meestal het grootste blok — en net dáár haalt slimme sturing de meeste winst.</p></div>'+
-    '<div>'+chartBlok('ch-fact-bar')+'<p class="note">Uw huidige factuur vs. een scherp geprijsd dynamisch contract vs. het volledige voorstel.</p></div>'+
+    '<div>'+chartBlok('ch-fact-bar')+'<p class="note">'+(_heeftMobiliteit?'Uw gebouwfactuur vandaag, dezelfde vloot aan het CREG-thuisforfait (de referentie), en het volledige voorstel — gebouw én slim laden samen.':'Uw huidige factuur vs. een scherp geprijsd dynamisch contract vs. het volledige voorstel.')+'</p></div>'+
   '</div>'+
   '<div class="kpi-row k3">'+
     '<div class="kpi"><div class="l">Factuur vandaag</div><div class="v">'+eur(F.bestaand_jaar)+'</div><div class="s">/jaar, huidig contract</div></div>'+
     '<div class="kpi"><div class="l">Scherp dynamisch</div><div class="v">'+eur(F.scherp_dynamisch_jaar)+'</div><div class="s">enkel ander contract</div></div>'+
-    '<div class="kpi groen"><div class="l">Met het voorstel</div><div class="v">'+eur(F.bestaand_jaar-FIN.besparing_jaar1)+'</div><div class="s">−'+pct(besp_pct)+'</div></div>'+
+    '<div class="kpi groen"><div class="l">Met het voorstel</div><div class="v">'+eur(_voorstelJaar)+'</div><div class="s">−'+pct(besp_pct)+(_heeftMobiliteit?' vs. vloot @ CREG':'')+'</div></div>'+
   '</div>'+
   mgmt('factuur — componenten & afleiding',
     '<table><thead><tr><th>Component</th><th>€/jaar</th><th>aandeel</th></tr></thead><tbody>'+
@@ -593,11 +614,11 @@ pagina(
   '<div class="kpi-row k3">'+
     '<div class="kpi groen"><div class="l">KPI 1 · km-kost</div><div class="v">'+eur2(O.kpi1_eur_per_km)+'</div><div class="s">/km vs '+eur2(O.kpi1_creg_per_km)+' (CREG)</div></div>'+
     '<div class="kpi"><div class="l">KPI 2 · rendement</div><div class="v">'+pct(O.kpi2_rendement)+'</div><div class="s">besparing / capex</div></div>'+
-    '<div class="kpi"><div class="l">KPI 3 · loadfactor</div><div class="v">'+fmt2.format(O.kpi3_loadfactor_na)+'</div><div class="s">was '+fmt2.format(O.kpi3_loadfactor_voor)+'</div></div>'+
+    '<div class="kpi"><div class="l">KPI 3 · loadfactor</div><div class="v">'+lf(O.kpi3_loadfactor_na)+'</div><div class="s">was '+lf(O.kpi3_loadfactor_voor)+'</div></div>'+
   '</div>'+
   '<div class="split">'+
     '<div>'+chartBlok('ch-pv-donut','sm')+'<p class="note">Waar uw zonne-energie naartoe gaat: eigen verbruik, via de batterij, of geïnjecteerd.</p></div>'+
-    '<div>'+chartBlok('ch-piek','sm')+'<p class="note">De batterij snijdt uw sitepiek van '+num(E.sitepiek_zonder_batterij_kw)+' kW terug naar '+num(E.sitepiek_met_batterij_kw)+' kW — dat vermijdt '+num(aansluiting_vermeden)+' kW aan verzwaring.</p></div>'+
+    '<div>'+chartBlok('ch-piek','sm')+'<p class="note">'+((heeftBatterij && aansluiting_vermeden>0)?'De batterij snijdt uw sitepiek van '+num(E.sitepiek_zonder_batterij_kw)+' kW terug naar '+num(E.sitepiek_met_batterij_kw)+' kW — dat vermijdt '+num(aansluiting_vermeden)+' kW aan verzwaring.':'Slimme sturing en PV vlakken uw sitepiek af en houden het lokale verbruik hoog.')+'</p></div>'+
   '</div>'+
   mgmt('optimale opstelling — dimensionering & NPV',
     '<table><tbody>'+
@@ -695,14 +716,14 @@ if(GP.length){
             '<div class="k"><div class="kl">Extra investering</div><div class="kv">+'+eur(s.extra_capex)+'</div></div>'+
             '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 1 · €/km</div><div class="kv">'+eur2(s.kpi1_eur_km)+'</div></div>'+
             '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 2 · rendement</div><div class="kv">'+pct(s.kpi2_rendement)+'</div></div>'+
-            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 3 · loadfactor</div><div class="kv">'+fmt2.format(s.kpi3_loadfactor)+'</div></div>'+
+            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 3 · loadfactor</div><div class="kv">'+lf(s.kpi3_loadfactor)+'</div></div>'+
           '</div>'+
         '</div></div>';
     }).join('')+'</div>'+
     (heeftVoorbij?'<div class="box oranje"><b>Waarom stoppen bij het optimum?</b> Voorbij de optimale opstelling blijft u investeren, maar de markt biedt niet genoeg extra waarde: het rendement (KPI 2) daalt terwijl de capex verder stijgt. De optimale opstelling is precies het punt met de beste verhouding tussen investering en meerwaarde.</div>':'')+
     mgmt('groeipad — alle stappen',
       '<table><thead><tr><th>Stap</th><th>Extra capex</th><th>Cumulatief</th><th>KPI1 €/km</th><th>KPI2 rend.</th><th>KPI3 lf</th></tr></thead><tbody>'+
-      GP.map(function(s){ return '<tr><td>'+esc(s.label)+(s.is_optimaal?' ★':'')+'</td><td>'+eur(s.extra_capex)+'</td><td>'+eur(s.cum_capex)+'</td><td>'+eur2(s.kpi1_eur_km)+'</td><td>'+pct(s.kpi2_rendement)+'</td><td>'+fmt2.format(s.kpi3_loadfactor)+'</td></tr>'; }).join('')+
+      GP.map(function(s){ return '<tr><td>'+esc(s.label)+(s.is_optimaal?' ★':'')+'</td><td>'+eur(s.extra_capex)+'</td><td>'+eur(s.cum_capex)+'</td><td>'+eur2(s.kpi1_eur_km)+'</td><td>'+pct(s.kpi2_rendement)+'</td><td>'+lf(s.kpi3_loadfactor)+'</td></tr>'; }).join('')+
       '</tbody></table>')
   );
 }
@@ -805,8 +826,8 @@ window.addEventListener('load', function(){
     datasets:[{ data:[comp.energie,comp.distributie,comp.capaciteit,comp.heffingen], backgroundColor:[C_BLAUW,C_GROEN,C_ORANJE,C_GRIJS], borderWidth:1, borderColor:'#fff' }] },
     options:{ plugins:{ legend:{position:'right',labels:{font:{size:11}}} }, cutout:'55%', responsive:true, maintainAspectRatio:false } });
   // factuur bar
-  mk('ch-fact-bar', { type:'bar', data:{ labels:['Vandaag','Scherp dyn.','Voorstel'],
-    datasets:[{ data:[F.bestaand_jaar,F.scherp_dynamisch_jaar,F.bestaand_jaar-FIN.besparing_jaar1], backgroundColor:[C_GRIJS,C_ORANJE,C_GROEN] }] },
+  mk('ch-fact-bar', { type:'bar', data:{ labels: _heeftMobiliteit?['Vandaag','Vloot @ CREG','Voorstel']:['Vandaag','Scherp dyn.','Voorstel'],
+    datasets:[{ data: _heeftMobiliteit?[F.bestaand_jaar,_referentieJaar,_voorstelJaar]:[F.bestaand_jaar,F.scherp_dynamisch_jaar,_voorstelJaar], backgroundColor:[C_GRIJS,C_ORANJE,C_GROEN] }] },
     options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:function(v){return '€'+(v/1000)+'k';}}}}, responsive:true, maintainAspectRatio:false } });
   // PV donut (benutting)
   mk('ch-pv-donut', { type:'doughnut', data:{ labels:['Direct eigen verbruik','Via batterij','Injectie'],
