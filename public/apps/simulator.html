@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.13  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.18  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.18 (Johan-keuze A, 31-07): ENGINE = ENIGE BRON voor het ontwerp-rapport + de Kamino-card. De autopilot
+              bouwde de optimale opstelling uit de LEGE handmatige batterij (_frBatterij → 0/0) en de besparing uit de
+              no-batterij-factuur, terwijl _kpiEngine().beste (opstelling 2/3-winnaar op hoogste NPV) de échte batterij,
+              aansluiting én besparing = (E_base + CREG) − E_beste al berekende en enkel voor de schermtegels gebruikt
+              werd. Nu route _ontwerpRapportData out.optimaal (batterij/aansluiting), out.ontwerp (capex-batterij) en
+              out.financieel.besparing_jaar1 door eng.beste. Gevolg: batterij ≠ 0/0, card-TVT klopt (leest dezelfde
+              besparing), en simulator-scherm/rapport/card lopen door één engine. _kpiEngine-row draagt nu battKwh/
+              battKw/aansluitingKva. MOET SAMEN met ontwerp-rapport.html v2.8.0 live (dat de dubbele CREG-optelling
+              schrapt). NB: laadpunten-telling (_frLaadpalen) en de groeipad-stappen zijn een aparte follow-up.
      v1.63.13: AUTOPILOT voor ALLE VIER de tegels. Nieuwe branches in _autopilotDrive: 'contract'
               (_runFactuurAnalyse 'specifiek' → factuurrapport/onderhandelingsmarge) en 'productie'
               (_runInjectieAnalyse → SolarActive, HTML via _solarActiveHtml/postMessage). _apSetState zet de
@@ -3242,6 +3251,14 @@ function _ontwerpRapportData(projectId, mode){
   var lfVoor=(eng&&eng.huidigLoadfactor!=null)?eng.huidigLoadfactor:0;
   var capexTot=(beste&&beste.capex)?beste.capex:_ontwerpCapexTot(pvKwp, bt.kwh, lp);
   var kpi2=(beste&&beste.rendement!=null)?beste.rendement:(capexTot>0?fd.besparing_jaar1/capexTot*100:0);
+  // v1.63.18 (Johan-keuze A, 31-07): ENGINE = ENIGE BRON. De optimale opstelling (batterij + aansluiting) én de
+  // besparing komen uit eng.beste (opstelling 2/3-winnaar op hoogste NPV), NIET uit de lege handmatige batterij
+  // (_frBatterij) of de no-batterij-factuur. beste.besparing = (E_base + CREG) − E_beste → incl. CREG én batterij.
+  // Terugval op de oude bron enkel als er geen beste is (geen base case / geen opstellingen).
+  var _bBattKwh=(beste&&beste.battKwh!=null)?Math.round(beste.battKwh):bt.kwh;
+  var _bBattKw =(beste&&beste.battKw!=null)?Math.round(beste.battKw):bt.kw;
+  var _bAansl  =(beste&&beste.maxKw)?Math.round(beste.maxKw):(+STATE.aansluitingKva||0);
+  var _bBesp   =(beste&&beste.besparing!=null)?Math.round(beste.besparing):(fd.besparing_jaar1||0);
   var a=STATE.injectieAnalyse||null;
   var bestaande_pv=(bpv.aanwezig && a) ? {
     aanwezig:true, kwp:+bpv.kwp||0, kva:+bpv.kva||0,
@@ -3274,7 +3291,7 @@ function _ontwerpRapportData(projectId, mode){
   var _zvFrac=(en.pv_productie_mwh>0)?Math.min(1,Math.max(0,(en.pv_zelfverbruik_mwh||0)/en.pv_productie_mwh)):0.6;
   var xpZelf=Math.round(xpProd*_zvFrac*10)/10;         // zelfverbruik van de nieuwe kWp (zelfde fractie als de sim)
   var _xpMeer=Math.round(xpZelf*_ePrijsMwh);
-  if((fd.besparing_jaar1||0)>0) _xpMeer=Math.min(_xpMeer, Math.round(fd.besparing_jaar1));   // nooit meer dan het totaal
+  if((_bBesp||0)>0) _xpMeer=Math.min(_xpMeer, Math.round(_bBesp));   // nooit meer dan het totaal (v1.63.18: winnaar-besparing)
   var extra_pv={ kwp:pvKwp, productie_mwh:xpProd,
     zelfverbruik_pct:Math.round(_zvFrac*100),
     meerwaarde_eur:_xpMeer,
@@ -3289,6 +3306,7 @@ function _ontwerpRapportData(projectId, mode){
   } : null;
   var groeipad = (STATE.groeipad&&STATE.groeipad.stappen) ? { stappen:STATE.groeipad.stappen } : null;
   var out=Object.assign({}, fd);
+  out.ontwerp=Object.assign({}, fd.ontwerp, { batterij_kw:_bBattKw, batterij_kwh:_bBattKwh });   // v1.63.18: capex/afschrijving in het rapport op de winnaar-batterij (niet 0/0)
   out._mode=(mode==='management')?'management':'klant';
   out.project_id=projectId||'';
   out.scenario_naam=STATE.scenario||'';
@@ -3303,15 +3321,15 @@ function _ontwerpRapportData(projectId, mode){
     beschrijving:(STATE.profielBeschrijving||'') };
   out.laadplein=laadplein;
   out.bestaande_pv=bestaande_pv;
-  out.optimaal={ pv_kwp:pvKwp, batterij_kw:bt.kw, batterij_kwh:bt.kwh,
-    aansluiting_kw:+STATE.aansluitingKva||0, aansluiting_vandaag_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():0),
+  out.optimaal={ pv_kwp:pvKwp, batterij_kw:_bBattKw, batterij_kwh:_bBattKwh,
+    aansluiting_kw:_bAansl, aansluiting_vandaag_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():0),
     spanning_nieuw:STATE.spanning||'', laadpalen:lp, npv:kpiNpv,
     kpi1_eur_per_km:kpiKm, kpi1_creg_per_km:cregKm,
     kpi2_rendement:kpi2, kpi3_loadfactor_voor:lfVoor, kpi3_loadfactor_na:lfNa };
   out.extra_pv=extra_pv;
   if(groeistap) out.groeistap=groeistap;
   if(groeipad) out.groeipad=groeipad;
-  out.financieel={ besparing_jaar1:fd.besparing_jaar1||0, besparing_energie_deel:fd.besparing_energie_deel||0.72, onbalans_windfall_jaar1:fd.onbalans_windfall_jaar1||0 };
+  out.financieel={ besparing_jaar1:_bBesp, besparing_energie_deel:fd.besparing_energie_deel||0.72, onbalans_windfall_jaar1:fd.onbalans_windfall_jaar1||0 };   // v1.63.18: besparing = eng.beste.besparing (incl. CREG + batterij) → card-TVT & rapport uit één bron
   return out;
 }
 function _openOntwerpRapport(mode){
@@ -6303,6 +6321,7 @@ function _kpiEngine(){
       rendementHorizonAlle:rendHorAlle, rendementHorizonAlleCherry:rendHorAlleCherry,
       tco:tco, tcoCherry:tcoCherry, npv:npv, npvCherry:npvCherry, besparingCherry:besparingCherry, rendementCherry:rendCherry,
       loadfactor:loadf(afk,mkw), afnameKwh:afk, maxKw:mkw,
+      battKwh:battKwh, battKw:battKw, aansluitingKva:(+cfg.aansluiting_kva||0),   // v1.63.18: batterij/aansluiting van de opstelling → ontwerp-rapport pakt de winnaar (niet de lege handmatige batterij)
       haalbaar:((o.dimensionering||{}).haalbaar!==false)};
   });
   var lf0=loadf(verbruikHuidigKwh,P_huidig);
