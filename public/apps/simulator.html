@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.19  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.20  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.20 (31-07): (1) PV-TOTAAL — de optimale opstelling toont nu bestaande + nieuwe PV (was enkel de nieuwe,
+              fout gelabeld "totaal"); capex blijft op de nieuwe PV. (2) LOADFACTOR PER GROEISTAP — _groeipadRapportData
+              rekent de loadfactor nu per stap uit `afname_mwh` (server v15.50.0), zelfde conventie als _kpiEngine
+              (afname/(8760×aansluiting)); terugval op eng.beste voor de optimale stap bij een oude proxy. VEREIST
+              server v15.50.0 voor de per-stap loadfactor.
      v1.63.19 (31-07): GROEIPAD + GROEISTAP 1 in het ontwerp-rapport gevuld. De server /api/groeipad levert RUWE
               stappen (kw/kwh/factuur_sturing/distributie); het rapport verwacht presentatie-velden (extra_capex,
               cum_capex, kpi1_eur_km, kpi2_rendement, kpi3_loadfactor, label, wat, is_optimaal) — die werden nooit
@@ -3286,7 +3291,10 @@ function _groeipadRapportData(){
     var besparingNetto=besparing-(oh1+capex*TCO_AAN.verzekering_promille/1000);
     var rend=(capex>0 && besparingNetto>0)?(besparingNetto/capex*100):null;
     var kostKm=(kmGeladen>0)?((factStap-E_base)/kmGeladen):null;
-    var lf=(c>0)?(((gebouwMwh+geladenK)*1000)/(8760*c)):null;
+    // v1.63.20: loadfactor per stap = grid-afname / (8760 × aansluiting) — zelfde conventie als _kpiEngine
+    // (maxKw = aansluiting_kva). Server v15.50.0 stuurt afname_mwh per stap; oude proxy → null → terugval.
+    var afnameK=(s.afname_mwh!=null)?(+s.afname_mwh):null;
+    var lf=(c>0 && afnameK!=null)?((afnameK*1000*af)/(8760*c)):null;
     return { k:k, kw:kw, kwh:kwh, c:c, pct:pct, besparing:Math.round(besparing), capex:Math.round(capex),
              rend:rend, kostKm:kostKm, lf:lf, isOpt:isOpt };
   });
@@ -3300,7 +3308,7 @@ function _groeipadRapportData(){
       cum_capex:Math.round(d.capex),
       kpi1_eur_km:(d.kostKm!=null)?Math.round(d.kostKm*1000)/1000:null,
       kpi2_rendement:(d.rend!=null)?Math.round(d.rend*10)/10:0,
-      kpi3_loadfactor:(d.isOpt && b.loadfactor!=null)?Math.round(b.loadfactor*100)/100:null,   // enkel de optimale stap heeft een betrouwbare loadfactor (eng.beste); rest → "—" (geen per-stap dispatch-piek beschikbaar)
+      kpi3_loadfactor:(d.lf!=null)?Math.round(d.lf*100)/100:((d.isOpt && b.loadfactor!=null)?Math.round(b.loadfactor*100)/100:null),   // v1.63.20: per-stap loadfactor uit de afname (server v15.50.0); terugval op eng.beste voor de optimale stap bij een oude proxy
       is_optimaal:d.isOpt, voorbij_optimaal:(d.k>kOpt)
     });
   });
@@ -3409,7 +3417,10 @@ function _ontwerpRapportData(projectId, mode){
     beschrijving:(STATE.profielBeschrijving||'') };
   out.laadplein=laadplein;
   out.bestaande_pv=bestaande_pv;
-  out.optimaal={ pv_kwp:pvKwp, batterij_kw:_bBattKw, batterij_kwh:_bBattKwh,
+  // v1.63.20: optimale opstelling toont de TOTALE PV = bestaande + nieuwe (het rapport labelt dit "kWp totaal";
+  // demo bevestigt: optimaal.pv_kwp = extra_pv.kwp + bestaande_pv.kwp). De capex blijft op de NIEUWE PV
+  // (out.ontwerp.pv_kwp = STATE.pvKwp), want de bestaande panelen zijn al geplaatst.
+  out.optimaal={ pv_kwp:pvKwp+(+bpv.kwp||0), batterij_kw:_bBattKw, batterij_kwh:_bBattKwh,
     aansluiting_kw:_bAansl, aansluiting_vandaag_kw:Math.round(_gecontracteerdToegangsvermogenKw?_gecontracteerdToegangsvermogenKw():0),
     spanning_nieuw:STATE.spanning||'', laadpalen:lp, npv:kpiNpv,
     kpi1_eur_per_km:kpiKm, kpi1_creg_per_km:cregKm,
