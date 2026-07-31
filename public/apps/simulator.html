@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.20  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.21  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.21 (31-07): HARTSLAG naar de Kamino-launcher. De autopilot stuurt nu elke ~8s (+ bij elke statuswijziging)
+              een `kamino-progress`-bericht met de huidige stap. Kamino toont dat live én gebruikt het als liveness-
+              signaal i.p.v. een harde tijdscap → een lange-maar-werkende studie wordt niet meer afgekapt. Ticker start
+              in _autopilotDrive, stopt in _apKlaar en bij een fout. Per-stap-achtervang ruimer: SIM_MAX_WACHT 12→20 min,
+              _apRunSim 12→20, PV-sweep 5→10, groeipad 5→15 min. VEREIST kamino.html v0.9.2+ (liveness-watchdog).
      v1.63.20 (31-07): (1) PV-TOTAAL — de optimale opstelling toont nu bestaande + nieuwe PV (was enkel de nieuwe,
               fout gelabeld "totaal"); capex blijft op de nieuwe PV. (2) LOADFACTOR PER GROEISTAP — _groeipadRapportData
               rekent de loadfactor nu per stap uit `afname_mwh` (server v15.50.0), zelfde conventie als _kpiEngine
@@ -942,7 +947,7 @@ function apiPost(path,body){
 // v1.23.4: job aanvragen en voortgang pollen. Resolvet met dezelfde vorm als de
 // oude synchrone POST, zodat de rest van runSimulatie() ongewijzigd blijft.
 var SIM_POLL_MS = 1500;
-var SIM_MAX_WACHT_MS = 12*60*1000;   // ruim: 3 opstellingen x 7 runs x ~25s = ~9 min
+var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
   return apiPost('/api/nominatie-sim-3', input).then(function(r0){
     // Oude server (of 'enkel'-modus zonder job): meteen het resultaat.
@@ -10793,12 +10798,26 @@ function _fdsimInit(){
 //  groeistappen → groeistap 1 → ontwerp-rapport.
 // ═══════════════════════════════════════════════════════════════════════════════
 var _apH=null;   // huidige handoff — nodig om een fout terug te melden aan Kamino (parent)
+// v1.63.21: HARTSLAG naar de Kamino-parent. De launcher heeft geen harde tijdscap meer maar een liveness-watchdog;
+// zolang deze hartslag (elke ~8s) binnenkomt, weet Kamino dat de rekenmachine leeft en laat hij de studie doorlopen.
+// De hartslag draagt de huidige status → Kamino toont live voortgang. Rekenwerk zit server-side (async fetch), dus
+// de client-thread blokkeert niet en de ticker blijft lopen tijdens een lange berekening.
+var _apLastStatus='', _apHbTimer=null;
+function _apHeartbeat(){
+  if(!_apEmbed() || !_apH) return;
+  try{ window.parent.postMessage({ __fluctus:'kamino-progress', projectId:_apH.projectId, tegel:_apH.tegel, status:_apLastStatus, ts:Date.now() }, location.origin); }catch(e){}
+}
+function _apHbStart(){ _apHbStop(); try{ _apHbTimer=setInterval(_apHeartbeat, 8000); }catch(e){} }
+function _apHbStop(){ if(_apHbTimer){ try{ clearInterval(_apHbTimer); }catch(e){} _apHbTimer=null; } }
 function _apStatus(msg, isFout){
+  _apLastStatus = String(msg||'');   // v1.63.21: onthoud de status voor de hartslag
   // v1.63.14: bij een fout in de embed-run (Kamino-launcher) meteen de parent verwittigen, i.p.v. Kamino
   // 240s+ laten wachten tot zijn eigen time-out. Zo toont Kamino de échte fout onmiddellijk.
   if(isFout && _apEmbed() && _apH){
     try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:_apH.projectId, tegel:_apH.tegel, error:String(msg||'onbekende fout') }, '*'); }catch(e){}
+    _apHbStop();   // v1.63.21: terminale fout → hartslag stopt
   }
+  if(!isFout) _apHeartbeat();   // v1.63.21: onmiddellijke hartslag bij elke statuswijziging (naast de ~8s-ticker)
   var id='fdsim-autopilot-overlay', o=document.getElementById(id);
   if(!o){ o=document.createElement('div'); o.id=id;
     o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(31,56,100,.97);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,Segoe UI,Arial,sans-serif;text-align:center;padding:24px';
@@ -10860,12 +10879,12 @@ function _apSetState(h){
 function _apRunSim(){
   STATE.currentStep=9;
   try{ runSimulatie(); }catch(e){ return Promise.reject(e); }
-  return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 720000, 'simulatie');
+  return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 1200000, 'simulatie');   // v1.63.21: 20 min achtervang
 }
 function _apPickPv(drempel){
   drempel=drempel||90;
   if(+STATE.pvKwp>0) return Promise.resolve();   // PV al vast → sweep sloeg over
-  return _apWait(function(){ return STATE.pvSweep && !STATE.pvSweepLoading; }, 300000, 'PV-sweep').then(function(){
+  return _apWait(function(){ return STATE.pvSweep && !STATE.pvSweepLoading; }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
     var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[], keuze=0;
     st.forEach(function(s){ var pv=+s.pv_kwp||0, z=(s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null;
       if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
@@ -10876,7 +10895,7 @@ function _apPickPv(drempel){
   });
 }
 function _apGroeistap1(){
-  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 300000, 'groeipad').then(function(){
+  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 900000, 'groeipad').then(function(){   // v1.63.21: 15 min achtervang
     var _in=JSON.parse(JSON.stringify(STATE.lastSimInput||{}));
     _in.aansluiting_kva=STATE.aansluitingKva; _in.aantal_batterijen=1;   // eerste groeistap, vaste aansluiting (gebouw)
     STATE.groeipadKeuze={k:1,c:STATE.aansluitingKva};
@@ -10940,6 +10959,7 @@ function _apRapportUrl(reportKey){
        : '/apps/ontwerp-rapport.html';
 }
 function _apKlaar(h, reportData, reportKey, reportHtml){
+  _apHbStop();   // v1.63.21: resultaat is klaar → hartslag stopt (Kamino krijgt zo dadelijk kamino-result)
   // v1.63.15: het project-ID komt van Kamino (uniek per upload) → forceer het in het rapport, zodat het
   // rapport, de PDF-opslag én de auto-bucket-opslag allemaal onder HETZELFDE ID landen (niet naam-afgeleid).
   if(reportData && h && h.projectId){ try{ reportData.project_id=h.projectId; }catch(e){} }
@@ -10959,6 +10979,7 @@ function _apKlaar(h, reportData, reportKey, reportHtml){
 function _autopilotDrive(h){
   var tegel=h.tegel||'aansluiting';
   _apH=h;   // onthoud de handoff zodat _apStatus een fout aan Kamino kan terugmelden
+  _apHbStart();   // v1.63.21: start de hartslag-ticker (elke ~8s) → Kamino's liveness-watchdog
   _apStatus('Uw gegevens worden ingeladen…');
   try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
   if(tegel==='contract'){

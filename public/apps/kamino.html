@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.1 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.2 (Mijn Fluctus-app · testmodus)
+     v0.9.2 (31-07): LIVE STATUS + LIVENESS-WATCHDOG i.p.v. harde tijdscap. De autopilot (simulator) stuurt nu elke
+           ~8s een hartslag (kamino-progress) met de huidige stap → de loadingscreen toont live voortgang, en de
+           launcher reset een liveness-watchdog bij elke hartslag. De harde 10-min-cap (die zware tegel-3/4-studies
+           onterecht afkapte) is weg: een studie mag zo lang duren als nodig ZOLANG de rekenmachine leeft; enkel als
+           er 120s lang geen hartslag meer binnenkomt (iframe gecrasht / JS-thread geblokkeerd = echte vastloper)
+           grijpt hij in. Server-side hangs meldt de simulator zelf via zijn per-stap-timeouts. Vereist simulator
+           v1.63.21+ (die de hartslagen stuurt).
      v0.9: STUDIE 1 ECHT — de onderhandelingsmarge wordt live berekend via /api/kamino/onderhandel
            (dezelfde buildSimInput → simulator.py als de simulator, dus drift-vrij). Kerncijfers op de kaart
            en het resultaat komen uit de echte run; verbruiksprofielen geladen uit /api/profielen-lijst.
@@ -390,9 +397,20 @@ function _pollKamino(jobId, onKlaar, onFout){
 // rapport", die het simulator-rapport IN Kamino opent. De simulator wordt nooit aan de klant getoond.
 var SIM_URL='/apps/simulator.html';
 var LAUNCHERS={ contract:1, productie:1, aansluiting:1, mobiliteit:1 };   // alle vier de tegels draaien via de simulator-autopilot
-var _kMsgListener=null, _kIframe=null, _kTimeout=null;
+var _kMsgListener=null, _kIframe=null, _kTimeout=null, _kWatchdog=null;
+// v0.9.2: GEEN harde tijdscap meer. Een studie mag zo lang duren als nodig, ZOLANG de rekenmachine leeft.
+// De simulator stuurt elke ~8s een hartslag (kamino-progress). De watchdog reset bij elke hartslag; enkel als er
+// K_LIVENESS_MS lang GÉÉN hartslag meer binnenkomt (iframe gecrasht of JS-thread geblokkeerd = echte vastloper),
+// grijpen we in. Het rekenwerk zit server-side, dus de client-thread blokkeert niet en de hartslag loopt door
+// tijdens een lange berekening. Server-side hangs vangt de simulator zelf op met zijn per-stap-timeouts.
+var K_LIVENESS_MS=120000;
+function _kResetWatchdog(id,pid){
+  if(_kWatchdog) clearTimeout(_kWatchdog);
+  _kWatchdog=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De rekenmachine reageert niet meer — er kwam een tijd lang geen voortgang meer binnen. Probeer de studie opnieuw te starten.'); }, K_LIVENESS_MS);
+}
 function _kOpruimen(){
   if(_kTimeout){ clearTimeout(_kTimeout); _kTimeout=null; }
+  if(_kWatchdog){ clearTimeout(_kWatchdog); _kWatchdog=null; }
   if(_kMsgListener){ try{ window.removeEventListener('message', _kMsgListener); }catch(e){} _kMsgListener=null; }
   if(_kIframe){ try{ _kIframe.parentNode.removeChild(_kIframe); }catch(e){} _kIframe=null; }
 }
@@ -413,7 +431,15 @@ function _startStudieAutopilot(id){
   _kOpruimen();
   _kMsgListener=function(e){
     if(e.origin!==location.origin) return;
-    var d=e.data; if(!d || d.__fluctus!=='kamino-result') return;
+    var d=e.data; if(!d) return;
+    // v0.9.2: hartslag/voortgang → live status tonen + de liveness-watchdog resetten (bewijs dat de rekenmachine leeft).
+    if(d.__fluctus==='kamino-progress'){
+      if(d.projectId && d.projectId!==pid) return;
+      if(d.status) _kZetStatus(d.status);
+      _kResetWatchdog(id,pid);
+      return;
+    }
+    if(d.__fluctus!=='kamino-result') return;
     if(d.projectId!==pid || d.tegel!==id) return;
     _kOpruimen();
     if(d.error){ _fout(id, 'De studie liep vast: '+d.error); return; }   // fout uit de simulator → meteen tonen
@@ -426,10 +452,10 @@ function _startStudieAutopilot(id){
   _kIframe.style.cssText='position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;border:0;opacity:0;pointer-events:none';
   _kIframe.src=SIM_URL;
   document.body.appendChild(_kIframe);
-  // De zware tegels (3 aansluiting / 4 mobiliteit) draaien een volledige sim + PV-sweep + herrun + groeipad;
-  // dat kan enkele minuten duren. Ruime time-out (10 min); een échte fout komt nu sowieso vroeger terug via postMessage.
-  var _tmo=(id==='aansluiting'||id==='mobiliteit')?600000:240000;
-  _kTimeout=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De berekening duurde te lang. Probeer de studie opnieuw te starten.'); }, _tmo);
+  // v0.9.2: geen harde tijdscap meer — we starten de liveness-watchdog. Zolang de simulator hartslagen stuurt
+  // (elke ~8s, ook tijdens een lange server-berekening), blijft de studie lopen; enkel bij een echte vastloper
+  // (geen hartslag meer) grijpt hij in. Zo wordt een lange-maar-werkende studie nooit onterecht afgekapt.
+  _kResetWatchdog(id, pid);
 }
 function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   var kern=null, diag='';
@@ -486,9 +512,11 @@ function _toonBerekenen(id){
     '<div class="card" style="text-align:center;padding:40px 24px">'+
     '<div style="font-size:34px">⏳</div>'+
     '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie wordt berekend…</div>'+
-    '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">We rekenen uw ontwerp volautomatisch door op uw factuur (± 30–60 s). De kerncijfers verschijnen hier zodra het klaar is.</div>'+
+    '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">We rekenen uw ontwerp volautomatisch door op uw factuur. Bij een uitgebreide studie kan dit enkele minuten duren; de kerncijfers verschijnen hier zodra het klaar is.</div>'+
+    '<div id="k-status" style="margin-top:14px;font-size:12.5px;color:#5A6577;min-height:18px"></div>'+
     '</div></div>';
 }
+function _kZetStatus(txt){ var el=document.getElementById('k-status'); if(el) el.textContent=txt||''; }
 // het simulator-rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
 function _bekijkRapport(id){
   var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
