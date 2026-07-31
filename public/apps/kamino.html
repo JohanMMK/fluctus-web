@@ -319,15 +319,16 @@ var _HUIDIG=null;
 function renderPunt(id){
   var p=byId(id); if(!p){ location.hash='#/'; return; } _HUIDIG=id;
   var kleur=p.gratis?'#048443':'#9E480E';
+  // Bestaande PV = project-eigenschap → tonen (en meenemen) op productie, aansluiting én mobiliteit.
+  var pvBlok='<div class="sec"><h3>Uw bestaande PV</h3>'+veldPvAlleen(p.id==='productie'?'bv. 40':'optioneel')+'</div>';
   var inputSec;
   if(p.input==='laadpleinen'){
     inputSec = '<div class="sec"><h3>Uw aansluiting</h3>'+veldFactuurBlok()+'</div>'+
-      '<div class="sec"><h3>Uw laadpleinen</h3>'+pleinBlok()+'</div>';
+      '<div class="sec"><h3>Uw laadpleinen</h3>'+pleinBlok()+'</div>'+ pvBlok;
   } else {
     inputSec = '<div class="sec"><h3>Uw factuur</h3>'+veldFactuurBlok()+'</div>';
-    if(p.id==='productie'){
-      // SolarActive: PV-grootte (kWp) + injectie (MWh/jaar) altijd tonen — ook op een bestaand project.
-      inputSec += '<div class="sec"><h3>Uw bestaande PV</h3>'+veldPvAlleen('bv. 40')+'</div>';
+    if(p.id==='productie' || p.id==='aansluiting'){
+      inputSec += pvBlok;   // de bestaande PV telt mee in het ontwerp
     } else if(!heeftActief()){
       inputSec += '<div class="sec"><h3>Uw verbruik & PV</h3>'+veldProfielPv()+'</div>';
     }
@@ -401,7 +402,10 @@ function _startStudieAutopilot(id){
   if(!bc){ alert('Laad eerst een factuur op om de studie te starten.'); return; }
   var pid=STATE.werk.id;
   var payload={ tegel:id, baseCase:bc, profielNaam:STATE.werk.profiel, pvDrempel:90, projectId:pid, embed:true };
-  if(id==='productie'){ payload.pvKwp=+STATE.werk.pv_kwp||0; payload.injectieMwh=+STATE.werk.pv_inj||0; payload.inverterKva=Math.round(((+STATE.werk.pv_kwp||0)/1.3)*10)/10; }
+  // De bestaande PV (kWp + injectie) is een PROJECT-eigenschap → in ELKE tegel meesturen. Zo rekent ook het
+  // ontwerp (tegel 3/4) de extra PV BOVENOP de bestaande installatie, i.p.v. te doen alsof er geen PV is.
+  var _bk=+STATE.werk.pv_kwp||0, _bi=+STATE.werk.pv_inj||0;
+  if(_bk>0 || _bi>0){ payload.bestaandeKwp=_bk; payload.bestaandeInj=_bi; payload.bestaandeKva=Math.round((_bk/1.3)*10)/10; }
   if(id==='mobiliteit'){ payload.laadpleinen=(STATE.werk.pleinen||[]).map(_pleinNaarSim); }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
@@ -412,6 +416,7 @@ function _startStudieAutopilot(id){
     var d=e.data; if(!d || d.__fluctus!=='kamino-result') return;
     if(d.projectId!==pid || d.tegel!==id) return;
     _kOpruimen();
+    if(d.error){ _fout(id, 'De studie liep vast: '+d.error); return; }   // fout uit de simulator → meteen tonen
     _ontvangKern(id, pid, d.kern||{}, d.reportData||null, d.reportKey||null, d.reportHtml||null);
   };
   window.addEventListener('message', _kMsgListener);
@@ -421,7 +426,10 @@ function _startStudieAutopilot(id){
   _kIframe.style.cssText='position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;border:0;opacity:0;pointer-events:none';
   _kIframe.src=SIM_URL;
   document.body.appendChild(_kIframe);
-  _kTimeout=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De berekening duurde te lang. Probeer de studie opnieuw te starten.'); }, 240000);
+  // De zware tegels (3 aansluiting / 4 mobiliteit) draaien een volledige sim + PV-sweep + herrun + groeipad;
+  // dat kan enkele minuten duren. Ruime time-out (10 min); een échte fout komt nu sowieso vroeger terug via postMessage.
+  var _tmo=(id==='aansluiting'||id==='mobiliteit')?600000:240000;
+  _kTimeout=setTimeout(function(){ _kOpruimen(); if(STATE.werk.id===pid) _fout(id,'De berekening duurde te lang. Probeer de studie opnieuw te starten.'); }, _tmo);
 }
 function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   var kern=null, diag='';
@@ -525,11 +533,20 @@ function startStudie(id){
   if(!STATE.werk.id){ _maakProject(null); }   // mock-fallback (niet ingelogd / geen factuur)
   resultaat(id);
 }
+// v0.9.6 (Johan-keuze 30-07): ELKE factuur-upload = een NIEUW, uniek project-ID. Niet langer een hash van de
+// naam — anders zouden twee verschillende facturen van dezelfde klant hetzelfde ID krijgen en elkaar
+// overschrijven. Uniek = laatste ms-tijd (base36) + random → voldoet aan de server-regex FLX-XXX-XXXX.
+var _pidSeq=Math.floor(Math.random()*46656);   // 36^3 — per-sessie teller zodat zelfs bursts uniek zijn
+function _nieuwProjectId(){
+  _pidSeq=(_pidSeq+1)%46656;
+  var rnd=function(n){ var s=''; while(s.length<n){ s+=Math.floor(Math.random()*36).toString(36); } return s.toUpperCase().slice(0,n); };
+  var t=('000'+((Date.now()+_pidSeq)%46656).toString(36).toUpperCase()).slice(-3);
+  return 'FLX-'+t+'-'+rnd(4);
+}
 function _maakProject(bc){
   var naam=(STATE.contact.k_naam||'').trim() || (bc&&(bc.klant||bc.klantNaam)) || (STATE.werk.factuur?STATE.werk.factuur.replace(/\.[^.]+$/,''):'Nieuw project');
   var echt=!!(bc && ingelogd() && _factuurFile);
-  var pid=echt?projectIdLokaal(naam):('FLX-—'+Math.floor(Math.random()*900+100));
-  if(echt){ kApiPost('/api/project-id',{ project:naam }).catch(function(){}); }
+  var pid=_nieuwProjectId();
   STATE.projecten.unshift({ id:pid, naam:naam, datum:vandaag(), factuur:STATE.werk.factuur||'', baseCase:bc, opgeslagen:echt });
   STATE.werk.id=pid; STATE.werk.naam=naam; STATE.werk.baseCase=bc; STATE.werk.opgeslagen=echt; _factuurFile=null;
 }
