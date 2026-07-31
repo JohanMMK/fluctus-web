@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.22  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.23  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.23 (twee-bakjes, 31-07): dieselbasis per voertuigtype (Kamino stuurt diesel_eur_km) + _vlootDieselJaar().
+              _ontwerpRapportData rekent nu twee bakjes: PV+batterij = _bBesp (ongewijzigd) en LAADPALEN = D − CREG
+              (vermeden brandstof), met laadpaal-capex. rd.financieel krijgt totaal_besparing_jaar1 (= diesel-totaal,
+              headline), pvbatt_besparing_jaar1, laadpaal_besparing_jaar1, laadpaal_capex, laadpaal_tvt_jaar,
+              diesel_kost_jaar, creg_kost_jaar. Card-besparing = diesel-totaal; card-TVT blijft de PV+batterij-rapport-TVT.
      v1.63.22 (31-07): (1) LAADPUNTEN-TELLING — de launcher stuurt laadpunten op 0 ("sim dimensioneert zelf"); nieuwe
               _dimLaadpalen leidt de telling af uit cap_kw per plein (≤44 kW → AC22, groter → DC160) → out.optimaal.
               laadpalen toont nu een echte telling i.p.v. 0. ENKEL weergave — de laadpaal-kost hoort bij het aparte
@@ -3403,6 +3408,16 @@ function _ontwerpRapportData(projectId, mode){
   var _bBattKw =(beste&&beste.battKw!=null)?Math.round(beste.battKw):bt.kw;
   var _bAansl  =(beste&&beste.maxKw)?Math.round(beste.maxKw):(+STATE.aansluitingKva||0);
   var _bBesp   =(beste&&beste.besparing!=null)?Math.round(beste.besparing):(fd.besparing_jaar1||0);
+  // v1.63.23: TWEE-BAKJES-MODEL (Johan 31-07). Bakje 1 (LAADPALEN) wordt terugverdiend door vermeden brandstof:
+  //   (diesel/km − CREG/km) × km = D − C_creg. Bakje 2 (PV + BATTERIJ) = _bBesp = (E_base + C_creg) − E_beste (gebouw
+  //   + slim laden, ongewijzigd). Totaal = _bBesp + (D − C_creg) = (E_base + D) − E_beste = de diesel-referentie (16/07).
+  //   De laadpaal-capex hoort nu in de investering (bakje 1 betaalt ze). PV+batterij-financiering blijft op _bBesp.
+  var _dieselJaar = (typeof _vlootDieselJaar==='function') ? _vlootDieselJaar() : 0;
+  var _cregJaar   = (eng && eng.C!=null) ? +eng.C : 0;
+  var _laadpaalCapex = (_lpDim.ac||0)*2500 + (_lpDim.dc160||0)*40000 + (_lpDim.dc400||0)*70000;
+  var _laadpalenBesp = Math.round(_dieselJaar - _cregJaar);                              // bakje 1: vermeden brandstof
+  var _laadpaalTvt   = (_laadpalenBesp>0 && _laadpaalCapex>0) ? Math.round(_laadpaalCapex/_laadpalenBesp*10)/10 : null;
+  var _totaalBesp    = _bBesp + _laadpalenBesp;                                          // diesel-totaal (headline)
   var a=STATE.injectieAnalyse||null;
   var bestaande_pv=(bpv.aanwezig && a) ? {
     aanwezig:true, kwp:+bpv.kwp||0, kva:+bpv.kva||0,
@@ -3481,7 +3496,16 @@ function _ontwerpRapportData(projectId, mode){
   if(groeistap) out.groeistap=groeistap;
   if(groeipad) out.groeipad=groeipad;
   out.financieel={ besparing_jaar1:_bBesp, besparing_energie_deel:fd.besparing_energie_deel||0.72, onbalans_windfall_jaar1:fd.onbalans_windfall_jaar1||0 };   // v1.63.18: besparing = eng.beste.besparing (incl. CREG + batterij) → card-TVT & rapport uit één bron
-  out.financieel.terugverdientijd_jaar = _rapportTvt(out);   // v1.63.22: rapport-TVT (escalerende horizon) → de Kamino-kaart toont exact dezelfde TVT als het rapport
+  out.financieel.terugverdientijd_jaar = _rapportTvt(out);   // v1.63.22: rapport-TVT (escalerende horizon, PV+batterij-bakje) → kaart = rapport
+  // v1.63.23: twee-bakjes-velden voor het rapport. besparing_jaar1 blijft het PV+batterij-bakje (financiering/TVT
+  // ongewijzigd); totaal_besparing_jaar1 = diesel-referentie = headline. Laadpalen-bakje apart met eigen capex + TVT.
+  out.financieel.pvbatt_besparing_jaar1 = _bBesp;
+  out.financieel.laadpaal_besparing_jaar1 = _laadpalenBesp;
+  out.financieel.laadpaal_capex = Math.round(_laadpaalCapex);
+  out.financieel.laadpaal_tvt_jaar = _laadpaalTvt;
+  out.financieel.diesel_kost_jaar = Math.round(_dieselJaar);
+  out.financieel.creg_kost_jaar = Math.round(_cregJaar);
+  out.financieel.totaal_besparing_jaar1 = _totaalBesp;
   return out;
 }
 function _openOntwerpRapport(mode){
@@ -3677,6 +3701,9 @@ function _lpCregEurJaar(lp){ return _lpEnergieMwh(lp)*1000*_cregTarief(); }
 function _cregKostJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+_lpCregEurJaar(lp);},0); }
 // Totale km/jaar van de vloot (voor €/km).
 function _vlootKmJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*((lp.km_per_jaar!=null?+lp.km_per_jaar:0)||0);},0); }
+// v1.63.23: totale DIESELKOST/jaar van de vloot = Σ aantal × km/jaar × diesel_eur_km (per voertuigtype uit de Kamino-invoer;
+// terugval €0,116/km = personenwagen uit Laadkosten_Belgie_2026_v2.pdf). Dít is de referentie voor de laadpalen-terugverdien.
+function _vlootDieselJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*(+lp.km_per_jaar||0)*((lp.diesel_eur_km!=null?+lp.diesel_eur_km:0.116));},0); }
 // Gemiddelde CREG-kost per km over de vloot (0 km → 0).
 function _cregKmKostGem(){ var km=_vlootKmJaar(); return km>0 ? _cregKostJaar()/km : 0; }
 // Geschatte "blinde" HR-kost per km: extra capaciteitstarief door ongestuurd thuisladen,
@@ -10970,7 +10997,7 @@ function _apBouwKern(h, rd){
   var kern={};
   if(h.tegel==='aansluiting' || h.tegel==='mobiliteit'){
     var fin=(rd&&rd.financieel)||{}, opt=(rd&&rd.optimaal)||{};
-    var besparing=Math.round(fin.besparing_jaar1||0);
+    var besparing=Math.round((fin.totaal_besparing_jaar1!=null?fin.totaal_besparing_jaar1:fin.besparing_jaar1)||0);   // v1.63.23: diesel-totaal (PV+batterij + laadpalen)
     var rendement=(opt.kpi2_rendement!=null)?Math.round(opt.kpi2_rendement*10)/10:null;
     var pvKwp=+((opt.pv_kwp!=null)?opt.pv_kwp:STATE.pvKwp)||0, battKwh=+opt.batterij_kwh||0, lp=opt.laadpalen||{ac:0,dc160:0,dc400:0};
     var eng=(typeof _kpiEngine==='function')?_kpiEngine():null, b=(eng&&eng.beste)||null;
