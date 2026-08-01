@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.9.1  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.9.2  (dual-mode: klant + management)
+     v2.9.2 (Optie B — twee-bakjes-rendement, Johan 01-08): KPI 2 (rendement) staat nu op het PV+batterij-bakje op ELKE
+             pagina: p.5-kaart, groeistap-kaart (p.7) én groeipad (p.7+) rekenen besparing (gebouw+CREG) ÷ capex
+             (PV+batterij+verzwaring+cabine, zónder laadpalen). De START-kaart toont nu de échte instap-stap (bv. 98 kVA)
+             met correcte "geen verzwaring nodig / incl. verzwaring (cabine)"-melding, en telt de laadpalen niet meer in
+             het bakje-1-rendement (die staan als bakje 2 op p.1). berekenCapex telt nu verzwaring + LS→MS-cabine mee →
+             de cabine "verdwijnt" niet meer uit de volledige investering; capex-uitsplitsing toont ze apart.
      v2.9.1 (consistentie, 31-07): CAPEX + besparing = TOTAAL overal (investering p.8 incl. laadinfra, groeistap p.9 toont
              laadpalen + prijs). Twee-bakjes-TVT: rendReal/headline = combined (totaal); p.1-box toont pvbatt-TVT (_tvtEsc)
              + laadpaal-TVT apart. p.4-balk toont nu vier balken: Vandaag / +vloot @ CREG / +vloot op diesel / Voorstel
@@ -273,7 +279,11 @@ function berekenCapex(o){
   var pv = (o.pv_kwp||0)*AAN.capex.pv_kwp;
   var bat = (o.batterij_kwh||0)*AAN.capex.batterij_kwh;
   var lp = (o.laadpalen.ac||0)*AAN.capex.laadpaal_ac + (o.laadpalen.dc160||0)*AAN.capex.laadpaal_dc160 + (o.laadpalen.dc400||0)*AAN.capex.laadpaal_dc400;
-  return { pv:pv, batterij:bat, laadpalen:lp, totaal:pv+bat+lp,
+  // v2.9.2 (01-08): verzwaring + LS→MS-cabine meetellen (kwam vroeger NIET in de volledige investering voor → cabine "verdween").
+  var verzw=(+o.verzwaring_eur||0), cabine=(+o.cabine_eur||0);
+  // bucket1 = PV+batterij+verzwaring+cabine (Optie B: KPI 2-noemer, zónder laadpalen). totaal = bucket1 + laadpalen.
+  return { pv:pv, batterij:bat, laadpalen:lp, verzwaring:verzw, cabine:cabine,
+    bucket1:pv+bat+verzw+cabine, totaal:pv+bat+lp+verzw+cabine,
     aantal_laadpalen:(o.laadpalen.ac||0)+(o.laadpalen.dc160||0)+(o.laadpalen.dc400||0) };
 }
 function onderhoudJaar1(o){
@@ -392,10 +402,11 @@ function _lpCapex(lp){ lp=lp||{}; return (lp.ac||0)*AAN.capex.laadpaal_ac+(lp.dc
 function _lpAantal(lp){ lp=lp||{}; return (lp.ac||0)+(lp.dc160||0)+(lp.dc400||0); }
 var gsBatCapex=(_GS.batterij_kwh||0)*AAN.capex.batterij_kwh;
 var gsPvCapex =(_GS.pv_kwp||0)*AAN.capex.pv_kwp;
-var gsLpCapex =_lpCapex(_GS.laadpalen);
-var gsHeeftComp = !!(_GS.laadpalen || _GS.pv_kwp || _GS.batterij_kwh);
-var gsCapex = gsHeeftComp ? (gsBatCapex+gsPvCapex+gsLpCapex) : (_GS.capex||0);
-var gsOpex  = (_GS.pv_kwp||0)*AAN.onderhoud.pv_kwp + (_GS.batterij_kw||0)*AAN.onderhoud.batterij_kw + _lpAantal(_GS.laadpalen)*AAN.onderhoud.laadpaal + gsCapex*AAN.verzekering_promille/1000;
+var gsLpCapex =_lpCapex(_GS.laadpalen);   // laadpalen = bakje 2 (apart getoond, NIET in het bakje-1-rendement)
+// v2.9.2 (Optie B, 01-08): START-kaart op het PV+batterij-bakje. gsCapex = capex uit de simulator (PV+batterij+
+// verzwaring+cabine, zónder laadpalen); terugval op batterij+PV. besparing = bakje 1 (zónder laadpalen-diesel).
+var gsCapex = (_GS.capex!=null && _GS.capex>0) ? _GS.capex : (gsBatCapex+gsPvCapex);
+var gsOpex  = (_GS.pv_kwp||0)*AAN.onderhoud.pv_kwp + (_GS.batterij_kw||0)*AAN.onderhoud.batterij_kw + gsCapex*AAN.verzekering_promille/1000;
 var gsBesp = _GS.besparing_jaar||0;
 var gsRendement = gsCapex>0 ? gsBesp/gsCapex*100 : 0;
 var gsPayback = (gsBesp-gsOpex)>0 ? gsCapex/(gsBesp-gsOpex) : null;
@@ -661,7 +672,7 @@ pagina(
     '<tr><td>Sitepiek zonder/met batterij</td><td>'+num(E.sitepiek_zonder_batterij_kw)+' → '+num(E.sitepiek_met_batterij_kw)+' kW (−'+num(aansluiting_vermeden)+')</td></tr>'+
     '<tr><td>PV-benutting</td><td>productie '+num(E.pv_productie_mwh)+' MWh · zelfverbruik '+pct(zelfcons_pct)+' · via batterij '+num(E.pv_via_batterij_mwh)+' MWh</td></tr>'+
     '</tbody></table>'+
-    frm('KPI 1 = laadkost_jaar / km_jaar. KPI 2 = jaarbesparing / capex = '+eur(FIN.besparing_jaar1)+' / '+eur(CAPEX.totaal)+' = '+pct(FIN.besparing_jaar1/CAPEX.totaal*100)+'. KPI 3 = loadfactor (gem. last / piek) vóór→ná.'))
+    frm('KPI 1 = laadkost_jaar / km_jaar. KPI 2 = PV+batterij-bakje: besparing (gebouw+CREG) / capex (PV+batterij+verzwaring+cabine, zónder laadpalen) = '+eur(_pvbattBesp)+' / '+eur(CAPEX.bucket1)+' = '+pct(O.kpi2_rendement!=null?O.kpi2_rendement:(CAPEX.bucket1>0?_pvbattBesp/CAPEX.bucket1*100:0))+'. De laadpalen (bakje 2) hebben hun eigen rendement/TVT. KPI 3 = loadfactor (gem. last / piek) vóór→ná.'))
 );
 
 // ---- PAGINA 7 — EXTRA PV ----
@@ -692,11 +703,11 @@ pagina(
     '<div class="kpi"><div class="l">Batterij (start)</div><div class="v">'+num(GS.batterij_kw)+'/'+num(GS.batterij_kwh)+'</div><div class="s">kW / kWh</div></div>'+
     '<div class="kpi"><div class="l">Zonnepanelen (start)</div><div class="v">'+num((GS.pv_kwp||0)+(_BP.aanwezig?(_BP.kwp||0):0))+'</div><div class="s">kWp'+(GS.pv_kwp?' (+'+num(GS.pv_kwp)+' nieuw)':'')+(_BP.aanwezig?' incl. bestaand':'')+'</div></div>'+
     '<div class="kpi"><div class="l">Laadpunten (start)</div><div class="v">'+num(_lpAantal(GS.laadpalen))+'</div><div class="s">van '+num((O.laadpalen.ac||0)+(O.laadpalen.dc160||0)+(O.laadpalen.dc400||0))+' in het einddoel</div></div>'+
-    '<div class="kpi oranje"><div class="l">Aansluiting (start)</div><div class="v">'+num(GS.aansluiting_kw)+' kW</div><div class="s">geen verzwaring nodig</div></div>'+
+    '<div class="kpi oranje"><div class="l">Aansluiting (start)</div><div class="v">'+num(GS.aansluiting_kw)+' kW</div><div class="s">'+(((GS.aansluiting_kw||0)>(O.aansluiting_vandaag_kw||0))?'incl. verzwaring (cabine)':'geen verzwaring nodig')+'</div></div>'+
   '</div>'+
   '<h3>Wat het u oplevert</h3>'+
   '<div class="kpi-row">'+
-    '<div class="kpi oranje"><div class="l">Investering (start)</div><div class="v">'+eur(gsCapex)+'</div><div class="s">vs '+eur(CAPEX.totaal)+' volledig</div></div>'+
+    '<div class="kpi oranje"><div class="l">Investering (start)</div><div class="v">'+eur(gsCapex)+'</div><div class="s">vs '+eur(CAPEX.bucket1)+' volledig (PV+batterij)</div></div>'+
     '<div class="kpi groen"><div class="l">Besparing (start)</div><div class="v">'+eur(gsBesp)+'</div><div class="s">/jaar al vanaf stap 1</div></div>'+
     '<div class="kpi"><div class="l">Rendement (start)</div><div class="v">'+pct(gsRendement)+'</div><div class="s">besparing / investering</div></div>'+
     '<div class="kpi"><div class="l">Terugverdientijd</div><div class="v">'+(gsPayback!=null?fmt1.format(gsPayback)+' jr':'—')+'</div><div class="s">investering / netto</div></div>'+
@@ -706,8 +717,9 @@ pagina(
       '<table class="mini"><tbody>'+
       '<tr><td>Batterij ('+num(GS.batterij_kwh)+' kWh)</td><td>'+eur(gsBatCapex)+'</td></tr>'+
       (GS.pv_kwp?'<tr><td>Zonnepanelen ('+num(GS.pv_kwp)+' kWp nieuw)</td><td>'+eur(gsPvCapex)+'</td></tr>':'')+
-      '<tr><td>Laadpalen ('+num(_lpAantal(GS.laadpalen))+' punten)</td><td>'+eur(gsLpCapex)+'</td></tr>'+
-      '</tbody><tfoot><tr><td>Totaal (start)</td><td>'+eur(gsCapex)+'</td></tr></tfoot></table>'+
+      (((GS.aansluiting_kw||0)>(O.aansluiting_vandaag_kw||0))?'<tr><td>Verzwaring + cabine (LS→MS)</td><td>'+eur(Math.max(0,gsCapex-gsBatCapex-gsPvCapex))+'</td></tr>':'')+
+      '</tbody><tfoot><tr><td>Totaal (start · PV+batterij)</td><td>'+eur(gsCapex)+'</td></tr></tfoot></table>'+
+      '<p class="note">De laadpalen (bakje 2) worden apart terugverdiend via vermeden diesel — zie de besparing per bakje op pagina 1.</p>'+
     '</div>'+
     (gsPvAanwezig?'<div><h3 style="margin-top:4px">Waar uw start-productie naartoe gaat</h3>'+chartBlok('ch-gs-pie','sm')+'<p class="note">± '+num(gsProdBestaand+gsProdNieuw)+' MWh/jaar zonne-productie bij de start: eigen verbruik vs. injectie.</p></div>':'<div></div>')+
   '</div>'+
@@ -718,12 +730,12 @@ pagina(
     '<tr><td>PV (nieuw) kWp</td><td>'+num(GS.pv_kwp||0)+'</td><td>'+num(_XP.kwp||0)+'</td></tr>'+
     '<tr><td>Laadpunten</td><td>'+num(_lpAantal(GS.laadpalen))+'</td><td>'+num((O.laadpalen.ac||0)+(O.laadpalen.dc160||0)+(O.laadpalen.dc400||0))+'</td></tr>'+
     '<tr><td>Aansluiting</td><td>'+num(GS.aansluiting_kw)+' kW</td><td>'+num(O.aansluiting_kw)+' kW</td></tr>'+
-    '<tr><td>Capex</td><td>'+eur(gsCapex)+'</td><td>'+eur(CAPEX.totaal)+'</td></tr>'+
-    '<tr><td>Besparing/jaar</td><td>'+eur(gsBesp)+'</td><td>'+eur(FIN.besparing_jaar1)+'</td></tr>'+
+    '<tr><td>Capex (PV+batterij, bakje 1)</td><td>'+eur(gsCapex)+'</td><td>'+eur(CAPEX.bucket1)+'</td></tr>'+
+    '<tr><td>Besparing/jaar (PV+batterij, bakje 1)</td><td>'+eur(gsBesp)+'</td><td>'+eur(_pvbattBesp)+'</td></tr>'+
     '</tbody></table>'+
-    frm('gsCapex = batterij '+num(GS.batterij_kwh)+' kWh × '+eur(AAN.capex.batterij_kwh)+' + PV '+num(GS.pv_kwp||0)+' kWp × '+eur(AAN.capex.pv_kwp)+' + laadpalen = '+eur(gsBatCapex)+' + '+eur(gsPvCapex)+' + '+eur(gsLpCapex)+' = '+eur(gsCapex)+'\n'+
+    frm('gsCapex (bakje 1) = batterij '+num(GS.batterij_kwh)+' kWh × '+eur(AAN.capex.batterij_kwh)+' + PV '+num(GS.pv_kwp||0)+' kWp × '+eur(AAN.capex.pv_kwp)+' (+ verzwaring/cabine indien MS) = '+eur(gsCapex)+'  · laadpalen = apart bakje 2\n'+
         'opex start = onderhoud+verzekering = '+eur(gsOpex)+'/jaar\n'+
-        'rendement = besparing/gsCapex = '+eur(gsBesp)+' / '+eur(gsCapex)+' = '+pct(gsRendement)+'\n'+
+        'rendement (bakje 1) = besparing/gsCapex = '+eur(gsBesp)+' / '+eur(gsCapex)+' = '+pct(gsRendement)+'\n'+
         'payback = gsCapex / (besparing − opex) = '+eur(gsCapex)+' / '+eur(gsBesp-gsOpex)+(gsPayback!=null?' = '+fmt1.format(gsPayback)+' jr':' = — (netto ≤ 0)')))
 );
 
@@ -771,7 +783,7 @@ pagina(
   '<p>Hieronder ziet u hoe uw <b>cumulatieve netto besparing</b> evolueert over '+AAN.horizon+' jaar, onder drie kostenscenario\'s. Het punt waar de lijn de nullijn kruist, is uw terugverdientijd. Netkosten stijgen structureel — hoe sneller ze stijgen, hoe waardevoller dit ontwerp wordt.</p>'+
   chartBlok('ch-cashflow')+
   '<div class="kpi-row k3">'+
-    '<div class="kpi"><div class="l">Totale investering</div><div class="v">'+eur(CAPEX.totaal)+'</div><div class="s">PV+batterij+laadinfra</div></div>'+
+    '<div class="kpi"><div class="l">Totale investering</div><div class="v">'+eur(CAPEX.totaal)+'</div><div class="s">PV+batterij'+((CAPEX.cabine>0)?'+cabine':'')+'+laadinfra</div></div>'+
     '<div class="kpi groen"><div class="l">Besparing jaar 1</div><div class="v">'+eur(FIN.besparing_jaar1)+'</div><div class="s">realistisch</div></div>'+
     '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(rendReal.tvt!=null?fmt1.format(rendReal.tvt):'—')+' jr</div><div class="s">realistisch scenario</div></div>'+
   '</div>'+
@@ -779,6 +791,7 @@ pagina(
   mgmt('capex/opex & rendement',
     '<table><tbody>'+
     '<tr><td>Capex PV / batterij / laadinfra</td><td>'+eur(CAPEX.pv)+' / '+eur(CAPEX.batterij)+' / '+eur(CAPEX.laadpalen)+'</td></tr>'+
+    (((CAPEX.verzwaring||0)+(CAPEX.cabine||0))>0?'<tr><td>Capex verzwaring / cabine (LS→MS)</td><td>'+eur(CAPEX.verzwaring||0)+' / '+eur(CAPEX.cabine||0)+'</td></tr>':'')+
     '<tr><td>Capex totaal</td><td>'+eur(CAPEX.totaal)+'</td></tr>'+
     '<tr><td>Onderhoud jaar 1 / verzekering</td><td>'+eur(OH1)+' / '+eur(VERZ)+'</td></tr>'+
     '<tr><td>Rendement jaar 1 (realistisch)</td><td>'+pct(rendReal.rendement)+' · netto jaar 1 = '+eur(rendReal.netto1)+'</td></tr>'+
