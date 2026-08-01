@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.26  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.27  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.27 (01-08): LICHTE RUN 1 (autopilot-snelheid). De autopilot draaide het zware groeipad DUBBEL: één keer
+              in run 1 (zonder PV, enkel om de PV-seed te bepalen) en opnieuw in de herrun (mét PV). Run 1's groeipad
+              werd volledig weggegooid. Nu slaat run 1 de groeipad-berekening over (vlag STATE.apSuppressGroeipad) zolang
+              er nog een herrun mét PV volgt; het definitieve groeipad komt uit de herrun. Bij vaste PV (geen herrun)
+              blijft run 1 het groeipad wél berekenen. Eindcijfers ONGEWIJZIGD (die komen uit de herrun); enkel sneller.
      v1.63.26 (01-08): _apHeartbeat stuurt nu de ÉCHTE sim-substap mee. De hartslag hing de status vast op de laatste
               _apStatus-tekst ("Optimale opstelling berekenen…") terwijl de server-side sim wél vooruitging via STATE.simLog.
               Nu wordt de laatste simLog-regel (opstelling/run) aan de status geplakt → Kamino toont "…· opstelling 2 van 3",
@@ -9867,7 +9872,10 @@ function runSimulatie(){
     STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null; STATE.pvKeuzeKwp=null;
     try {
       var _geng=_kpiEngine(), _gb=_geng&&_geng.beste;
-      if(_gb && _gb.o && _gb.key!=='verhogen' && STATE.lastSimInput){
+      // v1.63.27: LICHTE RUN 1. Tijdens de autopilot-run-1 (zonder PV, enkel sizing voor de PV-seed) slaan we het
+      // groeipad over — de herrun mét PV berekent het definitieve groeipad toch opnieuw. Zo draait dit zware blok
+      // niet dubbel. De vlag staat enkel true wanneer er zeker nog een herrun volgt (zie _autopilotDrive/_apPickPv).
+      if(!STATE.apSuppressGroeipad && _gb && _gb.o && _gb.key!=='verhogen' && STATE.lastSimInput){
         var _gbcfg=_gb.o.config||{};
         var _kvaVol=+_gbcfg.aansluiting_kva||0;
         // v1.47.0: groeipad loopt tot het BATTERIJ-AANTAL van opstelling 2 (volledig batterij) — zo
@@ -10986,6 +10994,7 @@ function _apPickPv(drempel){
       if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
     if(keuze===0){ var best=null; st.forEach(function(s){ if(s.zelfconsumptie_pct!=null && (!best||+s.zelfconsumptie_pct>+best.zelfconsumptie_pct)) best=s; }); if(best) keuze=+best.pv_kwp||0; }
     STATE.pvKwp=keuze; STATE.pvKeuzeKwp=keuze;
+    STATE.apSuppressGroeipad=false;   // v1.63.27: dit IS de herrun mét PV → nu het definitieve groeipad wél berekenen
     _apStatus('Extra PV op '+keuze+' kWp (≥'+drempel+'% zelfverbruik) — groeistappen herrekenen…');
     return _apRunSim();   // herrun mét PV → groeipad mét PV
   });
@@ -11055,6 +11064,7 @@ function _apRapportUrl(reportKey){
        : '/apps/ontwerp-rapport.html';
 }
 function _apKlaar(h, reportData, reportKey, reportHtml){
+  STATE.apSuppressGroeipad=false;   // v1.63.27: studie klaar → vlag resetten (nooit een latere run beïnvloeden)
   _apHbStop();   // v1.63.21: resultaat is klaar → hartslag stopt (Kamino krijgt zo dadelijk kamino-result)
   // v1.63.15: het project-ID komt van Kamino (uniek per upload) → forceer het in het rapport, zodat het
   // rapport, de PDF-opslag én de auto-bucket-opslag allemaal onder HETZELFDE ID landen (niet naam-afgeleid).
@@ -11099,6 +11109,9 @@ function _autopilotDrive(h){
     return;
   }
   // tegel 3 (aansluiting) / 4 (mobiliteit): simulator-volgorde tot ontwerp.
+  // v1.63.27: LICHTE RUN 1 — run 1 dient enkel om de PV-seed te bepalen; het groeipad komt uit de herrun mét PV.
+  // Onderdruk het run-1-groeipad ZOLANG er een herrun volgt (= geen vaste PV). Bij vaste PV rekent run 1 het wél.
+  STATE.apSuppressGroeipad = (+STATE.pvKwp<=0);
   _apStatus('Optimale opstelling berekenen…');
   _apRunSim()
     .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||90)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||90); })
@@ -11109,7 +11122,7 @@ function _autopilotDrive(h){
       var rd=null; try{ rd=_ontwerpRapportData(pid, h.rapportModus||'klant'); }catch(e){ console.error('[autopilot] rapportdata',e); }
       _apKlaar(h, rd, 'FLUCTUS_ONTWERP_RAPPORT');
     })
-    .catch(function(e){ _apStatus('De automatische studie liep vast ('+((e&&e.message)||e)+').', true); console.error('[autopilot]',e); });
+    .catch(function(e){ STATE.apSuppressGroeipad=false; _apStatus('De automatische studie liep vast ('+((e&&e.message)||e)+').', true); console.error('[autopilot]',e); });   // v1.63.27: vlag resetten zodat een latere interactieve run het groeipad niet overslaat
 }
 function _autopilotCheck(){
   var raw=null;
