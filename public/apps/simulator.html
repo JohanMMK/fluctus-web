@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.25  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.26  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.26 (01-08): _apHeartbeat stuurt nu de ÉCHTE sim-substap mee. De hartslag hing de status vast op de laatste
+              _apStatus-tekst ("Optimale opstelling berekenen…") terwijl de server-side sim wél vooruitging via STATE.simLog.
+              Nu wordt de laatste simLog-regel (opstelling/run) aan de status geplakt → Kamino toont "…· opstelling 2 van 3",
+              zodat je ziet of stap 1 vooruitgaat of echt hangt. (Werkt samen met kamino v0.9.7 die de liveness-kill schrapte.)
      v1.63.25 (01-08): console-diagnose "hartslag verstuurd" in _apHeartbeat (iframe-context) om de heartbeat-flow te kunnen zien.
      v1.63.24 (consistentie, 31-07): laadpalen zitten nu in de ontwerp-capex (out.ontwerp.laadpalen=_lpDim) én in de groeistap;
               besparing_jaar1 = het DIESEL-TOTAAL (PV+batterij + laadpalen) → financiering/investering/headline/card overal
@@ -10888,8 +10892,16 @@ var _apH=null;   // huidige handoff — nodig om een fout terug te melden aan Ka
 var _apLastStatus='', _apHbTimer=null;
 function _apHeartbeat(){
   if(!_apEmbed() || !_apH) return;
-  try{ window.parent.postMessage({ __fluctus:'kamino-progress', projectId:_apH.projectId, tegel:_apH.tegel, status:_apLastStatus, ts:Date.now() }, location.origin); }catch(e){}
-  try{ console.log('[fluctus] hartslag verstuurd:', _apLastStatus); }catch(e){}   // v1.63.25: diagnose (iframe-context)
+  // v1.63.26: plak de laatste ÉCHTE sim-substap (uit STATE.simLog) aan de status. _apLastStatus verandert enkel bij
+  // een _apStatus-stapwissel; de server-side sim gaat ondertussen vooruit via de simLog-poll. Zo toont Kamino live
+  // of stap 1 vooruitgaat ("…· opstelling 2 van 3") of echt vastzit.
+  var st=_apLastStatus;
+  try{
+    var L=STATE.simLog||[];
+    if(L.length){ var last=L[L.length-1]; if(last && last.tekst){ st = _apLastStatus ? (_apLastStatus+' · '+last.tekst) : String(last.tekst); } }
+  }catch(e){}
+  try{ window.parent.postMessage({ __fluctus:'kamino-progress', projectId:_apH.projectId, tegel:_apH.tegel, status:st, ts:Date.now() }, location.origin); }catch(e){}
+  try{ console.log('[fluctus] hartslag verstuurd:', st); }catch(e){}   // v1.63.25: diagnose (iframe-context)
 }
 function _apHbStart(){ _apHbStop(); try{ _apHbTimer=setInterval(_apHeartbeat, 8000); }catch(e){} }
 function _apHbStop(){ if(_apHbTimer){ try{ clearInterval(_apHbTimer); }catch(e){} _apHbTimer=null; } }
