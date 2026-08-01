@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.29  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.30  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.30 (01-08): LIVE SUB-VOORTGANG voor PV-sweep / groeipad / groeistap. Die fases draaien via aparte endpoints
+              die STATE.simLog NIET bijwerken → de statusregel bevroor op "Simulatie afgerond" terwijl de PV-sweep minuten
+              doorrekende (leek "vast"). _apHeartbeat toont nu de loading-vlag + verstreken tijd ("PV-scenario's
+              doorrekenen — Ns"). Ook: _apPickPv gaat door bij een sweep-fout (pvSweepFout) i.p.v. 10 min te wachten.
      v1.63.29 (Optie B — twee-bakjes-rendement, Johan 01-08): KPI 2 (rendement) staat nu OVERAL op het PV+batterij-bakje:
               besparing (gebouw+CREG, zónder laadpalen-diesel) ÷ capex (PV+batterij+verzwaring+cabine, zónder laadpalen).
               (1) KPI-engine: capex_b1 + rendement_b1 per rij. (2) p.5-kaart kpi2 = beste.rendement_b1. (3) Groeipad:
@@ -10938,14 +10942,20 @@ var _apH=null;   // huidige handoff — nodig om een fout terug te melden aan Ka
 var _apLastStatus='', _apHbTimer=null;
 function _apHeartbeat(){
   if(!_apEmbed() || !_apH) return;
-  // v1.63.26: plak de laatste ÉCHTE sim-substap (uit STATE.simLog) aan de status. _apLastStatus verandert enkel bij
-  // een _apStatus-stapwissel; de server-side sim gaat ondertussen vooruit via de simLog-poll. Zo toont Kamino live
-  // of stap 1 vooruitgaat ("…· opstelling 2 van 3") of echt vastzit.
-  var st=_apLastStatus;
+  // v1.63.26: plak de laatste ÉCHTE sub-voortgang aan de status. _apLastStatus verandert enkel bij een _apStatus-
+  // stapwissel; de zware server-fases gaan ondertussen vooruit. Zo toont Kamino live wáár het rekent (of het vastzit).
+  // v1.63.30: de PV-sweep, het groeipad en de groeistap draaien via APARTE endpoints die STATE.simLog NIET bijwerken.
+  // Zonder deze tak bevroor de statusregel op de laatste simLog-regel ("Simulatie afgerond") terwijl die fases minuten
+  // doorrekenden. Nu tonen we hun eigen loading-vlag + verstreken tijd, zodat je ziet dat het vooruitgaat.
+  var st=_apLastStatus, sub='';
   try{
-    var L=STATE.simLog||[];
-    if(L.length){ var last=L[L.length-1]; if(last && last.tekst){ st = _apLastStatus ? (_apLastStatus+' · '+last.tekst) : String(last.tekst); } }
+    var _els=function(t0){ return t0?Math.max(0,Math.round((Date.now()-t0)/1000)):0; };
+    if(STATE.pvSweepLoading){ sub='PV-scenario’s doorrekenen'+(STATE.pvSweepN?(' (±'+STATE.pvSweepN+' stappen)'):'')+' — '+_els(STATE.pvSweepT0)+'s'; }
+    else if(STATE.groeipadLoading){ sub='Groeipad doorrekenen'+(STATE.groeipadN?(' (±'+STATE.groeipadN+' stappen)'):'')+' — '+_els(STATE.groeipadT0)+'s'; }
+    else if(STATE.groeistap1Loading){ sub='Groeistap doorrekenen'; }
+    else { var L=STATE.simLog||[]; if(L.length){ var last=L[L.length-1]; if(last && last.tekst) sub=String(last.tekst); } }
   }catch(e){}
+  if(sub) st = _apLastStatus ? (_apLastStatus+' · '+sub) : sub;
   try{ window.parent.postMessage({ __fluctus:'kamino-progress', projectId:_apH.projectId, tegel:_apH.tegel, status:st, ts:Date.now() }, location.origin); }catch(e){}
   try{ console.log('[fluctus] hartslag verstuurd:', st); }catch(e){}   // v1.63.25: diagnose (iframe-context)
 }
@@ -11026,7 +11036,9 @@ function _apRunSim(){
 function _apPickPv(drempel){
   drempel=drempel||90;
   if(+STATE.pvKwp>0) return Promise.resolve();   // PV al vast → sweep sloeg over
-  return _apWait(function(){ return STATE.pvSweep && !STATE.pvSweepLoading; }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
+  // v1.63.30: wacht tot de PV-sweep klaar is OF faalt (pvSweepFout) — bij een fout niet 10 min blijven wachten maar
+  // gewoon zonder extra PV verder. De heartbeat toont ondertussen "PV-scenario's doorrekenen — Ns" (live voortgang).
+  return _apWait(function(){ return (STATE.pvSweep && !STATE.pvSweepLoading) || (!!STATE.pvSweepFout && !STATE.pvSweepLoading); }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
     var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[], keuze=0;
     st.forEach(function(s){ var pv=+s.pv_kwp||0, z=(s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null;
       if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
