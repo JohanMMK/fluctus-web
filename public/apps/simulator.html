@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.31  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.32  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.32 (Johan 01-08): (1) MARGINALE zelfconsumptie voor de extra-PV-keuze — _apPickPv kiest nu op
+              s.marginale_zelfconsumptie_pct (server v15.51: nieuwe PV t.o.v. bestaand-only) i.p.v. het geblende %.
+              (2) Zelfverbruik-drempel default 80% (was 90%), als parameter (h.pvDrempel). (3) START-groeistap = de
+              kleinste stap met een ÉCHTE batterij (k≥1) i.p.v. data[0] → tegel 3 gaf anders "groeistap 1 = niks doen".
      v1.63.31 (Optie 2, Johan 01-08): FACTUURRAPPORT-HEATMAPS OVER EEN VOL JAAR. De autopilot draaide voor tegel
               'contract' enkel 'specifiek' (1 maand) → de 3 heatmaps ("Uw jaar in drie beelden") toonden maar één
               maand gevuld (rest grijs). Nu draait de autopilot ook 'rolling12' (vol jaar) vóór het rapport, zodat
@@ -3364,10 +3368,12 @@ function _groeipadRapportData(){
       is_optimaal:d.isOpt, voorbij_optimaal:(d.k>kOpt)
     });
   });
-  // v1.63.29 (Johan 01-08): de START = de EERSTE (kleinste) groeipad-stap = wat het groeipad zelf als stap 1 toont.
-  // (Vroeger: de k=1-stap met de hoogste besparing → dat pikte de verzwaarde 135-optimum i.p.v. de 98-instap, waardoor
-  // de START-kaart een andere aansluiting/rendement toonde dan groeipad-stap 1.)
-  var es=data[0]||null;
+  // v1.63.32 (Johan 01-08): de START = de kleinste stap met een ÉCHTE batterij (k≥1). Bij een gebouw-only case
+  // (tegel 3, geen laadplein) kan de eerste groeipad-stap "niks doen" (k=0) zijn als de zuivere NPV-optimum niks-doen
+  // is — maar de instap die we verkopen is BatteryActive = 1 batterij. Dus sla een k=0-stap over.
+  // (v1.63.29 was data[0]; dat gaf voor tegel 3 "groeistap 1 = niks doen".) Terugval op data[0] als er geen batterij-stap is.
+  var es=null; for(var _ei=0;_ei<data.length;_ei++){ if(data[_ei] && (+data[_ei].k>=1 || +data[_ei].kwh>0)){ es=data[_ei]; break; } }
+  if(!es) es=data[0]||null;
   var groeistap=es?{
     label:'START — '+es.kw+'/'+es.kwh,
     batterij_kw:es.kw, batterij_kwh:es.kwh, aansluiting_kw:Math.round(es.c),
@@ -11015,7 +11021,7 @@ function _apSetState(h){
   STATE.jaarverbruik = (h.jaarverbruikMwh!=null)?+h.jaarverbruikMwh
     : ((STATE.periodeVolumeMwh>0 && dg>0)? STATE.periodeVolumeMwh*(365/dg) : (STATE.jaarverbruik||0));
   STATE.pvKwp = (h.pvKwp!=null)?+h.pvKwp:0; STATE.pvInjStrategie = STATE.pvInjStrategie||'geen';
-  STATE.pvZelfDrempel = (h.pvDrempel!=null)?+h.pvDrempel:90;
+  STATE.pvZelfDrempel = (h.pvDrempel!=null)?+h.pvDrempel:80;   // v1.63.32: default 80% (was 90%)
   // v1.63.17: de BESTAANDE PV (kWp + injectie) is een PROJECT-eigenschap → in ALLE tegels naar STATE.bestaandePv.
   // Tegel 2 (productie) gebruikt ze als subject; tegel 3/4 (ontwerp) dimensioneren zo de extra PV BOVENOP de
   // bestaande i.p.v. vanaf nul. Belangrijk: de bestaande PV gaat NIET in STATE.pvKwp (= de extra/ontwerp-PV die
@@ -11039,15 +11045,18 @@ function _apRunSim(){
   return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 1200000, 'simulatie');   // v1.63.21: 20 min achtervang
 }
 function _apPickPv(drempel){
-  drempel=drempel||90;
+  drempel=drempel||80;   // v1.63.32: default 80% (was 90%); komt als parameter uit de payload (h.pvDrempel)
   if(+STATE.pvKwp>0) return Promise.resolve();   // PV al vast → sweep sloeg over
   // v1.63.30: wacht tot de PV-sweep klaar is OF faalt (pvSweepFout) — bij een fout niet 10 min blijven wachten maar
   // gewoon zonder extra PV verder. De heartbeat toont ondertussen "PV-scenario's doorrekenen — Ns" (live voortgang).
   return _apWait(function(){ return (STATE.pvSweep && !STATE.pvSweepLoading) || (!!STATE.pvSweepFout && !STATE.pvSweepLoading); }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
     var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[], keuze=0;
-    st.forEach(function(s){ var pv=+s.pv_kwp||0, z=(s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null;
+    // v1.63.32: kies op de MARGINALE zelfconsumptie van de nieuwe PV (marginale_zelfconsumptie_pct, server v15.51),
+    // niet op het geblende % (dat door bestaande PV te gunstig oogt). Terugval op het geblende % bij een oude proxy.
+    var _zc=function(s){ return (s.marginale_zelfconsumptie_pct!=null)?+s.marginale_zelfconsumptie_pct:((s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null); };
+    st.forEach(function(s){ var pv=+s.pv_kwp||0, z=_zc(s);
       if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
-    if(keuze===0){ var best=null; st.forEach(function(s){ if(s.zelfconsumptie_pct!=null && (!best||+s.zelfconsumptie_pct>+best.zelfconsumptie_pct)) best=s; }); if(best) keuze=+best.pv_kwp||0; }
+    if(keuze===0){ var best=null, bz=null; st.forEach(function(s){ var z=_zc(s); if(z!=null && (best==null||z>bz)){ best=s; bz=z; } }); if(best) keuze=+best.pv_kwp||0; }
     STATE.pvKwp=keuze; STATE.pvKeuzeKwp=keuze;
     STATE.apSuppressGroeipad=false;   // v1.63.27: dit IS de herrun mét PV → nu het definitieve groeipad wél berekenen
     _apStatus('Extra PV op '+keuze+' kWp (≥'+drempel+'% zelfverbruik) — groeistappen herrekenen…');
@@ -11176,7 +11185,7 @@ function _autopilotDrive(h){
   STATE.apSuppressGroeipad = (+STATE.pvKwp<=0);
   _apStatus('Optimale opstelling berekenen…');
   _apRunSim()
-    .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||90)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||90); })
+    .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||80)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||80); })
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
     .then(function(){
       _apStatus('Kerncijfers terugkoppelen…');
