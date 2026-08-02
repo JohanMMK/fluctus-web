@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
      KAMINO — single-page front v0.9.8 (Mijn Fluctus-app · testmodus)
-     v0.9.8 (01-08): zelfverbruik-drempel voor de extra-PV-dimensionering als parameter meegegeven (STATE.werk.pvDrempel),
-           default 80% (was 90). Sluit aan bij de marginale-zelfconsumptie-keuze in de simulator (v1.63.32 / server v15.51).
+     v0.9.8 (01-08): (1) zelfverbruik-drempel voor de extra-PV-dimensionering als parameter (STATE.werk.pvDrempel),
+           default 80% (was 90), met een regelaar op het PRODUCTIE-tegel (project-breed → geldt in aansluiting & mobiliteit;
+           veldPvDrempel). Sluit aan bij de marginale-zelfconsumptie-keuze in de simulator (v1.63.33 / server v15.52).
+           (2) 4c: tegel-3-kaart toont nu de 1-batterij-instap (BatteryActive) als headline + verkoop-signaal
+           (✅ ROI > 10 % verkoopbaar / ⚠️ < 10 % studiegarantie).
      v0.9.7 (01-08): LIVENESS-KILL WEG. De hartslag dient nu ENKEL voor de live-statusregel, niet meer als kill-timer.
            Reden: een zware synchrone verwerking in de iframe-thread kan de hartslag-ticker even bevriezen, waardoor de
            oude liveness-watchdog een WERKENDE studie onterecht afkapte ("reageert niet meer"). Er blijft enkel één
@@ -314,6 +317,15 @@ function veldPvAlleen(ph){
       '<div class="fld"><label>Injectie (MWh/jaar)</label><input value="'+(STATE.werk.pv_inj||'')+'" oninput="STATE.werk.pv_inj=this.value" placeholder="'+ph+'"></div></div>'+
     '<div class="hint" style="margin-top:4px">De kVA van de omvormer schatten we op kWp / 1,3.</div>';
 }
+// v0.9.8: PROJECT-BREDE PV-zelfverbruik-target. Bepaalt hoeveel EXTRA zonnepanelen het ontwerp (tegel 3/4) bijlegt:
+// we voegen nieuwe PV toe zolang de MARGINALE zelfconsumptie van die nieuwe panelen ≥ dit % is (server v15.52).
+// Staat op het productie-tegel (= de PV-tegel) en geldt project-breed. Default 80%.
+function veldPvDrempel(){
+  var v=(STATE.werk.pvDrempel!=null && STATE.werk.pvDrempel!=='')?STATE.werk.pvDrempel:80;
+  return '<div class="row"><div class="fld"><label>Zelfverbruik-target extra PV (%)</label>'+
+      '<input type="number" min="50" max="100" step="5" value="'+v+'" oninput="STATE.werk.pvDrempel=this.value"></div></div>'+
+    '<div class="hint" style="margin-top:4px">Bij het ontwerp (aansluiting & mobiliteit) leggen we extra zonnepanelen bij zolang de <b>marginale</b> zelfconsumptie van die nieuwe panelen ≥ dit percentage is. Lager = meer PV (met meer injectie), hoger = strenger. Standaard 80%. Geldt project-breed.</div>';
+}
 function pleinBlok(){
   var lijst=STATE.werk.pleinen.map(function(pl,i){
     var vs=(pl.start!=null&&pl.start!=='')?pl.start:8, ve=(pl.eind!=null&&pl.eind!=='')?pl.eind:18;
@@ -366,6 +378,9 @@ function renderPunt(id){
       inputSec += '<div class="sec"><h3>Uw verbruik & PV</h3>'+veldProfielPv()+'</div>';
     }
   }
+  // v0.9.8: de PV-zelfverbruik-target (project-breed, voor de extra-PV-dimensionering in tegel 3/4) staat op het
+  // productie-tegel (= de PV-tegel). Één keer instellen hier → geldt voor aansluiting én mobiliteit.
+  if(p.id==='productie'){ inputSec += '<div class="sec"><h3>PV-strategie voor het ontwerp</h3>'+veldPvDrempel()+'</div>'; }
 
   var tweestaps = p.tweestaps
     ? '<div class="tweestaps"><b>Zo verloopt deze studie:</b> u krijgt eerst een rapport op basis van een <b>standaardprofiel</b>. Daarna plannen we een korte <b>videovergadering</b> waarin we samen de <b>kabelplanner</b> doorlopen en bekijken of het zinvol is met úw specifieke verbruiksprofiel te rekenen — daarvoor vragen we dan uw mandaat.</div>'
@@ -492,12 +507,15 @@ function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   var _pctv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' %'):'—'; };
   var _tvtv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' j'):'—'; };
   if(id==='aansluiting'){
+    // v0.9.8 (4c): tegel 3 = de 1-batterij-INSTAP (BatteryActive) als headline + verkoop-signaal op de ROI.
     kern=[
-      {l:'Besparing/jaar', v:'− '+eurJaar(k.besparing_jaar)},
-      {l:'Rendement', v:_pctv(k.rendement_pct)},
+      {l:'Besparing/jaar (instap)', v:'− '+eurJaar(k.besparing_jaar)},
+      {l:'Rendement (1 batterij)', v:_pctv(k.rendement_pct)},
       {l:'Terugverdientijd', v:_tvtv(k.terugverdientijd_jaar)}
     ];
-    diag='Berekend door de Fluctus-simulator'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. De kerncijfers en het rapport komen uit dezelfde berekening.';
+    if(k.verkoopbaar) kern.push({l:'Verkoopadvies', v:'✅ ROI > 10% — verkoopbaar'});
+    else if(k.onder_garantie) kern.push({l:'Verkoopadvies', v:'⚠️ ROI < 10% — valt onder de studiegarantie'});
+    diag='Berekend door de Fluctus-simulator — kerncijfers van de aanbevolen 1-batterij-instap (BatteryActive)'+(k.pv_kwp?(' · extra PV '+k.pv_kwp+' kWp'):'')+'. Kaart en rapport uit dezelfde berekening.';
   }
   else if(id==='mobiliteit'){
     kern=[
