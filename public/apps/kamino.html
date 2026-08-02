@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.9 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.10 (Mijn Fluctus-app · testmodus)
+     v0.9.10 (01-08): RAPPORTEN HEROPVRAGEN per tegel. Bij een heropend project (of een tegel die al gerekend is) toont
+           Kamino nu een "📄 Bekijk vorig rapport"-knop (overzicht-tegel + tegel-scherm). Het bewaarde rapport komt uit
+           de bucket via /api/kamino/rapport-open; de beschikbaarheid uit /api/kamino/project-open (rapporten.studies,
+           server v15.53). De bestaande "Bekijk uw volledige rapport"-knop valt nu ook terug op de bucket i.p.v. enkel
+           de in-sessie data. Voorheen kon je enkel herrekenen.
      v0.9.9 (01-08): PV-zelfverbruik-drempel-regelaar VERPLAATST van tegel 2 (productie) naar tegel 3 (aansluiting) +
            tegel 4 (mobiliteit) — daar wordt de extra PV gedimensioneerd. Tegel 2 = enkel sturing bestaande PV, geen extra PV.
      v0.9.8 (01-08): (1) zelfverbruik-drempel voor de extra-PV-dimensionering als parameter (STATE.werk.pvDrempel),
@@ -200,7 +205,8 @@ var STATE={
   gedaan:{},  // { projectId: { puntId: true } }
   kern:{},    // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
   diag:{},    // { projectId: { puntId: 'toelichting' } }
-  rapport:{}  // { 'projectId|puntId': { key, data } } — rapportdata uit de simulator, voor "Bekijk rapport"
+  rapport:{},  // { 'projectId|puntId': { key, data } } — rapportdata uit de simulator (deze sessie), voor "Bekijk rapport"
+  rapportOp:{} // v0.9.10 { projectId: { puntId: true } } — welke tegels een BEWAARD rapport in de bucket hebben (heropvraagbaar)
 };
 var _factuurFile=null;
 
@@ -267,6 +273,7 @@ function renderOverzicht(){
       '<div class="p-studie">Studie: <b>'+p.studie+'</b>'+badge+'</div>'+
       '<div class="kern3">'+kern.map(function(k){return '<div class="kern"><div class="kl">'+k.l+'</div><div class="kv">'+(_echt?k.v:'<span class="kv-leeg">—</span>')+'</div></div>';}).join('')+'</div>'+
       '<div class="p-open">'+(_echt?'Bekijk opnieuw →':(done?'Bekijk opnieuw →':'Start deze studie →'))+'</div>'+
+      (_rapportBeschikbaar(p.id)?'<div class="p-rapport" onclick="event.stopPropagation();_bekijkRapport(\''+p.id+'\')" style="margin-top:6px;font-size:12px;font-weight:700;color:#1F3864;cursor:pointer">📄 Bekijk vorig rapport</div>':'')+
     '</div>';
   }).join('');
   var banner='';
@@ -411,6 +418,7 @@ function renderPunt(id){
       '</div><div class="hint">We mailen het resultaat naar u én uw adviseur.</div></div>'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">'+
         '<button class="btn green" onclick="startStudie(\''+id+'\')">'+(p.gratis?'Bereken & mail mij de studie':'Doorrekenen & studie ontvangen')+'</button>'+
+        (_rapportBeschikbaar(id)?'<button class="btn ghost" onclick="_bekijkRapport(\''+id+'\')">📄 Bekijk vorig rapport</button>':'')+
         '<button class="btn ghost" onclick="location.hash=\'#/\'">Annuleren</button>'+
       '</div>'+
     '</div></div>';
@@ -551,6 +559,7 @@ function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
   }
   if(reportHtml){ STATE.rapport[pid+'|'+id]={ html:reportHtml }; }
   else if(reportData && reportKey){ STATE.rapport[pid+'|'+id]={ key:reportKey, data:reportData }; }
+  if(reportHtml||reportData){ (STATE.rapportOp[pid]||(STATE.rapportOp[pid]={}))[id]=true; }   // v0.9.10: markeer als heropvraagbaar
   // v0.9.5 — het rapport zit al klaar na de berekening → automatisch in de bucket zetten, nog vóór het
   // geopend wordt. Zo hoeft niemand het rapport nog manueel (PDF) naar Supabase te laden.
   kApiPost('/api/kamino/rapport-bewaar', { project_id:pid, tegel:id, kern:kern||null,
@@ -568,16 +577,21 @@ function _toonBerekenen(id){
     '</div></div>';
 }
 function _kZetStatus(txt){ var el=document.getElementById('k-status'); if(el) el.textContent=txt||''; }
-// het simulator-rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
-function _bekijkRapport(id){
-  var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
-  if(!r || (!r.data && !r.html)){ alert('Het rapport is nog niet klaar. Start de studie opnieuw.'); return; }
+// v0.9.10: is er een rapport (deze sessie óf bewaard in de bucket) voor deze tegel van het actieve project?
+function _rapportBeschikbaar(id){
+  var pid=STATE.werk.id; if(!pid) return false;
+  var r=STATE.rapport[pid+'|'+id];
+  if(r && (r.data||r.html)) return true;
+  return !!(STATE.rapportOp[pid] && STATE.rapportOp[pid][id]);
+}
+// het rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
+function _openRapportOverlay(reportData, reportKey, reportHtml){
   var url;
-  if(r.html){ try{ url=URL.createObjectURL(new Blob([r.html],{type:'text/html;charset=utf-8'})); }catch(e){ url='about:blank'; } }
-  else {
-    try{ sessionStorage.setItem(r.key, JSON.stringify(r.data)); }catch(e){}
-    url=(r.key==='FLUCTUS_FACTUURRAPPORT')?'/apps/factuurrapport.html':(r.key==='FLUCTUS_RAPPORT')?'/apps/financieel-rapport.html':'/apps/ontwerp-rapport.html';
-  }
+  if(reportHtml){ try{ url=URL.createObjectURL(new Blob([reportHtml],{type:'text/html;charset=utf-8'})); }catch(e){ url='about:blank'; } }
+  else if(reportData && reportKey){
+    try{ sessionStorage.setItem(reportKey, JSON.stringify(reportData)); }catch(e){}
+    url=(reportKey==='FLUCTUS_FACTUURRAPPORT')?'/apps/factuurrapport.html':(reportKey==='FLUCTUS_RAPPORT')?'/apps/financieel-rapport.html':'/apps/ontwerp-rapport.html';
+  } else { alert('Geen rapportdata gevonden.'); return; }
   var ov=document.createElement('div');
   ov.setAttribute('data-krap','1');
   ov.style.cssText='position:fixed;inset:0;z-index:9998;background:#fff;display:flex;flex-direction:column';
@@ -586,6 +600,20 @@ function _bekijkRapport(id){
     '<span style="font-weight:700">Uw volledige rapport</span></div>'+
     '<iframe src="'+url+'" style="flex:1;border:0;width:100%"></iframe>';
   document.body.appendChild(ov);
+}
+// v0.9.10: eerst de in-sessie rapportdata; anders het BEWAARDE rapport uit de bucket ophalen (heropend project).
+function _bekijkRapport(id){
+  var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
+  if(r && (r.data||r.html)){ _openRapportOverlay(r.data, r.key, r.html); return; }
+  if(!pid){ alert('Geen actief project.'); return; }
+  kApiGet('/api/kamino/rapport-open?project_id='+encodeURIComponent(pid)+'&tegel='+encodeURIComponent(id)).then(function(res){
+    var a=(res&&res.rapport)||null;
+    if(!a || (!a.reportData && !a.reportHtml)){ alert('Er is voor deze tegel nog geen bewaard rapport. Reken de studie eerst door.'); return; }
+    if(a.reportHtml) STATE.rapport[pid+'|'+id]={ html:a.reportHtml };
+    else if(a.reportData && a.reportKey) STATE.rapport[pid+'|'+id]={ key:a.reportKey, data:a.reportData };
+    (STATE.rapportOp[pid]||(STATE.rapportOp[pid]={}))[id]=true;
+    _openRapportOverlay(a.reportData, a.reportKey, a.reportHtml);
+  }).catch(function(e){ alert('Kon het bewaarde rapport niet openen: '+((e&&e.message)||e)); });
 }
 function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug</div>'+
   '<div class="card"><div class="qh"><div class="ic">⚠️</div><div><h2>Er liep iets mis</h2></div></div>'+
@@ -717,16 +745,19 @@ function openBestaand(){
   if(!/^FLX-/.test(id)||!/\S+@\S+\.\S+/.test(email)){ msg.style.color='#B23'; msg.textContent='Vul een geldig projectnummer (FLX-…) en e-mailadres in.'; return; }
   msg.style.color='#5A6577'; msg.textContent='Bezig met openen…';
   kApiPost('/api/kamino/project-open',{ id:id, email:email }).then(function(r){
-    laadProject(r.project); location.hash='#/'; renderOverzicht();
+    laadProject(r.project, r.rapporten); location.hash='#/'; renderOverzicht();
   }).catch(function(e){ msg.style.color='#B23'; msg.textContent='Kon niet openen: '+((e&&e.message)||e); });
 }
-function laadProject(rec){
+function laadProject(rec, rapporten){
   var k=rec.klant||{}, a=rec.adviseur||{};
   STATE.contact={ k_naam:k.naam||'', k_mail:k.email||'', k_tel:k.tel||'', a_naam:a.naam||'', a_mail:a.email||'', a_tel:a.tel||'' };
   var pv=rec.pv||{};
   if(!projById(rec.id)) STATE.projecten.unshift({ id:rec.id, naam:rec.naam||k.naam||'', datum:'', factuur:rec.factuur||'', baseCase:rec.baseCase||null, opgeslagen:true });
   STATE.werk={ id:rec.id, naam:rec.naam||k.naam||'', factuur:rec.factuur||'', profiel:PROFIELEN[0], pv_kwp:pv.kwp||'', pv_inj:pv.inj||'', pleinen:[], baseCase:rec.baseCase||null, opgeslagen:true };
   STATE.gedaan[rec.id]=Object.assign({}, rec.studies||{});
+  // v0.9.10: welke tegels hebben een BEWAARD rapport → per tegel een "bekijk vorig rapport"-knop.
+  var m={}; if(rapporten && Array.isArray(rapporten.studies)){ rapporten.studies.forEach(function(t){ if(t) m[t]=true; }); }
+  STATE.rapportOp[rec.id]=m;
 }
 // Projectrecord bewaren zodat het later via de toegangspoort heropend kan worden (enkel echte projecten).
 function persistProject(){
