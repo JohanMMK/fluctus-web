@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.9.3  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.9.5  (dual-mode: klant + management)
+     v2.9.5 (GROEIPAD BATTERIJ-ONLY, Johan 01-08): de groeistappen zijn nu batterij-only (data uit de simulator).
+             Op de eerste-groeistap-pagina staat een PV-optie-blok (A = instap-batterij, B = PV-eigen rendement,
+             C = instap + PV) uit INV.groeistap.pv_optie. Het groeipad-hoofdstuk kreeg een "batterij-only + PV eenmalig
+             op de eerste stap"-noot. De optimale-opstelling-A/B/C (v2.9.4) blijft als einddoel-optie staan.
+     v2.9.4 (BATTERIJ-EERST, Johan 01-08): op de Extra-PV-pagina staat nu een drie-rendementen-blok wanneer de
+             simulator de batterij-eerst-cases levert (INV.batterij_case + INV.pv_optie): A = batterij alleen,
+             B = PV-optie (eigen rendement = Δbesparing/Δcapex), C = batterij + PV gecombineerd. De batterij is de
+             hoofd-case; de extra PV is een aparte, vrijwillige optie eróp met haar eigen én gecombineerde rendement.
      v2.9.3 (4c, Johan 01-08): verkoop-signaal op de 1-batterij-instap (groeistap-kaart). Rendement ≥ 10 % → groene
              "verkoopbaar"-melding; < 10 % → oranje "valt onder de studiegarantie" (risk-reversal 10 %-belofte).
      v2.9.2 (Optie B — twee-bakjes-rendement, Johan 01-08): KPI 2 (rendement) staat nu op het PV+batterij-bakje op ELKE
@@ -387,6 +395,7 @@ var aansluiting_vermeden = (E.sitepiek_zonder_batterij_kw||0) - (E.sitepiek_met_
 
 // ---- PV-productiesplitsingen (waar gaat de productie naartoe → pie-charts) ----
 var _BP=INV.bestaande_pv||{}, _XP=INV.extra_pv||{}, _GS=INV.groeistap||{};
+var _BC=INV.batterij_case||null, _PO=INV.pv_optie||null;   // v2.9.4 (batterij-eerst): A = batterij-only, B = PV-eigen, C = gecombineerd
 var bpProd = _BP.aanwezig ? (_BP.productie_mwh!=null?_BP.productie_mwh:0.9*(_BP.kwp||0)) : 0;
 var bpInj  = _BP.aanwezig ? (_BP.injectie_mwh||0) : 0;
 var bpZelf = Math.max(0, bpProd - bpInj);
@@ -687,6 +696,16 @@ pagina(
     '<div class="kpi"><div class="l">Productie</div><div class="v">'+num(XP.productie_mwh)+'</div><div class="s">MWh/jaar</div></div>'+
     '<div class="kpi groen"><div class="l">Bijdrage/jaar</div><div class="v">'+eur(XP.meerwaarde_eur)+'</div><div class="s">lagere factuur</div></div>'+
   '</div>'+
+  // v2.9.4 (batterij-eerst, Johan 01-08): de batterij verdient op zichzelf (A); de extra PV is een OPTIE eróp met
+  // haar eigen rendement (B) én het gecombineerde rendement batterij+PV (C). Enkel tonen wanneer beide cases bestaan.
+  ((_BC && _PO)
+    ? '<div class="box blauw" style="margin-top:16px"><b>De batterij eerst — PV als optie eróp.</b> Uw batterij is op zichzelf al rendabel ('+pct(_BC.rendement_pct)+'). De extra zonnepanelen zijn een aparte, vrijwillige stap: ze hebben hun <b>eigen</b> rendement, en tillen samen met de batterij het <b>gecombineerde</b> rendement mee omhoog.</div>'+
+      '<div class="kpi-row k3">'+
+        '<div class="kpi"><div class="l">A · batterij alleen</div><div class="v">'+pct(_BC.rendement_pct)+'</div><div class="s">'+eur(_BC.besparing_jaar)+'/jr · '+eur(_BC.capex)+'</div></div>'+
+        '<div class="kpi groen"><div class="l">B · PV-optie (eigen)</div><div class="v">'+pct(_PO.eigen_rendement_pct)+'</div><div class="s">'+eur(_PO.besparing_jaar)+'/jr · '+eur(_PO.capex)+'</div></div>'+
+        '<div class="kpi"><div class="l">C · batterij + PV</div><div class="v">'+pct(_PO.gecombineerd_rendement_pct)+'</div><div class="s">gecombineerd</div></div>'+
+      '</div>'
+    : '')+
   '<div class="split"><div>'+chartBlok('ch-xpv-pie','sm')+'<p class="note">Waar de extra zonne-energie naartoe gaat: rechtstreeks eigen verbruik'+(heeftBatterij?', lokaal geconsumeerd via de batterij,':'')+' en injectie'+(heeftBatterij?' — apart getoond':'')+'.</p></div>'+
     '<div>'+chartBlok('ch-pv-maand','sm')+'<p class="note">Indicatieve maandproductie van de extra zonnepanelen (zomerpiek, winterdal).</p></div></div>'+
   mgmt('extra PV — energiebalans',
@@ -719,6 +738,16 @@ pagina(
   ((gsRendement>=10)
     ? '<div class="box groen"><b>✅ Verkoopbaar — rendement '+pct(gsRendement)+' (&gt; 10 %).</b> Deze eerste batterij haalt het minimumrendement ruimschoots: een bewezen, rendabele instap vandaag die later meegroeit. Precies waarmee u kunt starten.</div>'
     : '<div class="box" style="background:#FFF3E0;border-color:#9E480E55"><b>⚠️ Rendement '+pct(gsRendement)+' (&lt; 10 %).</b> Deze instap haalt het gegarandeerde minimumrendement van 10 % (nog) niet — hij valt daarmee onder de <b>studiegarantie</b>. Bekijk een grotere groeistap of een ander vertrekpunt vóór u dit als verkoop-case gebruikt.</div>')+
+  // v2.9.5 (batterij-eerst, Johan 01-08): de groeistappen zijn BATTERIJ-ONLY; de zonnepanelen zijn een EENMALIGE optie
+  // op deze eerste stap. A = instap-batterij, B = PV-optie (eigen rendement), C = instap + PV gecombineerd.
+  ((_GS.pv_optie)
+    ? '<div class="box blauw" style="margin-top:14px"><b>Zonnepanelen — optie op deze eerste stap.</b> De instap hierboven is <b>batterij-only</b> ('+pct(gsRendement)+'). U kunt er meteen <b>'+num(_GS.pv_optie.kwp)+' kWp</b> zonnepanelen bij plaatsen: die hebben hun <b>eigen</b> rendement en tillen samen met de batterij het gecombineerde rendement mee omhoog. (De verdere groeistappen blijven batterij-only.)</div>'+
+      '<div class="kpi-row k3">'+
+        '<div class="kpi"><div class="l">A · instap-batterij</div><div class="v">'+pct(gsRendement)+'</div><div class="s">'+eur(gsBesp)+'/jr · '+eur(gsCapex)+'</div></div>'+
+        '<div class="kpi groen"><div class="l">B · PV-optie (eigen)</div><div class="v">'+pct(_GS.pv_optie.eigen_rendement_pct)+'</div><div class="s">'+eur(_GS.pv_optie.besparing_jaar)+'/jr · '+eur(_GS.pv_optie.capex)+'</div></div>'+
+        '<div class="kpi"><div class="l">C · instap + PV</div><div class="v">'+pct(_GS.pv_optie.gecombineerd_rendement_pct)+'</div><div class="s">gecombineerd</div></div>'+
+      '</div>'
+    : '')+
   '<div class="split">'+
     '<div><h3 style="margin-top:4px">Uw start-investering, uitgesplitst</h3>'+
       '<table class="mini"><tbody>'+
@@ -753,6 +782,7 @@ if(GP.length){
   pagina(
     '<div class="stap-band"><div class="nr">7+</div><div><h2>Uw volledige groeipad</h2><div class="note">Van uw eerste stap tot (en voorbij) de optimale opstelling — stap voor stap.</div></div></div>'+
     '<p>Onderstaand pad toont hoe u van uw instapstap naar de optimale opstelling groeit. Bij elke stap ziet u <b>wat er bijkomt</b>, de <b>bijkomende investering</b>, en de <b>drie doelstellings-KPI\'s</b>. '+(heeftVoorbij?'De stappen ná het optimum zijn technisch mogelijk, maar hun rendement daalt — ze staan er ter volledigheid.':'')+'</p>'+
+    '<p class="note">Het groeipad rekent <b>batterij-only</b> — u breidt uit door batterijmodules bij te plaatsen naarmate uw vloot groeit. De zonnepanelen zijn een <b>eenmalige optie</b> die u op uw eerste stap bijlegt (zie de vorige pagina); ze worden niet per groeistap herhaald.</p>'+
     '<div class="gp">'+ GP.map(function(s,i){
       var cls=s.is_optimaal?'opt':(s.voorbij_optimaal?'voorbij':'');
       var laatste=(i===GP.length-1);
