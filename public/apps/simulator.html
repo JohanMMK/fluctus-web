@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.43  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.44  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.44 (ROLLING12-CONTRACTBUCKET, Johan 03-08): de FACTUURANALYSE rekende de JAARvergelijking als
+              factuurmaand ×(365/dagen) — een april-artefact dat de contract-marge vertekent (dezelfde reden waarom
+              het ontwerp al rolling12 draait), én het ontwerp-rapport mengde die april-base met rolling12-scenario's
+              (of viel terug op de −12%-schatting). _margeData().jaar gebruikt nu de kale rolling12-sim (factuurSimJaar)
+              voor de dynamische energie, netkosten verbatim uit de factuur (geannualiseerd), en Johan's pro-rata voor
+              het bestaande contract op 12 maanden (dynamisch_12m × bestaand_1m/dynamisch_1m). Eén bron voor scherm én
+              rapport → consistent. De MAANDvergelijking blijft de échte factuurmaand (papieren-factuur-check).
      v1.63.43 (CARRYOVER-FIX manager-open, Johan 03-08): het openen van een Kamino-project via FLX-id in de interactieve
               simulator (_managerCommit) nam (1) geen profiel over — het projectrecord had geen 'profiel'-veld, dus de
               server viel terug op een default-profiel — en (2) een NIET-geannualiseerd jaarverbruik (het periode-volume
@@ -453,7 +460,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.43</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.44</span>
   </div>
 </div>
 
@@ -1069,7 +1076,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.43';
+var SIM_VERSIE = 'v1.63.44';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3038,6 +3045,28 @@ function _margeData(){
   var energie_dyn=(_simE!=null && _simE>0)?_simE:energie*(1-DYN_KORTING);
   var energie_dyn_bron=(_simE!=null && _simE>0)?'simulatie':'schatting';
   var netto_overig=distributie+heffingen;  // distributie omvat capaciteit
+  // v1.63.44 (Johan 03-08): ROLLING12-CONTRACTBUCKET. De JAARvergelijking rekende vroeger de
+  // factuurmaand ×(365/dagen) — een april-artefact dat de contract-marge vertekent (dezelfde reden
+  // waarom het ONTWERP al op rolling12 draait). Nu: de dynamische JAAR-energie komt uit de kale
+  // rolling12-sim (STATE.factuurSimJaar); de netkosten blijven verbatim uit de factuur, geannualiseerd
+  // (×factor); en het BESTAANDE contract op 12 maanden wordt geschat via Johan's pro-rata:
+  //   bestaand_12m = dynamisch_12m × (bestaand_1m / dynamisch_1m).
+  // Zo is de contract-marge representatief én consistent met het ontwerp-rapport. De MAANDvergelijking
+  // hieronder blijft de échte factuurmaand (verificatie tegen de papieren factuur). Terugval op
+  // periode×factor zolang de rolling12-sim (nog) niet geladen is.
+  var _dyn1m = energie_dyn + netto_overig;         // dynamisch, factuurmaand (vol)
+  var _best1m = subtot;                            // bestaand (echte factuur), factuurmaand (vol)
+  var _eDynJaar = _factuurSimEnergieJaar();        // rolling12 dynamische energiepost
+  var _jaarBron = 'periode_x'+(Math.round(factor*10)/10);
+  var _jaarDyn, _jaarBest;
+  if(_eDynJaar!=null && _eDynJaar>0 && _dyn1m>0){
+    _jaarDyn  = _eDynJaar + netto_overig*factor;   // rolling12 energie + geannualiseerde netkosten
+    _jaarBest = _jaarDyn * (_best1m/_dyn1m);        // pro-rata: bestaand contract op 12 maanden
+    _jaarBron = 'rolling12_prorata';
+  } else {
+    _jaarDyn  = _dyn1m*factor;                      // terugval: factuurmaand ×(365/dagen)
+    _jaarBest = subtot*factor;
+  }
   // v1.21.1: alle NIET-energie-kosten worden verbatim van de factuur overgenomen en
   // (op jaarbasis) geëxtrapoleerd — identiek in beide kolommen. Enkel de energiepost
   // verschilt (huidig vs. dynamisch). De capaciteit wordt alléén apart getoond als de
@@ -3079,9 +3108,10 @@ function _margeData(){
         subtotaal:energie_dyn+netto_overig }
     },
     extrapolatie_factor:factor,
+    jaar_bron:_jaarBron,   // 'rolling12_prorata' of 'periode_x…' (terugval)
     jaar:{
-      bestaand:{ label:'Huidig contract — jaar', subtotaal:subtot*factor },
-      dynamisch:{ label:'Scherp dynamisch — jaar', subtotaal:(energie_dyn+netto_overig)*factor }
+      bestaand:{ label:'Huidig contract — jaar', subtotaal:_jaarBest },
+      dynamisch:{ label:'Scherp dynamisch — jaar', subtotaal:_jaarDyn }
     }
   };
 }
@@ -9858,6 +9888,14 @@ function _factuurSimEnergie(){
   var A=gr.A_energiekost||gr.A||{};
   return (A._subtotaal!=null)?(+A._subtotaal||0):null;
 }
+// v1.63.44 (Johan 03-08): dynamische ENERGIEPOST op ROLLING12 (STATE.factuurSimJaar = kale
+// factuur-sim over 12 rollende maanden). Basis voor de rolling12-contractbucket in _margeData.
+function _factuurSimEnergieJaar(){
+  var s=STATE.factuurSimJaar; if(!s) return null;
+  var jf=s.jaarfactuur||s.factuur||{}, gr=jf.groepen||{};
+  var A=gr.A_energiekost||gr.A||{};
+  return (A._subtotaal!=null)?(+A._subtotaal||0):null;
+}
 // v1.21.5: signatuur van enkel de BASELINE-inputs die de factuurvergelijking bepalen
 // (zelfde verbruik, ander contract). BEWUST zonder PV/batterij/laadplein/aansluiting/
 // toegangsvermogen: die horen bij het ontwerp-scenario en mogen de 4 factuur-scenario's
@@ -9952,11 +9990,17 @@ function renderStepFactuuranalyse(){
   var kpis=el('div',{class:'fdsim-kpis',style:'margin:12px 0'});
   function kpi(l,v,s){ var k=el('div',{class:'fdsim-kpi'}); k.appendChild(el('div',{class:'fdsim-kpi-label'},l)); k.appendChild(el('div',{class:'fdsim-kpi-val'},v)); if(s)k.appendChild(el('div',{class:'fdsim-kpi-sub'},s)); return k; }
   kpis.appendChild(kpi('Marge / maand',_eurM(margeM),'op deze factuurperiode'));
-  kpis.appendChild(kpi('Marge / jaar',_eurM(margeJ),'geëxtrapoleerd'));
+  var _jaarProrata=(d.jaar_bron==='rolling12_prorata');
+  kpis.appendChild(kpi('Marge / jaar',_eurM(margeJ),_jaarProrata?'12 rollende maanden':'geëxtrapoleerd'));
   kpis.appendChild(kpi('Energie nu → dynamisch',_eurM(d.maand.bestaand.posten[0].items[0][1])+' → '+_eurM(d.maand.dynamisch.posten[0].items[0][1]),'enkel de energiepost verandert'));
   box.appendChild(kpis);
   box.appendChild(_vglTabelSubtotaal('Maandvergelijking ('+(bc.periodeVan||'?')+' – '+(bc.periodeTot||'?')+')', d.maand.bestaand, d.maand.dynamisch));
-  box.appendChild(_vglTabelSubtotaal('Jaarvergelijking (extrapolatie ×'+new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(d.extrapolatie_factor)+')', d.jaar.bestaand, d.jaar.dynamisch));
+  // v1.63.44: JAARvergelijking op rolling12 (contract-marge representatief, consistent met het ontwerp-rapport).
+  // Terugval-label toont nog de extrapolatie-factor zolang de rolling12-sim niet geladen is.
+  box.appendChild(_vglTabelSubtotaal(_jaarProrata
+      ? 'Jaarvergelijking (12 rollende maanden — bestaand pro-rata)'
+      : ('Jaarvergelijking (extrapolatie ×'+new Intl.NumberFormat('nl-BE',{maximumFractionDigits:1}).format(d.extrapolatie_factor)+')'),
+    d.jaar.bestaand, d.jaar.dynamisch));
   // v1.21.7: de uitgelezen regels + de originele factuur ernaast — verifieerbaar.
   var _reg=_renderFactuurRegels();
   if(_reg) box.appendChild(_reg);
@@ -11523,6 +11567,16 @@ function _autopilotDrive(h){
   _apRunSim()
     .then(function(){ _apStatus('PV-optie dimensioneren op ≥'+(h.pvDrempel||80)+'% marginale zelfconsumptie…'); return _apPickPv(h.pvDrempel||80); })
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
+    .then(function(){
+      // v1.63.44 (Johan 03-08): factuur-analyses (kaal, geen batterij → snel, skip_lp) zodat de factuur-sectie
+      // van het ontwerp-rapport de ECHTE contract-marge toont via de rolling12-contractbucket (_margeData pro-rata)
+      // i.p.v. terug te vallen op de −12%-schatting. 'specifiek' = factuurmaand-energie, 'rolling12' = jaar-energie.
+      _apStatus('Factuur vs dynamisch contract berekenen…');
+      return new Promise(function(res){
+        try{ _runFactuurAnalyse('specifiek', function(){ _runFactuurAnalyse('rolling12', function(){ res(); }); }); }
+        catch(e){ console.error('[autopilot] factuuranalyse',e); res(); }
+      });
+    })
     .then(function(){
       _apStatus('Kerncijfers terugkoppelen…');
       var pid=h.projectId||((typeof _projectIdLokaal==='function')?_projectIdLokaal(STATE.project):'FLX-KAMINO');
