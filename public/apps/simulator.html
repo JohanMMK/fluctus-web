@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.33  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.34  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.34 (batterij-module op maat, Johan 01-08): drie modules (5/10, 30/60, 120/260). runSimulatie berekent de
+              trigger — toegangsvermogen (+ 50% laadpleinvermogen bij een laadplein-studie) — kiest de grootste module
+              met kW < basis, HERSCHRIJFT BATT_UNIT_KW/KWH (var) naar die module zodat alle client-math meeschaalt, en
+              stuurt ze mee (input.batt_module) → server v15.54 rekent het groeipad in veelvouden van díé module (max 6),
+              met fallback 120/260. Zo krijgt een kleine site (bv. Kiemkracht 98 kW) een passende 30/60 i.p.v. 0/0.
      v1.63.33 (4c, Johan 01-08): tegel 3 (aansluiting) verkoopt de 1-batterij-INSTAP. _apBouwKern zet de kern/headline
               voor 'aansluiting' op de instap (rd.groeistap): besparing + ROI (bakje 1), met verkoopbaar-vlag (ROI ≥ 10 %)
               en onder_garantie-vlag (< 10 %). Tegel 4 (mobiliteit) blijft de volledige opstelling. (Kamino toont het
@@ -6096,8 +6101,14 @@ var INV_PV_EUR_PER_KWP  = 450;     // PV-capex
 var INV_LAADPAAL_EUR    = { ac:2500, dc160:40000, dc400:70000 };
 var INV_KABEL_PCT       = 0.20;    // opslag kabeltracés op de volledige installatie
 var HORIZON_JAAR        = 15;      // TCO-horizon (jaren) — keuze op laagste eigendomskost
-var BATT_UNIT_KW        = 120;     // fysieke batterij-eenheid (spiegelt server BATT_UNIT_KW)
-var BATT_UNIT_KWH       = 260;     // idem (server BATT_UNIT_KWH)
+var BATT_UNIT_KW        = 120;     // fysieke batterij-eenheid (spiegelt server BATT_UNIT_KW) — v1.63.34: wordt per run
+var BATT_UNIT_KWH       = 260;     // HERSCHREVEN naar de gekozen module (zie _pasBattModule) zodat alle client-math meeschaalt.
+// v1.63.34 (Johan 01-08): batterij-module schaalt mee met de site. Drie modules; kies de grootste met kW < basisvermogen
+// (trigger: tegel 3 = toegangsvermogen; tegel 4 = toegangsvermogen + 50% laadpleinvermogen). Onder 5 kW → de kleinste (5/10).
+var BATT_MODULES = [ {kw:5,kwh:10}, {kw:30,kwh:60}, {kw:120,kwh:260} ];
+function _kiesBattModule(baseKw){ var m=BATT_MODULES[0]; for(var i=0;i<BATT_MODULES.length;i++){ if(BATT_MODULES[i].kw<baseKw) m=BATT_MODULES[i]; } return {kw:m.kw,kwh:m.kwh}; }
+// Herschrijf de client-eenheid-globals + onthoud de module. Idempotent per run.
+function _pasBattModule(mod){ if(mod && +mod.kw>0 && +mod.kwh>0){ BATT_UNIT_KW=+mod.kw; BATT_UNIT_KWH=+mod.kwh; STATE.battModule={kw:+mod.kw,kwh:+mod.kwh}; } }
 // v1.32.0 — TCO-escalatie AFGESTEMD op het financieel rapport (rapport_generator AAN-blok).
 // Onderhoud + verzekering + omvormer-vervanging (jaar 10) + het REALISTISCH kostenscenario:
 // energie/onderhoud groeit met 2% inflatie, netkosten met +6%/jaar én een sprong van +30% vanaf 2029.
@@ -9850,6 +9861,18 @@ function runSimulatie(){
   // Valt de server terug op het oude gedrag (geen job_id), dan gebruiken we gewoon de
   // synchrone response — zo werkt de UI ook tegen een niet-geüpdatete proxy.
   input._async = true;
+  // v1.63.34 (Johan 01-08): batterij-module op maat van de site. basis = toegangsvermogen (+ 50% laadpleinvermogen bij
+  // een laadplein-studie). Kies de grootste module met kW < basis; herschrijf de client-eenheid + stuur ze mee naar de
+  // server (batt_module), zodat het groeipad in veelvouden van díé module rekent i.p.v. altijd 120/260.
+  (function(){
+    var _base=(+STATE.aansluitingKva||0);
+    var _lpKw=(STATE.laadpleinen||[]).reduce(function(s,lp){ var v=(typeof _lpVermogenKw==='function'?_lpVermogenKw(lp):0)||(+lp.cap_kw||0)||(+lp.totaal_laadvermogen_kw||0); return s+(v||0); },0);
+    if(_lpKw>0) _base += 0.5*_lpKw;
+    var _mod=_kiesBattModule(_base);
+    _pasBattModule(_mod);
+    input.batt_module=_mod;
+    try{ log('Batterij-module: '+_mod.kw+'/'+_mod.kwh+' (basisvermogen '+Math.round(_base)+' kW)','ok'); }catch(e){}
+  })();
   // v1.23.4: de server kiest de beste mengverhouding op TOTALE eigendomskost en heeft
   // daar onze investeringsconstanten voor nodig. Ze blijven hier staan (één plek);
   // de server rekent er enkel mee. Zonder deze waarden kan hij niet kiezen en valt hij
