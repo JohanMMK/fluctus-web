@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.39  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.40  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.40 (GEBOUW-OPTIMUM + volgorde-fix, Johan 03-08): (1) VOLGORDE — de gebouw-groeipad-tak in _groeipadRapportData
+              stond ná 'if(!eng||!eng.beste) return null', maar voor een gebouw (tegel 3) is _kpiEngine()=null → de functie
+              keerde terug vóór de fix en de instap bleef €0. De gebouw-tak staat nu VÓÓR die guard. (2) GEBOUW-OPTIMUM —
+              voor een gebouw geeft de server modus 'batterij_gebouw' → STATE.opstellingen=null → _kpiEngine()=null → de
+              "optimale opstelling" viel terug op een degeneratie (PV-only + lege batterij 0/0 + besparing ÷ enkel-nieuwe-PV
+              → opgeblazen 62,8 %). _ontwerpRapportData bouwt 'beste' nu uit de NPV-optimale batterij van STATE.groeipadGebouw
+              → echte batterij + echt rendement, consistent met het scherm en de instap. Root: gebouw-pad omzeilde de
+              KPI-engine volledig, dus zowel de instap (€0) als het optimum (62,8 %/0-0) waren stuk.
      v1.63.39 (€0-INSTAP-FIX, Johan 01-08): het ontwerp-rapport toonde de eerste groeistap als €0 / 0 % (tegel 3),
               terwijl het sim-scherm zélf de juiste instap toonde (bv. 30/60 · €25.000 · 28,2 %). Oorzaak: het scherm
               leest STATE.groeipadGebouw (r.groeipad_gebouw, SYNCHROON met het sim-resultaat, batterij-only), maar
@@ -422,7 +430,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.39</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.40</span>
   </div>
 </div>
 
@@ -1038,7 +1046,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.39';
+var SIM_VERSIE = 'v1.63.40';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3349,12 +3357,13 @@ function _ontwerpCapexTot(pvKwp, battKwh, lp){
 // ongemoeid (geen regressierisico). Terugval: null → _ontwerpRapportData houdt de oude bron.
 function _groeipadRapportData(){
   var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
-  if(!eng||!eng.beste) return null;
   // v1.63.39 (Johan 01-08): €0-INSTAP-FIX. Voor tegel 3 (gebouw, geen laadplein) bouwen we het groeipad uit
   // STATE.groeipadGebouw (r.groeipad_gebouw) — dat komt SYNCHROON met het sim-resultaat mee en is al batterij-only.
   // STATE.groeipad komt van een APARTE async /api/groeipad-call die later pas binnenkomt; genereerde de klant het
   // rapport vóór die klaar was, dan viel de groeistap terug op €0/0 % (exact de bug in de FLX-…-rapporten). Het
   // scherm toonde wél de juiste instap omdat _renderGroeipadGebouw al op groeipadGebouw leest. Nu doet het rapport dat ook.
+  // v1.63.40: deze tak staat VÓÓR de eng-check — voor een gebouw is _kpiEngine()=null (STATE.opstellingen null),
+  // dus zonder deze volgorde keerde de functie terug op null (return null hieronder) en bleef de groeistap €0.
   var gg=STATE.groeipadGebouw;
   if(gg && gg.alternatieven && gg.alternatieven.length){
     var _lpG0=_frLaadpalen();
@@ -3384,6 +3393,8 @@ function _groeipadRapportData(){
     }:null;
     return { stappen:gStap, groeistap:gGroeistap };
   }
+  // Laadplein-pad (tegel 4): het async /api/groeipad + de KPI-engine. Vereist eng.beste (geen gebouw-sweep).
+  if(!eng||!eng.beste) return null;
   var gp=STATE.groeipad;
   if(!gp||!gp.stappen||!gp.stappen.length) return null;
   var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
@@ -3518,6 +3529,26 @@ function _ontwerpRapportData(projectId, mode){
   // v1.63.1: echte KPI's uit de KPI-engine (beste opstelling) i.p.v. schattingen.
   var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
   var beste=(eng&&eng.beste)||null;
+  // v1.63.40 (Johan 01-08): GEBOUW-OPTIMUM. Voor tegel 3 (geen laadplein) geeft de server modus 'batterij_gebouw' →
+  // STATE.opstellingen blijft null → _kpiEngine()=null → beste=null. Zonder deze tak viel de "optimale opstelling"
+  // terug op een DEGENERATIE: PV-only + lege handmatige batterij (0/0) + besparing ÷ enkel-de-nieuwe-PV-capex →
+  // opgeblazen % (bv. 62,8 % bij Kiemkracht). We bouwen 'beste' nu uit de NPV-optimale batterij van STATE.groeipadGebouw
+  // (exact de bron die het sim-scherm toont) → echte batterij + echt rendement, consistent met de instap.
+  if(!beste && STATE.groeipadGebouw && STATE.groeipadGebouw.alternatieven && STATE.groeipadGebouw.alternatieven.length){
+    var _gga=STATE.groeipadGebouw, _goptK=+_gga.optimaal_k||1;
+    var _gopt=_gga.alternatieven.filter(function(a){ return (+a.aantal_batterijen||0)===_goptK; })[0]||_gga.alternatieven[0];
+    if(_gopt){
+      var _gCapexO=Math.round(+_gopt.capex||0), _gBespO=Math.round(+_gopt.besparing_jaar||0);
+      var _gRendO=(_gCapexO>0 && _gBespO>0)?(_gBespO/_gCapexO*100):null;
+      beste={ key:'batterij', o:null,
+        battKw:Math.round(+_gopt.kw||0), battKwh:Math.round(+_gopt.kwh||0),
+        maxKw:Math.round(+_gga.aansluiting_kva||0), aansluitingKva:Math.round(+_gga.aansluiting_kva||0),
+        besparing:_gBespO, capex:_gCapexO, capex_b1:_gCapexO,
+        rendement:_gRendO, rendement_b1:_gRendO,
+        npv:(_gopt.npv!=null?+_gopt.npv:null), kostKm:null, loadfactor:(_gopt.loadfactor!=null?+_gopt.loadfactor:0),
+        inv:{ pv:0, trace:0, netaanpassing:0, cabine:0, laadpalen:0 }, _gebouw:true };
+    }
+  }
   var cregKm=(eng&&eng.opstelling0&&eng.opstelling0.kostKm!=null)?eng.opstelling0.kostKm:0.0501;
   var kpiKm=(beste&&beste.kostKm!=null)?beste.kostKm:0;
   var kpiNpv=(beste&&beste.npv!=null)?beste.npv:0;
