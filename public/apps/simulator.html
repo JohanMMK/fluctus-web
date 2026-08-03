@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.42  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.43  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.43 (CARRYOVER-FIX manager-open, Johan 03-08): het openen van een Kamino-project via FLX-id in de interactieve
+              simulator (_managerCommit) nam (1) geen profiel over — het projectrecord had geen 'profiel'-veld, dus de
+              server viel terug op een default-profiel — en (2) een NIET-geannualiseerd jaarverbruik (het periode-volume
+              werd als jaarvolume gebruikt in het rolling12-ontwerp). Beide fout t.o.v. de autopilot. Nu leest hij het
+              gepersisteerde rec.profiel (kamino.html v0.9.13 + server v15.57) en annualiseert hij het verbruik op de
+              factuurperiode (365/dagen), identiek aan _apSetState. → interactief matcht opnieuw de Kamino-kaart.
      v1.63.42 (ROLLING12 voor het ontwerp, Johan 03-08): het ontwerp draaide in de INTERACTIEVE flow op de factuurmaand
               (STATE.jaar='specifiek', 1 maand ×~11,8). Bewezen op de echte 12-maanden-marktdata: dat overschat de
               batterij-arbitrage én de onbalans-windfall ~2× (bv. april goedkoop/volatiel). runSimulatie mapt 'specifiek'
@@ -447,7 +453,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.42</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.43</span>
   </div>
 </div>
 
@@ -1063,7 +1069,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.42';
+var SIM_VERSIE = 'v1.63.43';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -2647,11 +2653,28 @@ function _managerCommit(id, rec, applied, pcResp){
   if(bc.spanningsniveau)STATE.spanning=bc.spanningsniveau;
   else if(s.kVA!=null && s.kVA*0.95>=100)STATE.spanning='MS';
   else if(s.kVA!=null)STATE.spanning='LS';
-  if(rec.profiel)STATE.profielNaam=rec.profiel;
-  if(s.jaarverbruikMWh)STATE.jaarverbruik=s.jaarverbruikMWh;
+  // v1.63.43 (Johan 03-08): carryover-fix project→interactief. Twee bugs die het manager-open-pad
+  //   (deze functie) fout deden lopen t.o.v. de autopilot (_apSetState ~11254/11263):
+  //   (1) PROFIEL — het projectrecord had geen 'profiel'-veld → STATE.profielNaam bleef leeg → de server
+  //       viel terug op een default-profiel (verkeerde dispatch-vorm). Nu leest hij rec.profiel (kamino.html
+  //       persist v0.9.13); terugval op de base case of de bestaande STATE (manager kiest anders op de Profiel-stap).
+  //   (2) JAARVERBRUIK — applyBaseCaseToWizard levert het NIET-geannualiseerde PERIODE-volume (regel ~1213:
+  //       afname/1000). Het rolling12-ontwerp gebruikt STATE.jaarverbruik ALS jaarvolume → verkeerd geschaald
+  //       (onrealistische besparing/rendement). Nu annualiseren we op de factuurperiode, identiek aan de autopilot.
+  STATE.profielNaam = rec.profiel || (bc && (bc.profielNaam||bc.profiel)) || STATE.profielNaam || '';
+  var _mcDg = (typeof _periodeDagen==='function') ? _periodeDagen(bc.periodeVan, bc.periodeTot) : null;
+  var _mcPeriodeMwh = (bc.afnameKwh!=null) ? (+bc.afnameKwh)/1000 : (+STATE.periodeVolumeMwh||0);
+  STATE.jaarverbruik = (_mcPeriodeMwh>0 && _mcDg>0) ? _mcPeriodeMwh*(365/_mcDg)
+    : (s.jaarverbruikMWh || STATE.jaarverbruik || 0);
   STATE.pvKwp=s.pvKwp||0; STATE.pvInjStrategie=s.pvInjStrategie||'geen';
   if(s.kVA!=null){ STATE.aansluitingKva=s.kVA; STATE._aansluitingManueel=false; }
-  STATE.jaar='specifiek'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
+  // v1.63.43 (Johan 03-08): (3) MODUS = rolling12 voor de manager-open (net als de autopilot voor ontwerp-tegels,
+  //   _apSetState ~11260). Vroeger stond hij op 'specifiek'. Sinds v1.63.42 draait het ontwerp ALTIJD op een vol jaar,
+  //   maar de weergave-annualisatie (_annFactor = 365/dagen) én de KPI-annualisatie bleven aan STATE.jaar='specifiek'
+  //   hangen → de sim gaf jaarcijfers die dan NOG eens ×(365/dagen) gingen (sweep €340k, rendement 179%, "1,0 mnd"-
+  //   labels). Op 'rolling12' geeft _annFactor()=1 en verdwijnt de dubbele annualisatie — identiek aan de Kamino-kaart.
+  //   periodeVan/Tot blijven bewaard voor referentie/factuuranalyse.
+  STATE.jaar='rolling12'; STATE.periodeVan=bc.periodeVan; STATE.periodeTot=bc.periodeTot; STATE.baseCaseLoskoppeld=false;
   if(bc.afnameKwh!=null)STATE.periodeVolumeMwh=bc.afnameKwh/1000;
   if(rec.pv && (+rec.pv.kwp>0)){ STATE.bestaandePv={ aanwezig:true, kwp:+rec.pv.kwp||0, kva:Math.round(((+rec.pv.kwp||0)/1.3)*10)/10, piekKw:0, injMwhJaar:+rec.pv.inj||0, injMwhMaand:0, maand:6, injOpbrengstEur:0 }; }
   STATE.baseCase=bc; STATE.baseCase.klantBtw=bc.klantBtw||null; STATE.baseCase.leveringsadres=bc.leveringsadres||null; STATE.baseCase._kaminoProjectId=id;
@@ -10123,7 +10146,13 @@ function runSimulatie(){
     var _kLp=_frLaadpalen();
     input._kpi_capex_vast = _kLp.ac*INV_LAADPAAL_EUR.ac + _kLp.dc160*INV_LAADPAAL_EUR.dc160 + _kLp.dc400*INV_LAADPAAL_EUR.dc400
                           + (+STATE.pvKwp||0)*INV_PV_EUR_PER_KWP + _kabeltrace(true);
-    input._kpi_annfactor = _annFactor();   // sim draait op de factuurperiode; K is jaarbasis
+    // v1.63.43 (Johan 03-08): REGRESSIE-FIX van v1.63.42. Sinds het ontwerp ALTIJD op een vol jaar draait
+    //   (_ontwerpJaar = rolling12 of een expliciet kalenderjaar — nooit meer de factuurmaand), levert de sim al
+    //   een JAARfactuur. _annFactor() (= 365/dagen zolang STATE.jaar='specifiek') vermenigvuldigde die jaarfactuur
+    //   dan ALSNOG met ~8–12× → sweep-factuur €340k, besparing €45k, rendement 179% (het artefact dat Johan zag).
+    //   De autopilot ontsnapte omdat _apSetState STATE.jaar='rolling12' zet; de factuur-scan- én manager-open-flow
+    //   (STATE.jaar='specifiek') niet. Nu: annf = 1 zodra het ontwerp op een vol jaar draait.
+    input._kpi_annfactor = (_ontwerpJaar==='specifiek') ? _annFactor() : 1;
   } catch(e){}
   STATE.simLog = []; STATE.simLogStart = Date.now();
   // v1.26.0: bewaar de sim-input zodat het groeipad (blok 10) dezelfde payload kan hergebruiken.
