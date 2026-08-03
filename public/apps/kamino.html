@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.13 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.15 (Mijn Fluctus-app · testmodus)
+     v0.9.15 (LAADPALEN VERPLICHT, Johan 03-08): de mobiliteit-tegel vraagt nu VERPLICHT de laadpalen per plein
+           (AC22 / DC160 / DC300 aantallen). Validatie blokkeert de studie als een plein geen paal heeft. _pleinNaarSim
+           geeft de echte aantallen door → de simulator rekent op de échte laadpiek (nodige aansluiting/batterij/capex).
+           De ideaal-gespreide best-case-terugval vervalt zo voor Kamino.
+     v0.9.14 (LAADPALEN-INVOER): eerste versie — optioneel met auto-terugval (vervangen door v0.9.15 verplicht).
      v0.9.13 (PROFIEL PERSISTEREN, Johan 03-08): persistProject bewaart nu STATE.werk.profiel in het projectrecord en
            laadProject herstelt het bij heropenen. Zonder dit veld ging het gekozen verbruiksprofiel verloren bij het
            heropenen (kamino) én bij de manager-open in de interactieve simulator (die viel dan terug op een default-
@@ -358,24 +363,34 @@ function pleinBlok(){
       '<div class="fld"><label>Dagen per week</label><div class="radio">'+
           [5,6,7].map(function(d){return '<label class="'+(pl.dagen===d?'on':'')+'" onclick="STATE.werk.pleinen['+i+'].dagen='+d+';renderPunt(_HUIDIG)">'+d+' dagen</label>';}).join('')+
         '</div></div>'+
+      // v0.9.14 (Johan 03-08): laadpalen OPTIONEEL ingeven (zoals de interactieve). Leeg = de simulator
+      // spreidt de dagenergie ideaal over het venster (best-case). Ingevuld = de echte piek → realistisch ontwerp.
+      '<div class="fld"><label>Laadpalen op dit plein <span style="font-weight:400;color:#9E480E">(verplicht — minstens één)</span></label>'+
+        '<div class="row" style="margin-top:2px">'+
+          '<div class="fld"><label style="font-size:12px">AC 22 kW</label><input type="number" min="0" value="'+((pl.laadpunten&&pl.laadpunten.ac22)||'')+'" oninput="(STATE.werk.pleinen['+i+'].laadpunten=STATE.werk.pleinen['+i+'].laadpunten||{}).ac22=this.value" placeholder="0"></div>'+
+          '<div class="fld"><label style="font-size:12px">DC 160 kW</label><input type="number" min="0" value="'+((pl.laadpunten&&pl.laadpunten.dc160)||'')+'" oninput="(STATE.werk.pleinen['+i+'].laadpunten=STATE.werk.pleinen['+i+'].laadpunten||{}).dc160=this.value" placeholder="0"></div>'+
+          '<div class="fld"><label style="font-size:12px">DC 300 kW</label><input type="number" min="0" value="'+((pl.laadpunten&&pl.laadpunten.dc300)||'')+'" oninput="(STATE.werk.pleinen['+i+'].laadpunten=STATE.werk.pleinen['+i+'].laadpunten||{}).dc300=this.value" placeholder="0"></div>'+
+        '</div></div>'+
     '</div>';
   }).join('');
   return '<div class="hint pleinhint">💡 Elk <b>voertuigtype</b> én elk <b>laadvenster</b> is in feite een apart laadplein. Rijden er verschillende types, of laden ze op verschillende uren? Voeg dan meerdere pleinen toe.</div>'+
     lijst+
-    '<div class="hint pleinhint">De rest (km/jaar, kWh/km, laadinfrastructuur) neemt de standaarden van de simulator — die dimensioneert de ideale laadpalen zelf.</div>'+
+    '<div class="hint pleinhint">Geef per plein de <b>laadpalen</b> op (AC 22 / DC 160 / DC 300 kW). De simulator rekent dan op de <b>échte laadpiek</b> — dat bepaalt de nodige aansluiting, batterij en investering. Zonder palen kan de studie niet starten.</div>'+
     '<div class="pleinadd"><span class="btn ghost" onclick="addPlein()">+ Nog een laadplein toevoegen</span></div>';
 }
-function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[0],voertuigen:'',start:8,eind:18,dagen:5}); renderPunt(_HUIDIG); }
+function addPlein(){ STATE.werk.pleinen.push({autotype:AUTOTYPES[0],voertuigen:'',start:8,eind:18,dagen:5,laadpunten:{ac22:'',dc160:'',dc300:''}}); renderPunt(_HUIDIG); }
 // map de MINIMALE Kamino-invoer → de laadplein-vorm van de simulator; ontbrekende velden = simulator-standaarden
-// (km/jaar + kWh/km per type, laadpunten 0 → de simulator dimensioneert de ideale infrastructuur zelf).
+// (km/jaar + kWh/km per type). v0.9.14 (Johan 03-08): laadpunten worden nu doorgegeven als de verkoper ze ingaf;
+// zijn alle aantallen 0/leeg, dan blijft de simulator-terugval (ideaal gespreid over het venster) gelden.
 function _pleinNaarSim(pl,i){
   var type=pl.autotype||AUTOTYPES[0]; var def=VT_DEF[type]||VT_DEF['Personenwagen'];
   var vs=(pl.start!=null&&pl.start!=='')?+pl.start:8, ve=(pl.eind!=null&&pl.eind!=='')?+pl.eind:18;
+  var _lp=pl.laadpunten||{};
   return { naam:'Laadplein '+(i+1), voertuigtype:type,
     aantal:+pl.voertuigen||0, km_per_jaar:def.km_per_jaar, kwh_per_km:def.kwh_per_km,
     diesel_eur_km:(def.diesel_km!=null?def.diesel_km:0.116),   // v0.9.4: dieselreferentie voor de laadpalen-terugverdien
     venster_start:vs, venster_eind:ve, dagen_per_week:+pl.dagen||5,
-    laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
+    laadpunten:[{type:'AC22',aantal:+_lp.ac22||0},{type:'DC160',aantal:+_lp.dc160||0},{type:'DC300',aantal:+_lp.dc300||0}],
     bestaand:false };
 }
 function delPlein(i){ STATE.werk.pleinen.splice(i,1); renderPunt(_HUIDIG); }
@@ -491,7 +506,15 @@ function _startStudieAutopilot(id){
   // ontwerp (tegel 3/4) de extra PV BOVENOP de bestaande installatie, i.p.v. te doen alsof er geen PV is.
   var _bk=+STATE.werk.pv_kwp||0, _bi=+STATE.werk.pv_inj||0;
   if(_bk>0 || _bi>0){ payload.bestaandeKwp=_bk; payload.bestaandeInj=_bi; payload.bestaandeKva=Math.round((_bk/1.3)*10)/10; }
-  if(id==='mobiliteit'){ payload.laadpleinen=(STATE.werk.pleinen||[]).map(_pleinNaarSim); }
+  if(id==='mobiliteit'){
+    // v0.9.15 (Johan 03-08): laadpalen VERPLICHT. De simulator rekent op de échte laadpiek — geen ideaal-gespreide
+    // best-case meer. Elk laadplein moet minstens één laadpaal (AC22/DC160/DC300) hebben.
+    var _pl=(STATE.werk.pleinen||[]);
+    if(!_pl.length){ alert('Voeg minstens één laadplein toe.'); return; }
+    var _mist=_pl.filter(function(pl){ var l=pl.laadpunten||{}; return ((+l.ac22||0)+(+l.dc160||0)+(+l.dc300||0))<=0; });
+    if(_mist.length){ alert('Geef de laadpalen op voor elk laadplein (AC 22 / DC 160 / DC 300 kW). Zonder palen kan de laadpiek niet realistisch berekend worden.'); return; }
+    payload.laadpleinen=_pl.map(_pleinNaarSim);
+  }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
   _toonBerekenen(id);

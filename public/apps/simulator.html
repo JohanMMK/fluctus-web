@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.44  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.46  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.46 (TELLING = INVOER, Johan 03-08): _lpDim gebruikt nu de opgegeven laadpalen 1-op-1 voor de telling + capex
+              (weergave = invoer); terugval op de cap_kw-dimensionering enkel nog zonder invoer. Werkt samen met
+              kamino v0.9.15 (laadpalen verplicht).
+     v1.63.45 (LAADPALEN-LABELING, Johan 03-08): _ontwerpRapportData zet nu out.ontwerp.laadpalen_opgegeven (o.b.v. de
+              INVOER STATE.laadpleinen). Zijn er geen palen opgegeven, dan spreidt de simulator de energie ideaal over het
+              venster (best-case) → het rapport toont "ideaal gespreid — geen palen opgegeven" i.p.v. een misleidende
+              laadpunt-telling. Werkt samen met kamino.html v0.9.14 (laadpalen-invoer) + ontwerp-rapport v2.9.9.
      v1.63.44 (ROLLING12-CONTRACTBUCKET, Johan 03-08): de FACTUURANALYSE rekende de JAARvergelijking als
               factuurmaand ×(365/dagen) — een april-artefact dat de contract-marge vertekent (dezelfde reden waarom
               het ontwerp al rolling12 draait), én het ontwerp-rapport mengde die april-base met rolling12-scenario's
@@ -460,7 +467,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.44</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.46</span>
   </div>
 </div>
 
@@ -1076,7 +1083,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.44';
+var SIM_VERSIE = 'v1.63.46';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3594,7 +3601,11 @@ function _ontwerpRapportData(projectId, mode){
   var factuurComp={ energie:capMin('energie'), capaciteit:capaciteit,
     distributie:Math.max(0,capMin('distributie')-capaciteit), heffingen:capMin('heffingen') };
   var bt=_frBatterij(), lp=_frLaadpalen();
-  var _lpDim=_dimLaadpalen(fd.laadpleinen);   // v1.63.22: gedimensioneerde laadpunten-telling (uit cap_kw) i.p.v. de 0-invoer
+  // v1.63.45 (Johan 03-08): TELLING = INVOER. Zijn er laadpalen opgegeven (STATE.laadpleinen), dan gebruiken we die
+  // aantallen 1-op-1 voor telling + capex (weergave = invoer). Zonder invoer valt het terug op de uit cap_kw
+  // afgeleide dimensionering (v1.63.22) — enkel nog relevant voor een interactieve run zonder palen.
+  var _lpInvoer=_frLaadpalen();
+  var _lpDim=((_lpInvoer.ac||0)+(_lpInvoer.dc160||0)+(_lpInvoer.dc400||0))>0 ? _lpInvoer : _dimLaadpalen(fd.laadpleinen);
   var pvKwp=+STATE.pvKwp||0, bpv=STATE.bestaandePv||{};
   // v1.63.1: echte KPI's uit de KPI-engine (beste opstelling) i.p.v. schattingen.
   var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
@@ -3743,7 +3754,12 @@ function _ontwerpRapportData(projectId, mode){
     }
   }
   var out=Object.assign({}, fd);
+  // v1.63.45 (Johan 03-08): vlag of de verkoper ECHTE laadpalen ingaf. Zo niet, dan spreidt de simulator de
+  // energie ideaal over het venster (best-case) → het rapport/kaart labelt dat expliciet i.p.v. een misleidende
+  // laadpunt-telling te tonen. Vlag op de INVOER (STATE.laadpleinen), niet op de auto-gedimensioneerde _lpDim.
+  var _lpOpg=(STATE.laadpleinen||[]).some(function(p){ return (p.laadpunten||[]).some(function(x){ return (+x.aantal||0)>0; }); });
   out.ontwerp=Object.assign({}, fd.ontwerp, { batterij_kw:_bBattKw, batterij_kwh:_bBattKwh, laadpalen:_lpDim,
+    laadpalen_opgegeven:_lpOpg,
     verzwaring_eur:(beste&&beste.inv&&beste.inv.netaanpassing)||0, cabine_eur:(beste&&beste.inv&&beste.inv.cabine)||0 });   // v1.63.29: verzwaring + LS→MS-cabine apart meegeven → rapport telt/toon de cabine (was volledig weg uit de volledige-investering)
   out._mode=(mode==='management')?'management':'klant';
   out.project_id=projectId||'';
