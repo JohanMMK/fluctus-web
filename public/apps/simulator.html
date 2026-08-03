@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.41  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.42  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.42 (ROLLING12 voor het ontwerp, Johan 03-08): het ontwerp draaide in de INTERACTIEVE flow op de factuurmaand
+              (STATE.jaar='specifiek', 1 maand ×~11,8). Bewezen op de echte 12-maanden-marktdata: dat overschat de
+              batterij-arbitrage én de onbalans-windfall ~2× (bv. april goedkoop/volatiel). runSimulatie mapt 'specifiek'
+              nu → 'rolling12' voor de ontwerp-run (autopilot deed dit al). De factuuranalyse (tegel 1) blijft op de
+              factuurmaand. Zo geven Kamino én interactief hetzelfde, representatieve batterij-getal (geverifieerd lokaal:
+              rolling12 30/60 = arbitrage €1.362/5,4%, onbalans €7.004; factuurmaand blies ~2× op). Rapport v2.9.8 toont de
+              base case (A = arbitrage, garantie-basis) + windfall (B = arbitrage + onbalans) apart.
      v1.63.41 (BATTERIJ = CORE, PV = OPTIE, Johan 03-08): fundamentele vereenvoudiging van de flow (Kamino + interactief).
               De autopilot doet GEEN dure herrun-mét-PV meer: run 1 rekent meteen het definitieve batterij-optimum + het
               batterij-only groeipad; _apPickPv leidt daarna de PV-OPTIE af uit de sweep (marginaal, x% zelfconsumptie) ZONDER
@@ -440,7 +447,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.41</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.42</span>
   </div>
 </div>
 
@@ -1056,7 +1063,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.41';
+var SIM_VERSIE = 'v1.63.42';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -9985,8 +9992,15 @@ function runSimulatie(){
   // v1.15.2: bij type='specifiek' krijgt simulator.py het PERIODE-volume in
   // jaarverbruik_mwh (zo verwacht hij dat veld in specifiek-modus). STATE.jaarverbruik
   // blijft het geprojecteerde JAARverbruik (voor UI-display + staffel-tier).
+  // v1.63.42 (Johan 03-08): het ONTWERP draait nooit op de factuurmaand (STATE.jaar='specifiek'). Bewezen op de echte
+  // 12-maanden-data: één maand ×12 overschat de batterij-arbitrage én de onbalans-windfall ~2× (april was goedkoop/
+  // volatiel). Het ontwerp gebruikt altijd een representatief jaar: bij 'specifiek' → 'rolling12'. De autopilot deed dit
+  // al (STATE.jaar='rolling12'); nu doet de interactieve flow (die na de factuuranalyse op 'specifiek' bleef) het ook.
+  // De FACTUURANALYSE (tegel 1, contractvergelijking) blijft wél op de factuurmaand — die functie is _runFactuurAnalyse,
+  // los van deze runSimulatie. Een expliciete jaarkeuze ('2024'/'2025') wordt gerespecteerd.
+  var _ontwerpJaar = (STATE.jaar === 'specifiek') ? 'rolling12' : STATE.jaar;
   var jaarverbruikVoorSim;
-  if (STATE.jaar === 'specifiek') {
+  if (_ontwerpJaar === 'specifiek') {
     if (!STATE.periodeVolumeMwh || STATE.periodeVolumeMwh <= 0) {
       alert('Periode-volume ontbreekt in base case. Upload de factuur opnieuw.');
       STATE.isRunning=false;
@@ -9995,6 +10009,7 @@ function runSimulatie(){
     }
     jaarverbruikVoorSim = STATE.periodeVolumeMwh;
   } else {
+    // rolling12 / expliciet jaar → het GEPROJECTEERDE jaarverbruik (niet het periode-volume).
     jaarverbruikVoorSim = STATE.jaarverbruik;
   }
 
@@ -10039,16 +10054,17 @@ function runSimulatie(){
     // wanneer manueel ingegeven; anders berekent server.js v15.13 de default
     // op basis van PV-omvormer + BESS-omvormer.
     max_injectie_kw:(STATE._maxInjectieKwManueel && STATE.maxInjectieKw > 0 ? STATE.maxInjectieKw : 0),
-    jaar:STATE.jaar,
+    jaar:_ontwerpJaar,   // v1.63.42: ontwerp = rolling12 (nooit de factuurmaand); server buildSimInput pakt dan de MARKT-jaarperiode
     // v1.15 sessie 4: expliciete periode-velden voor server.js buildSimInput.
-    // Zonder deze velden valt server.js terug op rolling12-pad ook bij jaar='specifiek'.
-    periodeVan:STATE.periodeVan||null,
-    periodeTot:STATE.periodeTot||null,
+    // v1.63.42: bij rolling12 GEEN periodeVan/Tot meesturen — anders zou de server (bij een toekomstige 'specifiek'-detectie)
+    // alsnog de factuurmaand kunnen pakken. Enkel bij een echte 'specifiek'-ontwerprun (zeldzaam) sturen we ze mee.
+    periodeVan:(_ontwerpJaar==='specifiek'?(STATE.periodeVan||null):null),
+    periodeTot:(_ontwerpJaar==='specifiek'?(STATE.periodeTot||null):null),
     simulatieperiode:{
       van:periode.van,
       tot:periode.tot,
-      // Bij 'specifiek' moet de simulator weten dat jaarverbruik_mwh een periode-volume is.
-      type:(STATE.jaar==='specifiek'?'specifiek':'kalenderjaar')
+      // Bij 'specifiek' moet de simulator weten dat jaarverbruik_mwh een periode-volume is; bij rolling12 = kalenderjaar.
+      type:(_ontwerpJaar==='specifiek'?'specifiek':'kalenderjaar')
     }
   };
 

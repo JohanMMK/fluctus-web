@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.9.6  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.9.8  (dual-mode: klant + management)
+     v2.9.7 (VOORWAARDEN + windfall-framing, Johan 03-08): (1) VOORWAARDE-kader bij het batterij-rendement: de arbitrage
+             geldt enkel op een dynamisch (spot-geïndexeerd) contract; op een vast contract vervalt ze (enkel piekshaving).
+             (2) De onbalans-windfall is nu als POTENTIEEL gelabeld dat onbalans-passthrough van de leverancier vereist,
+             geldig voor de optimale opstelling + de eerste groeistap. NB: de besparingsbasis-fix (sim-delta over 12 maanden)
+             is een aparte engine-stap — zie het build-spec in Project Knowledge (Coherent_besparingsmodel_bouwspec).
      v2.9.6 (BATTERIJ = CORE, PV = OPTIE, Johan 03-08): de "optimale opstelling"-pagina stelt nu de BATTERIJ als kern
              voor (KPI 2 = batterij-only rendement); de PV-pagina is herdoopt tot "Zonnepanelen — een optie op uw
              batterij" en toont de PV-optie (kWp op x% marginale zelfconsumptie) met A (batterij-core) / B (PV-eigen) /
@@ -677,6 +682,10 @@ pagina(
     '<div class="kpi"><div class="l">KPI 2 · rendement</div><div class="v">'+pct(O.kpi2_rendement)+'</div><div class="s">besparing / capex</div></div>'+
     '<div class="kpi"><div class="l">KPI 3 · loadfactor</div><div class="v">'+lf(O.kpi3_loadfactor_na)+'</div><div class="s">was '+lf(O.kpi3_loadfactor_voor)+'</div></div>'+
   '</div>'+
+  // v2.9.7 (Johan 03-08): VOORWAARDE bij het batterij-rendement. De arbitrage-opbrengst geldt enkel op een dynamisch
+  // (spot-geïndexeerd) contract — daar leeft het prijsverschil dat de batterij oogst. Op een vast contract vervalt de
+  // arbitrage en blijft enkel de piekshaving. Dekt de 10%-garantie juridisch + commercieel af.
+  '<div class="box blauw" style="margin-top:6px"><b>Voorwaarde.</b> Dit rendement geldt op een <b>dynamisch (spot-geïndexeerd) contract</b> — daar zit het prijsverschil tussen dure en goedkope uren dat de batterij oogst. Op een <b>vast</b> contract vervalt de arbitrage en blijft enkel de piekshaving over. Een hogere leveranciersmarge raakt de arbitrage nauwelijks; wél de blootstelling aan de spotprijs.</div>'+
   '<div class="split">'+
     '<div>'+chartBlok('ch-pv-donut','sm')+'<p class="note">Waar uw zonne-energie naartoe gaat: eigen verbruik, via de batterij, of geïnjecteerd.</p></div>'+
     '<div>'+chartBlok('ch-piek','sm')+'<p class="note">'+((heeftBatterij && aansluiting_vermeden>0)?'De batterij snijdt uw sitepiek van '+num(E.sitepiek_zonder_batterij_kw)+' kW terug naar '+num(E.sitepiek_met_batterij_kw)+' kW — dat vermijdt '+num(aansluiting_vermeden)+' kW aan verzwaring.':'Slimme sturing en PV vlakken uw sitepiek af en houden het lokale verbruik hoog.')+'</p></div>'+
@@ -829,7 +838,15 @@ pagina(
     '<div class="kpi groen"><div class="l">Besparing jaar 1</div><div class="v">'+eur(FIN.besparing_jaar1)+'</div><div class="s">realistisch</div></div>'+
     '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(rendReal.tvt!=null?fmt1.format(rendReal.tvt):'—')+' jr</div><div class="s">realistisch scenario</div></div>'+
   '</div>'+
-  (FIN.onbalans_windfall_jaar1>0?'<div class="box oranje"><b>Bonus — onbalanssturing:</b> bovenop het bovenstaande kan de flexibiliteit ± '+eur(FIN.onbalans_windfall_jaar1)+'/jaar extra opbrengen. Dit is een bonus, geen basis: de sturing oogst die waarde wanneer de markt ze biedt.</div>':'')+
+  // v2.9.8 (Johan 03-08): WINDFALL met het (B)-rendement. Base case (A) = spot-arbitrage (O.kpi2_rendement) — dit is de
+  // garantie-basis. De onbalans is een APARTE windfall met haar eigen bijdrage; samen geeft dat het (B)-rendement =
+  // arbitrage + onbalans. Vereist onbalans-passthrough van de leverancier.
+  (FIN.onbalans_windfall_jaar1>0?(function(){
+    var _wRend=(CAPEX.bucket1>0)?(FIN.onbalans_windfall_jaar1/CAPEX.bucket1*100):null;
+    var _aRend=(O.kpi2_rendement!=null)?O.kpi2_rendement:null;
+    var _bRend=(_aRend!=null&&_wRend!=null)?(_aRend+_wRend):null;
+    return '<div class="box oranje"><b>Windfall — onbalanssturing (potentieel):</b> de base case hierboven (<b>'+pct(_aRend)+'</b>) is de <b>spot-arbitrage</b> — dát is de basis waarop wij het rendement garanderen. Bovenop kan de <b>onbalanssturing</b> ± '+eur(FIN.onbalans_windfall_jaar1)+'/jaar extra opbrengen'+(_wRend!=null?(' (+'+pct(_wRend)+')'):'')+'. Samen: <b>'+pct(_bRend)+'</b> rendement (arbitrage + onbalans). Dit is een <b>potentieel</b>, geen basis: het <b>vereist dat uw leverancier onbalans-passthrough aanbiedt</b> (afrekenen op de imbalance-markt) — wij nemen dit graag met uw leverancier op. Geldt voor de optimale opstelling en uw eerste groeistap.</div>';
+  })():'')+
   mgmt('capex/opex & rendement',
     '<table><tbody>'+
     '<tr><td>Capex PV / batterij / laadinfra</td><td>'+eur(CAPEX.pv)+' / '+eur(CAPEX.batterij)+' / '+eur(CAPEX.laadpalen)+'</td></tr>'+
