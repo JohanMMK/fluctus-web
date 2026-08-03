@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.38  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.39  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.39 (€0-INSTAP-FIX, Johan 01-08): het ontwerp-rapport toonde de eerste groeistap als €0 / 0 % (tegel 3),
+              terwijl het sim-scherm zélf de juiste instap toonde (bv. 30/60 · €25.000 · 28,2 %). Oorzaak: het scherm
+              leest STATE.groeipadGebouw (r.groeipad_gebouw, SYNCHROON met het sim-resultaat, batterij-only), maar
+              _groeipadRapportData las enkel STATE.groeipad — dat komt van een APARTE async /api/groeipad-call die later
+              pas binnenkomt; genereerde de klant het rapport vóór die klaar was → groeistap €0. Nu bouwt
+              _groeipadRapportData het groeipad + de instap voor een gebouw (geen laadplein) rechtstreeks uit
+              groeipadGebouw.alternatieven → geen €0-instap meer, en identiek aan het scherm. Laadplein-cases (tegel 4)
+              vallen ongewijzigd terug op STATE.groeipad.
      v1.63.38 (GROEIPAD BATTERIJ-ONLY, Johan 01-08): de groeistappen worden nu BATTERIJ-ONLY berekend (de groeipad-
               dispatch forceert pv_kwp=0; _groeipadRapportData laat de PV-capex/-tracé/-onderhoud uit de stap-economie
               en valt niet terug op de herrun-winnaar-factuur mét PV). De extra PV is een EENMALIGE optie op de EERSTE
@@ -414,7 +422,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.38</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.39</span>
   </div>
 </div>
 
@@ -1030,7 +1038,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.38';
+var SIM_VERSIE = 'v1.63.39';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3342,6 +3350,40 @@ function _ontwerpCapexTot(pvKwp, battKwh, lp){
 function _groeipadRapportData(){
   var eng=(typeof _kpiEngine==='function')?_kpiEngine():null;
   if(!eng||!eng.beste) return null;
+  // v1.63.39 (Johan 01-08): €0-INSTAP-FIX. Voor tegel 3 (gebouw, geen laadplein) bouwen we het groeipad uit
+  // STATE.groeipadGebouw (r.groeipad_gebouw) — dat komt SYNCHROON met het sim-resultaat mee en is al batterij-only.
+  // STATE.groeipad komt van een APARTE async /api/groeipad-call die later pas binnenkomt; genereerde de klant het
+  // rapport vóór die klaar was, dan viel de groeistap terug op €0/0 % (exact de bug in de FLX-…-rapporten). Het
+  // scherm toonde wél de juiste instap omdat _renderGroeipadGebouw al op groeipadGebouw leest. Nu doet het rapport dat ook.
+  var gg=STATE.groeipadGebouw;
+  if(gg && gg.alternatieven && gg.alternatieven.length){
+    var _lpG0=_frLaadpalen();
+    var alts=gg.alternatieven.slice().sort(function(a,b){ return (+a.aantal_batterijen||0)-(+b.aantal_batterijen||0); });
+    var optK=+gg.optimaal_k||1, Pg=+gg.aansluiting_kva||0, prevCap=0, gStap=[];
+    alts.forEach(function(a,i){
+      var k=+a.aantal_batterijen||0, akw=Math.round(+a.kw||k*BATT_UNIT_KW), akwh=Math.round(+a.kwh||k*BATT_UNIT_KWH), cap=Math.round(+a.capex||0);
+      gStap.push({
+        nr:i+1,
+        label:(i===0?'START — ':'Groeistap '+(i+1)+' — ')+akw+'/'+akwh,
+        wat:'Batterij '+akw+' kW / '+akwh+' kWh op '+Math.round(Pg)+' kVA (bestaand verbruik)',
+        extra_capex:Math.round(cap-prevCap), cum_capex:cap,
+        kpi1_eur_km:null,
+        kpi2_rendement:(a.rendement!=null)?Math.round(+a.rendement*10)/10:0,
+        kpi3_loadfactor:(a.loadfactor!=null)?Math.round(+a.loadfactor*100)/100:null,
+        is_optimaal:(k===optK), voorbij_optimaal:(k>optK)
+      });
+      prevCap=cap;
+    });
+    var esG=alts.filter(function(a){ return (+a.aantal_batterijen||0)>=1; })[0]||alts[0]||null;
+    var gGroeistap=esG?{
+      label:'START — '+Math.round(+esG.kw||BATT_UNIT_KW)+'/'+Math.round(+esG.kwh||BATT_UNIT_KWH),
+      batterij_kw:Math.round(+esG.kw||BATT_UNIT_KW), batterij_kwh:Math.round(+esG.kwh||BATT_UNIT_KWH), aansluiting_kw:Math.round(Pg),
+      pv_kwp:0, laadpalen:_lpG0,
+      besparing_jaar:Math.round(+esG.besparing_jaar||0), capex:Math.round(+esG.capex||0),
+      motivatie:'De kleinste opstelling die vandaag al volstaat en met uw verbruik meegroeit naar de optimale opstelling.'
+    }:null;
+    return { stappen:gStap, groeistap:gGroeistap };
+  }
   var gp=STATE.groeipad;
   if(!gp||!gp.stappen||!gp.stappen.length) return null;
   var af=eng.af, E_base=eng.E_base, C=eng.C||0, b=eng.beste;
