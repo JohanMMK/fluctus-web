@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.50  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.51  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.51 (LAADCAPACITEIT-CHECK, Johan 03-08): het rapport-laadplein-object krijgt nu gevraagd/geladen/tekort_mwh
+              (uit de sim, per plein geaggregeerd) + een 'voldoende'-vlag → het rapport toont of de opgegeven laadpalen
+              de energie binnen venster + aansluiting kunnen leveren (zoals de interactieve simulator).
+     v1.63.50 (FIX €0-FACTUUR): jaarbasis-extrapolatie NA de definitie van `factor` (stond ervoor → NaN → €0).
      v1.63.48 (FACTUUR OP DE PERIODE, Johan 03-08): de factuuranalyse vergelijkt nu ACTIEF op de factuurperiode zelf
               (jaar/kwartaal/maand); de jaarbasis is enkel een INDICATIEVE extrapolatie van het verschil (×365/dagen).
               Dit vervangt de rolling12-pro-rata van v1.63.44 (_margeData().jaar = periode×factor). Labels: "Marge / periode"
@@ -474,7 +478,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.50</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.51</span>
   </div>
 </div>
 
@@ -1090,7 +1094,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.50';
+var SIM_VERSIE = 'v1.63.51';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3681,10 +3685,20 @@ function _ontwerpRapportData(projectId, mode){
     beheer_jaar:(a.payback&&a.payback.management_jaar_eur)||0
   } : { aanwezig:false };
   var heeftLp=!!(STATE.laadpleinen&&STATE.laadpleinen.length>0);
+  // v1.63.51 (Johan 03-08): LAADCAPACITEIT-CHECK. De sim geeft per plein gevraagd/geladen/tekort_mwh (uit _bouw_ev_load:
+  // wat er NIET binnen het venster + de aansluiting geladen raakte). We aggregeren dat zodat het rapport toont of de
+  // opgegeven laadpalen volstaan om de energie erin te krijgen (zoals de interactieve simulator).
+  var _lpPln=(fd.laadpleinen&&fd.laadpleinen.pleinen)||[];
+  var _tekortTot=_lpPln.reduce(function(s,p){ return s+(+p.tekort_mwh||0); },0);
+  var _gevraagdTot=_lpPln.reduce(function(s,p){ return s+(+p.gevraagd_mwh||0); },0);
   var laadplein=heeftLp ? {
     aanwezig:true, mwh_jaar:en.laadplein_mwh||0, km_jaar:Math.round((eng&&eng.km)||((en.laadplein_mwh||0)*1000/0.16)),
     kost_per_km:kpiKm, creg_per_km:cregKm,
-    voertuigen:'', pleinen:((fd.laadpleinen&&fd.laadpleinen.pleinen)||[]).map(function(p){ return {naam:p.naam||p.label||'plein', type:p.type||'', aantal:p.aantal||0, mwh:Math.round(p.mwh||p.ev_last_mwh||0)}; })
+    gevraagd_mwh:Math.round(_gevraagdTot*10)/10, tekort_mwh:Math.round(_tekortTot*10)/10,
+    voldoende:(_tekortTot<=Math.max(0.05,_gevraagdTot*0.005)),   // ≤0,5% tekort = voldoende (afrondingsmarge)
+    voertuigen:'', pleinen:_lpPln.map(function(p){ return {naam:p.naam||p.label||'plein', type:p.type||'', aantal:p.aantal||0,
+      mwh:Math.round(p.mwh||p.ev_last_mwh||p.geladen_mwh||0), gevraagd_mwh:Math.round((+p.gevraagd_mwh||0)*10)/10,
+      geladen_mwh:Math.round((+p.geladen_mwh||0)*10)/10, tekort_mwh:Math.round((+p.tekort_mwh||0)*10)/10, piek_kw:Math.round(+p.piek_kw||0)}; })
   } : { aanwezig:false };
   // v1.63.9 FIX: extra-PV sectie op ENKEL de nieuwe kWp. De sim voegt bestaande + nieuwe PV samen in
   // pv.kwp (server v15.43), dus en.pv_* zijn TOTAAL-cijfers — die crediteren de bestaande panelen mee en

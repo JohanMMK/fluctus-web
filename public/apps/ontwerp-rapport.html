@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.9.11  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.9.13  (dual-mode: klant + management)
+     v2.9.13 (GROEISTAP 1 ZONDER/MET WINDFALL, Johan 03-08): de eerste-groeistap-pagina toont groeistap 1 nu expliciet
+             zonder (gegarandeerd: arbitrage + piekshaving) én met onbalans-windfall (potentieel, vereist passthrough),
+             windfall geschaald naar de instap-batterij t.o.v. het optimum. Sluit aan bij de kabeltracé-herrekenflow.
+     v2.9.12 (LAADCAPACITEIT-CHECK): laadplein-pagina toont "✓ volstaat" of "⚠ X MWh raakt niet geladen" (tekort_mwh).
      v2.9.11 (TEGEL-DECLUTTER + ACTIE, Johan 03-08): elke tegel = simpele vraag → simpel antwoord → actie.
              (1) Gebouw (tegel 3): KPI 1 (km-kost) weg + Laadplein-tegel weg (irrelevant zonder vloot); rendement +
                  loadfactor blijven, KPI's hernummerd. (2) Contract-vergelijking ("scherp dynamisch") + de SolarActive-
@@ -646,6 +650,13 @@ if(INV.laadplein && INV.laadplein.aanwezig){
       '<div class="kpi"><div class="l">Laadvolume</div><div class="v">'+num(LP.mwh_jaar)+'</div><div class="s">MWh/jaar</div></div>'+
       '<div class="kpi"><div class="l">Afstand</div><div class="v">'+num(LP.km_jaar/1000)+'k</div><div class="s">km/jaar</div></div>'+
     '</div>'+
+    // v2.9.12 (Johan 03-08): LAADCAPACITEIT-CHECK — volstaan de opgegeven laadpalen om de energie binnen het venster
+    // + de aansluiting te leveren? (tekort_mwh uit de sim). Groen = volstaat; oranje = X MWh raakt niet geladen.
+    ((LP.tekort_mwh!=null)
+      ? (LP.voldoende
+          ? '<div class="box groen"><b>✓ Laadcapaciteit volstaat.</b> De opgegeven laadpalen leveren alle '+num(LP.gevraagd_mwh||LP.mwh_jaar)+' MWh/jaar binnen het laadvenster en uw aansluiting.</div>'
+          : '<div class="box oranje" style="border-width:2px"><b>⚠ Laadcapaciteit te krap.</b> ± '+fmt1.format(LP.tekort_mwh)+' MWh/jaar (van '+num(LP.gevraagd_mwh)+') raakt <b>niet</b> geladen binnen het venster en uw aansluiting. Voeg krachtigere/meer laadpalen toe, verruim het laadvenster, of voorzie een grotere aansluiting/batterij.</div>')
+      : '')+
     heatmapBlok('hm-laad','Wanneer laadt u?','Slim laden verschuift naar de goedkoopste en zonnigste momenten, binnen uw aansluiting.', function(d,q){return synthLast(d,q)*(O.aansluiting_kw||135)*0.7;}, 0, (O.aansluiting_kw||135), 'blauw','kW')+
     mgmt('laadplein — pleinen & km-kost',
       '<table><thead><tr><th>Plein</th><th>type</th><th>aantal</th><th>MWh/jaar</th></tr></thead><tbody>'+
@@ -791,6 +802,24 @@ pagina(
         '<div class="kpi"><div class="l">C · instap + PV</div><div class="v">'+pct(_GS.pv_optie.gecombineerd_rendement_pct)+'</div><div class="s">gecombineerd</div></div>'+
       '</div>'
     : '')+
+  // v2.9.13 (Johan 03-08): groeistap 1 herrekend ZONDER en MET onbalans-windfall. Zonder = de gegarandeerde base
+  // (arbitrage + piekshaving) = het rendement hierboven. Met = base + windfall (onbalans-respons), geschaald naar de
+  // instap-batterij t.o.v. de optimale (want de windfall in FIN geldt op het optimum). Windfall = POTENTIEEL, vereist
+  // onbalans-passthrough van de leverancier — daarom apart, conform de v2.9.7-framing.
+  (function(){
+    var _wfTot=+((INV.financieel&&INV.financieel.onbalans_windfall_jaar1)||0);
+    if(!(_wfTot>0)) return '';
+    var _gsKwh=+GS.batterij_kwh||0, _optKwh=+((O&&O.batterij_kwh)||0);
+    var _wfGs=Math.round((_optKwh>0)?_wfTot*(_gsKwh/_optKwh):_wfTot);
+    var _rendMet=(gsCapex>0)?((gsBesp+_wfGs)/gsCapex*100):null;
+    return '<div class="box" style="margin-top:12px;background:#EAF3EA;border-color:#05B05055">'+
+      '<b>Groeistap 1 — zonder én met onbalans-windfall.</b> De instap hierboven ('+pct(gsRendement)+') is de <b>gegarandeerde</b> base: spot-arbitrage + piekshaving op een dynamisch contract. Stelt uw leverancier <b>onbalans-passthrough</b> open, dan komt daar een <b>potentiële</b> windfall van ± '+eur(_wfGs)+'/jaar bij → rendement <b>'+pct(_rendMet)+'</b>. Die windfall is apart omdat ze de medewerking van uw leverancier vereist.'+
+      '<div class="kpi-row k3" style="margin-top:8px">'+
+        '<div class="kpi"><div class="l">Zonder windfall (gegarandeerd)</div><div class="v">'+pct(gsRendement)+'</div><div class="s">'+eur(gsBesp)+'/jr</div></div>'+
+        '<div class="kpi groen"><div class="l">Met windfall (potentieel)</div><div class="v">'+pct(_rendMet)+'</div><div class="s">'+eur(gsBesp+_wfGs)+'/jr</div></div>'+
+        '<div class="kpi"><div class="l">Onbalans-windfall</div><div class="v">'+eur(_wfGs)+'</div><div class="s">/jaar · vereist passthrough</div></div>'+
+      '</div></div>';
+  })()+
   '<div class="split">'+
     '<div><h3 style="margin-top:4px">Uw start-investering, uitgesplitst</h3>'+
       '<table class="mini"><tbody>'+
