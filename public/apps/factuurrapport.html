@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- FLUCTUS FACTUUR- & ONDERHANDELINGSMARGE-RAPPORT — v1.22 (+ project-ID in de voettekst van elke pagina
+<!-- FLUCTUS FACTUUR- & ONDERHANDELINGSMARGE-RAPPORT — v1.23 (+ project-ID in de voettekst van elke pagina
      + "PDF opslaan"-knop via de gedeelde drop-in fluctus-rapport-pdf.js → lokale download + Supabase-bucket). -->
 <html lang="nl">
 <head>
@@ -301,12 +301,12 @@ var MND_START=[[0,'jan'],[31,'feb'],[59,'mrt'],[90,'apr'],[120,'mei'],[151,'jun'
   var betaald=[]; for(var i=0;i<n;i++){ var kw=Math.max(0,verbruik[i]||0); betaald.push(kw*0.25/1000*(kostM[i]||0)); }
   function blok(id,titel,sub){ return '<h3 style="margin:14px 0 3px">'+titel+'</h3>'+
     '<div style="font-size:11px;color:var(--grijs);margin-bottom:3px">'+sub+'</div>'+
-    '<div style="text-align:center"><canvas id="'+id+'" width="720" height="196" style="max-width:100%;border:1px solid var(--lijn);border-radius:6px"></canvas></div>'+
+    '<div><canvas id="'+id+'" width="1040" height="176" style="width:100%;display:block;border:1px solid var(--lijn);border-radius:6px"></canvas></div>'+
     '<div id="'+id+'-lg" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:10px;color:var(--grijs);margin-top:3px"></div>'; }
   pagina(6, `
     <div class="eyebrow">Factuursimulatie · dynamisch tarief</div>
-    <h2>Uw jaar in drie beelden</h2>
-    <p class="lead">Elke kolom is een dag (1 januari links → 31 december rechts), elke rij een uur (0u onderaan → 24u bovenaan). Elke cel vat de 4 kwartieren van dat uur samen.</p>
+    <h2>Uw factuurperiode in drie beelden</h2>
+    <p class="lead">Elke kolom is een dag van uw factuurperiode (${D.periode_van} – ${D.periode_tot}), elke rij een uur (0u onderaan → 24u bovenaan). Elke cel vat de 4 kwartieren van dat uur samen.</p>
     ${blok('fs-h1','1 · Spotprijs','De marktprijs per uur — groen = goedkoop, rood = duur (€/MWh)')}
     ${blok('fs-h2','2 · Uw verbruik','Hoeveel u afnam — licht = weinig, donkerblauw = veel (kW)')}
     ${blok('fs-h3','3 · Totaal betaald','Verbruik × prijs — waar het geld ging, groen = weinig, rood = veel (€/uur)')}
@@ -318,16 +318,17 @@ var MND_START=[[0,'jan'],[31,'feb'],[59,'mrt'],[90,'apr'],[120,'mei'],[151,'jun'
     tekenHeat('fs-h3', betaald,  pr.van, {agg:'sum',  palet:'traffic', eenheid:'€'});
   }, 40);
 })();
-// bin per KALENDER-positie: dag-van-het-jaar × uur, uit de echte timestamps (start = pr.van).
-// Zo staat 1 januari links, ongeacht waar het simulatievenster begint.
+// v1.23 (Johan 03-08): bin over de FACTUURPERIODE zelf — sequentiële dagen vanaf pr.van (dag 0..n-1) × uur.
+// De sim draait op de factuurperiode, dus we tonen net die periode (maand/kwartaal/jaar), niet een heel
+// kalenderjaar met lege cellen. Robuust via index (i/96 = dag, (i%96)/4 = uur) i.p.v. timestamp-parsing.
 function _binKalender(vals, vanISO, agg){
-  var startMs=(vanISO?new Date(vanISO):new Date(2025,0,1)).getTime(), DAGEN=366, UREN=24;
+  var startMs=(vanISO?new Date(vanISO).getTime():Date.now());
+  var UREN=24, DAGEN=Math.max(1, Math.round(vals.length/96));
   var sum=[], cnt=[]; for(var d=0;d<DAGEN;d++){ sum[d]=[]; cnt[d]=[]; for(var u=0;u<UREN;u++){ sum[d][u]=0; cnt[d][u]=0; } }
-  for(var i=0;i<vals.length;i++){ var dt=new Date(startMs+i*900000);
-    var doy=Math.floor((dt-new Date(dt.getFullYear(),0,1))/86400000); if(doy<0)doy=0; if(doy>365)doy=365;
-    var h=dt.getHours(); sum[doy][h]+=vals[i]; cnt[doy][h]++; }
+  for(var i=0;i<vals.length;i++){ var d=Math.floor(i/96); if(d>=DAGEN)d=DAGEN-1; var h=Math.floor((i%96)/4); if(h>23)h=23;
+    sum[d][h]+=vals[i]; cnt[d][h]++; }
   var grid=[]; for(var d2=0;d2<DAGEN;d2++){ grid[d2]=[]; for(var u2=0;u2<UREN;u2++){ var c=cnt[d2][u2]; grid[d2][u2]=c?(agg==='sum'?sum[d2][u2]:sum[d2][u2]/c):null; } }
-  return {grid:grid, DAGEN:DAGEN, UREN:UREN};
+  return {grid:grid, DAGEN:DAGEN, UREN:UREN, startMs:startMs};
 }
 function tekenHeat(id, vals, vanISO, opts){
   var cv=document.getElementById(id); if(!cv||!vals||!vals.length) return;
@@ -351,8 +352,16 @@ function tekenHeat(id, vals, vanISO, opts){
   ctx.fillStyle='#5A6577'; ctx.font='9px Helvetica,Arial,sans-serif';
   ctx.textAlign='right'; ctx.textBaseline='middle';
   [0,6,12,18,24].forEach(function(hh){ ctx.fillText(hh+'u', mL-4, mT+pH-(hh/24)*pH); });
-  ctx.textAlign='left'; ctx.textBaseline='top';
-  MND_START.forEach(function(mm){ var x=mL+(mm[0]/DAGEN)*pW; ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(x+0.5,mT+pH); ctx.lineTo(x+0.5,mT+pH+3); ctx.stroke(); ctx.fillText(mm[1], x+1, mT+pH+5); });
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  // v1.23: datum-labels over de factuurperiode (even verdeeld), i.p.v. maandnamen.
+  var nLab=Math.max(2, Math.min(DAGEN, 8));
+  for(var li=0; li<nLab; li++){
+    var dayIdx=Math.round(li*(DAGEN-1)/(nLab-1)), x=mL+((dayIdx+0.5)/DAGEN)*pW;
+    var dt=new Date((b.startMs||Date.now())+dayIdx*86400000);
+    var lab=dt.getDate()+'/'+(dt.getMonth()+1);
+    ctx.strokeStyle='#CBD3DE'; ctx.beginPath(); ctx.moveTo(x+0.5,mT+pH); ctx.lineTo(x+0.5,mT+pH+3); ctx.stroke();
+    ctx.fillText(lab, x, mT+pH+5);
+  }
   var lg=document.getElementById(id+'-lg');
   if(lg){ var grad=(palet==='blauw')?'linear-gradient(to right,rgb(234,241,250),rgb(20,60,140))':'linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
     lg.innerHTML='<span>'+Math.round(lo)+' '+opts.eenheid+'</span><span style="display:inline-block;width:150px;height:9px;border-radius:3px;background:'+grad+'"></span><span>'+Math.round(hi)+' '+opts.eenheid+'</span>'; }
