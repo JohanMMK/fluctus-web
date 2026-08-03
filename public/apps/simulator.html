@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.40  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.41  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.41 (BATTERIJ = CORE, PV = OPTIE, Johan 03-08): fundamentele vereenvoudiging van de flow (Kamino + interactief).
+              De autopilot doet GEEN dure herrun-mét-PV meer: run 1 rekent meteen het definitieve batterij-optimum + het
+              batterij-only groeipad; _apPickPv leidt daarna de PV-OPTIE af uit de sweep (marginaal, x% zelfconsumptie) ZONDER
+              toepassen (STATE.pvKwp blijft 0). Eén sim-run i.p.v. twee → Kamino is niet meer trager dan een interactieve run.
+              STATE.pvOptie (kwp, marginale besparing, capex, eigen rendement, marginale zelfconsumptie %) voedt: (1) out.
+              batterij_case = A (batterij-core), (2) out.pv_optie = B (PV-eigen) + C (batterij+PV) op het optimum, (3) out.
+              groeistap.pv_optie = C op de instap, (4) out.extra_pv toont de OPTIE i.p.v. de toegepaste PV. Interactief:
+              _ontwerpRapportData leidt STATE.pvOptie zelf af uit de sweep (drempel 80 %) → zelfde batterij-core + PV-optie.
+              Volgorde nu overal: 1 opstellingen → 2 PV-optie op het optimum → 3 groeipad zonder PV → 4 groeistap 1 + PV-optie.
+              Rapport v2.9.6. De herrun-restanten (besteOverride/batterijCase) zijn vervangen door de sweep-afgeleide optie.
      v1.63.40 (GEBOUW-OPTIMUM + volgorde-fix, Johan 03-08): (1) VOLGORDE — de gebouw-groeipad-tak in _groeipadRapportData
               stond ná 'if(!eng||!eng.beste) return null', maar voor een gebouw (tegel 3) is _kpiEngine()=null → de functie
               keerde terug vóór de fix en de instap bleef €0. De gebouw-tak staat nu VÓÓR die guard. (2) GEBOUW-OPTIMUM —
@@ -430,7 +440,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.40</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.41</span>
   </div>
 </div>
 
@@ -1046,7 +1056,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.40';
+var SIM_VERSIE = 'v1.63.41';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -3631,35 +3641,40 @@ function _ontwerpRapportData(projectId, mode){
   if(groeistap){ groeistap.laadpalen=_lpDim; }
   var groeipad = (_gpr&&_gpr.stappen&&_gpr.stappen.length) ? { stappen:_gpr.stappen }
     : ((STATE.groeipad&&STATE.groeipad.stappen) ? { stappen:STATE.groeipad.stappen } : null);
-  // v1.63.37 (Johan 01-08): BATTERIJ-EERST (tegel 3/4). In de autopilot-herrun staat de batterij vast
-  // (STATE.besteOverride) en zit de extra PV eróp → beste = de COMBINED (batterij+PV). Drie rendementen:
-  //   A = batterij-only (uit run 1, STATE.batterijCase, nog zónder extra PV);
-  //   C = combined (kpi2 = beste.rendement_b1, batterij + PV, bakje 1);
-  //   B = PV-eigen = marginale besparing (C − A) / marginale PV-investering (nieuwe kWp × €450 + PV-kabeltracé €10.000).
-  var _bc=STATE.batterijCase||null, batterij_case=null, pv_optie=null;
-  if(_bc){
-    var _aRend=(_bc.rendement!=null)?Math.round(_bc.rendement*10)/10:null;
-    var _aBesp=Math.round(+_bc.besparing||0), _aCapex=Math.round(+_bc.capex||0);
+  // v1.63.41 (Johan 03-08): BATTERIJ = CORE, PV = OPTIE. Het optimum is batterij-only (beste, geen extra PV toegepast).
+  //   A = batterij-optimum (kpi2 = beste.rendement_b1 = batterij-only rendement).
+  //   PV-optie uit de sweep (STATE.pvOptie), MARGINAAL op het optimum: B = eigen rendement (marginale besparing ÷
+  //   PV-investering), C = gecombineerd batterij + PV. De optie verschijnt óók op groeistap 1 (C op de instap-capex).
+  //   Niets van de PV zit in het core-optimum — de PV is puur een aparte optie met zichtbare impact.
+  var _po=STATE.pvOptie||null, batterij_case=null, pv_optie=null;
+  // v1.63.41: interactieve terugval — buiten de autopilot is STATE.pvOptie leeg; leid ze dan af uit de PV-sweep
+  // (drempel 80 % marginale zelfconsumptie), zodat óók een handmatige run het rapport met batterij-core + PV-optie toont.
+  if(!_po && STATE.pvSweep && STATE.pvSweep.stappen && STATE.pvSweep.stappen.length){
+    try{ _po=(typeof _pvOptieKies==='function')?_pvOptieKies(80):null; }catch(e){ _po=null; }
+  }
+  if(beste){
+    var _aBesp=Math.round(+_bBesp||0);
+    var _aCapex=Math.round((beste.capex_b1!=null)?beste.capex_b1:((beste.capex!=null)?beste.capex:capexTot));
+    var _aRend=(kpi2!=null)?Math.round(kpi2*10)/10:((_aBesp>0&&_aCapex>0)?Math.round(_aBesp/_aCapex*1000)/10:null);
     var _aTvt=(_aBesp>0 && _aCapex>0)?Math.round(_aCapex/_aBesp*10)/10:null;
     batterij_case={ rendement_pct:_aRend, besparing_jaar:_aBesp, capex:_aCapex, terugverdientijd_jaar:_aTvt,
-                    batterij_kw:Math.round(+_bc.battKw||0), batterij_kwh:Math.round(+_bc.battKwh||0) };
-    if(pvKwp>0){
-      var _pvCapex=Math.round(pvKwp*INV_PV_EUR_PER_KWP + 10000);   // marginale PV-investering: nieuwe kWp + PV-kabeltracé
-      var _pvBesp=Math.round((+_bBesp||0) - _aBesp);               // marginale besparing van de PV (combined − batterij-only)
-      var _pvRend=(_pvBesp>0 && _pvCapex>0)?Math.round(_pvBesp/_pvCapex*1000)/10:null;
-      var _pvTvt =(_pvBesp>0 && _pvCapex>0)?Math.round(_pvCapex/_pvBesp*10)/10:null;
-      var _cCapex=(beste&&beste.capex_b1!=null)?Math.round(beste.capex_b1):Math.round(_aCapex+_pvCapex);
-      pv_optie={ kwp:Math.round(pvKwp), capex:_pvCapex, besparing_jaar:_pvBesp,
+                    batterij_kw:_bBattKw, batterij_kwh:_bBattKwh };
+    if(_po && +_po.kwp>0){
+      var _pvBesp=Math.round(+_po.besparing_jaar||0), _pvCapex=Math.round(+_po.capex||0);
+      var _pvRend=(_po.eigen_rendement_pct!=null)?_po.eigen_rendement_pct:((_pvBesp>0&&_pvCapex>0)?Math.round(_pvBesp/_pvCapex*1000)/10:null);
+      var _pvTvt=(_po.eigen_terugverdientijd_jaar!=null)?_po.eigen_terugverdientijd_jaar:((_pvBesp>0&&_pvCapex>0)?Math.round(_pvCapex/_pvBesp*10)/10:null);
+      var _cB=_aBesp+_pvBesp, _cC=_aCapex+_pvCapex;
+      pv_optie={ kwp:Math.round(+_po.kwp||0), capex:_pvCapex, besparing_jaar:_pvBesp,
+                 marginale_zelfconsumptie_pct:(_po.marginale_zelfconsumptie_pct!=null?_po.marginale_zelfconsumptie_pct:null),
+                 drempel:(_po.drempel!=null?_po.drempel:null),
                  eigen_rendement_pct:_pvRend, eigen_terugverdientijd_jaar:_pvTvt,
-                 gecombineerd_rendement_pct:(kpi2!=null?Math.round(kpi2*10)/10:null),
-                 gecombineerd_besparing_jaar:Math.round(+_bBesp||0), gecombineerd_capex:_cCapex };
-      // v1.63.38 (Johan 01-08): PV-OPTIE OP DE EERSTE GROEISTAP. De groeistap is batterij-only; hier leggen we de
-      // PV als eenmalige optie eróp: eigen rendement (B, zelfde marginale PV-besparing/-capex) + het gecombineerde
-      // rendement van DEZE instap + PV (C op de instap-capex, niet op het volgroeide optimum).
+                 gecombineerd_rendement_pct:((_cB>0&&_cC>0)?Math.round(_cB/_cC*1000)/10:null),
+                 gecombineerd_besparing_jaar:Math.round(_cB), gecombineerd_capex:Math.round(_cC) };
       if(groeistap){
         var _s1B=Math.round(+groeistap.besparing_jaar||0), _s1C=Math.round(+groeistap.capex||0);
         var _cB1=_s1B+_pvBesp, _cC1=_s1C+_pvCapex;
-        groeistap.pv_optie={ kwp:Math.round(pvKwp), capex:_pvCapex, besparing_jaar:_pvBesp,
+        groeistap.pv_optie={ kwp:Math.round(+_po.kwp||0), capex:_pvCapex, besparing_jaar:_pvBesp,
+          marginale_zelfconsumptie_pct:(_po.marginale_zelfconsumptie_pct!=null?_po.marginale_zelfconsumptie_pct:null),
           eigen_rendement_pct:_pvRend, eigen_terugverdientijd_jaar:_pvTvt,
           gecombineerd_rendement_pct:((_cB1>0 && _cC1>0)?Math.round(_cB1/_cC1*1000)/10:null),
           gecombineerd_besparing_jaar:Math.round(_cB1), gecombineerd_capex:Math.round(_cC1),
@@ -3693,8 +3708,20 @@ function _ontwerpRapportData(projectId, mode){
     kpi1_eur_per_km:kpiKm, kpi1_creg_per_km:cregKm,
     kpi2_rendement:kpi2, kpi3_loadfactor_voor:lfVoor, kpi3_loadfactor_na:lfNa };
   out.extra_pv=extra_pv;
-  if(batterij_case) out.batterij_case=batterij_case;   // v1.63.37: A = batterij-only rendement (headline in tegel 3/4)
-  if(pv_optie) out.pv_optie=pv_optie;                  // v1.63.37: B = PV-eigen rendement + C = gecombineerd (batterij+PV)
+  // v1.63.41: de "Extra PV"-pagina toont nu de PV-OPTIE (uit de sweep, batterij als core), niet de toegepaste PV
+  // (STATE.pvKwp=0). We voeden extra_pv uit pv_optie zodat de bestaande pagina de optie-kWp/-bijdrage/-zelfverbruik toont.
+  if(pv_optie){
+    var _xpProd=Math.round((+pv_optie.kwp||0)*0.9*10)/10;
+    out.extra_pv={ kwp:Math.round(+pv_optie.kwp||0), productie_mwh:_xpProd,
+      zelfverbruik_pct:(pv_optie.marginale_zelfconsumptie_pct!=null?pv_optie.marginale_zelfconsumptie_pct:null),
+      meerwaarde_eur:Math.round(+pv_optie.besparing_jaar||0),
+      direct_mwh:(pv_optie.marginale_zelfconsumptie_pct!=null?Math.round(_xpProd*(+pv_optie.marginale_zelfconsumptie_pct)/100*10)/10:null),
+      via_batterij_mwh:null,
+      injectie_mwh:(pv_optie.marginale_zelfconsumptie_pct!=null?Math.round(Math.max(0,_xpProd*(1-(+pv_optie.marginale_zelfconsumptie_pct)/100))*10)/10:null),
+      is_optie:true };
+  }
+  if(batterij_case) out.batterij_case=batterij_case;   // v1.63.41: A = batterij-core rendement (headline in kaart + rapport)
+  if(pv_optie) out.pv_optie=pv_optie;                  // v1.63.41: PV-optie — B = eigen rendement + C = gecombineerd (batterij+PV) + marginale zelfconsumptie
   if(groeistap) out.groeistap=groeistap;
   if(groeipad) out.groeipad=groeipad;
   // v1.63.24: CONSISTENT. besparing_jaar1 = het DIESEL-TOTAAL (PV+batterij + laadpalen) → financiering, headline én
@@ -9932,6 +9959,7 @@ function runSimulatie(){
   if(!validateStep(9))return;
   STATE.isRunning=true;
   STATE.groeipadGebouw=null;   // v1.54.0: reset batterij-only groeipad
+  STATE.pvOptie=null;   // v1.63.41: PV-optie per run herberekenen (uit de sweep) — batterij = core
   STATE.groeistap1=null; STATE.groeistap1Loading=false; STATE.groeistap1Fout=null;   // v1.57.0: reset groeistap-1-herberekening
   STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null;   // v1.55.0: reset PV-suggestie (pvKeuze pas na sweep)
   STATE.currentStep=10;
@@ -11245,32 +11273,45 @@ function _apRunSim(){
 }
 function _apPickPv(drempel){
   drempel=drempel||80;   // v1.63.32: default 80% (was 90%); komt als parameter uit de payload (h.pvDrempel)
-  if(+STATE.pvKwp>0) return Promise.resolve();   // PV al vast → sweep sloeg over
-  // v1.63.30: wacht tot de PV-sweep klaar is OF faalt (pvSweepFout) — bij een fout niet 10 min blijven wachten maar
-  // gewoon zonder extra PV verder. De heartbeat toont ondertussen "PV-scenario's doorrekenen — Ns" (live voortgang).
+  // v1.63.41 (Johan 03-08): PV = OPTIE, GEEN CORE. We passen de extra PV NIET meer toe (geen dure herrun). Het optimum
+  // en het groeipad blijven batterij-only (STATE.pvKwp blijft 0). We kiezen enkel de PV-maat op x% marginale zelfconsumptie
+  // en rekenen de optie-economie rechtstreeks uit de PV-sweep (marginale besparing t.o.v. pv=0). Eén sim-run i.p.v. run 1 +
+  // herrun → Kamino wordt sneller, en kaart/rapport tonen batterij als core met PV als aparte optie (impact zichtbaar).
   return _apWait(function(){ return (STATE.pvSweep && !STATE.pvSweepLoading) || (!!STATE.pvSweepFout && !STATE.pvSweepLoading); }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
-    var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[], keuze=0;
-    // v1.63.32: kies op de MARGINALE zelfconsumptie van de nieuwe PV (marginale_zelfconsumptie_pct, server v15.51),
-    // niet op het geblende % (dat door bestaande PV te gunstig oogt). Terugval op het geblende % bij een oude proxy.
-    var _zc=function(s){ return (s.marginale_zelfconsumptie_pct!=null)?+s.marginale_zelfconsumptie_pct:((s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null); };
-    st.forEach(function(s){ var pv=+s.pv_kwp||0, z=_zc(s);
-      if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
-    if(keuze===0){ var best=null, bz=null; st.forEach(function(s){ var z=_zc(s); if(z!=null && (best==null||z>bz)){ best=s; bz=z; } }); if(best) keuze=+best.pv_kwp||0; }
-    // v1.63.37 (Johan 01-08): BATTERIJ-EERST. Leg hier — nog ZONDER extra PV (STATE.pvKwp=0) — de batterij-case (A) vast:
-    // run 1's beste is de standalone-batterij-winnaar. Forceer die opstelling in de herrun (besteOverride) zodat de
-    // extra PV de batterij niet wegduwt → de herrun levert de COMBINED (batterij + PV) i.p.v. PV-only.
-    try{ var _eng0=(typeof _kpiEngine==='function')?_kpiEngine():null, _b0=_eng0&&_eng0.beste;
-      if(_b0){ STATE.batterijCase={ key:_b0.key, rendement:(_b0.rendement_b1!=null?_b0.rendement_b1:_b0.rendement),
-        besparing:_b0.besparing, capex:(_b0.capex_b1!=null?_b0.capex_b1:_b0.capex),
-        battKw:_b0.battKw, battKwh:_b0.battKwh, npv:_b0.npv, aansluitingKva:_b0.aansluitingKva };
-        if(_b0.key==='batterij'||_b0.key==='mix'){ STATE.besteOverride=_b0.key; } }
-      else { STATE.batterijCase=null; }
-    }catch(_e){ STATE.batterijCase=null; }
-    STATE.pvKwp=keuze; STATE.pvKeuzeKwp=keuze;
-    STATE.apSuppressGroeipad=false;   // v1.63.27: dit IS de herrun mét PV → nu het definitieve groeipad wél berekenen
-    _apStatus('Extra PV op '+keuze+' kWp (≥'+drempel+'% zelfverbruik) — batterij vasthouden, PV-impact berekenen…');
-    return _apRunSim();   // herrun mét PV, batterij geforceerd → combined (batterij+PV)
+    STATE.pvOptie=_pvOptieKies(drempel);   // PV-optie-economie (marginaal), ZONDER toepassen → optimum blijft batterij-only
+    var _k=(STATE.pvOptie&&STATE.pvOptie.kwp)||0; STATE.pvKeuzeKwp=_k;
+    _apStatus('PV-optie bepaald: '+_k+' kWp (≥'+drempel+'% marginale zelfconsumptie) — het optimum blijft batterij-only.');
+    return Promise.resolve();   // GEEN herrun
   });
+}
+// v1.63.41: kies de PV-maat op x% MARGINALE zelfconsumptie uit de sweep en geef de optie-economie terug. Herbruikt door de
+// autopilot (_apPickPv) én de interactieve rapportbouw (_ontwerpRapportData-terugval). Terugval op het hoogste marginale %.
+function _pvOptieKies(drempel){
+  drempel=drempel||80;
+  var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[]; if(!st.length) return null;
+  var _zc=function(s){ return (s.marginale_zelfconsumptie_pct!=null)?+s.marginale_zelfconsumptie_pct:((s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null); };
+  var keuze=0;
+  st.forEach(function(s){ var pv=+s.pv_kwp||0, z=_zc(s); if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
+  if(keuze===0){ var best=null, bz=null; st.forEach(function(s){ var z=_zc(s); if(z!=null && (best==null||z>bz)){ best=s; bz=z; } }); if(best) keuze=+best.pv_kwp||0; }
+  return _pvOptieUitSweep(keuze, drempel);
+}
+// v1.63.41: PV-optie-economie uit de sweep (marginaal t.o.v. pv=0), op de OPTIMALE batterij-opstelling. Geen herrun nodig.
+function _pvOptieUitSweep(kwp, drempel){
+  if(!(+kwp>0)) return null;
+  var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[]; if(!st.length) return null;
+  var af=(typeof _annFactor==='function')?_annFactor():1;
+  var base=st.filter(function(s){ return (+s.pv_kwp||0)===0; })[0]||st[0];
+  var f0=(+base.factuur_sturing_excl_btw||0);
+  var step=null, bestd=null; st.forEach(function(s){ var pv=+s.pv_kwp||0; if(pv>0){ var d=Math.abs(pv-(+kwp)); if(bestd==null||d<bestd){ bestd=d; step=s; } } });
+  if(!step) return null;
+  var pvK=+step.pv_kwp||+kwp;
+  var besp=Math.round((f0-(+step.factuur_sturing_excl_btw||0))*af);        // marginale besparing van de PV (t.o.v. pv=0)
+  var capex=Math.round(pvK*INV_PV_EUR_PER_KWP + 10000);                    // PV-capex + PV-kabeltracé (€10.000)
+  var mzc=(step.marginale_zelfconsumptie_pct!=null)?Math.round(+step.marginale_zelfconsumptie_pct):((step.zelfconsumptie_pct!=null)?Math.round(+step.zelfconsumptie_pct):null);
+  var rend=(besp>0&&capex>0)?Math.round(besp/capex*1000)/10:null;
+  var tvt=(besp>0&&capex>0)?Math.round(capex/besp*10)/10:null;
+  return { kwp:Math.round(pvK), besparing_jaar:besp, capex:capex,
+           eigen_rendement_pct:rend, eigen_terugverdientijd_jaar:tvt, marginale_zelfconsumptie_pct:mzc, drempel:drempel };
 }
 function _apGroeistap1(){
   return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 900000, 'groeipad').then(function(){   // v1.63.21: 15 min achtervang
@@ -11381,7 +11422,7 @@ function _apKlaar(h, reportData, reportKey, reportHtml){
   // rapport, de PDF-opslag én de auto-bucket-opslag allemaal onder HETZELFDE ID landen (niet naam-afgeleid).
   if(reportData && h && h.projectId){ try{ reportData.project_id=h.projectId; }catch(e){} }
   var kern=_apBouwKern(h, reportData);
-  STATE.besteOverride=null; STATE.batterijCase=null;   // v1.63.37: rapportdata + kern zijn gebouwd → override/case opruimen zodat een latere interactieve run schoon start
+  STATE.besteOverride=null; STATE.batterijCase=null; STATE.pvOptie=null;   // v1.63.41: rapportdata + kern gebouwd → alles opruimen zodat een latere interactieve run schoon start
   if(_apEmbed()){
     try{ window.parent.postMessage({ __fluctus:'kamino-result', projectId:h.projectId, tegel:h.tegel,
       kern:kern, reportData:(reportData||null), reportKey:(reportKey||null), reportHtml:(reportHtml||null) }, location.origin); }
@@ -11397,7 +11438,7 @@ function _apKlaar(h, reportData, reportKey, reportHtml){
 function _autopilotDrive(h){
   var tegel=h.tegel||'aansluiting';
   _apH=h;   // onthoud de handoff zodat _apStatus een fout aan Kamino kan terugmelden
-  STATE.besteOverride=null; STATE.batterijCase=null;   // v1.63.37: batterij-eerst — schone lei per studie (geen override- of case-lek van een vorige run)
+  STATE.besteOverride=null; STATE.batterijCase=null; STATE.pvOptie=null;   // v1.63.41: schone lei per studie (geen override/case/pv-optie-lek van een vorige run)
   _apHbStart();   // v1.63.21: start de hartslag-ticker (elke ~8s) → Kamino's liveness-watchdog
   _apStatus('Uw gegevens worden ingeladen…');
   try{ _apSetState(h); }catch(e){ _apStatus('Inladen mislukte: '+e.message, true); return; }
@@ -11429,12 +11470,13 @@ function _autopilotDrive(h){
     return;
   }
   // tegel 3 (aansluiting) / 4 (mobiliteit): simulator-volgorde tot ontwerp.
-  // v1.63.27: LICHTE RUN 1 — run 1 dient enkel om de PV-seed te bepalen; het groeipad komt uit de herrun mét PV.
-  // Onderdruk het run-1-groeipad ZOLANG er een herrun volgt (= geen vaste PV). Bij vaste PV rekent run 1 het wél.
-  STATE.apSuppressGroeipad = (+STATE.pvKwp<=0);
-  _apStatus('Optimale opstelling berekenen…');
+  // v1.63.41 (Johan 03-08): BATTERIJ = CORE, PV = OPTIE. Geen herrun-mét-PV meer → run 1 rekent meteen het definitieve
+  // (batterij-only) groeipad. De PV-optie wordt daarna uit de sweep afgeleid (marginaal), zonder toepassen. Eén run i.p.v.
+  // twee → sneller (dit verklaart waarom Kamino vroeger trager was dan een interactieve run: die deed geen herrun).
+  STATE.apSuppressGroeipad = false;
+  _apStatus('Optimale batterij-opstelling berekenen…');
   _apRunSim()
-    .then(function(){ _apStatus('Extra PV dimensioneren op ≥'+(h.pvDrempel||80)+'% zelfverbruik…'); return _apPickPv(h.pvDrempel||80); })
+    .then(function(){ _apStatus('PV-optie dimensioneren op ≥'+(h.pvDrempel||80)+'% marginale zelfconsumptie…'); return _apPickPv(h.pvDrempel||80); })
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
     .then(function(){
       _apStatus('Kerncijfers terugkoppelen…');
