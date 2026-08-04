@@ -161,6 +161,10 @@
   tbody tr:nth-child(even){background:var(--bg)}
   tfoot td{font-weight:800;border-top:2px solid var(--blauw);background:#eef2f8}
   table.bom{margin:2px 0}table.bom th,table.bom td{padding:4px 8px}
+  table.lpin{font-size:12px}table.lpin th,table.lpin td{padding:5px 8px}
+  table.lpin.ed thead th{background:#80C539;color:#fff}
+  table.lpin.ed{border-top:2px solid #80C539}
+  table.lpin.ed tbody tr:nth-child(even){background:#F0FBE0}
   table.bom tfoot .bom-tot td{background:#1F386414;border-top:2px solid var(--blauw);font-size:13px}
   .pos{color:var(--groen-d);font-weight:700}
   .neg{color:var(--rood);font-weight:700}
@@ -510,6 +514,7 @@ function flowStrip(){ return '<div class="flow">'+FLOW.map(function(nd,i){ retur
 var R = document.getElementById('rapport');
 var PID = INV.project_id || '';
 var _pg=0, _charts=[], _heatmaps=[];
+var _jcAan=(window.FluctusJacops&&FluctusJacops.active());   // Jacops-versie actief? → laadplein-invoer + heatmap in E+Drive-stijl
 // v2.10 (Johan-review 03-08): sectienummers dynamisch — alleen zichtbare secties tellen mee (laadplein/bestaande-PV
 // zijn conditioneel), zodat de nummering nooit een gat vertoont. Groeipad = "N+" (voortzetting), financieringsplan = geen nr.
 var _secNr=0; function secNr(){ return ++_secNr; }
@@ -531,6 +536,7 @@ function tekenHeatmap(canvas, dataFn, lo, hi, palet, eenheid){
   function kleur(v){ if(v==null) return [240,242,246];
     var t=Math.max(0,Math.min(1,(v-lo)/((hi-lo)||1))), r,g,b;
     if(palet==='blauw'){ r=Math.round(234-t*214); g=Math.round(241-t*181); b=Math.round(250-t*110); }
+    else if(palet==='edrive'){ r=Math.round(240-t*181); g=Math.round(251-t*129); b=Math.round(224-t*202); }   // E+Drive-groen: licht → #80C539 → donkergroen
     else if(t<0.5){ var k=t/0.5; r=Math.round(43+k*212); g=Math.round(158+k*47); b=Math.round(74-k*34); }
     else { var k2=(t-0.5)/0.5; r=Math.round(255-k2*43); g=Math.round(205-k2*163); b=Math.round(40-k2*4); }
     return [r,g,b]; }
@@ -538,7 +544,7 @@ function tekenHeatmap(canvas, dataFn, lo, hi, palet, eenheid){
     var idx=(q*W+d)*4; img.data[idx]=c[0]; img.data[idx+1]=c[1]; img.data[idx+2]=c[2]; img.data[idx+3]=255; } }
   ctx.putImageData(img,0,0);
   var lg=document.getElementById(canvas.id+'-lg');
-  if(lg){ var grad=(palet==='blauw')?'linear-gradient(to right,rgb(234,241,250),rgb(20,60,140))':'linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
+  if(lg){ var grad=(palet==='blauw')?'linear-gradient(to right,rgb(234,241,250),rgb(20,60,140))':(palet==='edrive')?'linear-gradient(to right,rgb(240,251,224),rgb(128,197,57),rgb(59,122,22))':'linear-gradient(to right,rgb(43,158,74),rgb(255,205,40),rgb(212,42,36))';
     lg.innerHTML='<span>'+Math.round(lo)+' '+eenheid+'</span><span style="display:inline-block;width:150px;height:9px;border-radius:3px;background:'+grad+'"></span><span>'+Math.round(hi)+' '+eenheid+'</span>'; }
 }
 // synthetische dagcurve (zonvorm / lastvorm) voor de voorbeeld-heatmaps als er geen echte arrays zijn
@@ -759,6 +765,21 @@ if(INV.laadplein && INV.laadplein.aanwezig){
       '<div class="kpi"><div class="l">Laadvolume</div><div class="v">'+num(LP.mwh_jaar)+'</div><div class="s">MWh/jaar</div></div>'+
       '<div class="kpi"><div class="l">Afstand</div><div class="v">'+num(LP.km_jaar/1000)+'k</div><div class="s">km/jaar</div></div>'+
     '</div>'+
+    // v2.11.1 (Johan 04-08): INPUT-PARAMETERS per laadplein (zoals ingegeven). In de Jacops-versie in E+Drive-stijl (groen).
+    ((LP.invoer&&LP.invoer.length)?(function(){
+      var _rows=LP.invoer.map(function(p){
+        var lp=p.laadpunten||{}, palen=[];
+        if((+lp.ac22||0)>0) palen.push(num(lp.ac22)+'× AC 22');
+        if((+lp.dc160||0)>0) palen.push(num(lp.dc160)+'× DC 160');
+        if((+lp.dc300||0)>0) palen.push(num(lp.dc300)+'× DC 300');
+        var venster=(p.venster_start!=null&&p.venster_eind!=null)?(num(p.venster_start)+'–'+num(p.venster_eind)+' u'):'—';
+        var kwhkm=(p.kwh_per_km>0)?(p.kwh_per_km.toFixed(2).replace('.',',')+' kWh/km'):'—';
+        return '<tr><td style="text-align:left">'+esc(p.voertuigtype||p.naam||'plein')+'</td><td>'+num(p.aantal)+'</td><td>'+num(p.km_per_jaar)+'</td><td>'+kwhkm+'</td><td>'+venster+'</td><td>'+num(p.dagen_per_week)+'</td><td style="text-align:left">'+(palen.length?palen.join(' · '):'—')+'</td></tr>';
+      }).join('');
+      return '<h3'+(_jcAan?' style="color:#5FA024"':'')+'>Uw invoer per laadplein</h3>'+
+        '<table class="lpin'+(_jcAan?' ed':'')+'"><thead><tr><th style="text-align:left">Laadplein</th><th>Aantal</th><th>km/jaar</th><th>Verbruik</th><th>Laadvenster</th><th>Dagen/week</th><th style="text-align:left">Laadpunten</th></tr></thead><tbody>'+_rows+'</tbody></table>'+
+        '<p class="note" style="margin-top:4px">Deze parameters (voertuigtype, aantal, jaarkilometers, verbruik, laadvenster, dagen en laadpunten) liggen aan de basis van de laadvraag en de sturing in dit rapport.</p>';
+    })():'')+
     // v2.9.12 (Johan 03-08): LAADCAPACITEIT-CHECK — volstaan de opgegeven laadpalen om de energie binnen het venster
     // + de aansluiting te leveren? (tekort_mwh uit de sim). Groen = volstaat; oranje = X MWh raakt niet geladen.
     ((LP.tekort_mwh!=null)
@@ -766,7 +787,7 @@ if(INV.laadplein && INV.laadplein.aanwezig){
           ? '<div class="box groen"><b>✓ Laadcapaciteit volstaat.</b> De opgegeven laadpalen leveren alle '+num(LP.gevraagd_mwh||LP.mwh_jaar)+' MWh/jaar binnen het laadvenster en uw aansluiting.</div>'
           : '<div class="box oranje" style="border-width:2px"><b>⚠ Laadcapaciteit te krap.</b> ± '+fmt1.format(LP.tekort_mwh)+' MWh/jaar (van '+num(LP.gevraagd_mwh)+') raakt <b>niet</b> geladen binnen het venster en uw aansluiting. Voeg krachtigere/meer laadpalen toe, verruim het laadvenster, of voorzie een grotere aansluiting/batterij.</div>')
       : '')+
-    heatmapBlok('hm-laad','Wanneer laadt u?','Slim laden verschuift naar de goedkoopste en zonnigste momenten, binnen uw aansluiting.', function(d,q){return synthLast(d,q)*(O.aansluiting_kw||135)*0.7;}, 0, (O.aansluiting_kw||135), 'blauw','kW')+
+    heatmapBlok('hm-laad','Wanneer laadt u?','Slim laden verschuift naar de goedkoopste en zonnigste momenten, binnen uw aansluiting.', function(d,q){return synthLast(d,q)*(O.aansluiting_kw||135)*0.7;}, 0, (O.aansluiting_kw||135), (_jcAan?'edrive':'blauw'),'kW')+
     mgmt('laadplein — pleinen & km-kost',
       '<table><thead><tr><th>Plein</th><th>type</th><th>aantal</th><th>MWh/jaar</th></tr></thead><tbody>'+
       (LP.pleinen||[]).map(function(p){return '<tr><td>'+esc(p.naam)+'</td><td>'+esc(p.type)+'</td><td>'+num(p.aantal)+'</td><td>'+num(p.mwh)+'</td></tr>';}).join('')+
