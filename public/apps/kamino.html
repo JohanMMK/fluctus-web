@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.17 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.18 (Mijn Fluctus-app · testmodus)
      v0.9.17 (Johan): KABELTRACÉ-KOPPELING tegel 3/4 — knop "Kabeltracé intekenen" op het resultaatscherm seedt de
            kabelplanner (adres + laadpunten + batterij + voorgestelde PV) uit de optimale opstelling; bij terugkeer
            herrekent de autopilot de optimale opstelling + groeistap 1 (PV/onbalans blijven optie) met de EXACTE
@@ -267,7 +267,7 @@ function byId(id){ return PUNTEN.find(function(p){return p.id===id;}); }
 function heeftActief(){ return !!STATE.werk.id; }
 function projById(id){ return STATE.projecten.find(function(p){return p.id===id;}); }
 function gedaanMap(){ var id=STATE.werk.id; if(!id) return {}; return STATE.gedaan[id]||(STATE.gedaan[id]={}); }
-function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false }; _factuurFile=null; }
+function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false }; _factuurFile=null; try{ sessionStorage.removeItem('FLX_KAMINO_KBL_STATE'); }catch(e){} }
 function vandaag(){ var d=new Date(); return ('0'+d.getDate()).slice(-2)+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+d.getFullYear(); }
 function ci(k){ return (STATE.contact[k]||'').replace(/"/g,'&quot;'); }
 function heeftFactuur(){ return !!(STATE.werk.opgeslagen || STATE.werk.factuur); }
@@ -284,8 +284,9 @@ var app=document.getElementById('app');
 // ─── JACOPS-PRESENTATIESKIN (?stijl=jacops) — geeft het hele Kamino-scherm de Jacops look & feel (rood-dominant +
 // "JACOPS."-logo in de topbar). Laat de gewone Fluctus-Kamino ongemoeid. Fluctus.net CVSO blijft in de voettekst. ───
 (function(){
-  function _jc(){ try{ return /(^|[?&])stijl=jacops(&|$)/.test(location.search||''); }catch(e){ return false; } }
-  if(!_jc()) return;
+  // Kamino is een hash-router (#/…) → aanvaard stijl=jacops zowel in de echte query (?…) als in de hash (#/?…).
+  function _jc(){ try{ return /stijl=jacops/.test((location.search||'')+' '+(location.hash||'')); }catch(e){ return false; } }
+  if(!_jc()){ try{ window.addEventListener('hashchange', function(){ if(_jc()) location.reload(); }); }catch(e){} return; }
   var css=''
     + ':root{--blauw:#E83020;--blauw-l:#C6261A;--oranje:#F2A900;--oranje-d:#C6261A;--groen:#1E7F4F;--groen-d:#17663F;--zwart:#232323;}'
     + '.punt{border-top-color:#E83020}.punt.betaald{border-top-color:#C6261A}.punt.gratis{border-top-color:#1E7F4F}'
@@ -624,6 +625,25 @@ function _startStudieAutopilot(id, extra){
 // komt in de reeds voorziene bijlage van rapport T3/T4). De kabelplanner zelf blijft ongewijzigd (zelfde localStorage-contract).
 var KBL_SEED_KEY='fluctus_kbl_seed', KBL_RESULT_KEY='fluctus_kbl_result', KABELPLANNER_URL='kabelplanner.html';
 var _kblSeedTs={}, _kblResultTs={}, _kblLaatste={}, _kblActief=null;
+var KBL_STATE_KEY='FLX_KAMINO_KBL_STATE';
+// v0.9.18 (Johan 04-08): de Kamino-state is in-memory; als de kabelplanner in dezelfde tab opent of je keert terug
+// via "terug", herlaadt Kamino en verdween het actieve project + de kerncijfers. We bewaren de sessie-state (zónder de
+// zware rapport-JSON — die wordt bij de herrekening opnieuw gemaakt) vóór het openen, en herstellen ze bij het laden.
+function _kblPersistKamino(){
+  try{ sessionStorage.setItem(KBL_STATE_KEY, JSON.stringify({
+    contact:STATE.contact, werk:STATE.werk, projecten:STATE.projecten, gedaan:STATE.gedaan,
+    kern:STATE.kern, diag:STATE.diag, rapportOp:STATE.rapportOp,
+    active:_kblActief, seedTs:_kblSeedTs, resTs:_kblResultTs })); }catch(e){}
+}
+function _kblRestoreKamino(){
+  try{ var raw=sessionStorage.getItem(KBL_STATE_KEY); if(!raw) return false;
+    var s=JSON.parse(raw); if(!s||!s.werk||!s.werk.id) return false;
+    STATE.contact=s.contact||STATE.contact; STATE.werk=s.werk; STATE.projecten=s.projecten||[];
+    STATE.gedaan=s.gedaan||{}; STATE.kern=s.kern||{}; STATE.diag=s.diag||{}; STATE.rapportOp=s.rapportOp||{};
+    if(s.active) _kblActief=s.active; if(s.seedTs) _kblSeedTs=s.seedTs; if(s.resTs) _kblResultTs=s.resTs;
+    return true;
+  }catch(e){ return false; }
+}
 function _kblSeedTegel(id){
   var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id], rd=r&&r.data;
   if(!rd){ alert('Reken de studie eerst door voor u het kabeltracé intekent.'); return; }
@@ -641,6 +661,7 @@ function _kblSeedTegel(id){
   var prev=_kblLaatste[pid+'|'+id]; if(prev && prev.state) seed.restore=prev.state;
   try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
   _kblSeedTs[pid+'|'+id]=seed.ts; _kblActief={ pid:pid, id:id };
+  _kblPersistKamino();   // bewaar de sessie-state → overleeft een herlaad bij terugkeer uit de kabelplanner
   try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){ alert('Kon de kabelplanner niet openen (pop-up geblokkeerd?).'); }
 }
 function _kblCheckResultKamino(){
@@ -658,6 +679,7 @@ function _kblCheckResultKamino(){
       pvOverrideKwp:(res.pv_kwp_getekend!=null?+res.pv_kwp_getekend:null),
       kabelFoto:(res.foto_dataurl||null)
     });
+    _kblPersistKamino();   // bewaar dat dit resultaat verwerkt is → geen dubbele herrekening bij een volgende load
   }catch(e){}
 }
 if(typeof window!=='undefined' && !window._kblKaminoListen){ window._kblKaminoListen=true;
@@ -979,7 +1001,11 @@ window.addEventListener('message', function(e){
     try{ e.source && e.source.postMessage({type:'fluctus-rapport-saved', ok:false, error:(err&&err.message)||'upload mislukt'}, '*'); }catch(x){}
   });
 });
+// v0.9.18: herstel de sessie-state (overleeft een herlaad bij terugkeer uit de kabelplanner) vóór de eerste render,
+// render dan het scherm, en verwerk daarna een eventueel openstaand kabelplanner-resultaat (→ herrekening).
+try{ _kblRestoreKamino(); }catch(e){}
 window.addEventListener('hashchange',router); router();
+try{ _kblCheckResultKamino(); }catch(e){}
 </script>
 </body>
 </html>
