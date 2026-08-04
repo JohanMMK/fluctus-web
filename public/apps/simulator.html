@@ -11410,6 +11410,15 @@ function _apSetState(h){
   }
   STATE.laadpleinen = Array.isArray(h.laadpleinen)?h.laadpleinen:[];
   STATE.batterijId = h.batterijId||''; STATE.batterijCustom=h.batterijCustom||null;
+  // v1.63.54 (Johan): KABELTRACÉ-KOPPELING vanuit de Kamino-tegel — identiek aan de interactieve _kblCheckResult.
+  // De exacte kabelprijs (h.kabeltraceOverride) vervangt de schatting overal in de capex (_kabeltrace), de getekende PV
+  // (h.pvOverrideKwp) wordt de vaste PV-optie-maat, en de luchtfoto (h.kabelFoto) komt in de rapport-bijlage (T3/T4).
+  STATE.kabeltraceOverride = (h.kabeltraceOverride!=null && isFinite(+h.kabeltraceOverride)) ? +h.kabeltraceOverride : null;
+  STATE.kabeltraceResult = (h.kabelFoto || h.pvOverrideKwp!=null || h.kabeltraceOverride!=null)
+    ? { foto_dataurl:(h.kabelFoto||null),
+        kabeltrace_eur:(h.kabeltraceOverride!=null?+h.kabeltraceOverride:null),
+        pv_kwp_getekend:(h.pvOverrideKwp!=null?+h.pvOverrideKwp:null) }
+    : null;
   if(bc.factuur_bestanden) STATE.baseCase=bc; STATE.baseCase=bc;
   STATE.currentStep=9;
   if(!Array.isArray(STATE.visited)) STATE.visited=[];
@@ -11420,28 +11429,34 @@ function _apRunSim(){
   try{ runSimulatie(); }catch(e){ return Promise.reject(e); }
   return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 1200000, 'simulatie');   // v1.63.21: 20 min achtervang
 }
-function _apPickPv(drempel){
+function _apPickPv(drempel, fixedKwp){
   drempel=drempel||80;   // v1.63.32: default 80% (was 90%); komt als parameter uit de payload (h.pvDrempel)
   // v1.63.41 (Johan 03-08): PV = OPTIE, GEEN CORE. We passen de extra PV NIET meer toe (geen dure herrun). Het optimum
   // en het groeipad blijven batterij-only (STATE.pvKwp blijft 0). We kiezen enkel de PV-maat op x% marginale zelfconsumptie
   // en rekenen de optie-economie rechtstreeks uit de PV-sweep (marginale besparing t.o.v. pv=0). Eén sim-run i.p.v. run 1 +
   // herrun → Kamino wordt sneller, en kaart/rapport tonen batterij als core met PV als aparte optie (impact zichtbaar).
   return _apWait(function(){ return (STATE.pvSweep && !STATE.pvSweepLoading) || (!!STATE.pvSweepFout && !STATE.pvSweepLoading); }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
-    STATE.pvOptie=_pvOptieKies(drempel);   // PV-optie-economie (marginaal), ZONDER toepassen → optimum blijft batterij-only
+    STATE.pvOptie=_pvOptieKies(drempel, (fixedKwp!=null?+fixedKwp:null));   // PV-optie-economie (marginaal), ZONDER toepassen → optimum blijft batterij-only
     var _k=(STATE.pvOptie&&STATE.pvOptie.kwp)||0; STATE.pvKeuzeKwp=_k;
-    _apStatus('PV-optie bepaald: '+_k+' kWp (≥'+drempel+'% marginale zelfconsumptie) — het optimum blijft batterij-only.');
+    _apStatus((fixedKwp!=null?'PV vastgelegd op ':'PV-optie bepaald: ')+_k+' kWp'+(fixedKwp!=null?' (kabelplanner)':' (≥'+drempel+'% marginale zelfconsumptie)')+' — het optimum blijft batterij-only.');
     return Promise.resolve();   // GEEN herrun
   });
 }
 // v1.63.41: kies de PV-maat op x% MARGINALE zelfconsumptie uit de sweep en geef de optie-economie terug. Herbruikt door de
 // autopilot (_apPickPv) én de interactieve rapportbouw (_ontwerpRapportData-terugval). Terugval op het hoogste marginale %.
-function _pvOptieKies(drempel){
+function _pvOptieKies(drempel, fixedKwp){
   drempel=drempel||80;
   var st=(STATE.pvSweep&&STATE.pvSweep.stappen)||[]; if(!st.length) return null;
   var _zc=function(s){ return (s.marginale_zelfconsumptie_pct!=null)?+s.marginale_zelfconsumptie_pct:((s.zelfconsumptie_pct!=null)?+s.zelfconsumptie_pct:null); };
   var keuze=0;
-  st.forEach(function(s){ var pv=+s.pv_kwp||0, z=_zc(s); if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
-  if(keuze===0){ var best=null, bz=null; st.forEach(function(s){ var z=_zc(s); if(z!=null && (best==null||z>bz)){ best=s; bz=z; } }); if(best) keuze=+best.pv_kwp||0; }
+  // v1.63.54: getekende PV uit de kabelplanner heeft voorrang → snap naar de dichtste sweep-stap (de sweep is discreet).
+  if(fixedKwp!=null && +fixedKwp>0){
+    var bestPv=null, bd=1e9; st.forEach(function(s){ var pv=+s.pv_kwp||0; if(pv>0){ var d=Math.abs(pv-+fixedKwp); if(d<bd){ bd=d; bestPv=pv; } } });
+    keuze=(bestPv!=null?bestPv:+fixedKwp);
+  } else {
+    st.forEach(function(s){ var pv=+s.pv_kwp||0, z=_zc(s); if(pv>0 && z!=null && z>=drempel && pv>keuze) keuze=pv; });
+    if(keuze===0){ var best=null, bz=null; st.forEach(function(s){ var z=_zc(s); if(z!=null && (best==null||z>bz)){ best=s; bz=z; } }); if(best) keuze=+best.pv_kwp||0; }
+  }
   return _pvOptieUitSweep(keuze, drempel);
 }
 // v1.63.41: PV-optie-economie uit de sweep (marginaal t.o.v. pv=0), op de OPTIMALE batterij-opstelling. Geen herrun nodig.
@@ -11625,7 +11640,10 @@ function _autopilotDrive(h){
   STATE.apSuppressGroeipad = false;
   _apStatus('Optimale batterij-opstelling berekenen…');
   _apRunSim()
-    .then(function(){ _apStatus('PV-optie dimensioneren op ≥'+(h.pvDrempel||80)+'% marginale zelfconsumptie…'); return _apPickPv(h.pvDrempel||80); })
+    .then(function(){
+      if(h.pvOverrideKwp!=null && +h.pvOverrideKwp>0){ _apStatus('PV vastleggen op de getekende '+Math.round(+h.pvOverrideKwp)+' kWp (kabelplanner)…'); return _apPickPv(h.pvDrempel||80, +h.pvOverrideKwp); }
+      _apStatus('PV-optie dimensioneren op ≥'+(h.pvDrempel||80)+'% marginale zelfconsumptie…'); return _apPickPv(h.pvDrempel||80);
+    })
     .then(function(){ _apStatus('Groeistap 1 vastleggen…'); return _apGroeistap1(); })
     .then(function(){
       // v1.63.44 (Johan 03-08): factuur-analyses (kaal, geen batterij → snel, skip_lp) zodat de factuur-sectie
