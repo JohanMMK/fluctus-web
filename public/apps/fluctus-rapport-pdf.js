@@ -86,7 +86,9 @@
     }
   }
 
-  function fname(){ return ((M.klant||'rapport')+'_'+M.type+(M.pid?'_'+M.pid:'')).replace(/[^A-Za-z0-9._-]/g,'_')+'.pdf'; }
+  // v1.1 (Johan-review 03-08): scherpe bestandsnaam = <type>_<projectID> (bv. Contract_FLX-…, SolarActive_FLX-…).
+  function fname(){ var jc=(function(){ try{ return /(^|[?&])stijl=jacops(&|$)/.test(location.search||''); }catch(e){ return false; } })();
+    return (M.type+(M.pid?'_'+M.pid:'')+(jc?'_jacops':'')).replace(/[^A-Za-z0-9._-]/g,'_')+'.pdf'; }
 
   async function upload(b64){
     var payload={ project:M.klant||M.pid, project_id:M.pid, type:M.type, filenaam:fname(), pdf_base64:b64 };

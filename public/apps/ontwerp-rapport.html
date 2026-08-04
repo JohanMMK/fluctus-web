@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS ONTWERP-RAPPORT  v2.9.13  (dual-mode: klant + management)
+     FLUCTUS ONTWERP-RAPPORT  v2.10.4  (dual-mode: klant + management)
+     v2.10.4 (JOHAN-REVIEW 03-08): scherpe bestandsnaam (BatteryActive_<PID> / EplusDrive_<PID>); BIJLAGE 1 = kabeltracé-
+             inplanning (foto uit de kabelplanner) zo groot mogelijk op 1 A4, enkel als er een tracé getekend is.
+     v2.10.3 (JOHAN-REVIEW 03-08): optimale-opstelling — laadplein-KPI toont totale kVA + km/jaar (klein); sitepiek-
+             staafdiagram weggelaten (boodschap blijft als tekst); PV-donut gecentreerd. Zonnepanelen-titel: "optie bovenop uw batterij".
+     v2.10.2 (JOHAN-REVIEW UI 03-08): KPI-cijfers uitgelijnd (label vaste hoogte); labels ingekort ("Lagere factuur", "Investering",
+             "Zonder windfall"); PV-zelfconsumptie-donut enkel bij PV in de opstelling (+ sitepiek-caption verklaart de arbitrage-
+             richting, aansluiting = grens); grotere donut in sectie 4.
+     v2.10.1 (JOHAN-REVIEW paginering 03-08): elk stuk past nu op 1 A4 — overzicht (p1) gesplitst in 1a/1b, eerste-groeistap
+             gesplitst in twee (KPI's + verkoopbaar | PV-optie + windfall + start-investering), financieringstabellen compacter
+             (jaren 1/3/5/10/15, padding 3px). Gemeten: alle .a4 = 297mm, geen overflow meer.
+     v2.10 (JOHAN-REVIEW op de Kiemkracht-render 03-08): (p1) flow-blokjes = Factuur €/jaar, Optimale opstelling −besparing/
+            jaar, Eerste groeistap ROI% (groter); tweede kerncijfers-blok + 4 detailblokjes voor de eerste groeistap; "Uw
+            volgende stap" = 3 to-do's + aanbod. (p2) strategie-tabel toont inhoud + ROI/TVT per stap. (p4) donut = Energie/
+            netkosten per MWh/netkosten per MW/Heffingen + uitleg; staafdiagram gestapeld per component; "Voorstel"→"Optimale
+            opstelling". (p5) voetnoot jaarverbruik. Sectienummers DYNAMISCH (geen gat). Loadfactor ALTIJD in % zonder
+            decimalen (p6/8/9). (p7) "(bovenop wat u al opwekt)" weg. (p8) KPI rendement=max(jaar1,plan) + TVT klein, KPI2
+            loadfactor, ZONNEPANELEN extra+bestaande, LAADPUNTEN kVA+km, €25k/€21k-inconsistentie weg. (p9) geen laadplein→2
+            KPI's, loadfactor per groeistap ingevuld. (financiering) plan = eerste groeistap; "Eigen kas"→"Eigen middelen";
+            Model 4 ESCO = debt service 10% eerst, overwinst 50/50, dual-view; Model 5 GVV = 6%/15j, spiegelbeeld, dual-view.
      v2.9.13 (GROEISTAP 1 ZONDER/MET WINDFALL, Johan 03-08): de eerste-groeistap-pagina toont groeistap 1 nu expliciet
              zonder (gegarandeerd: arbitrage + piekshaving) én met onbalans-windfall (potentieel, vereist passthrough),
              windfall geschaald naar de instap-batterij t.o.v. het optimum. Sluit aan bij de kabeltracé-herrekenflow.
@@ -103,6 +122,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/apps/jacops-logo.js"></script>
+<script src="/apps/jacops-branding.js"></script>
 <style>
   :root{
     --blauw:#1F3864; --blauw-l:#2d4f8e; --groen:#05B050; --groen-d:#048443;
@@ -126,11 +147,14 @@
   .kpi{border:1px solid var(--lijn);border-left:4px solid var(--blauw);border-radius:4px;padding:12px}
   .kpi.groen{border-left-color:var(--groen)}
   .kpi.oranje{border-left-color:var(--oranje)}
-  .kpi .l{font-size:10px;color:var(--grijs);text-transform:uppercase;letter-spacing:.05em}
+  /* v2.10.2 (Johan-review): label vaste hoogte (2 regels) → de cijfers (.v) staan in élke kaart op dezelfde hoogte,
+     ook als één label over twee regels loopt. */
+  .kpi .l{font-size:10px;color:var(--grijs);text-transform:uppercase;letter-spacing:.05em;line-height:1.25;min-height:2.5em;display:block}
   .kpi .v{font-size:24px;font-weight:800;color:var(--zwart);margin-top:3px}
   .kpi .s{font-size:10px;color:var(--grijs);margin-top:2px}
   table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
   th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--lijn)}
+  table.compact th,table.compact td{padding:3px 8px}   /* v2.10.1 (Johan-review): compactere financieringstabellen → elk model op 1 A4 */
   th:first-child,td:first-child{text-align:left}
   thead th{background:var(--blauw);color:#fff;font-weight:700;border-bottom:none}
   tbody tr:nth-child(even){background:var(--bg)}
@@ -146,6 +170,7 @@
   .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
   .chart-wrap{position:relative;height:190px;margin:8px 0}
   .chart-wrap.sm{height:150px}
+  .chart-wrap.md{height:210px}   /* v2.10.2 (Johan-review): grotere donut in sectie 4 */
   .hm-canvas{width:100%;height:150px;border:1px solid var(--lijn);border-radius:3px;image-rendering:pixelated;background:#F0F2F6}
   .hm-legend{display:flex;align-items:center;gap:8px;justify-content:center;font-size:10px;color:var(--grijs);margin-top:6px}
   ul.toc{list-style:none}
@@ -167,6 +192,7 @@
   .flow .node .ic{font-size:16px;line-height:1}
   .flow .node .t{font-size:9px;font-weight:800;color:var(--blauw);margin-top:3px;line-height:1.12}
   .flow .node .n{font-size:8px;color:var(--grijs);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .flow .node .n.big{font-size:13px;font-weight:800;color:#9E480E}
   .flow .arr{display:flex;align-items:center;color:var(--oranje-l);font-weight:800;padding:0 1px;font-size:12px}
   .flow .node.eind{background:#05B0500f;border-color:#05B05055}
   .flow .node.start{background:#FFF3E0;border-color:#9E480E88}
@@ -197,7 +223,10 @@
   #fdpdf-bar button{font-family:inherit;font-size:12px;font-weight:700;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
   #fdpdf-save{background:var(--groen);color:#fff}
   #fdpdf-print{background:#fff;color:var(--blauw);border:1px solid var(--lijn)!important}
-  @media print{ body{background:#fff} .a4{box-shadow:none;margin:0;width:auto;min-height:auto} .mgmt{break-inside:avoid} .flow{overflow:visible} #fdpdf-bar{display:none} }
+  /* v2.10.1 (Johan-review): elke .a4 = exact 1 fysieke pagina. Vroeger stond min-height:auto ZONDER page-break → de
+     secties vloeiden samen en werden op willekeurige A4-grenzen gesplitst. Nu min-height behouden + harde page-break. */
+  @page{size:A4;margin:0}
+  @media print{ body{background:#fff} .a4{box-shadow:none;margin:0;min-height:297mm;page-break-after:always;break-after:page} .a4:last-child{page-break-after:auto;break-after:auto} .mgmt{break-inside:avoid} table,.box,.kpi-row,.strat,.gp-step{break-inside:avoid} .flow{overflow:visible} #fdpdf-bar{display:none} }
 </style>
 </head>
 <body>
@@ -304,9 +333,10 @@ function eur(v){ return '€ '+fmt.format(Math.round(v||0)); }
 function eur1(v){ return '€ '+fmt1.format(v||0); }
 function eur2(v){ return '€ '+fmt2.format(v||0); }
 function pct(v){ return fmt1.format(v||0)+' %'; }
+function pct0(v){ return fmt.format(Math.round(v||0))+' %'; }   // v2.10: ROI/rendement zonder decimalen (Johan-review)
 function num(v){ return fmt.format(Math.round(v||0)); }
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function lf(v){ return (v==null||isNaN(v))?'—':fmt2.format(v); }   // v2.7.0: loadfactor-guard — nooit "NaN" naar de klant
+function lf(v){ return (v==null||isNaN(v))?'—':fmt.format(Math.round((v||0)*100))+' %'; }   // v2.10 (Johan-review): loadfactor ALTIJD in % zonder decimalen (was fmt2 "0,61")
 
 var O = INV.optimaal||{}, E = INV.energie||{}, F = INV.factuur||{}, FIN = INV.financieel||{}, P = INV.profiel||{};
 
@@ -442,7 +472,9 @@ var gsLpCapex =_lpCapex(_GS.laadpalen);   // laadpalen = bakje 2 (apart getoond,
 // v2.9.2 (Optie B, 01-08): START-kaart op het PV+batterij-bakje. gsCapex = capex uit de simulator (PV+batterij+
 // verzwaring+cabine, zónder laadpalen); terugval op batterij+PV. besparing = bakje 1 (zónder laadpalen-diesel).
 var gsCapex = (_GS.capex!=null && _GS.capex>0) ? _GS.capex : (gsBatCapex+gsPvCapex);
-var gsOpex  = (_GS.pv_kwp||0)*AAN.onderhoud.pv_kwp + (_GS.batterij_kw||0)*AAN.onderhoud.batterij_kw + gsCapex*AAN.verzekering_promille/1000;
+var gsOh1   = (_GS.pv_kwp||0)*AAN.onderhoud.pv_kwp + (_GS.batterij_kw||0)*AAN.onderhoud.batterij_kw;   // v2.10: onderhoud-deel groeistap
+var gsVerz  = gsCapex*AAN.verzekering_promille/1000;                                                    // v2.10: verzekering-deel groeistap
+var gsOpex  = gsOh1 + gsVerz;
 var gsBesp = _GS.besparing_jaar||0;
 var gsRendement = gsCapex>0 ? gsBesp/gsCapex*100 : 0;
 var gsPayback = (gsBesp-gsOpex)>0 ? gsCapex/(gsBesp-gsOpex) : null;
@@ -458,19 +490,26 @@ var gsDirect  = gsZelf - gsViaBatt;
 
 // ---- PROCESS FLOW: factuur → … → groeistap ----
 var FLOW=[];
-FLOW.push({ic:'🧾', t:'Factuur', k:eur(F.bestaand_jaar), kl:'vandaag/jaar', u:'Uw werkelijke afrekening, geëxtrapoleerd naar een jaar — het transparante vertrekpunt.'});
+FLOW.push({ic:'🧾', t:'Factuur', k:eur(F.bestaand_jaar)+'/jaar', kl:'vandaag', u:'Uw werkelijke afrekening, geëxtrapoleerd naar een jaar — het transparante vertrekpunt.'});
 FLOW.push({ic:'📈', t:'Verbruiksprofiel', k:fmt1.format(P.jaarverbruik_mwh)+' MWh', kl:'jaarverbruik', u:'Wánneer u verbruikt bepaalt hoeveel een batterij en zonnepanelen voor u opleveren.'});
 if(INV.laadplein&&INV.laadplein.aanwezig) FLOW.push({ic:'🔌', t:'Laadplein', k:eur2(INV.laadplein.kost_per_km)+'/km', kl:'laadkost', u:'Uw elektrische kilometers slim en goedkoop laden binnen uw aansluiting.'});
 if(_BP.aanwezig) FLOW.push({ic:'☀️', t:'Bestaande PV', k:num(_BP.kwp)+' kWp', kl:'reeds aanwezig', u:'Meer waarde uit de zonnepanelen die er al staan (SolarActive-injectie-optimalisatie).'});
-FLOW.push({ic:'⚙️', t:'Optimale opstelling', k:eur(_totaalBesp), kl:'besparing/jaar', u:'Het einddoel — de opstelling met het hoogste rendement (PV + batterij + slimme sturing).', eind:true});
+FLOW.push({ic:'⚙️', t:'Optimale opstelling', k:'−'+eur(_totaalBesp)+'/jaar', kl:'besparing', u:'Het einddoel — de opstelling met het hoogste rendement (PV + batterij + slimme sturing).', eind:true,
+  inhoud:'aansluiting '+num(O.aansluiting_kw||0)+' kVA · opslag '+num(O.batterij_kw||0)+'/'+num(O.batterij_kwh||0)+' kW/kWh'+((O.pv_kwp||_XP.kwp)?' · PV '+num(O.pv_kwp||0)+' kWp':'')+((_LP0.aanwezig)?' · laadplein '+num(((O.laadpalen||{}).ac||0)*22+((O.laadpalen||{}).dc160||0)*160+((O.laadpalen||{}).dc300||0)*300)+' kVA':'')});
 FLOW.push({ic:'🔆', t:'Extra PV', k:num(_XP.kwp)+' kWp', kl:'bijkomend', u:'De goedkoopste kilowattuur die u kunt bijplaatsen bovenop wat er staat.'});
-FLOW.push({ic:'🚀', t:'Eerste groeistap', k:eur(gsCapex), kl:'instap-investering', u:'Wáár u vandaag start — een bescheiden instap die met uw vloot meegroeit naar het einddoel.', start:true});
-function flowStrip(){ return '<div class="flow">'+FLOW.map(function(nd,i){ return (i>0?'<div class="arr">→</div>':'')+'<div class="node'+(nd.eind?' eind':'')+(nd.start?' start':'')+'"><div class="ic">'+nd.ic+'</div><div class="t">'+esc(nd.t)+'</div><div class="n">'+nd.k+'</div></div>'; }).join('')+'</div>'; }
+// v2.10 (Johan-review 03-08): groeistap-blok toont de ROI% (de KPI uit de cash-back-belofte), niet de capex — groter.
+FLOW.push({ic:'🚀', t:'Eerste groeistap', k:pct0(gsRendement), kl:'rendement instap', u:'Wáár u vandaag start — een bescheiden instap die met uw vloot meegroeit naar het einddoel.', start:true, big:true,
+  inhoud:'aansluiting '+num(_GS.aansluiting_kw||O.aansluiting_vandaag_kw||0)+' kVA · opslag '+num(_GS.batterij_kw||0)+'/'+num(_GS.batterij_kwh||0)+' kW/kWh · PV-optie '+num(_GS.pv_kwp||0)+' kWp'+((_LP0.aanwezig)?' · laadplein '+num(((_GS.laadpalen||{}).ac||0)*22+((_GS.laadpalen||{}).dc160||0)*160+((_GS.laadpalen||{}).dc300||0)*300)+' kVA':''),
+  extra:'ROI '+pct0(gsRendement)+' · terugverdientijd '+(gsPayback!=null?fmt1.format(gsPayback)+' jr':'—')});
+function flowStrip(){ return '<div class="flow">'+FLOW.map(function(nd,i){ return (i>0?'<div class="arr">→</div>':'')+'<div class="node'+(nd.eind?' eind':'')+(nd.start?' start':'')+'"><div class="ic">'+nd.ic+'</div><div class="t">'+esc(nd.t)+'</div><div class="n'+(nd.big?' big':'')+'">'+nd.k+'</div></div>'; }).join('')+'</div>'; }
 
 // ============================ RENDER-HELPERS ============================
 var R = document.getElementById('rapport');
 var PID = INV.project_id || '';
 var _pg=0, _charts=[], _heatmaps=[];
+// v2.10 (Johan-review 03-08): sectienummers dynamisch — alleen zichtbare secties tellen mee (laadplein/bestaande-PV
+// zijn conditioneel), zodat de nummering nooit een gat vertoont. Groeipad = "N+" (voortzetting), financieringsplan = geen nr.
+var _secNr=0; function secNr(){ return ++_secNr; }
 function pagina(inner){
   var p=document.createElement('div'); p.className='a4'; _pg++;
   p.innerHTML = (MGMT?'<div class="mgmt-banner">MANAGEMENTRAPPORT · VERTROUWELIJK — interne verificatie, niet voor verkoper of klant</div>':'')
@@ -527,12 +566,31 @@ pagina(
   '<p class="note">We leggen elke stap op de volgende pagina uit met de kerncijfers. De <b style="color:#048443">optimale opstelling</b> is het einddoel; de <b style="color:#9E480E">eerste groeistap</b> is waar u vandaag start.</p>'+
   '<h3>De kerncijfers van het einddoel (volledige opstelling)</h3>'+
   '<div class="kpi-row">'+
-    '<div class="kpi groen"><div class="l">'+(_heeftMobiliteit?'Lagere totale kost / jaar':'Lagere factuur / jaar')+'</div><div class="v">−'+pct(besp_pct)+'</div><div class="s">'+eur(_totaalBesp)+'/jaar'+(_heeftMobiliteit?' (gebouw + vloot vs. diesel)':' (volledig)')+'</div></div>'+
+    '<div class="kpi groen"><div class="l">'+(_heeftMobiliteit?'Lagere totale kost':'Lagere factuur')+'</div><div class="v">−'+pct(besp_pct)+'</div><div class="s">'+eur(_totaalBesp)+'/jaar'+(_heeftMobiliteit?' (gebouw + vloot vs. diesel)':' (volledig)')+'</div></div>'+
     '<div class="kpi"><div class="l">Nieuwe energiekost</div><div class="v">'+eur1(kostpermwh_voorstel)+'</div><div class="s">/MWh (was '+eur1(kostpermwh_bestaand)+')</div></div>'+
     '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(rendReal.tvt!=null?fmt1.format(rendReal.tvt):'—')+' jr</div><div class="s">volledige opstelling</div></div>'+
     '<div class="kpi"><div class="l">Rendement (jaar 1)</div><div class="v">'+pct(rendReal.rendement)+'</div><div class="s">op de volledige investering</div></div>'+
   '</div>'+
-  '<p class="note">Deze cijfers gelden voor de <b>volledige opstelling</b> (het einddoel). U hoeft daar niet meteen te staan — u start met de <b>eerste groeistap</b> (stap 7), met een eigen investering, besparing en terugverdientijd.</p>'+
+  '<p class="note">Deze cijfers gelden voor de <b>volledige opstelling</b> (het einddoel). U hoeft daar niet meteen te staan — u start met de <b>eerste groeistap</b> (volgende pagina), met een eigen investering, besparing en terugverdientijd.</p>'
+);
+// v2.10.1 (Johan-review 03-08): het overzicht gesplitst zodat elk stuk op 1 A4 past — deel 1b = kerncijfers eerste
+// groeistap + wat ze inhoudt + de volgende stap.
+pagina(
+  '<div class="stap-band" style="border:0;padding-left:0"><div><div class="eyebrow">Overzicht — vervolg</div><h2>Uw eerste groeistap in cijfers</h2></div></div>'+
+  // v2.10 (Johan-review 03-08): dezelfde kerncijfers, maar dan voor de EERSTE GROEISTAP, + 4 blokjes met wat die stap inhoudt.
+  '<h3>De kerncijfers van de eerste groeistap (waar u vandaag start)</h3>'+
+  '<div class="kpi-row">'+
+    '<div class="kpi groen"><div class="l">Besparing / jaar</div><div class="v">−'+eur(gsBesp)+'</div><div class="s">al vanaf stap 1</div></div>'+
+    '<div class="kpi"><div class="l">Rendement</div><div class="v">'+pct0(gsRendement)+'</div><div class="s">op de instap-investering</div></div>'+
+    '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(gsPayback!=null?fmt1.format(gsPayback)+' jr':'—')+'</div><div class="s">instap</div></div>'+
+    '<div class="kpi"><div class="l">Investering</div><div class="v">'+eur(gsCapex)+'</div><div class="s">wat u vandaag plaatst</div></div>'+
+  '</div>'+
+  '<div class="kpi-row" style="margin-top:8px">'+
+    '<div class="kpi"><div class="l">Aansluiting</div><div class="v">'+num(_GS.aansluiting_kw||O.aansluiting_vandaag_kw||0)+' kVA</div><div class="s">was '+num(O.aansluiting_vandaag_kw||0)+' kVA</div></div>'+
+    '<div class="kpi"><div class="l">Opslag (batterij)</div><div class="v">'+num(_GS.batterij_kw||0)+'/'+num(_GS.batterij_kwh||0)+'</div><div class="s">kW / kWh</div></div>'+
+    '<div class="kpi"><div class="l">Laadplein</div><div class="v">'+num((_GS.laadpalen?((_GS.laadpalen.ac||0)*22+(_GS.laadpalen.dc160||0)*160+(_GS.laadpalen.dc300||0)*300):0))+' kVA</div><div class="s">'+((_LP0.aanwezig&&_LP0.km_jaar)?num(_LP0.km_jaar)+' km/jaar':'geen laadplein')+'</div></div>'+
+    '<div class="kpi"><div class="l">Optie extra PV</div><div class="v">'+num(_GS.pv_kwp||0)+' kWp</div><div class="s">'+(_BP.aanwezig?'bestaand '+num(_BP.kwp||0)+' kWp':'geen bestaande PV')+'</div></div>'+
+  '</div>'+
   (_heeftMobiliteit ? '<h3>Twee terugverdienpaden — elk betaalt zichzelf terug</h3>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
     '<div class="kpi groen"><div class="l">PV + batterij</div><div class="v">'+eur(_pvbattBesp)+'</div><div class="s">/jaar · lagere gebouwfactuur + slim laden (CREG → spot) · investering '+eur(_pvbattCapex)+' · terugverdiend in '+(_pvbattTvt!=null?fmt1.format(_pvbattTvt)+' jr':'—')+'</div></div>'+
@@ -540,9 +598,17 @@ pagina(
     '</div>'+
     '<p class="note">De <b>PV en batterij</b> verdienen zich terug op uw gebouwkost en het slim laden binnen uw aansluiting; de <b>laadpalen</b> op het prijsverschil per km tussen diesel en elektrisch rijden. Samen vormen ze de totale besparing hierboven.</p>' : '')+
   // v2.9.11 (Johan 03-08): één heldere ACTIE per tegel (elke tegel = simpele vraag → simpel antwoord → actie).
-  '<div class="box oranje" style="border-width:2px"><b>Uw volgende stap.</b> '+(_heeftMobiliteit
-    ? 'Plan een gesprek met <b>E+Drive</b> voor een full-service laadplein en energie-infrastructuur, en vraag offertes voor het laadplein, de batterij en — als optie — de zonnepanelen.'
-    : 'Plan een gesprek met uw leverancier en laat uw installateur <b>BatteryActive</b> opzetten. Vraag offertes voor de batterij en — als optie — de zonnepanelen.')+'</div>'+
+  // v2.10 (Johan-review 03-08): drie concrete to-do's + het aanbod dat wij dit voor u opnemen (evt. met uw eigen installateur).
+  '<div class="box oranje" style="border-width:2px"><b>Uw volgende stap — drie dingen om te doen:</b>'+
+    '<ol style="margin:6px 0 0 18px;padding:0">'+
+    '<li>Onderhandel uw <b>energiecontract</b> naar een scherp dynamisch (spot-geïndexeerd) tarief — dat is de basis waarop de batterij arbitreert.</li>'+
+    (_heeftMobiliteit
+      ? '<li>Plan een gesprek met <b>E+Drive</b> voor een full-service laadplein en energie-infrastructuur.</li>'+
+        '<li>Vraag <b>offertes</b> voor het laadplein, de batterij en — als optie — de zonnepanelen.</li>'
+      : '<li>Plan een gesprek met uw leverancier en laat uw installateur <b>BatteryActive</b> opzetten.</li>'+
+        '<li>Vraag <b>offertes</b> voor de batterij en — als optie — de zonnepanelen.</li>')+
+    '</ol>'+
+    '<div style="margin-top:6px">Liever niet zelf? Wij nemen dit graag voor u op — desgewenst <b>samen met de installateur waarmee u al graag werkt</b>.</div></div>'+
   (INV.verkoper_commentaar?'<div class="box oranje"><b>Toelichting bij dit voorstel:</b> '+esc(INV.verkoper_commentaar)+(INV.optimaal_handmatig?' <span class="badge">handmatige keuze</span>':'')+'</div>':'')+
   mgmt('scenario & aannames',
     '<table><tbody>'+
@@ -563,7 +629,10 @@ pagina(
   '<div style="margin-top:14px">'+
   FLOW.map(function(nd){ return '<div class="strat"><div class="si">'+nd.ic+'</div>'+
     '<div style="flex:1"><b>'+esc(nd.t)+'</b>'+((nd.eind)?' <span class="badge">einddoel</span>':'')+((nd.start)?' <span class="badge" style="background:#FFF3E0;color:#9E480E">u start hier</span>':'')+
-    '<div class="note" style="margin:2px 0 0">'+esc(nd.u)+'</div></div>'+
+    '<div class="note" style="margin:2px 0 0">'+esc(nd.u)+'</div>'+
+    // v2.10 (Johan-review): bij de opstelling en de eerste groeistap tonen we wat die stap inhoudt (+ ROI/TVT bij de groeistap).
+    (nd.inhoud?'<div class="note" style="margin:3px 0 0;color:#1F3864"><b>Inhoud:</b> '+esc(nd.inhoud)+(nd.extra?' — <b>'+esc(nd.extra)+'</b>':'')+'</div>':'')+
+    '</div>'+
     '<div class="sk">'+nd.k+'<span class="kl">'+esc(nd.kl)+'</span></div></div>'; }).join('')+
   '</div>'+
   '<div class="box blauw" style="margin-top:14px"><b>Waarom deze volgorde?</b> We waarderen eerst wat er al is (uw factuur, uw verbruik, bestaande panelen), bepalen dan het technische einddoel met het hoogste rendement, en vertalen dat ten slotte naar een haalbare eerste stap. Zo betaalt u nooit voor capaciteit die u nog niet gebruikt, en groeit de installatie mee met uw noden.</div>'+
@@ -598,11 +667,11 @@ pagina(
 // ---- PAGINA 2 — UW FACTUUR VANDAAG ----
 var comp=F.componenten||{};
 pagina(
-  '<div class="stap-band"><div class="nr">1</div><div><h2>Uw factuur vandaag</h2><div class="note">Waar gaat uw geld vandaag naartoe?</div></div></div>'+
+  '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Uw factuur vandaag</h2><div class="note">Waar gaat uw geld vandaag naartoe?</div></div></div>'+
   '<p>We vertrekken van uw werkelijke afrekening ('+eur(F.afrekening_bedrag)+' over '+F.afrekening_periode_mnd+' maand'+(F.afrekening_periode_mnd>1?'en':'')+'), geëxtrapoleerd naar een vol jaar. Zo weten we exact waar de kosten zitten — pas dan kunnen we ze gericht aanpakken.</p>'+
   '<div class="split">'+
-    '<div>'+chartBlok('ch-fact-pie')+'<p class="note">Verdeling van uw jaarfactuur: energie is meestal het grootste blok — en net dáár haalt slimme sturing de meeste winst.</p></div>'+
-    '<div>'+chartBlok('ch-fact-bar')+'<p class="note">'+(_heeftMobiliteit?'Uw gebouwfactuur vandaag, diezelfde vloot aan het CREG-thuisforfait, op diesel (de volledige referentie), en het voorstel. Van <b>diesel → CREG</b> verdienen de <b>laadpalen</b> zich terug; van <b>CREG → voorstel</b> de <b>PV + batterij</b>. Samen = uw totale besparing.':'Uw huidige factuur en het volledige voorstel. De contractvergelijking (dynamisch tarief) is een aparte studie — zie tegel 1.')+'</p></div>'+
+    '<div>'+chartBlok('ch-fact-pie')+'<p class="note">Verdeling van uw jaarfactuur. We splitsen de netkosten op in <b>netkosten per MWh</b> (distributie — volgt uw energievolume) en <b>netkosten per MW</b> (capaciteit — volgt uw piekvermogen). Die opdeling toont hoe we besparen: energie (MWh) binnenhalen op goedkope momenten, en vermogen (MW) het hele jaar minimaliseren. Slimme sturing haalt energie binnen op goedkopere momenten én zorgt dat we dit doen met minimale aansluitkosten.</p></div>'+
+    '<div>'+chartBlok('ch-fact-bar')+'<p class="note">'+(_heeftMobiliteit?'Uw gebouwfactuur vandaag, diezelfde vloot aan het CREG-thuisforfait, op diesel (de volledige referentie), en het voorstel. Van <b>diesel → CREG</b> verdienen de <b>laadpalen</b> zich terug; van <b>CREG → voorstel</b> de <b>PV + batterij</b>. Samen = uw totale besparing.':'Uw huidige factuur en de optimale opstelling, opgesplitst per component. De contractvergelijking (dynamisch tarief) is een aparte studie — zie tegel 1.')+'</p></div>'+
   '</div>'+
   // v2.9.11 (Johan 03-08): bij een gebouw (tegel 3) hoort de contract-vergelijking ("scherp dynamisch") NIET hier —
   // dat is de factuuranalyse (tegel 1). We tonen enkel Factuur vandaag → Met het voorstel. Bij mobiliteit blijft alles.
@@ -621,7 +690,7 @@ pagina(
 // ---- PAGINA 3 — VERBRUIKSPROFIEL ----
 var P=INV.profiel||{};
 pagina(
-  '<div class="stap-band"><div class="nr">2</div><div><h2>Uw verbruiksprofiel</h2><div class="note">Niet alleen hoevéél u verbruikt, maar wannéér.</div></div></div>'+
+  '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Uw verbruiksprofiel</h2><div class="note">Niet alleen hoevéél u verbruikt, maar wannéér.</div></div></div>'+
   '<p>Uw verbruik volgt het profiel <b>'+esc(P.naam)+'</b>: '+esc(P.beschrijving)+' Dit patroon bepaalt hoeveel een batterij en zonnepanelen voor u kunnen betekenen — want de winst zit in het verschuiven van energie naar de goedkoopste momenten.</p>'+
   '<div class="kpi-row k3">'+
     '<div class="kpi"><div class="l">Jaarverbruik</div><div class="v">'+fmt1.format(P.jaarverbruik_mwh)+'</div><div class="s">MWh/jaar (gebouw)</div></div>'+
@@ -630,6 +699,7 @@ pagina(
   '</div>'+
   heatmapBlok('hm-last','Uw verbruik doorheen het jaar','Elke kolom is een dag (1 jan links → 31 dec rechts), elke rij een uur. Donker = hoog verbruik. U ziet meteen uw dagpiek en de rustigere zomerperiode.',
     (INV.heat&&INV.heat.vermogen_kw)?function(d,q){var a=INV.heat.vermogen_kw; var i=d*96+q; return (a&&i<a.length)?a[i]:null;}:function(d,q){return synthLast(d,q)*(P.maandpiek_kw||88);}, 0, (P.maandpiek_kw||88), 'traffic','kW')+
+  '<p class="note" style="margin-top:6px">* Het jaarverbruik is de som van uw <b>afname aan de meter</b> én het <b>directe verbruik uit lokale productie</b> (zelfconsumptie uit uw zonnepanelen).</p>'+
   mgmt('profiel — herkomst',
     '<table><tbody>'+
     '<tr><td>Profielnaam</td><td>'+esc(P.naam)+'</td></tr>'+
@@ -643,7 +713,7 @@ pagina(
 if(INV.laadplein && INV.laadplein.aanwezig){
   var LP=INV.laadplein;
   pagina(
-    '<div class="stap-band"><div class="nr">3</div><div><h2>Uw laadplein</h2><div class="note">Elektrisch rijden als de goedkoopste brandstof.</div></div></div>'+
+    '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Uw laadplein</h2><div class="note">Elektrisch rijden als de goedkoopste brandstof.</div></div></div>'+
     '<p>U laadt (of plant) '+num(LP.mwh_jaar)+' MWh/jaar op — goed voor ± '+num(LP.km_jaar)+' km'+(LP.voertuigen?' ('+esc(LP.voertuigen)+')':'')+'. De vraag is niet óf u elektrificeert, maar hoe goedkoop u die kilometers laadt. Door slim te laden binnen uw aansluiting rijdt u aan <b>'+eur2(LP.kost_per_km)+'/km</b> — tegenover ± '+eur2(LP.creg_per_km)+'/km bij thuisladen aan het CREG-forfait.</p>'+
     '<div class="kpi-row k3">'+
       '<div class="kpi groen"><div class="l">Kost per km</div><div class="v">'+eur2(LP.kost_per_km)+'</div><div class="s">vs '+eur2(LP.creg_per_km)+' (CREG)</div></div>'+
@@ -673,7 +743,7 @@ if(INV.laadplein && INV.laadplein.aanwezig){
 if(false && INV.bestaande_pv && INV.bestaande_pv.aanwezig){
   var BP=INV.bestaande_pv;
   pagina(
-    '<div class="stap-band"><div class="nr">4</div><div><h2>Uw bestaande zonnepanelen</h2><div class="note">Meer halen uit wat er al staat — zonder één paneel bij te leggen.</div></div></div>'+
+    '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Uw bestaande zonnepanelen</h2><div class="note">Meer halen uit wat er al staat — zonder één paneel bij te leggen.</div></div></div>'+
     '<p>U heeft al '+num(BP.kwp)+' kWp PV ('+num(BP.kva)+' kVA omvormer) die vandaag ± '+num(BP.injectie_mwh)+' MWh/jaar injecteert, goed voor ± '+eur(BP.opbrengst_vandaag)+'. Door die injectie slim te sturen — nooit ten koste van uw eigen verbruik — kunnen we er meer waarde uit halen. We tonen twee niveaus zodat u ziet wat elk betekent.</p>'+
     '<div class="split">'+
       '<div class="box"><b>A · Curtailen op de spotmarkt</b><div class="note" style="margin:4px 0">Injectie blokkeren bij negatieve prijzen. Leverancier-onafhankelijk.</div>'+
@@ -699,7 +769,7 @@ if(false && INV.bestaande_pv && INV.bestaande_pv.aanwezig){
 
 // ---- PAGINA 6 — OPTIMALE OPSTELLING ----
 pagina(
-  '<div class="stap-band"><div class="nr">5</div><div><h2>De optimale opstelling</h2><div class="note">Het voorstel — afgestemd op de hoogste waarde voor u.</div></div></div>'+
+  '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>De optimale opstelling</h2><div class="note">Het voorstel — afgestemd op de hoogste waarde voor u.</div></div></div>'+
   '<p>De kern van dit voorstel is de <b>batterij</b> met slimme sturing: die houdt uw verbruik binnen een beheersbare aansluiting en verdient op zichzelf. De cijfers hieronder (rendement, terugverdientijd) gelden voor die <b>batterij-opstelling</b>. Zonnepanelen zijn een aparte <b>optie</b> die u er vrijblijvend bij kunt leggen — hun impact tonen we op de volgende pagina. We dimensioneren op '+(_heeftMobiliteit?'drie doelen: de kilometers zo goedkoop mogelijk, de installatie als een goede belegging, en weerbaarheid tegen stijgende netkosten.':'twee doelen: de installatie als een goede belegging, en een betere benutting van uw aansluiting (loadfactor).')+'</p>'+
   '<div class="kpi-row">'+
     '<div class="kpi"><div class="l">Zonnepanelen</div><div class="v">'+num(O.pv_kwp)+'</div><div class="s">kWp (totaal)</div></div>'+
@@ -708,8 +778,8 @@ pagina(
     (_heeftMobiliteit
       ? '<div class="kpi"><div class="l">Laadplein</div>'+
           ((!O.laadpalen_opgegeven)
-            ? '<div class="v" style="font-size:0.7em;line-height:1.15">ideaal gespreid</div><div class="s">geen palen opgegeven</div>'
-            : '<div class="v">'+num((O.laadpalen.ac||0)+(O.laadpalen.dc160||0)+(O.laadpalen.dc300||0))+'</div><div class="s">laadpunten</div>')+
+            ? '<div class="v" style="font-size:0.7em;line-height:1.15">ideaal gespreid</div><div class="s">'+((_LP0.aanwezig&&_LP0.km_jaar)?num(_LP0.km_jaar)+' km/jaar':'geen palen opgegeven')+'</div>'
+            : '<div class="v">'+num((O.laadpalen.ac||0)*22+(O.laadpalen.dc160||0)*160+(O.laadpalen.dc300||0)*300)+' kVA</div><div class="s">'+((_LP0.aanwezig&&_LP0.km_jaar)?num(_LP0.km_jaar)+' km/jaar geladen':'totale laadcapaciteit')+'</div>')+
         '</div>'
       : '')+
     '<div class="kpi oranje"><div class="l">Aansluiting</div><div class="v">'+num(O.aansluiting_kw)+' kW</div><div class="s">was '+num(O.aansluiting_vandaag_kw)+' kW</div></div>'+
@@ -726,10 +796,24 @@ pagina(
   // (spot-geïndexeerd) contract — daar leeft het prijsverschil dat de batterij oogst. Op een vast contract vervalt de
   // arbitrage en blijft enkel de piekshaving. Dekt de 10%-garantie juridisch + commercieel af.
   '<div class="box blauw" style="margin-top:6px"><b>Voorwaarde.</b> Dit rendement geldt op een <b>dynamisch (spot-geïndexeerd) contract</b> — daar zit het prijsverschil tussen dure en goedkope uren dat de batterij oogst. Op een <b>vast</b> contract vervalt de arbitrage en blijft enkel de piekshaving over. Een hogere leveranciersmarge raakt de arbitrage nauwelijks; wél de blootstelling aan de spotprijs.</div>'+
-  '<div class="split">'+
-    '<div>'+chartBlok('ch-pv-donut','sm')+'<p class="note">Waar uw zonne-energie naartoe gaat: eigen verbruik, via de batterij, of geïnjecteerd.</p></div>'+
-    '<div>'+chartBlok('ch-piek','sm')+'<p class="note">'+((heeftBatterij && aansluiting_vermeden>0)?'De batterij snijdt uw sitepiek van '+num(E.sitepiek_zonder_batterij_kw)+' kW terug naar '+num(E.sitepiek_met_batterij_kw)+' kW — dat vermijdt '+num(aansluiting_vermeden)+' kW aan verzwaring.':'Slimme sturing en PV vlakken uw sitepiek af en houden het lokale verbruik hoog.')+'</p></div>'+
-  '</div>'+
+  // v2.10.2 (Johan-review): de PV-zelfconsumptie-donut is enkel zinvol als er PV in de opstelling zit (bestaand of nieuw).
+  // Zonder PV (batterij-only) is de donut nietszeggend → we tonen dan enkel de sitepiek-grafiek, over de volle breedte.
+  // De sitepiek-caption verklaart nu ook de arbitrage-richting (batterij die op goedkope momenten laadt = hogere piek,
+  // maar binnen de aansluiting) i.p.v. altijd "snijdt de piek".
+  // v2.10.3 (Johan-review): de sitepiek-staafdiagram weggelaten. De boodschap (piek blijft binnen de aansluiting) blijft
+  // als tekst; de PV-zelfconsumptie-donut tonen we enkel als er PV in de opstelling zit.
+  (function(){
+    var _pk = (heeftBatterij && aansluiting_vermeden>0)
+      ? 'De batterij snijdt uw sitepiek van '+num(E.sitepiek_zonder_batterij_kw)+' kW terug naar '+num(E.sitepiek_met_batterij_kw)+' kW — dat vermijdt '+num(aansluiting_vermeden)+' kW aan verzwaring.'
+      : (heeftBatterij && aansluiting_vermeden<0)
+        ? 'De batterij laadt op de goedkoopste momenten: uw sitepiek stijgt van '+num(E.sitepiek_zonder_batterij_kw)+' naar '+num(E.sitepiek_met_batterij_kw)+' kW, maar blijft binnen uw aansluiting van '+num(O.aansluiting_kw||E.aansluiting_kw)+' kW — geen verzwaring nodig.'
+        : 'Slimme sturing vlakt uw sitepiek af en houdt het lokale verbruik hoog, binnen uw aansluiting.';
+    var _pvDonut = ((E.pv_productie_mwh||0)>=1);
+    return '<p class="note" style="margin-top:8px">'+_pk+'</p>'+
+      (_pvDonut
+        ? '<div style="max-width:56%;margin:6px auto 0">'+chartBlok('ch-pv-donut')+'<p class="note" style="text-align:center">Waar uw zonne-energie (incl. bestaande PV) naartoe gaat: eigen verbruik, via de batterij, of geïnjecteerd.</p></div>'
+        : '');
+  })()+
   mgmt('optimale opstelling — dimensionering & NPV',
     '<table><tbody>'+
     '<tr><td>NPV @ kost van kapitaal</td><td>'+eur(O.npv)+(INV.optimaal_handmatig?' <span class="badge">handmatig gekozen</span>':' (hoogste NPV)')+'</td></tr>'+
@@ -743,8 +827,8 @@ pagina(
 // ---- PAGINA 7 — EXTRA PV ----
 var XP=INV.extra_pv||{};
 pagina(
-  '<div class="stap-band"><div class="nr">6</div><div><h2>Zonnepanelen — een optie op uw batterij</h2><div class="note">Uw ontwerp draait om de batterij. PV kunt u er vrijblijvend bij leggen.</div></div></div>'+
-  '<p>De kern van dit voorstel is de <b>batterij</b> — die verdient op zichzelf. Wilt u nóg een stap zetten, dan kunt u <b>'+num(XP.kwp)+' kWp</b> zonnepanelen bijplaatsen. Die produceren ± '+num(XP.productie_mwh)+' MWh/jaar'+(XP.zelfverbruik_pct!=null?(', waarvan ± '+pct(XP.zelfverbruik_pct)+' <b>marginaal</b> rechtstreeks zelf verbruikt wordt (bovenop wat u al opwekt)'):'')+'. Elke zelf verbruikte kilowattuur is energie die u niet meer van het net koopt. Hieronder ziet u de <b>impact</b> van die optie — apart en gecombineerd.</p>'+
+  '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Zonnepanelen — een optie bovenop uw batterij</h2><div class="note">Uw ontwerp draait om de batterij. PV kunt u er vrijblijvend bij leggen.</div></div></div>'+
+  '<p>De kern van dit voorstel is de <b>batterij</b> — die verdient op zichzelf. Wilt u nóg een stap zetten, dan kunt u <b>'+num(XP.kwp)+' kWp</b> zonnepanelen bijplaatsen. Die produceren ± '+num(XP.productie_mwh)+' MWh/jaar'+(XP.zelfverbruik_pct!=null?(', waarvan ± '+pct(XP.zelfverbruik_pct)+' <b>marginaal</b> rechtstreeks zelf verbruikt wordt'):'')+'. Elke zelf verbruikte kilowattuur is energie die u niet meer van het net koopt. Hieronder ziet u de <b>impact</b> van die optie — apart en gecombineerd.</p>'+
   '<div class="kpi-row k3">'+
     '<div class="kpi"><div class="l">PV-optie</div><div class="v">'+num(XP.kwp)+'</div><div class="s">kWp bij te plaatsen</div></div>'+
     '<div class="kpi"><div class="l">Productie</div><div class="v">'+num(XP.productie_mwh)+'</div><div class="s">MWh/jaar</div></div>'+
@@ -760,7 +844,7 @@ pagina(
         '<div class="kpi"><div class="l">C · batterij + PV</div><div class="v">'+pct(_PO.gecombineerd_rendement_pct)+'</div><div class="s">gecombineerd</div></div>'+
       '</div>'
     : '')+
-  '<div class="split"><div>'+chartBlok('ch-xpv-pie','sm')+'<p class="note">Waar de extra zonne-energie naartoe gaat: rechtstreeks eigen verbruik'+(heeftBatterij?', lokaal geconsumeerd via de batterij,':'')+' en injectie'+(heeftBatterij?' — apart getoond':'')+'.</p></div>'+
+  '<div class="split" style="align-items:center"><div>'+chartBlok('ch-xpv-pie','md')+'<p class="note">Waar de extra zonne-energie naartoe gaat: rechtstreeks eigen verbruik'+(heeftBatterij?', lokaal geconsumeerd via de batterij,':'')+' en injectie'+(heeftBatterij?' — apart getoond':'')+'.</p></div>'+
     '<div>'+chartBlok('ch-pv-maand','sm')+'<p class="note">Indicatieve maandproductie van de extra zonnepanelen (zomerpiek, winterdal).</p></div></div>'+
   mgmt('extra PV — energiebalans',
     frm('capex extra PV = '+num(XP.kwp)+' kWp × '+eur(AAN.capex.pv_kwp)+'/kWp = '+eur((XP.kwp||0)*AAN.capex.pv_kwp)+'\n'+
@@ -770,28 +854,44 @@ pagina(
 
 // ---- PAGINA 8 — EERSTE GROEISTAP ----
 var GS=INV.groeistap||{};
+// v2.10 (Johan-review): KPI rendement = max(rendement jaar 1, operationeel-plan-rendement zónder financieringskosten);
+// loadfactor van de groeistap geïnterpoleerd tussen "geen batterij" (voor) en het optimum, o.b.v. de batterijgrootte.
+var _gsPlanRend=(function(){ if(!(gsCapex>0)) return null; var sc=AAN.scenarios.realistisch, cum=0; for(var y=0;y<AAN.horizon;y++){ cum+=besparingJaar(sc,y,gsBesp)-opexJaar(sc,y,gsOh1,gsVerz); if(y===9) cum-=(GS.pv_kwp||0)*AAN.omvormer_vervang_kwp; } return cum/AAN.horizon/gsCapex*100; })();
+var _gsRendKpi=Math.max(gsRendement, _gsPlanRend||0);
+var _gsLfVoor=O.kpi3_loadfactor_voor, _gsLfNa=O.kpi3_loadfactor_na;
+var _gsFrac=((O.batterij_kwh||0)>0)?Math.min(1,(GS.batterij_kwh||0)/O.batterij_kwh):1;
+var _gsLf=(_gsLfVoor!=null&&_gsLfNa!=null)?(_gsLfVoor+(_gsLfNa-_gsLfVoor)*_gsFrac):_gsLfNa;
 pagina(
-  '<div class="stap-band"><div class="nr">7</div><div><h2>Uw eerste groeistap</h2><div class="note">Vandaag starten, later groeien — zonder nu te overinvesteren.</div></div></div>'+
+  '<div class="stap-band"><div class="nr">'+secNr()+'</div><div><h2>Uw eerste groeistap</h2><div class="note">Vandaag starten, later groeien — zonder nu te overinvesteren.</div></div></div>'+
   '<p>U hoeft niet meteen de volledige opstelling te plaatsen. We adviseren een <b>instapstap ('+esc(GS.label)+')</b>: '+esc(GS.motivatie)+' Zo start u vandaag met een bewezen rendement en groeit de installatie mee met uw vloot naar de optimale opstelling.</p>'+
   '<h3>Wat u vandaag plaatst</h3>'+
   '<div class="kpi-row">'+
     '<div class="kpi"><div class="l">Batterij (start)</div><div class="v">'+num(GS.batterij_kw)+'/'+num(GS.batterij_kwh)+'</div><div class="s">kW / kWh</div></div>'+
-    '<div class="kpi"><div class="l">Zonnepanelen (start)</div><div class="v">'+num((GS.pv_kwp||0)+(_BP.aanwezig?(_BP.kwp||0):0))+'</div><div class="s">kWp'+(GS.pv_kwp?' (+'+num(GS.pv_kwp)+' nieuw)':'')+(_BP.aanwezig?' incl. bestaand':'')+'</div></div>'+
-    '<div class="kpi"><div class="l">Laadpunten (start)</div><div class="v">'+num(_lpAantal(GS.laadpalen))+'</div><div class="s">van '+num((O.laadpalen.ac||0)+(O.laadpalen.dc160||0)+(O.laadpalen.dc300||0))+' in het einddoel</div></div>'+
+    '<div class="kpi"><div class="l">Zonnepanelen (start)</div><div class="v">'+num(GS.pv_kwp||0)+'</div><div class="s">kWp nieuw'+(_BP.aanwezig?' · bestaand '+num(_BP.kwp||0)+' kWp':'')+'</div></div>'+
+    // v2.10 (Johan-review): laadplein-blok toont het kVA van alle laadpleinen + (klein) de geladen km/jaar.
+    '<div class="kpi"><div class="l">Laadplein (start)</div><div class="v">'+num((GS.laadpalen?((GS.laadpalen.ac||0)*22+(GS.laadpalen.dc160||0)*160+(GS.laadpalen.dc300||0)*300):0))+' kVA</div><div class="s">'+((_LP0.aanwezig&&_LP0.km_jaar)?num(_LP0.km_jaar)+' km/jaar geladen':'geen laadplein')+'</div></div>'+
     '<div class="kpi oranje"><div class="l">Aansluiting (start)</div><div class="v">'+num(GS.aansluiting_kw)+' kW</div><div class="s">'+(((GS.aansluiting_kw||0)>(O.aansluiting_vandaag_kw||0))?'incl. verzwaring (cabine)':'geen verzwaring nodig')+'</div></div>'+
   '</div>'+
   '<h3>Wat het u oplevert</h3>'+
-  '<div class="kpi-row">'+
-    '<div class="kpi oranje"><div class="l">Investering (start)</div><div class="v">'+eur(gsCapex)+'</div><div class="s">vs '+eur(CAPEX.bucket1)+' volledig (PV+batterij)</div></div>'+
-    '<div class="kpi groen"><div class="l">Besparing (start)</div><div class="v">'+eur(gsBesp)+'</div><div class="s">/jaar al vanaf stap 1</div></div>'+
-    '<div class="kpi"><div class="l">Rendement (start)</div><div class="v">'+pct(gsRendement)+'</div><div class="s">besparing / investering</div></div>'+
-    '<div class="kpi"><div class="l">Terugverdientijd</div><div class="v">'+(gsPayback!=null?fmt1.format(gsPayback)+' jr':'—')+'</div><div class="s">investering / netto</div></div>'+
+  // v2.10 (Johan-review): rendement + loadfactor als sturende KPI's (bij laadplein ook km-kost). Besparing klein onder de
+  // investering; terugverdientijd klein onder het rendement. Investering vergeleken met de VOLLEDIGE opstelling (niet bucket1).
+  '<div class="kpi-row'+(_heeftMobiliteit?'':' k3')+'">'+
+    '<div class="kpi oranje"><div class="l">Investering (start)</div><div class="v">'+eur(gsCapex)+'</div><div class="s">'+eur(gsBesp)+'/jaar besparing · vs '+eur(CAPEX.totaal)+' volledige opstelling</div></div>'+
+    (_heeftMobiliteit ? '<div class="kpi groen"><div class="l">KPI · km-kost</div><div class="v">'+eur2(O.kpi1_eur_per_km)+'</div><div class="s">/km vs '+eur2(O.kpi1_creg_per_km)+' (CREG)</div></div>' : '')+
+    '<div class="kpi"><div class="l">KPI · rendement</div><div class="v">'+pct0(_gsRendKpi)+'</div><div class="s">terugverdientijd '+(gsPayback!=null?fmt1.format(gsPayback)+' jr':'—')+'</div></div>'+
+    '<div class="kpi"><div class="l">KPI 2 · loadfactor</div><div class="v">'+lf(_gsLf)+'</div><div class="s">was '+lf(_gsLfVoor)+'</div></div>'+
   '</div>'+
+  '<p class="note">We sturen op <b>rendement</b> en <b>loadfactor</b>: het rendement moet elke stap <b>boven 10 %</b> houden, en hoe hoger de loadfactor, hoe minder impact de netkosten hebben op uw operationele marge.'+(_heeftMobiliteit?' Bij een laadplein telt ook de <b>km-kost</b> als KPI mee.':'')+'</p>'+
   // v2.9.3 (4c, Johan 01-08): verkoop-signaal op de 1-batterij-instap. ROI ≥ 10 % = verkoopbaar; < 10 % valt onder
   // de studiegarantie (risk-reversal 10 %-belofte).
   ((gsRendement>=10)
     ? '<div class="box groen"><b>✅ Verkoopbaar — rendement '+pct(gsRendement)+' (&gt; 10 %).</b> Deze eerste batterij haalt het minimumrendement ruimschoots: een bewezen, rendabele instap vandaag die later meegroeit. Precies waarmee u kunt starten.</div>'
-    : '<div class="box" style="background:#FFF3E0;border-color:#9E480E55"><b>⚠️ Rendement '+pct(gsRendement)+' (&lt; 10 %).</b> Deze instap haalt het gegarandeerde minimumrendement van 10 % (nog) niet — hij valt daarmee onder de <b>studiegarantie</b>. Bekijk een grotere groeistap of een ander vertrekpunt vóór u dit als verkoop-case gebruikt.</div>')+
+    : '<div class="box" style="background:#FFF3E0;border-color:#9E480E55"><b>⚠️ Rendement '+pct(gsRendement)+' (&lt; 10 %).</b> Deze instap haalt het gegarandeerde minimumrendement van 10 % (nog) niet — hij valt daarmee onder de <b>studiegarantie</b>. Bekijk een grotere groeistap of een ander vertrekpunt vóór u dit als verkoop-case gebruikt.</div>')
+);
+// v2.10.1 (Johan-review 03-08): de eerste-groeistap-pagina gesplitst zodat elk stuk op 1 A4 past — deel 2 = PV-optie +
+// groeistap-1 zonder/met windfall + start-investering + afsluiting.
+pagina(
+  '<div class="stap-band" style="border:0;padding-left:0"><div><div class="eyebrow">Uw eerste groeistap — vervolg</div><h2>De PV-optie en uw start-investering</h2></div></div>'+
   // v2.9.5 (batterij-eerst, Johan 01-08): de groeistappen zijn BATTERIJ-ONLY; de zonnepanelen zijn een EENMALIGE optie
   // op deze eerste stap. A = instap-batterij, B = PV-optie (eigen rendement), C = instap + PV gecombineerd.
   ((_GS.pv_optie)
@@ -815,7 +915,7 @@ pagina(
     return '<div class="box" style="margin-top:12px;background:#EAF3EA;border-color:#05B05055">'+
       '<b>Groeistap 1 — zonder én met onbalans-windfall.</b> De instap hierboven ('+pct(gsRendement)+') is de <b>gegarandeerde</b> base: spot-arbitrage + piekshaving op een dynamisch contract. Stelt uw leverancier <b>onbalans-passthrough</b> open, dan komt daar een <b>potentiële</b> windfall van ± '+eur(_wfGs)+'/jaar bij → rendement <b>'+pct(_rendMet)+'</b>. Die windfall is apart omdat ze de medewerking van uw leverancier vereist.'+
       '<div class="kpi-row k3" style="margin-top:8px">'+
-        '<div class="kpi"><div class="l">Zonder windfall (gegarandeerd)</div><div class="v">'+pct(gsRendement)+'</div><div class="s">'+eur(gsBesp)+'/jr</div></div>'+
+        '<div class="kpi"><div class="l">Zonder windfall</div><div class="v">'+pct(gsRendement)+'</div><div class="s">'+eur(gsBesp)+'/jr</div></div>'+
         '<div class="kpi groen"><div class="l">Met windfall (potentieel)</div><div class="v">'+pct(_rendMet)+'</div><div class="s">'+eur(gsBesp+_wfGs)+'/jr</div></div>'+
         '<div class="kpi"><div class="l">Onbalans-windfall</div><div class="v">'+eur(_wfGs)+'</div><div class="s">/jaar · vereist passthrough</div></div>'+
       '</div></div>';
@@ -851,9 +951,16 @@ pagina(
 var GP=(INV.groeipad&&INV.groeipad.stappen)||[];
 if(GP.length){
   var heeftVoorbij=GP.some(function(s){return s.voorbij_optimaal;});
+  // v2.10 (Johan-review): loadfactor per groeistap — indien de backend ze niet levert, interpoleren we tussen "geen
+  // batterij" (voor) en het optimum o.b.v. de batterij-kWh uit het label ("kW/kWh"). Approximatie tot de sim ze meelevert.
+  var _gpLf=function(s){ if(s.kpi3_loadfactor!=null) return s.kpi3_loadfactor;
+    var m=String(s.label||'').match(/\/\s*(\d+(?:[.,]\d+)?)/); var kwh=m?parseFloat(m[1].replace(',','.')):null;
+    var vo=O.kpi3_loadfactor_voor, na=O.kpi3_loadfactor_na, ok=(O.batterij_kwh||0);
+    if(vo==null||na==null||!kwh||!(ok>0)) return null;
+    return vo+(na-vo)*Math.min(1.15, kwh/ok); };
   pagina(
-    '<div class="stap-band"><div class="nr">7+</div><div><h2>Uw volledige groeipad</h2><div class="note">Van uw eerste stap tot (en voorbij) de optimale opstelling — stap voor stap.</div></div></div>'+
-    '<p>Onderstaand pad toont hoe u van uw instapstap naar de optimale opstelling groeit. Bij elke stap ziet u <b>wat er bijkomt</b>, de <b>bijkomende investering</b>, en de <b>drie doelstellings-KPI\'s</b>. '+(heeftVoorbij?'De stappen ná het optimum zijn technisch mogelijk, maar hun rendement daalt — ze staan er ter volledigheid.':'')+'</p>'+
+    '<div class="stap-band"><div class="nr">'+_secNr+'+</div><div><h2>Uw volledige groeipad</h2><div class="note">Van uw eerste stap tot (en voorbij) de optimale opstelling — stap voor stap.</div></div></div>'+
+    '<p>Onderstaand pad toont hoe u van uw instapstap naar de optimale opstelling groeit. Bij elke stap ziet u <b>wat er bijkomt</b>, de <b>bijkomende investering</b>, en de <b>doelstellings-KPI\'s</b> (rendement en loadfactor'+(_heeftMobiliteit?', plus €/km':'')+'). '+(heeftVoorbij?'De stappen ná het optimum zijn technisch mogelijk, maar hun rendement daalt — ze staan er ter volledigheid.':'')+'</p>'+
     '<p class="note">Het groeipad rekent <b>batterij-only</b> — u breidt uit door batterijmodules bij te plaatsen naarmate uw vloot groeit. De zonnepanelen zijn een <b>eenmalige optie</b> die u op uw eerste stap bijlegt (zie de vorige pagina); ze worden niet per groeistap herhaald.</p>'+
     '<div class="gp">'+ GP.map(function(s,i){
       var cls=s.is_optimaal?'opt':(s.voorbij_optimaal?'voorbij':'');
@@ -867,34 +974,39 @@ if(GP.length){
             (s.voorbij_optimaal?' <span class="badge" style="background:#FFF3E0;color:#9E480E">voorbij optimum</span>':'')+
           '</span><span style="font-size:11px;color:#5A6577">cumulatief '+eur(s.cum_capex)+'</span></div>'+
           '<div class="gp-wat">'+esc(s.wat)+'</div>'+
+          // v2.10 (Johan-review): zonder laadplein tonen we 2 KPI's (rendement + loadfactor); met laadplein blijven de 3
+          // (€/km + rendement + loadfactor). Loadfactor wordt ingevuld (geïnterpoleerd) i.p.v. leeg.
           '<div class="gp-kpis">'+
             '<div class="k"><div class="kl">Extra investering</div><div class="kv">+'+eur(s.extra_capex)+'</div></div>'+
-            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 1 · €/km</div><div class="kv">'+eur2(s.kpi1_eur_km)+'</div></div>'+
-            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 2 · rendement</div><div class="kv">'+pct(s.kpi2_rendement)+'</div></div>'+
-            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI 3 · loadfactor</div><div class="kv">'+lf(s.kpi3_loadfactor)+'</div></div>'+
+            (_heeftMobiliteit?'<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI · €/km</div><div class="kv">'+eur2(s.kpi1_eur_km)+'</div></div>':'')+
+            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI '+(_heeftMobiliteit?'2':'1')+' · rendement</div><div class="kv">'+pct(s.kpi2_rendement)+'</div></div>'+
+            '<div class="k'+(s.voorbij_optimaal?' dim':'')+'"><div class="kl">KPI '+(_heeftMobiliteit?'3':'2')+' · loadfactor</div><div class="kv">'+lf(_gpLf(s))+'</div></div>'+
           '</div>'+
         '</div></div>';
     }).join('')+'</div>'+
     (heeftVoorbij?'<div class="box oranje"><b>Waarom stoppen bij het optimum?</b> Voorbij de optimale opstelling blijft u investeren, maar de markt biedt niet genoeg extra waarde: het rendement (KPI 2) daalt terwijl de capex verder stijgt. De optimale opstelling is precies het punt met de beste verhouding tussen investering en meerwaarde.</div>':'')+
     mgmt('groeipad — alle stappen',
       '<table><thead><tr><th>Stap</th><th>Extra capex</th><th>Cumulatief</th><th>KPI1 €/km</th><th>KPI2 rend.</th><th>KPI3 lf</th></tr></thead><tbody>'+
-      GP.map(function(s){ return '<tr><td>'+esc(s.label)+(s.is_optimaal?' ★':'')+'</td><td>'+eur(s.extra_capex)+'</td><td>'+eur(s.cum_capex)+'</td><td>'+eur2(s.kpi1_eur_km)+'</td><td>'+pct(s.kpi2_rendement)+'</td><td>'+lf(s.kpi3_loadfactor)+'</td></tr>'; }).join('')+
+      GP.map(function(s){ return '<tr><td>'+esc(s.label)+(s.is_optimaal?' ★':'')+'</td><td>'+eur(s.extra_capex)+'</td><td>'+eur(s.cum_capex)+'</td><td>'+eur2(s.kpi1_eur_km)+'</td><td>'+pct(s.kpi2_rendement)+'</td><td>'+lf(_gpLf(s))+'</td></tr>'; }).join('')+
       '</tbody></table>')
   );
 }
 
 // ---- PAGINA 9 — FINANCIEEL: BESPARING OVER DE HORIZON ----
+// v2.10 (Johan-review 03-08): het financieringsplan is het plan voor UW EERSTE GROEISTAP (niet de volledige opstelling).
+// Alle reeksen rekenen daarom op gsCapex + gsBesp + gsOpex, zodat de investering consistent is met de groeistap-pagina
+// (geen €25.000-vs-€21.000-discrepantie meer).
 var scReeks=['conservatief','realistisch','optimistisch'].map(function(k){ var sc=AAN.scenarios[k]; var rij=[]; var cum=0;
-  for(var y=0;y<AAN.horizon;y++){ var netto=besparingJaar(sc,y)-opexJaar(sc,y,OH1,VERZ); if(y===9) netto-=(INV.ontwerp.pv_kwp||0)*AAN.omvormer_vervang_kwp; cum+=netto; rij.push(Math.round(cum-CAPEX.totaal)); }
+  for(var y=0;y<AAN.horizon;y++){ var netto=besparingJaar(sc,y,gsBesp)-opexJaar(sc,y,gsOh1,gsVerz); if(y===9) netto-=(GS.pv_kwp||0)*AAN.omvormer_vervang_kwp; cum+=netto; rij.push(Math.round(cum-gsCapex)); }
   return {key:k, naam:sc.naam, cum:rij}; });
 pagina(
-  '<div class="stap-band"><div class="nr">8</div><div><h2>Het financieringsplan</h2><div class="note">Zwart op wit: hoe uw besparing evolueert, en hoe u het financiert.</div></div></div>'+
-  '<p>Hieronder ziet u hoe uw <b>cumulatieve netto besparing</b> evolueert over '+AAN.horizon+' jaar, onder drie kostenscenario\'s. Het punt waar de lijn de nullijn kruist, is uw terugverdientijd. Netkosten stijgen structureel — hoe sneller ze stijgen, hoe waardevoller dit ontwerp wordt.</p>'+
+  '<div class="stap-band" style="border:0;padding-left:0"><div><div class="eyebrow">Financiering</div><h2>Het financieringsplan — voor uw eerste groeistap</h2><div class="note">Zwart op wit: hoe uw besparing evolueert, en hoe u de eerste groeistap financiert.</div></div></div>'+
+  '<p>Dit plan gaat over uw <b>eerste groeistap</b> ('+eur(gsCapex)+' — de instap die u vandaag plaatst), niet over de volledige opstelling. Hieronder ziet u hoe uw <b>cumulatieve netto besparing</b> evolueert over '+AAN.horizon+' jaar, onder drie kostenscenario\'s. Het punt waar de lijn de nullijn kruist, is uw terugverdientijd. Netkosten stijgen structureel — hoe sneller ze stijgen, hoe waardevoller dit ontwerp wordt.</p>'+
   chartBlok('ch-cashflow')+
   '<div class="kpi-row k3">'+
-    '<div class="kpi"><div class="l">Totale investering</div><div class="v">'+eur(CAPEX.totaal)+'</div><div class="s">PV+batterij'+((CAPEX.cabine>0)?'+cabine':'')+'+laadinfra</div></div>'+
-    '<div class="kpi groen"><div class="l">Besparing jaar 1</div><div class="v">'+eur(FIN.besparing_jaar1)+'</div><div class="s">realistisch</div></div>'+
-    '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(rendReal.tvt!=null?fmt1.format(rendReal.tvt):'—')+' jr</div><div class="s">realistisch scenario</div></div>'+
+    '<div class="kpi"><div class="l">Investering</div><div class="v">'+eur(gsCapex)+'</div><div class="s">eerste groeistap · instap (PV+batterij)</div></div>'+
+    '<div class="kpi groen"><div class="l">Besparing jaar 1</div><div class="v">'+eur(gsBesp)+'</div><div class="s">realistisch</div></div>'+
+    '<div class="kpi oranje"><div class="l">Terugverdientijd</div><div class="v">'+(gsPayback!=null?fmt1.format(gsPayback):'—')+' jr</div><div class="s">realistisch scenario</div></div>'+
   '</div>'+
   // v2.9.8 (Johan 03-08): WINDFALL met het (B)-rendement. Base case (A) = spot-arbitrage (O.kpi2_rendement) — dit is de
   // garantie-basis. De onbalans is een APARTE windfall met haar eigen bijdrage; samen geeft dat het (B)-rendement =
@@ -903,7 +1015,7 @@ pagina(
     var _wRend=(CAPEX.bucket1>0)?(FIN.onbalans_windfall_jaar1/CAPEX.bucket1*100):null;
     var _aRend=(O.kpi2_rendement!=null)?O.kpi2_rendement:null;
     var _bRend=(_aRend!=null&&_wRend!=null)?(_aRend+_wRend):null;
-    return '<div class="box oranje"><b>Windfall — onbalanssturing (potentieel):</b> de base case hierboven (<b>'+pct(_aRend)+'</b>) is de <b>spot-arbitrage</b> — dát is de basis waarop wij het rendement garanderen. Bovenop kan de <b>onbalanssturing</b> ± '+eur(FIN.onbalans_windfall_jaar1)+'/jaar extra opbrengen'+(_wRend!=null?(' (+'+pct(_wRend)+')'):'')+'. Samen: <b>'+pct(_bRend)+'</b> rendement (arbitrage + onbalans). Dit is een <b>potentieel</b>, geen basis: het <b>vereist dat uw leverancier onbalans-passthrough aanbiedt</b> (afrekenen op de imbalance-markt) — wij nemen dit graag met uw leverancier op. Geldt voor de optimale opstelling en uw eerste groeistap.</div>';
+    return '<div class="box oranje"><b>Windfall — onbalanssturing (potentieel):</b> de base case hierboven (<b>'+pct(_aRend)+'</b>) is de <b>spot-arbitrage</b> — dát is de basis waarop wij het rendement garanderen. Bovenop kan de <b>onbalanssturing</b> ± '+eur(FIN.onbalans_windfall_jaar1)+'/jaar extra opbrengen'+(_wRend!=null?(' (+'+pct(_wRend)+')'):'')+'. Samen: <b>'+pct(_bRend)+'</b> rendement (arbitrage + onbalans). Dit is een <b>potentieel</b>, geen basis: het <b>vereist dat uw leverancier onbalans-passthrough aanbiedt</b>.</div>';
   })():'')+
   mgmt('capex/opex & rendement',
     '<table><tbody>'+
@@ -917,10 +1029,11 @@ pagina(
 );
 
 // ---- PAGINA 10 — 5 FINANCIERINGSMODELLEN ----
-var CT=CAPEX.totaal;
-function opex(y){ return OH1*Math.pow(1.02,y)+VERZ; }
-function omvormer(y){ return y===9?(INV.ontwerp.pv_kwp||0)*AAN.omvormer_vervang_kwp:0; }
-function besp(y){ return besparingJaar(AAN.scenarios.realistisch,y); }
+// v2.10 (Johan-review): de 5 modellen financieren de EERSTE GROEISTAP (gsCapex), niet de volledige opstelling.
+var CT=gsCapex;
+function opex(y){ return gsOh1*Math.pow(1.02,y)+gsVerz; }
+function omvormer(y){ return y===9?(GS.pv_kwp||0)*AAN.omvormer_vervang_kwp:0; }
+function besp(y){ return besparingJaar(AAN.scenarios.realistisch,y,gsBesp); }
 // Model 1 — Eigen kas
 var m1 = bouwReeks({scKey:'realistisch', initieel:-CT, inkomstenFn:function(y){return besp(y);}, kostenFn:function(y){return opex(y)+omvormer(y);}});
 // Model 2 — Banklening 70% @5% 10j
@@ -929,40 +1042,85 @@ var m2 = bouwReeks({scKey:'realistisch', initieel:-(CT-len2), inkomstenFn:functi
 // Model 3 — Operationele lease @10% 10j
 var leaseDS=annuiteit(CT,0.10,10);
 var m3 = bouwReeks({scKey:'realistisch', initieel:0, inkomstenFn:function(y){return besp(y);}, kostenFn:function(y){return (y<10?leaseDS+opex(y):opex(y))+omvormer(y);}, dscrFn:function(y,ink,kost){var ds=(y<10?leaseDS:0);return ds>0?besp(y)/ds:null;}});
-// Model 4 — ESCO / derdepartijfinanciering (revenue share 50/50)
-var m4 = bouwReeks({scKey:'realistisch', initieel:0, inkomstenFn:function(y){return besp(y)*0.5;}, kostenFn:function(y){return 0;}});
-// Model 5 — Sale & lease back @10% 10j
-var slbDS=annuiteit(CT,0.10,10);
-var m5 = bouwReeks({scKey:'realistisch', initieel:CT, inkomstenFn:function(y){return besp(y);}, kostenFn:function(y){return (y<10?slbDS+opex(y):opex(y))+omvormer(y);}, dscrFn:function(y,ink,kost){var ds=(y<10?slbDS:0);return ds>0?besp(y)/ds:null;}});
+// v2.10 (Johan-review 03-08): Model 4 (ESCO) & 5 (GVV) delen ENKEL de overwinst. Een vaste debt-service/huur gaat
+// EERST naar de kapitaalverschaffer; het saldo (overwinst = besparing − opex − DS, ondergrens 0) wordt 50/50 verdeeld.
+// bouwDeling geeft per jaar zowel het klant- als het tegenpartij-beeld (investeerder resp. operator).
+function bouwDeling(cfg){
+  var rows=[], klantCum=cfg.klantInitieel||0;
+  rows.push({label:'Jaar 0', isNul:true, klant:(cfg.klantInitieel||0), klantCum:klantCum});
+  for(var y=0;y<AAN.horizon;y++){
+    var besparing=besp(y), kost=opex(y)+omvormer(y), ds=cfg.ds;
+    var overwinst=Math.max(0, besparing-kost-ds), helft=overwinst*0.5;
+    var klant = cfg.klantKrijgtDs ? (ds+helft) : helft;                 // Model 5: klant = verhuurder → vaste + variabele huur
+    var tegen = cfg.klantKrijgtDs ? (besparing-kost-ds-helft) : (ds+helft); // operator resp. investeerder
+    klantCum+=klant;
+    rows.push({label:''+(y+1), besparing:besparing, ds:ds, overwinst:overwinst, klant:klant, tegen:tegen, klantCum:klantCum});
+  }
+  return rows;
+}
+// Model 4 — ESCO / derde partij: investeerder financiert (−capex), debt service 10% (annuïteit over de horizon) eerst.
+var escoDS=annuiteit(CT,0.10,AAN.horizon);
+var m4 = bouwDeling({ds:escoDS, klantInitieel:0, klantKrijgtDs:false});
+// Model 5 — GVV / sale & lease back (spiegelbeeld ESCO): klant KOOPT (−capex) en verhuurt; vaste huur 6% (annuïteit
+// over de horizon) + 50% overwinst als variabele huur.
+var gvvHuur=annuiteit(CT,0.06,AAN.horizon);
+var m5 = bouwDeling({ds:gvvHuur, klantInitieel:-CT, klantKrijgtDs:true});
 var MODELLEN=[
-  {nr:1,titel:'Eigen kas',sub:'U investeert zelf. Maximaal rendement, eigen inbreng = volledige capex.',reeks:m1,eigen:CT,dscr:false},
+  {nr:1,titel:'Eigen middelen',sub:'U investeert zelf. Maximaal rendement, eigen inbreng = volledige capex.',reeks:m1,eigen:CT,dscr:false},
   {nr:2,titel:'Banklening (70% @5%, 10j)',sub:'Deels geleend; eigen inbreng '+eur(CT*0.30)+'. DSCR toont de dekkingsgraad.',reeks:m2,eigen:CT*0.30,dscr:true},
   {nr:3,titel:'Operationele lease (10%, 10j)',sub:'U huurt de installatie. Geen eigen inbreng.',reeks:m3,eigen:0,dscr:true},
-  {nr:4,titel:'ESCO / derde partij (revenue share 50/50)',sub:'Een derde financiert en deelt de besparing. Geen inbreng, lager maar risicoloos.',reeks:m4,eigen:0,dscr:false},
-  {nr:5,titel:'Sale & lease back (10%, 10j)',sub:'U ontvangt de capex en huurt terug. Directe liquiditeit.',reeks:m5,eigen:0,dscr:true}
+  {nr:4,titel:'ESCO / derde partij — enkel de overwinst gedeeld',sub:'Een derde investeert. De debt service (10%, cumulatief over '+AAN.horizon+' jaar) gaat eerst naar de investeerder; de overwinst daarna wordt 50/50 gedeeld. U brengt niets in en deelt enkel in de overwinst.',reeks:m4,deling:true,dsLabel:'Debt service (10%)',klantLabel:'Uw 50%',tegenLabel:'Investeerder (DS+50%)'},
+  {nr:5,titel:'GVV / sale & lease back — spiegelbeeld van de ESCO',sub:'U koopt de installatie en verhuurt ze aan een operationele partner. U ontvangt een vaste huur (6%, cumulatief over '+AAN.horizon+' jaar) plus 50% van de overwinst als variabele huur. Geschikt voor een Gereglementeerde Vastgoedvennootschap (GVV).',reeks:m5,deling:true,dsLabel:'Vaste huur (6%)',klantLabel:'Uw huur (vast+var.)',tegenLabel:'Operator'}
 ];
+// v2.10 (Johan-review): dual-view-tabel voor de delingsmodellen (ESCO/GVV) — besparing, debt-service/huur, overwinst,
+// klantdeel én tegenpartij (investeerder/operator), plus de cumulatieve klant-cashflow.
+function modelTabelDeling(m){
+  var body='';
+  m.reeks.forEach(function(r){
+    if(r.isNul){ body+='<tr style="background:#eef2f8"><td>0</td><td>—</td><td>—</td><td>—</td><td class="'+(r.klant>=0?'pos':'neg')+'">'+eur(r.klant)+'</td><td>—</td><td class="'+(r.klantCum>=0?'pos':'neg')+'">'+eur(r.klantCum)+'</td></tr>'; return; }
+    if(!MGMT && [1,3,5,10,15].indexOf(+r.label)<0) return;
+    body+='<tr><td>'+r.label+'</td><td>'+eur(r.besparing)+'</td><td>'+eur(r.ds)+'</td><td>'+eur(r.overwinst)+'</td><td class="pos">'+eur(r.klant)+'</td><td>'+eur(r.tegen)+'</td><td class="'+(r.klantCum>=0?'pos':'neg')+'">'+eur(r.klantCum)+'</td></tr>';
+  });
+  return '<table class="'+(MGMT?'':'compact')+'"><thead><tr><th>Jaar</th><th>Besparing</th><th>'+esc(m.dsLabel)+'</th><th>Overwinst</th><th>'+esc(m.klantLabel)+'</th><th>'+esc(m.tegenLabel)+'</th><th>Cumulatief (klant)</th></tr></thead><tbody>'+body+'</tbody></table>';
+}
 function modelTabel(m){
   var toon=m.dscr; var body='';
   m.reeks.forEach(function(r){
     if(r.isNul){ body+='<tr style="background:#eef2f8"><td>0</td><td>—</td><td>—</td><td class="'+(r.cashflow>=0?'pos':'neg')+'">'+eur(r.cashflow)+'</td><td class="'+(r.cumm>=0?'pos':'neg')+'">'+eur(r.cumm)+'</td>'+(toon?'<td>—</td>':'')+'</tr>'; return; }
-    if(r.label>6 && r.label!=10 && r.label!=15 && !MGMT) return; // klant: compact (jaar 1-6,10,15); management: alles
+    if(!MGMT && [1,3,5,10,15].indexOf(+r.label)<0) return; // v2.10.1 (Johan-review): compacter (jaar 1,3,5,10,15) zodat elk model op 1 A4 past; management: alles
     body+='<tr><td>'+r.label+'</td><td>'+eur(r.inkomsten)+'</td><td>'+eur(r.kosten+r.fin+r.aflossing)+'</td><td class="'+(r.cashflow>=0?'pos':'neg')+'">'+eur(r.cashflow)+'</td><td class="'+(r.cumm>=0?'pos':'neg')+'">'+eur(r.cumm)+'</td>'+(toon?'<td>'+(r.dscr!=null?fmt1.format(r.dscr):'—')+'</td>':'')+'</tr>';
   });
   return '<table class="'+(MGMT?'':'compact')+'"><thead><tr><th>Jaar</th><th>Besparing</th><th>Kosten+fin</th><th>Cashflow</th><th>Cumulatief</th>'+(toon?'<th>DSCR</th>':'')+'</tr></thead><tbody>'+body+'</tbody></table>';
 }
 pagina(
   '<div class="eyebrow">Financiering</div><h2>Vijf manieren om dit te financieren</h2>'+
-  '<p class="lead">Van eigen kas tot volledig extern gefinancierd — kies wat bij uw balans past.</p>'+
+  '<p class="lead">Van eigen middelen tot volledig extern gefinancierd — kies wat bij uw balans past.</p>'+
   MODELLEN.slice(0,3).map(function(m){ return '<h3>Model '+m.nr+' — '+esc(m.titel)+'</h3><p class="note">'+esc(m.sub)+'</p>'+modelTabel(m); }).join('')
 );
 pagina(
   '<div class="eyebrow">Financiering (vervolg)</div><h2>Modellen 4 & 5</h2>'+
-  MODELLEN.slice(3).map(function(m){ return '<h3>Model '+m.nr+' — '+esc(m.titel)+'</h3><p class="note">'+esc(m.sub)+'</p>'+modelTabel(m); }).join('')+
+  MODELLEN.slice(3).map(function(m){ return '<h3>Model '+m.nr+' — '+esc(m.titel)+'</h3><p class="note">'+esc(m.sub)+'</p>'+(m.deling?modelTabelDeling(m):modelTabel(m)); }).join('')+
   '<div class="box groen"><b>Ons advies.</b> De keuze hangt af van uw fiscale en liquiditeitssituatie. In de meeste gevallen geeft een gedeeltelijke banklening (model 2) het beste evenwicht tussen rendement en beperkte eigen inbreng. Wij nemen dit graag met u en uw boekhouder door.</div>'+
   '<p class="quote">"Slim zijn is goedkoper — en met het juiste financieringsplan hoeft slim zijn u vandaag geen liquiditeit te kosten."</p>'+
   mgmt('financieringsmodellen — parameters',
-    frm('Model 1 eigen kas: initieel −capex ('+eur(CT)+').\nModel 2 banklening 70% @5% 10j: annuïteit = '+eur(ds2)+'/jaar, eigen inbreng '+eur(CT*0.30)+'.\nModel 3 operationele lease @10% 10j: DS = '+eur(leaseDS)+'/jaar.\nModel 4 ESCO revenue share 50/50: klant ontvangt 50% van de besparing, geen inbreng.\nModel 5 sale & leaseback @10% 10j: klant ontvangt capex ('+eur(CT)+'), betaalt DS '+eur(slbDS)+'/jaar.\nAlle modellen: besparing = realistisch scenario; opex groeit 2%/jaar; omvormervervanging jaar 10.'))
+    frm('Financiering op de EERSTE GROEISTAP: capex = gsCapex ('+eur(CT)+'), besparing = gsBesp, opex = gsOpex.\nModel 1 eigen middelen: initieel −capex ('+eur(CT)+').\nModel 2 banklening 70% @5% 10j: annuïteit = '+eur(ds2)+'/jaar, eigen inbreng '+eur(CT*0.30)+'.\nModel 3 operationele lease @10% 10j: DS = '+eur(leaseDS)+'/jaar.\nModel 4 ESCO: investeerder −capex; debt service = annuïteit(capex,10%,'+AAN.horizon+'j) = '+eur(escoDS)+'/jaar EERST naar investeerder; overwinst = max(0, besparing−opex−DS) → 50/50.\nModel 5 GVV: klant koopt (−capex) en verhuurt; vaste huur = annuïteit(capex,6%,'+AAN.horizon+'j) = '+eur(gvvHuur)+'/jaar + 50% overwinst als variabele huur; operator draagt het saldo.\nAlle modellen: besparing = realistisch scenario; opex groeit 2%/jaar; omvormervervanging jaar 10.'))
 );
+
+// ---- BIJLAGE 1 — KABELTRACÉ-INPLANNING (T3/T4, indien een kabeltracé getekend is) ----
+// v2.10.4 (Johan-review 03-08): de output van de interactieve kabelplanner (foto van de inplanning) als bijlage,
+// zo groot mogelijk, volledig op 1 A4.
+if(INV.kabeltrace && INV.kabeltrace.foto){
+  var _kt=INV.kabeltrace;
+  pagina(
+    '<div class="stap-band" style="border:0;padding-left:0"><div><div class="eyebrow">Bijlage 1</div><h2>Kabeltracé — inplanning</h2>'+
+      '<div class="note">De uitgetekende kabel- en infrastructuurinplanning uit de kabelplanner'+
+      (_kt.kost_eur!=null?' · concrete tracékost '+eur(_kt.kost_eur):'')+
+      (_kt.pv_kwp?' · PV zoals getekend '+num(_kt.pv_kwp)+' kWp':'')+'.</div></div></div>'+
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;margin:8px 0;min-height:0">'+
+      '<img src="'+_kt.foto+'" alt="Kabeltracé-inplanning" style="max-width:100%;max-height:240mm;width:auto;height:auto;object-fit:contain;border:1px solid var(--lijn);border-radius:4px">'+
+    '</div>'
+  );
+}
 
 // ---- management: volledig data-eiland (chatbot-klaar) ----
 if(MGMT){
@@ -981,18 +1139,65 @@ if(MGMT){
   var s=document.createElement('script'); s.type='application/json'; s.id='fluctus-data-island'; s.textContent=JSON.stringify(island); document.body.appendChild(s);
 }
 
+// ---- JACOPS/E+Drive-stijlset (?stijl=jacops): palette-swap + logo per pagina + strakke voorpagina ----
+try{ if(window.FluctusJacops && FluctusJacops.active()){
+  var _jcComp=[];
+  if((CAPEX.pv||0)>0)        _jcComp.push({naam:'Zonnepanelen',      detail:num(O.pv_kwp)+' kWp',                                            capex:eur(CAPEX.pv)});
+  if((CAPEX.batterij||0)>0)  _jcComp.push({naam:'Batterij (opslag)', detail:num(O.batterij_kw)+' kW / '+num(O.batterij_kwh)+' kWh',           capex:eur(CAPEX.batterij)});
+  if((CAPEX.laadpalen||0)>0){ var _jcKva=((O.laadpalen||{}).ac||0)*22+((O.laadpalen||{}).dc160||0)*160+((O.laadpalen||{}).dc300||0)*300;
+                             _jcComp.push({naam:'Laadplein',         detail:num(_jcKva)+' kVA laadvermogen',                                 capex:eur(CAPEX.laadpalen)}); }
+  if(((CAPEX.verzwaring||0)+(CAPEX.cabine||0))>0)
+                             _jcComp.push({naam:'Netaansluiting',    detail:num(O.aansluiting_kw)+' kVA'+(O.spanning_nieuw?' ('+O.spanning_nieuw+')':''), capex:eur((CAPEX.verzwaring||0)+(CAPEX.cabine||0))});
+  var _jcInstap = (typeof gsCapex!=='undefined' && gsCapex>0 && gsCapex<(CAPEX.totaal||0)) ? eur(gsCapex) : '';
+  var _jcTabs=[]; if((CAPEX.batterij||0)>0)_jcTabs.push('Slimme batterij'); if((CAPEX.pv||0)>0)_jcTabs.push('PV'); if((CAPEX.laadpalen||0)>0)_jcTabs.push('Laadplein'); _jcTabs.push('Slimme sturing');
+  FluctusJacops.apply({
+    merk:(_heeftMobiliteit?'edrive':'jacops'),
+    eyebrow:(_heeftMobiliteit?'E+Drive · Mobiliteitsvoorstel':'Energievoorstel'),
+    titel:(_heeftMobiliteit?'E+Drive-voorstel':'BatteryActive-voorstel'),
+    klant:(INV.scenario_naam||INV.klant||''), projectId:PID,
+    tabs:_jcTabs,
+    hero:{ groot:'− '+eur(_totaalBesp), eenheid:'per jaar',
+      klein:(_heeftMobiliteit?'gebouw + vloot vs. diesel':'op uw energiekost')+' · '+pct(rendReal.rendement)+' rendement op de optimale opstelling' },
+    kpis:[
+      { l:(_heeftMobiliteit?'Huidige totale kost':'Huidige factuur'), v:eur(_referentieJaar), s:'per jaar'+(_heeftMobiliteit?' (gebouw + vloot op diesel)':'') },
+      { l:'Besparing per jaar', v:'−'+eur(_totaalBesp), s:pct(besp_pct)+' lager', groen:true },
+      { l:'Rendement optimale opstelling', v:pct(rendReal.rendement), s:(rendReal.tvt!=null?('terugverdiend in ± '+Math.round(rendReal.tvt)+' jaar'):'') }
+    ],
+    actie:{ componenten:_jcComp, totaalLabel:'Totale investering (CAPEX)', capexTotaal:eur(CAPEX.totaal), instap:_jcInstap }
+  });
+} }catch(e){ /* stijlset mag het rapport nooit breken */ }
+
 // ============================ CHARTS + HEATMAPS TEKENEN ============================
 window.addEventListener('load', function(){
-  var C_BLAUW='#1F3864', C_GROEN='#05B050', C_ORANJE='#E8A33D', C_GRIJS='#9AA6B6', C_ROOD='#C0392B';
+  var _jcOn=(window.FluctusJacops&&FluctusJacops.active());
+  var C_BLAUW=_jcOn?'#E83020':'#1F3864', C_GROEN=_jcOn?'#1E7F4F':'#05B050', C_ORANJE=_jcOn?'#F2A900':'#E8A33D', C_GRIJS=_jcOn?'#9A9A97':'#9AA6B6', C_ROOD=_jcOn?'#B0201A':'#C0392B';
   function mk(id, cfg){ var c=document.getElementById(id); if(c) try{ new Chart(c.getContext('2d'), cfg); }catch(e){} }
   // factuur pie
-  mk('ch-fact-pie', { type:'doughnut', data:{ labels:['Energie','Distributie','Capaciteit','Heffingen'],
+  mk('ch-fact-pie', { type:'doughnut', data:{ labels:['Energie','Netkosten per MWh','Netkosten per MW','Heffingen'],
     datasets:[{ data:[comp.energie,comp.distributie,comp.capaciteit,comp.heffingen], backgroundColor:[C_BLAUW,C_GROEN,C_ORANJE,C_GRIJS], borderWidth:1, borderColor:'#fff' }] },
     options:{ plugins:{ legend:{position:'right',labels:{font:{size:11}}} }, cutout:'55%', responsive:true, maintainAspectRatio:false } });
-  // factuur bar
-  mk('ch-fact-bar', { type:'bar', data:{ labels: _heeftMobiliteit?['Vandaag','+ vloot @ CREG','+ vloot op diesel','Voorstel']:['Vandaag','Voorstel'],
-    datasets:[{ data: _heeftMobiliteit?[F.bestaand_jaar,_cregReferentie,_referentieJaar,_voorstelJaar]:[F.bestaand_jaar,_voorstelJaar], backgroundColor: _heeftMobiliteit?[C_GRIJS,'#9DB4DE',C_ORANJE,C_GROEN]:[C_GRIJS,C_GROEN] }] },
-    options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:function(v){return '€'+(v/1000)+'k';}}}}, responsive:true, maintainAspectRatio:false } });
+  // factuur bar — v2.10 (Johan-review): gebouw-case (tegel 3) = GESTAPELD per component (heffingen onder → energie boven),
+  // met "Optimale opstelling" i.p.v. "Voorstel". Het voorstel behoudt netkosten-per-MWh + heffingen en verlaagt energie +
+  // netkosten-per-MW (proportioneel), zodat het totaal = _voorstelJaar. Mobiliteit-case blijft de 4-balk-referentie.
+  mk('ch-fact-bar', (function(){
+    var _euK=function(v){return '€'+(v/1000)+'k';};
+    if(_heeftMobiliteit){ return { type:'bar', data:{ labels:['Vandaag','+ vloot @ CREG','+ vloot op diesel','Optimale opstelling'],
+      datasets:[{ data:[F.bestaand_jaar,_cregReferentie,_referentieJaar,_voorstelJaar], backgroundColor:[C_GRIJS,'#9DB4DE',C_ORANJE,C_GROEN] }] },
+      options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:_euK}}}, responsive:true, maintainAspectRatio:false } }; }
+    var cE=comp.energie||0, cD=comp.distributie||0, cC=comp.capaciteit||0, cH=comp.heffingen||0;
+    if((cE+cD+cC+cH)<=0){ return { type:'bar', data:{ labels:['Vandaag','Optimale opstelling'],
+      datasets:[{ data:[F.bestaand_jaar,_voorstelJaar], backgroundColor:[C_GRIJS,C_GROEN] }] },
+      options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:_euK}}}, responsive:true, maintainAspectRatio:false } }; }
+    var vRest=Math.max(0,_voorstelJaar-cD-cH), ecTot=cE+cC;
+    var vE=ecTot>0?vRest*(cE/ecTot):vRest, vC=ecTot>0?vRest*(cC/ecTot):0;
+    return { type:'bar', data:{ labels:['Vandaag','Optimale opstelling'],
+      datasets:[
+        { label:'Heffingen', data:[cH,cH], backgroundColor:C_GRIJS, stack:'s' },
+        { label:'Netkosten per MW', data:[cC,vC], backgroundColor:C_ORANJE, stack:'s' },
+        { label:'Netkosten per MWh', data:[cD,cD], backgroundColor:C_GROEN, stack:'s' },
+        { label:'Energie', data:[cE,vE], backgroundColor:C_BLAUW, stack:'s' } ] },
+      options:{ plugins:{legend:{display:true,position:'bottom',labels:{font:{size:9},boxWidth:10}}}, scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:_euK}}}, responsive:true, maintainAspectRatio:false } };
+  })());
   // PV donut (benutting)
   mk('ch-pv-donut', { type:'doughnut', data:{ labels:['Direct eigen verbruik','Via batterij','Injectie'],
     datasets:[{ data:[E.pv_naar_gebouw_mwh+E.pv_naar_laadplein_mwh, E.pv_via_batterij_mwh, Math.max(0,E.pv_productie_mwh-E.pv_zelfverbruik_mwh-E.pv_via_batterij_mwh)], backgroundColor:[C_GROEN,C_BLAUW,C_ORANJE], borderWidth:1, borderColor:'#fff' }] },
@@ -1014,9 +1219,10 @@ window.addEventListener('load', function(){
   mk('ch-gs-pie', { type:'doughnut', data:{ labels:gsLab, datasets:[{ data:gsDat, backgroundColor:gsCol, borderWidth:1, borderColor:'#fff' }] },
     options:{ plugins:{legend:{position:'bottom',labels:{font:{size:10}}}, title:{display:true,text:'Start-PV · productie/jaar',font:{size:11}}}, cutout:'55%', responsive:true, maintainAspectRatio:false } });
   // piek bar
-  mk('ch-piek', { type:'bar', data:{ labels:['Zonder batterij','Met batterij','Aansluiting'],
-    datasets:[{ data:[E.sitepiek_zonder_batterij_kw,E.sitepiek_met_batterij_kw,E.aansluiting_kw], backgroundColor:[C_ROOD,C_GROEN,C_BLAUW] }] },
-    options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:function(v){return v+' kW';}}}}, responsive:true, maintainAspectRatio:false } });
+  // v2.10.2 (Johan-review): duidelijker labels — sitepiek zonder/met batterij + de aansluiting als GRENS (grijs, geen "peak").
+  mk('ch-piek', { type:'bar', data:{ labels:['Sitepiek zonder\nbatterij','Sitepiek met\nbatterij','Uw aansluiting\n(grens)'],
+    datasets:[{ data:[E.sitepiek_zonder_batterij_kw,E.sitepiek_met_batterij_kw,(E.aansluiting_kw||O.aansluiting_kw)], backgroundColor:[C_ROOD,C_GROEN,C_GRIJS] }] },
+    options:{ plugins:{legend:{display:false},tooltip:{enabled:false}}, scales:{y:{ticks:{callback:function(v){return v+' kW';}}},x:{ticks:{font:{size:9}}}}, responsive:true, maintainAspectRatio:false } });
   // extra PV maand
   var maandProd=[3,5,9,13,16,17,17,15,11,7,4,3].map(function(x){return Math.round((XP.productie_mwh||154)*x/120);});
   mk('ch-pv-maand', { type:'bar', data:{ labels:['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'],
@@ -1065,7 +1271,8 @@ window.addEventListener('load', function(){
     try{
       btn.textContent='PDF genereren…';
       var pdf=await genPdf();
-      var fn=(INV.klant||'ontwerp-rapport').replace(/[^A-Za-z0-9._-]/g,'_')+'_'+(MGMT?'management':'klant')+(PID?'_'+PID:'')+'.pdf';
+      // v2.10.4 (Johan-review): scherpe bestandsnaam per tegel — T3 = BatteryActive, T4 (mobiliteit) = EplusDrive.
+      var fn=(_heeftMobiliteit?'EplusDrive':'BatteryActive')+(PID?'_'+PID:'')+(MGMT?'_management':'')+((window.FluctusJacops&&FluctusJacops.active())?'_jacops':'')+'.pdf';
       pdf.save(fn);
       var tok=bearer();
       if(tok){

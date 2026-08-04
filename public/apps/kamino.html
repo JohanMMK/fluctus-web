@@ -641,12 +641,17 @@ function _rapportBeschikbaar(id){
   return !!(STATE.rapportOp[pid] && STATE.rapportOp[pid][id]);
 }
 // het rapport IN Kamino tonen (volledig-scherm overlay met een iframe).
-function _openRapportOverlay(reportData, reportKey, reportHtml){
+function _openRapportOverlay(reportData, reportKey, reportHtml, jacops){
   var url;
-  if(reportHtml){ try{ url=URL.createObjectURL(new Blob([reportHtml],{type:'text/html;charset=utf-8'})); }catch(e){ url='about:blank'; } }
+  if(reportHtml){
+    // blob erft de fluctus.net-origin → /apps/ laadt; blob heeft geen query, dus zet de vlag inline (window.__STIJL_JACOPS).
+    if(jacops){ var vlag='<script>window.__STIJL_JACOPS=1;<\/script>'; reportHtml = /<head[^>]*>/i.test(reportHtml) ? reportHtml.replace(/<head[^>]*>/i,function(m){return m+vlag;}) : vlag+reportHtml; }
+    try{ url=URL.createObjectURL(new Blob([reportHtml],{type:'text/html;charset=utf-8'})); }catch(e){ url='about:blank'; }
+  }
   else if(reportData && reportKey){
     try{ sessionStorage.setItem(reportKey, JSON.stringify(reportData)); }catch(e){}
     url=(reportKey==='FLUCTUS_FACTUURRAPPORT')?'/apps/factuurrapport.html':(reportKey==='FLUCTUS_RAPPORT')?'/apps/financieel-rapport.html':'/apps/ontwerp-rapport.html';
+    if(jacops) url+='?stijl=jacops';
   } else { alert('Geen rapportdata gevonden.'); return; }
   var ov=document.createElement('div');
   ov.setAttribute('data-krap','1');
@@ -658,9 +663,9 @@ function _openRapportOverlay(reportData, reportKey, reportHtml){
   document.body.appendChild(ov);
 }
 // v0.9.10: eerst de in-sessie rapportdata; anders het BEWAARDE rapport uit de bucket ophalen (heropend project).
-function _bekijkRapport(id){
+function _bekijkRapport(id, jacops){
   var pid=STATE.werk.id, r=STATE.rapport[pid+'|'+id];
-  if(r && (r.data||r.html)){ _openRapportOverlay(r.data, r.key, r.html); return; }
+  if(r && (r.data||r.html)){ _openRapportOverlay(r.data, r.key, r.html, jacops); return; }
   if(!pid){ alert('Geen actief project.'); return; }
   kApiGet('/api/kamino/rapport-open?project_id='+encodeURIComponent(pid)+'&tegel='+encodeURIComponent(id)).then(function(res){
     var a=(res&&res.rapport)||null;
@@ -668,7 +673,7 @@ function _bekijkRapport(id){
     if(a.reportHtml) STATE.rapport[pid+'|'+id]={ html:a.reportHtml };
     else if(a.reportData && a.reportKey) STATE.rapport[pid+'|'+id]={ key:a.reportKey, data:a.reportData };
     (STATE.rapportOp[pid]||(STATE.rapportOp[pid]={}))[id]=true;
-    _openRapportOverlay(a.reportData, a.reportKey, a.reportHtml);
+    _openRapportOverlay(a.reportData, a.reportKey, a.reportHtml, jacops);
   }).catch(function(e){ alert('Kon het bewaarde rapport niet openen: '+((e&&e.message)||e)); });
 }
 function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" onclick="location.hash=\'#/\'">← Terug</div>'+
@@ -777,6 +782,7 @@ function _toonResultaat(id, waarschuwing){
     tweestaps+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
       '<button class="btn green" onclick="_bekijkRapport(\''+id+'\')">📄 Bekijk uw volledige rapport</button>'+
+      '<button class="btn" style="border-color:#E8352A;background:#E8352A;color:#fff" onclick="_bekijkRapport(\''+id+'\',true)">📄 JACOPS-versie</button>'+
       '<button class="btn ghost" onclick="location.hash=\'#/\'">← Naar het overzicht</button></div>'+
     '</div></div>';
 }
