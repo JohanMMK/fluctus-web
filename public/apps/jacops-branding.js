@@ -27,6 +27,10 @@
   + '.flow .node.start{background:#FBEDEB!important;border-color:rgba(232,48,32,.55)!important}'
   + '.mgmt-banner{background:linear-gradient(90deg,'+RD+','+GOLD+')!important}'
   + '.mgmt{border-color:rgba(232,48,32,.55)!important;background:#FCF3F2!important}.mgmt h4{color:'+RD+'!important}'
+  /* tabel-totaalrijen (o.a. de Bill of Materials) volgden een hardgecodeerde blauwe tint → naar Jacops-rood */
+  + 'tfoot td{background:rgba(232,48,32,.06)!important;border-top-color:'+R+'!important}'
+  + 'table.bom tfoot .bom-tot td{background:rgba(232,48,32,.12)!important;border-top-color:'+R+'!important}'
+  + 'tr[style*="#eef2f8"] td,td[style*="#eef2f8"]{background:rgba(232,48,32,.06)!important}'
   /* logo-band per pagina */
   + '.a4-foot.jc{align-items:center;gap:8px}'
   + '.a4-foot .jc-jbox{background:'+R+';color:#fff;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:10px;letter-spacing:-.3px;padding:2px 6px;border-radius:3px;white-space:nowrap}'
