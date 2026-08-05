@@ -16,15 +16,17 @@ const $ = (id) => document.getElementById(id);
 //   extern:true      → opent in een nieuw tabblad (externe site).
 // De 'echte' tools (kamino/simulator/gemeenteplan) worden per gebruiker
 // gefilterd via de fluctus-proxy /api/app-access/check.
+// Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
+//   1 Academy · 2 Energiemarkt · 3 Gemeenteplan · 4 Kamino · 5 Simulator · 6 Gebruikers
 const APP_CATALOG = [
-  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
-  { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
-  { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
   // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
   // gedeelde marktdata bij die de simulator gebruikt.
   { id: 'energiemarkt', naam: 'Energiemarkt',    ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulator-data bij.', url: '/apps/energiemarkt.html' },
+  { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
+  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
+  { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
