@@ -9,14 +9,26 @@ const $ = (id) => document.getElementById(id);
 
 // App-catalogus = de 9a-apps. url is configureerbaar; de eigenlijke inbedding
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
+// Vlaggen:
+//   altijd:true      → tegel altijd zichtbaar voor elke ingelogde gebruiker
+//                      (geen app-access/check nodig).
+//   managerOnly:true → tegel enkel voor managers (role==='manager').
+//   extern:true      → opent in een nieuw tabblad (externe site).
+// De 'echte' tools (kamino/simulator/gemeenteplan) worden per gebruiker
+// gefilterd via de fluctus-proxy /api/app-access/check.
 const APP_CATALOG = [
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
+  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '', altijd: true, extern: true },
+  { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
   // { id: 'energiemarkt',naam: 'Energiemarkt', ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.', url: '/apps/energiemarkt.html' },
 ];
+
+// Externe Academy-URL (override via /api/config → academyUrl).
+function academyUrl() { return (CFG && CFG.academyUrl) || 'https://www.fluctus.net/academy'; }
 
 let CFG = null;
 let sb = null;       // Supabase client
@@ -93,10 +105,14 @@ function resetLogin() {
 async function logout() { await sb.auth.signOut(); }
 
 // RBAC: per app checken via de bestaande fluctus-proxy (9a). Managers → alle apps.
+// 'altijd'-tegels (Academy) tonen we altijd; 'managerOnly'-tegels (Gebruikers)
+// enkel voor managers. De rol lezen we uit het antwoord van app-access/check.
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const out = [];
-  await Promise.all(APP_CATALOG.map(async (app) => {
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);
+  const verleend = new Set();
+  let role = 'seller';
+  await Promise.all(echte.map(async (app) => {
     try {
       const r = await fetch(`${base}/api/app-access/check`, {
         method: 'POST',
@@ -105,10 +121,17 @@ async function toegankelijkeApps(token) {
       });
       if (!r.ok) return;
       const j = await r.json();
-      if (j && (j.toegang || j.access || j.ok)) out.push(app);
+      if (j && j.user && j.user.role) role = j.user.role;
+      if (j && (j.toegang || j.access || j.ok)) verleend.add(app.id);
     } catch (e) { /* verborgen bij fout */ }
   }));
-  return out;
+  // In catalogus-volgorde teruggeven: echte apps met toegang, altijd-apps,
+  // en manager-only apps enkel voor managers.
+  return APP_CATALOG.filter((a) => {
+    if (a.altijd) return true;
+    if (a.managerOnly) return role === 'manager';
+    return verleend.has(a.id);
+  });
 }
 
 function renderLauncher(apps) {
@@ -119,7 +142,9 @@ function renderLauncher(apps) {
   }
   apps.forEach(a => {
     const t = document.createElement('a');
-    t.className = 'app-tile'; t.href = a.url;
+    t.className = 'app-tile';
+    t.href = (a.id === 'academy') ? academyUrl() : a.url;
+    if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
     host.appendChild(t);
   });
