@@ -52,6 +52,12 @@
   .filterbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin:0 0 14px; padding:12px; background:#F8FAFC; border:1px solid var(--lijn); border-radius:8px; }
   .filterbar .veld label{ color:var(--navy); }
   .filterbar .reset{ background:transparent; color:var(--grijs); border:1px solid var(--lijn); }
+  .legende{ display:flex; gap:16px; flex-wrap:wrap; margin:10px 0 0; font-size:11.5px; color:var(--grijs); }
+  .legende span{ display:flex; align-items:center; gap:6px; }
+  .lg{ width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid var(--lijn); }
+  .lg-on{ background:var(--green); border-color:var(--green); }
+  .lg-auto{ background:#BFE3CC; border-color:#9ec7ad; }
+  .lg-wait{ background:#F1F2F4; border-color:#d7dbe0; }
   @media(max-width:640px){ main{ padding:14px 8px 60px; } .kaart{ padding:14px; } input[type=search]{ min-width:150px; } }
 </style>
 </head>
@@ -168,7 +174,12 @@
           APPS.map(function(a){ return '<th class="app">'+esc(a.naam)+(a.altijd?'<span class="alt">altijd</span>':'')+'</th>'; }).join('')+
           '<th>Acties</th>'+
         '</tr></thead><tbody id="tbody"></tbody></table></div>'+
-        '<p class="hint">Een vinkje kent de tool meteen toe of trekt ze in. <span class="noaid">·</span> = gebruiker moet eerst één keer inloggen. Academy staat altijd aan.</p>'+
+        '<div class="legende">'+
+          '<span><b class="lg lg-on"></b> aangevinkt = heeft toegang (klik om toe te kennen / in te trekken)</span>'+
+          '<span><b class="lg lg-auto"></b> vergrendeld = automatisch — managers hebben alle tools, iedereen heeft de Academy</span>'+
+          '<span><b class="lg lg-wait"></b> grijs met <span class="noaid">·</span> = verkoper moet eerst één keer inloggen; daarna kan je toekennen</span>'+
+        '</div>'+
+        '<div class="msg" id="g-msg"></div>'+
       '</div>';
     // sync filter-selects met state
     $('f-status').value=FILT.status; $('f-app').value=FILT.app; $('f-access').value=FILT.access;
@@ -249,15 +260,18 @@
     }catch(e){ $('inv-btn').disabled=false; msg.className='msg err'; msg.textContent='Netwerkfout: '+e.message; }
   }
 
+  function gmsg(txt, kind){ var m=$('g-msg'); if(!m) return; m.className='msg '+(kind||''); m.textContent=txt||''; }
+
   async function zetToegang(u, appId, aan, cb){
-    cb.disabled=true;
+    cb.disabled=true; gmsg('');
     try{
       var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId }) });
       cb.disabled=false;
-      if(!r.ok){ cb.checked=!aan; return; }
+      if(!r.ok){ cb.checked=!aan; var j=await r.json().catch(function(){return {};}); gmsg('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+' ('+(j.error||('fout '+r.status))+').','err'); return; }
       u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan) u.apps.push(appId);
+      gmsg((aan?'Toegang tot '+appId+' toegekend aan ':'Toegang tot '+appId+' ingetrokken bij ')+u.email+'.','ok');
       $('tel').textContent='· '+filtered().length+' van '+USERS.length+' gebruikers';
-    }catch(e){ cb.disabled=false; cb.checked=!aan; }
+    }catch(e){ cb.disabled=false; cb.checked=!aan; gmsg('Netwerkfout bij toegang wijzigen: '+e.message,'err'); }
   }
 
   async function zetRol(u, role){
