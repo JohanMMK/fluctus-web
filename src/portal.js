@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 // App-catalogus = de 9a-apps. url is configureerbaar; de eigenlijke inbedding
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
 const APP_CATALOG = [
-  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '20 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
+  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
