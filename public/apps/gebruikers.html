@@ -11,21 +11,19 @@
   header{ background:var(--navy); color:#fff; padding:14px 22px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
   header h1{ font-size:18px; margin:0; font-weight:800; letter-spacing:-.2px; }
   header .who{ font-size:13px; opacity:.9; }
-  header a.terug{ color:#cdd7ee; text-decoration:none; font-size:13px; margin-left:14px; }
-  header a.terug:hover{ text-decoration:underline; }
-  main{ max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  main{ max-width:1180px; margin:0 auto; padding:20px 16px 70px; }
   .kaart{ background:#fff; border:1px solid var(--lijn); border-radius:10px; padding:18px 18px 16px; margin:0 0 20px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
   .kaart h2{ font-size:14px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.05em; color:var(--navy); }
   .rij{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
   .veld{ display:flex; flex-direction:column; gap:4px; }
   .veld label{ font-size:11px; color:var(--grijs); font-weight:600; }
-  input[type=text], input[type=email], select{ font-size:14px; padding:8px 10px; border:1px solid var(--lijn); border-radius:7px; background:#fff; min-width:180px; }
+  input[type=text], input[type=email], input[type=search], select{ font-size:14px; padding:8px 10px; border:1px solid var(--lijn); border-radius:7px; background:#fff; }
+  input[type=email]{ min-width:180px; } input[type=search]{ min-width:200px; }
   input:focus, select:focus{ outline:none; border-color:var(--navy); }
   button{ font-size:14px; font-weight:600; padding:9px 16px; border:0; border-radius:7px; cursor:pointer; background:var(--navy); color:#fff; }
   button:hover{ filter:brightness(1.08); }
   button:disabled{ opacity:.5; cursor:not-allowed; }
   button.sec{ background:#EEF1F6; color:var(--navy); }
-  button.gev{ background:var(--rood); }
   button.gr{ background:var(--green); }
   .msg{ font-size:13px; margin:10px 0 0; min-height:18px; }
   .msg.ok{ color:var(--green); } .msg.err{ color:var(--rood); }
@@ -33,6 +31,7 @@
   th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--lijn); vertical-align:middle; }
   th{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--grijs); font-weight:700; white-space:nowrap; }
   th.app,td.app{ text-align:center; }
+  th.app .alt{ display:block; font-size:8px; color:var(--green); font-weight:700; letter-spacing:.02em; }
   tbody tr:hover{ background:#FAFBFC; }
   .u-email{ font-weight:600; color:#1F2430; }
   .u-naam{ color:var(--grijs); font-size:12px; }
@@ -40,8 +39,6 @@
   .b-active{ background:#E3F6EA; color:#0A7A38; }
   .b-invited{ background:#FFF3D6; color:#8A6100; }
   .b-inactive{ background:#F3D6D6; color:#8A1A14; }
-  .b-manager{ background:#E1E9FA; color:#1F3864; }
-  .b-seller{ background:#EEF1F6; color:#4A5568; }
   .app-toggle{ width:20px; height:20px; cursor:pointer; accent-color:var(--green); }
   .app-toggle:disabled{ cursor:not-allowed; }
   .noaid{ font-size:10px; color:#B08600; }
@@ -51,13 +48,16 @@
   .fout-groot{ padding:30px; text-align:center; color:var(--rood); font-size:14px; }
   .hint{ font-size:12px; color:var(--grijs); margin:2px 0 0; }
   .tel{ font-size:12px; color:var(--grijs); font-weight:600; }
-  select.rolsel{ min-width:120px; padding:5px 8px; font-size:12px; }
-  @media(max-width:640px){ input,select{ min-width:140px; } main{ padding:14px 8px 50px; } .kaart{ padding:14px; } }
+  select.rolsel{ padding:5px 8px; font-size:12px; }
+  .filterbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin:0 0 14px; padding:12px; background:#F8FAFC; border:1px solid var(--lijn); border-radius:8px; }
+  .filterbar .veld label{ color:var(--navy); }
+  .filterbar .reset{ background:transparent; color:var(--grijs); border:1px solid var(--lijn); }
+  @media(max-width:640px){ main{ padding:14px 8px 60px; } .kaart{ padding:14px; } input[type=search]{ min-width:150px; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Gebruikersbeheer<a class="terug" href="/portal.html">← naar portaal</a></h1>
+  <h1>Gebruikersbeheer</h1>
   <div class="who" id="who"></div>
 </header>
 <main>
@@ -68,15 +68,18 @@
 <script>
 (function(){
   "use strict";
-  // Grantbare tools (spiegelt de portal-catalogus; academy/gebruikers zijn geen
-  // per-verkoper te verlenen tegels).
+  // Alle apps op Mijn Fluctus behalve de Gebruikers-app zelf. 'altijd:true' =
+  // elke gebruiker/genodigde heeft er altijd toegang toe (Academy) → geen toggle.
   var APPS = [
     { id:'kamino',       naam:'Kamino' },
     { id:'simulator',    naam:'Simulator' },
     { id:'gemeenteplan', naam:'Gemeenteplan' },
+    { id:'energiemarkt', naam:'Energiemarkt' },
+    { id:'academy',      naam:'Academy', altijd:true },
   ];
 
   var CFG=null, sb=null, SESSION=null, PROXY='', USERS=[];
+  var FILT={ q:'', status:'', app:'', access:'' };
   var $ = function(id){ return document.getElementById(id); };
   var root = $('root');
 
@@ -89,21 +92,19 @@
     sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
     var d = await sb.auth.getSession();
     SESSION = d.data.session;
-    if(!SESSION){ window.location.href = '/portal.html'; return; }   // niet ingelogd → naar login
+    if(!SESSION){ window.location.href = '/portal.html'; return; }
     $('who').textContent = (SESSION.user && SESSION.user.email) || '';
     await laadUsers();
   }
 
-  function authHeaders(extra){
-    return Object.assign({ 'Authorization':'Bearer '+SESSION.access_token, 'Content-Type':'application/json' }, extra||{});
-  }
+  function authHeaders(extra){ return Object.assign({ 'Authorization':'Bearer '+SESSION.access_token, 'Content-Type':'application/json' }, extra||{}); }
 
   async function laadUsers(){
     root.className='laad'; root.textContent='Gebruikers laden…';
     var r;
     try{ r = await fetch(PROXY+'/api/manager/users', { headers: authHeaders() }); }
     catch(e){ root.className='fout-groot'; root.textContent='Kan de server niet bereiken: '+e.message; return; }
-    if(r.status===403){ root.className='fout-groot'; root.innerHTML='Deze pagina is enkel voor managers.<br><a href="/portal.html">← naar portaal</a>'; return; }
+    if(r.status===403){ root.className='fout-groot'; root.innerHTML='Deze pagina is enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a>'; return; }
     if(r.status===401){ window.location.href='/portal.html'; return; }
     if(!r.ok){ root.className='fout-groot'; root.textContent='Fout bij ophalen ('+r.status+').'; return; }
     var j = await r.json();
@@ -111,11 +112,27 @@
     render();
   }
 
+  // Heeft gebruiker toegang tot app? Managers = alles; academy = altijd; anders grant.
+  function heeftToegang(u, appId){
+    var app = APPS.filter(function(a){ return a.id===appId; })[0];
+    if(app && app.altijd) return true;
+    if(u.role==='manager') return true;
+    return (u.apps||[]).indexOf(appId)>=0;
+  }
+
+  function filtered(){
+    var q=(FILT.q||'').trim().toLowerCase();
+    return USERS.filter(function(u){
+      if(q){ var hay=((u.email||'')+' '+(u.name||'')+' '+(u.company||'')).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+      if(FILT.status && (u.status||'active')!==FILT.status) return false;
+      if(FILT.app && FILT.access){ var h=heeftToegang(u,FILT.app); if(FILT.access==='heeft' && !h) return false; if(FILT.access==='geen' && h) return false; }
+      return true;
+    });
+  }
+
   function render(){
     root.className='';
-    var apphead = APPS.map(function(a){ return '<th class="app">'+esc(a.naam)+'</th>'; }).join('');
-    var rows = USERS.map(function(u,i){ return userRow(u,i); }).join('');
-    var mgr = USERS.filter(function(u){ return u.role==='manager'; }).length;
+    var appOpts = APPS.map(function(a){ return '<option value="'+a.id+'">'+esc(a.naam)+'</option>'; }).join('');
     root.innerHTML =
       '<div class="kaart">'+
         '<h2>Nieuwe gebruiker uitnodigen</h2>'+
@@ -125,75 +142,107 @@
           '<div class="veld"><label>Bedrijf</label><input type="text" id="inv-bedrijf" placeholder="Bedrijfsnaam"></div>'+
           '<button id="inv-btn" class="gr">Uitnodigen</button>'+
         '</div>'+
-        '<p class="hint">De gebruiker krijgt rol <b>verkoper</b> en een uitnodigingsmail van de Fluctus Academy. Toegang tot tools ken je hieronder toe.</p>'+
+        '<p class="hint">Nieuwe gebruikers krijgen rol <b>verkoper</b>, een uitnodigingsmail én automatisch toegang tot de <b>Academy</b>. Andere tools ken je hieronder toe.</p>'+
         '<div class="msg" id="inv-msg"></div>'+
       '</div>'+
       '<div class="kaart">'+
-        '<h2>Gebruikers &amp; toegang <span class="tel">· '+USERS.length+' gebruikers, '+mgr+' manager(s)</span></h2>'+
-        '<div style="overflow-x:auto">'+
-        '<table><thead><tr>'+
-          '<th>Gebruiker</th><th>Rol</th><th>Status</th>'+apphead+'<th>Acties</th>'+
-        '</tr></thead><tbody>'+ (rows || '<tr><td colspan="'+(4+APPS.length)+'" style="color:#6B7280">Nog geen gebruikers.</td></tr>') +'</tbody></table>'+
+        '<h2>Gebruikers &amp; toegang <span class="tel" id="tel"></span></h2>'+
+        '<div class="filterbar">'+
+          '<div class="veld"><label>Zoek op naam / e-mail</label><input type="search" id="f-q" placeholder="typ een naam…" value="'+esc(FILT.q)+'"></div>'+
+          '<div class="veld"><label>Status</label><select id="f-status">'+
+            '<option value="">alle</option>'+
+            '<option value="active">actief</option>'+
+            '<option value="invited">uitgenodigd</option>'+
+            '<option value="inactive">inactief</option>'+
+          '</select></div>'+
+          '<div class="veld"><label>Toegang tot app</label><select id="f-app"><option value="">— kies app —</option>'+appOpts+'</select></div>'+
+          '<div class="veld"><label>&nbsp;</label><select id="f-access">'+
+            '<option value="">heeft / geen</option>'+
+            '<option value="heeft">heeft toegang</option>'+
+            '<option value="geen">geen toegang</option>'+
+          '</select></div>'+
+          '<button class="reset" id="f-reset">Wis filters</button>'+
         '</div>'+
-        '<p class="hint">Een vinkje kent de tool meteen toe of trekt ze in. Een <span class="noaid">·</span> bij de vinkjes betekent: de gebruiker moet eerst één keer inloggen voor toegang toegekend kan worden.</p>'+
+        '<div style="overflow-x:auto"><table><thead><tr>'+
+          '<th>Gebruiker</th><th>Rol</th><th>Status</th>'+
+          APPS.map(function(a){ return '<th class="app">'+esc(a.naam)+(a.altijd?'<span class="alt">altijd</span>':'')+'</th>'; }).join('')+
+          '<th>Acties</th>'+
+        '</tr></thead><tbody id="tbody"></tbody></table></div>'+
+        '<p class="hint">Een vinkje kent de tool meteen toe of trekt ze in. <span class="noaid">·</span> = gebruiker moet eerst één keer inloggen. Academy staat altijd aan.</p>'+
       '</div>';
+    // sync filter-selects met state
+    $('f-status').value=FILT.status; $('f-app').value=FILT.app; $('f-access').value=FILT.access;
     // wiring
     $('inv-btn').onclick = uitnodigen;
-    USERS.forEach(function(u,i){ wireRow(u,i); });
+    $('f-q').oninput = function(){ FILT.q=this.value; renderTable(); };
+    $('f-status').onchange = function(){ FILT.status=this.value; renderTable(); };
+    $('f-app').onchange = function(){ FILT.app=this.value; renderTable(); };
+    $('f-access').onchange = function(){ FILT.access=this.value; renderTable(); };
+    $('f-reset').onclick = function(){ FILT={q:'',status:'',app:'',access:''}; render(); };
+    renderTable();
   }
 
-  function userRow(u,i){
-    var st = (u.status||'active');
-    var stBadge = '<span class="badge '+(st==='active'?'b-active':st==='invited'?'b-invited':'b-inactive')+'">'+esc(st==='active'?'actief':st==='invited'?'uitgenodigd':'inactief')+'</span>';
-    var rolSel = '<select class="rolsel" data-rol="'+i+'">'+
+  function renderTable(){
+    var list = filtered();
+    var tb = $('tbody');
+    tb.innerHTML = list.length ? list.map(function(u){ return userRow(u); }).join('')
+      : '<tr><td colspan="'+(4+APPS.length)+'" style="color:#6B7280">Geen gebruikers voor deze filter.</td></tr>';
+    $('tel').textContent = '· '+list.length+' van '+USERS.length+' gebruikers';
+    // wire per zichtbare rij (via email als sleutel)
+    list.forEach(function(u){ wireRow(u); });
+  }
+
+  function idFor(email){ return 'u_'+String(email).replace(/[^a-z0-9]/gi,'_'); }
+
+  function userRow(u){
+    var rid=idFor(u.email);
+    var st=(u.status||'active');
+    var stBadge='<span class="badge '+(st==='active'?'b-active':st==='invited'?'b-invited':'b-inactive')+'">'+esc(st==='active'?'actief':st==='invited'?'uitgenodigd':'inactief')+'</span>';
+    var rolSel='<select class="rolsel" id="'+rid+'_rol">'+
         '<option value="seller"'+(u.role==='seller'?' selected':'')+'>verkoper</option>'+
         '<option value="manager"'+(u.role==='manager'?' selected':'')+'>manager</option>'+
       '</select>';
-    var appsCells = APPS.map(function(a){
-      var heeft = (u.apps||[]).indexOf(a.id)>=0;
-      var kanNiet = !u.auth_uid;
-      var mgr = u.role==='manager';
-      var checked = (heeft || mgr) ? ' checked' : '';
-      var dis = (kanNiet || mgr) ? ' disabled' : '';
-      var tip = mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : '');
-      return '<td class="app">'+
-        '<input type="checkbox" class="app-toggle" data-u="'+i+'" data-app="'+a.id+'"'+checked+dis+' '+tip+'>'+
-        (kanNiet && !mgr ? '<div class="noaid">·</div>' : '')+
-      '</td>';
+    var appsCells=APPS.map(function(a){
+      var mgr=u.role==='manager';
+      var kanNiet=!u.auth_uid;
+      var checked=(a.altijd || mgr || (u.apps||[]).indexOf(a.id)>=0) ? ' checked' : '';
+      var dis=(a.altijd || mgr || kanNiet) ? ' disabled' : '';
+      var tip = a.altijd ? 'title="Iedereen heeft altijd toegang tot de Academy"' : (mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : ''));
+      return '<td class="app"><input type="checkbox" class="app-toggle" id="'+rid+'_'+a.id+'" data-app="'+a.id+'"'+checked+dis+' '+tip+'>'+
+        (kanNiet && !mgr && !a.altijd ? '<div class="noaid">·</div>' : '')+'</td>';
     }).join('');
     var deact = st==='active'
-      ? '<button class="sec" data-deact="'+i+'">Deactiveren</button>'
-      : '<button class="gr" data-react="'+i+'">Activeren</button>';
+      ? '<button class="sec" id="'+rid+'_deact">Deactiveren</button>'
+      : '<button class="gr" id="'+rid+'_react">Activeren</button>';
     return '<tr>'+
       '<td><div class="u-email">'+esc(u.email)+'</div>'+ (u.name?'<div class="u-naam">'+esc(u.name)+(u.company?' · '+esc(u.company):'')+'</div>':'') +'</td>'+
-      '<td>'+rolSel+'</td>'+
-      '<td>'+stBadge+'</td>'+
-      appsCells+
+      '<td>'+rolSel+'</td><td>'+stBadge+'</td>'+appsCells+
       '<td><div class="acts">'+deact+'</div></td>'+
     '</tr>';
   }
 
-  function wireRow(u,i){
-    var sel = document.querySelector('select[data-rol="'+i+'"]');
-    if(sel) sel.onchange = function(){ zetRol(u, sel.value); };
-    document.querySelectorAll('input.app-toggle[data-u="'+i+'"]').forEach(function(cb){
-      cb.onchange = function(){ zetToegang(u, cb.getAttribute('data-app'), cb.checked, cb); };
+  function wireRow(u){
+    var rid=idFor(u.email);
+    var sel=$(rid+'_rol'); if(sel) sel.onchange=function(){ zetRol(u, sel.value); };
+    APPS.forEach(function(a){
+      if(a.altijd) return;
+      var cb=$(rid+'_'+a.id); if(cb && !cb.disabled) cb.onchange=function(){ zetToegang(u, a.id, cb.checked, cb); };
     });
-    var da = document.querySelector('button[data-deact="'+i+'"]'); if(da) da.onclick=function(){ zetStatus(u,'inactive'); };
-    var ra = document.querySelector('button[data-react="'+i+'"]'); if(ra) ra.onclick=function(){ zetStatus(u,'active'); };
+    var da=$(rid+'_deact'); if(da) da.onclick=function(){ zetStatus(u,'inactive'); };
+    var ra=$(rid+'_react'); if(ra) ra.onclick=function(){ zetStatus(u,'active'); };
   }
 
   async function uitnodigen(){
     var msg=$('inv-msg'); msg.className='msg';
     var email=($('inv-email').value||'').trim(), naam=($('inv-naam').value||'').trim(), bedrijf=($('inv-bedrijf').value||'').trim();
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ msg.className='msg err'; msg.textContent='Vul een geldig e-mailadres in.'; return; }
-    $('inv-btn').disabled=true; msg.className='msg'; msg.textContent='Bezig…';
+    $('inv-btn').disabled=true; msg.textContent='Bezig…';
     try{
       var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'invite', email:email, name:naam, company:bedrijf }) });
       var j=await r.json().catch(function(){return {};});
       $('inv-btn').disabled=false;
-      if(!r.ok){ msg.className='msg err'; msg.textContent = (j.melding||j.error||('fout '+r.status)); return; }
-      var mailtxt = (j.mail && j.mail.sent) ? ' Uitnodigingsmail verstuurd.' : (' Profiel aangemaakt (mail niet verstuurd'+(j.mail&&j.mail.reden?': '+j.mail.reden:'')+').');
+      if(!r.ok){ msg.className='msg err'; msg.textContent=(j.melding||j.error||('fout '+r.status)); return; }
+      var mailtxt=(j.mail && j.mail.sent) ? ' Uitnodigingsmail verstuurd.' : (' Profiel aangemaakt (mail niet verstuurd'+(j.mail&&j.mail.reden?': '+j.mail.reden:'')+').');
       msg.className='msg ok'; msg.textContent='Uitgenodigd: '+email+'.'+mailtxt;
       $('inv-email').value=''; $('inv-naam').value=''; $('inv-bedrijf').value='';
       await laadUsers();
@@ -203,30 +252,22 @@
   async function zetToegang(u, appId, aan, cb){
     cb.disabled=true;
     try{
-      var r;
-      if(aan){
-        r=await fetch(PROXY+'/api/manager/app-access',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId }) });
-      } else {
-        r=await fetch(PROXY+'/api/manager/app-access',{ method:'DELETE', headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId }) });
-      }
+      var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId }) });
       cb.disabled=false;
       if(!r.ok){ cb.checked=!aan; return; }
-      // lokale state bijwerken
-      u.apps = (u.apps||[]).filter(function(x){ return x!==appId; });
-      if(aan) u.apps.push(appId);
+      u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan) u.apps.push(appId);
+      $('tel').textContent='· '+filtered().length+' van '+USERS.length+' gebruikers';
     }catch(e){ cb.disabled=false; cb.checked=!aan; }
   }
 
   async function zetRol(u, role){
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'role', email:u.email, role:role }) });
-    if(r.ok){ u.role=role; render(); }
-    else { alert('Kon rol niet wijzigen ('+r.status+').'); render(); }
+    if(r.ok){ u.role=role; renderTable(); } else { alert('Kon rol niet wijzigen ('+r.status+').'); renderTable(); }
   }
 
   async function zetStatus(u, status){
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'status', email:u.email, status:status }) });
-    if(r.ok){ u.status=status; render(); }
-    else { alert('Kon status niet wijzigen ('+r.status+').'); }
+    if(r.ok){ u.status=status; renderTable(); } else { alert('Kon status niet wijzigen ('+r.status+').'); }
   }
 
   (async function(){
@@ -235,5 +276,6 @@
   })();
 })();
 </script>
+<script src="/apps/mijn-fluctus.js"></script>
 </body>
 </html>
