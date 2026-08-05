@@ -20,15 +20,17 @@ const APP_CATALOG = [
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
-  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '', altijd: true, extern: true },
+  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
   // { id: 'energiemarkt',naam: 'Energiemarkt', ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.', url: '/apps/energiemarkt.html' },
 ];
 
-// Externe Academy-URL (override via /api/config → academyUrl).
-function academyUrl() { return (CFG && CFG.academyUrl) || 'https://www.fluctus.net/academy'; }
+// Academy-URL. Standaard same-origin (/apps/academy.html) → deelt de Supabase-
+// sessie met de portal, dus geen tweede login (single sign-on). Kan overschreven
+// worden via /api/config → academyUrl (bv. een externe URL; dan vervalt SSO).
+function academyUrl() { return (CFG && CFG.academyUrl) || '/apps/academy.html'; }
 
 let CFG = null;
 let sb = null;       // Supabase client
