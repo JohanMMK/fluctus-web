@@ -17,8 +17,14 @@ const $ = (id) => document.getElementById(id);
 // De 'echte' tools (kamino/simulator/gemeenteplan) worden per gebruiker
 // gefilterd via de fluctus-proxy /api/app-access/check.
 // Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
-//   1 Academy · 2 Energiemarkt · 3 Gemeenteplan · 4 Kamino · 5 Simulator · 6 Gebruikers
+//   1 Jacops-presentatie · 2 Academy · 3 Energiemarkt · 4 Gemeenteplan · 5 Kamino · 6 Simulator · 7 Gebruikers
 const APP_CATALOG = [
+  // Jacops-presentatie: statische map (index.html + 7 MP4's) op GitHub Pages,
+  // zodat de fluctus-web-repo licht blijft. GRANTBAAR: enkel zichtbaar voor
+  // verkopers aan wie je ze toekent (via de Gebruikers-tegel, app_id 'jacops');
+  // managers zien ze automatisch. Opent in een nieuw tabblad (presenteren).
+  // ↓ pas deze URL aan naar waar je de map effectief pusht.
+  { id: 'jacops',      naam: 'Jacops-presentatie', ico: '🎬', beschrijving: 'Meer mogelijk met hetzelfde net — de Jacops-presentatie.', url: 'https://johanmmk.github.io/jacops-presentatie/index.html', extern: true },
   { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
   // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
