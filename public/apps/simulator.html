@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.52  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.57  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.57 (ROOT-FIX VRAAG 4 — PV-sweep start nu óók bij laadplein, 06-08): _pvSweepConfig() gaf null in het
+              laadplein-'enkel'-geval (laadvraag past binnen de aansluiting → server geeft geen opstellingen-vergelijking
+              en geen groeipad_gebouw → _kpiEngine()=null én groeipadGebouw=null). Nieuwe 4e fallback leidt de opstelling
+              af uit STATE.lastSimInput (aansluiting) + STATE.resultaat (batterij via _dimKwh) → de PV-sweep draait op de
+              door run 1 gekozen opstelling en vraag 4 krijgt zijn PV-optie i.p.v. batterij-only. Console logt de gekozen
+              c/k ([pv-sweep] laadplein-fallback) ter controle. Strikt geguard: enkel wanneer de 3 bestaande takken falen.
+     v1.63.56 (FIX VRAAG 4 — time-out bij PV-sweep, 06-08): de autopilot voor tegel 3/4 blokkeerde bij mobiliteit in
+              _apPickPv 10 min op een PV-sweep die nooit startte (_startPvSweep gaf vroege return: geen geldige
+              _pvSweepConfig in het mobiliteit-geval) → "De automatische studie liep vast (time-out bij PV-sweep)".
+              Fix: _apPickPv forceert één _startPvSweep()-poging; blijft de sweep on-gestart, dan geen PV-optie →
+              batterij-only en meteen door (PV is optie, geen core — v1.63.41). Enkel het autopilot-pad; interactieve
+              runs onaangeroerd. Root (waarom _pvSweepConfig geen config geeft bij mobiliteit) = aparte follow-up.
      v1.63.51 (LAADCAPACITEIT-CHECK, Johan 03-08): het rapport-laadplein-object krijgt nu gevraagd/geladen/tekort_mwh
               (uit de sim, per plein geaggregeerd) + een 'voldoende'-vlag → het rapport toont of de opgegeven laadpalen
               de energie binnen venster + aansluiting kunnen leveren (zoals de interactieve simulator).
@@ -478,7 +490,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.52</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.57</span>
   </div>
 </div>
 
@@ -1094,7 +1106,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.52';
+var SIM_VERSIE = 'v1.63.57';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
 function _sim3Async(input){
@@ -8257,6 +8269,24 @@ function _pvSweepConfig(){
     var _ko=Math.max(1,Math.round(_dimKwh(opsB)/BATT_UNIT_KWH));
     return { c:(+opsB.config.aansluiting_kva||0), k:_ko };
   }
+  // v1.63.57 (Johan 06-08): LAADPLEIN / 'enkel'-modus (tegel 4 mobiliteit). Wanneer de laadvraag binnen de bestaande
+  // aansluiting past, geeft de server GEEN opstellingen-vergelijking (STATE.opstellingen=null → _kpiEngine()=null) én
+  // GEEN groeipadGebouw → de drie takken hierboven falen → vroeger null → sweep startte niet → vraag 4 liep vast.
+  // Run 1 draaide dan al op de enige = optimale opstelling: de aansluiting zit in STATE.lastSimInput, de gesizede
+  // batterij in STATE.resultaat. Draai de PV-sweep op exact díe opstelling (marginaal t.o.v. pv=0, zelfde opstelling).
+  // STRIKT enkel deze tak: de werkende gevallen (twee_opstellingen / batterij_gebouw) bereiken de fallback nooit.
+  var _lsi=STATE.lastSimInput;
+  if(_lsi){
+    var _cc=(+_lsi.aansluiting_kva)||(+_lsi.aansluitingKva)||(+STATE.aansluitingKva)||0;
+    var _kk=0, _bron='resultaat';
+    var _rk=_dimKwh(STATE.resultaat); if(_rk>0){ _kk=Math.round(_rk/BATT_UNIT_KWH); }
+    if(!_kk && +_lsi.aantal_batterijen>0){ _kk=Math.round(+_lsi.aantal_batterijen); _bron='lastSimInput'; }
+    if(!_kk){ _kk=1; _bron='default(1)'; }
+    if(_cc>0){
+      try{ console.log('[fluctus][pv-sweep] laadplein-fallback (\'enkel\'-modus): c='+_cc+' kVA, k='+_kk+' batt (bron '+_bron+')'); }catch(e){}
+      return { c:_cc, k:Math.max(1,_kk) };
+    }
+  }
   return null;
 }
 // ── v1.57.3 — kleine live-log tijdens PV-/groeipad-berekening ──────────────────
@@ -11445,6 +11475,17 @@ function _apPickPv(drempel, fixedKwp){
   // en het groeipad blijven batterij-only (STATE.pvKwp blijft 0). We kiezen enkel de PV-maat op x% marginale zelfconsumptie
   // en rekenen de optie-economie rechtstreeks uit de PV-sweep (marginale besparing t.o.v. pv=0). Eén sim-run i.p.v. run 1 +
   // herrun → Kamino wordt sneller, en kaart/rapport tonen batterij als core met PV als aparte optie (impact zichtbaar).
+  // v1.63.56 (FIX VRAAG 4 / mobiliteit — time-out bij PV-sweep): na run 1 start de sim de PV-sweep via _startPvSweep()
+  // (regel ~10346), maar die geeft een vroege return zodra _pvSweepConfig() geen geldige config vindt (het mobiliteit-
+  // geval) → de sweep start niet (pvSweepLoading blijft false, pvSweep null, geen fout). _apWait wachtte dan 10 min op
+  // een sweep die nooit komt → "time-out bij PV-sweep" → studie faalt. Fix: forceer hier één start-poging; blijft de
+  // sweep daarna nog on-gestart, dan is er simpelweg geen PV-optie → batterij-only, meteen door i.p.v. blokkeren.
+  try{ if(!STATE.pvSweep && !STATE.pvSweepLoading && !STATE.pvSweepFout){ _startPvSweep(); } }catch(_sp){}
+  if(!STATE.pvSweep && !STATE.pvSweepLoading && !STATE.pvSweepFout){
+    STATE.pvOptie=null; STATE.pvKeuzeKwp=0;
+    _apStatus((fixedKwp!=null?'PV kon niet worden vastgelegd ':'Geen PV-optie van toepassing ')+'— het optimum blijft batterij-only.');
+    return Promise.resolve();
+  }
   return _apWait(function(){ return (STATE.pvSweep && !STATE.pvSweepLoading) || (!!STATE.pvSweepFout && !STATE.pvSweepLoading); }, 600000, 'PV-sweep').then(function(){   // v1.63.21: 10 min achtervang
     STATE.pvOptie=_pvOptieKies(drempel, (fixedKwp!=null?+fixedKwp:null));   // PV-optie-economie (marginaal), ZONDER toepassen → optimum blijft batterij-only
     var _k=(STATE.pvOptie&&STATE.pvOptie.kwp)||0; STATE.pvKeuzeKwp=_k;
