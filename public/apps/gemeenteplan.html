@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS GEMEENTEPLAN  v1.0
+     FLUCTUS GEMEENTEPLAN  v1.1
      App-pagina voor Mijn Fluctus (public/apps/gemeenteplan.html).
      - Enkel voor ingelogde gebruikers (FluctusAppAuth-gate → /portal.html).
      - Slimme gemeente-zoekbalk (typeahead, accent-ongevoelig).
@@ -9,6 +9,9 @@
        met de ingelogde gebruiker in cc en oekene@gmail.com in bcc.
      Mail loopt via de fluctus-academy-backend (POST /api/laadplan-mail),
      exact dezelfde Brevo-HTTP-API-methode als de invite/offerte.
+     v1.1 (06-08): FIX "unauthenticated" — de access_token wordt vlak vóór het
+     verzenden vers opgehaald (Supabase roteert hem ~elk uur; de bij het laden
+     bewaarde token verliep) + auto-refresh + duidelijke sessie-melding.
      ============================================================ -->
 <html lang="nl">
 <head>
@@ -223,6 +226,9 @@
         if (!session){ location.replace('/portal.html'); return false; }
         CURRENT_EMAIL = (session.user && session.user.email) || null;
         CURRENT_TOKEN = session.access_token || null;
+        // Houd de token vers: Supabase roteert de access_token (~elk uur). Zonder
+        // dit hield de pagina de oude (verlopen) token → mail-backend gaf 401.
+        try { sb.auth.onAuthStateChange(function(_e, s){ if (s && s.access_token) CURRENT_TOKEN = s.access_token; }); } catch(e){}
         // best-effort RBAC: managers = impliciet toegang; blokkeer enkel bij expliciete weigering.
         return fetch(PROXY_BASE + '/api/app-access/check', {
           method:'POST',
@@ -237,6 +243,16 @@
           });
         }).catch(function(){ return true; });   // netwerkfout → ingelogd volstaat
       }).catch(function(){ location.replace('/portal.html'); return false; });
+    }
+
+    // Verse access_token vlak vóór een backend-call (roteert ~elk uur).
+    // Retourneert de token of null (sessie verlopen → opnieuw inloggen nodig).
+    function verseToken(){
+      return sb.auth.getSession().then(function(r){
+        var s = r && r.data && r.data.session;
+        if (s && s.access_token){ CURRENT_TOKEN = s.access_token; return CURRENT_TOKEN; }
+        return null;
+      }).catch(function(){ return CURRENT_TOKEN; });
     }
 
     // ---------------------------------------------------------------- helpers
@@ -605,32 +621,45 @@
       mSend.disabled = true; mSend.textContent = 'Versturen…';
       mMsg.className='fk-modal-msg'; mMsg.textContent='';
 
-      fetch(MAIL_BACKEND + '/api/laadplan-mail', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + CURRENT_TOKEN },
-        body: JSON.stringify({
-          gemeente: CURRENT.gemeente,
-          slug:     CURRENT.slug,
-          niscode:  CURRENT.nis,
-          subject:  CURRENT.subject,
-          body:     CURRENT.body,
-          to:       list
-        })
-      }).then(function(res){
-        return res.json().catch(function(){ return {}; }).then(function(j){ return { ok:res.ok, j:j }; });
-      }).then(function(r){
-        if (r.ok && r.j && r.j.ok){
-          var att = (r.j.attachments!=null) ? r.j.attachments : 0;
-          mMsg.className='fk-modal-msg ok';
-          mMsg.textContent = 'Verstuurd naar '+list.length+' adres(sen)'+(att?(' met '+att+' bijlage(n)'):' (bijlagen niet gevonden)')+'. Kopie naar u + oekene@gmail.com.';
-          showToast('Laadplan van <b>'+CURRENT.gemeente+'</b> verstuurd.');
-          setTimeout(closeModal, 1800);
-        } else {
-          var detail = (r.j && (r.j.detail || r.j.error)) || 'onbekende fout';
+      // FIX 401: eerst een VERSE token ophalen (Supabase roteert hem ~elk uur).
+      verseToken().then(function(token){
+        if (!token){
           mMsg.className='fk-modal-msg err';
-          mMsg.textContent = 'Versturen mislukt: '+detail+'. Controleer de backend-URL/CORS.';
+          mMsg.textContent='Uw sessie is verlopen. Herlaad de pagina (Cmd/Ctrl+R) en log opnieuw in.';
           mSend.disabled=false; mSend.textContent='Opnieuw versturen';
+          return null;
         }
+        return fetch(MAIL_BACKEND + '/api/laadplan-mail', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + token },
+          body: JSON.stringify({
+            gemeente: CURRENT.gemeente,
+            slug:     CURRENT.slug,
+            niscode:  CURRENT.nis,
+            subject:  CURRENT.subject,
+            body:     CURRENT.body,
+            to:       list
+          })
+        }).then(function(res){
+          return res.json().catch(function(){ return {}; }).then(function(j){ return { status:res.status, ok:res.ok, j:j }; });
+        }).then(function(r){
+          if (r.ok && r.j && r.j.ok){
+            var att = (r.j.attachments!=null) ? r.j.attachments : 0;
+            mMsg.className='fk-modal-msg ok';
+            mMsg.textContent = 'Verstuurd naar '+list.length+' adres(sen)'+(att?(' met '+att+' bijlage(n)'):' (bijlagen niet gevonden)')+'. Kopie naar u + oekene@gmail.com.';
+            showToast('Laadplan van <b>'+CURRENT.gemeente+'</b> verstuurd.');
+            setTimeout(closeModal, 1800);
+          } else if (r.status === 401){
+            mMsg.className='fk-modal-msg err';
+            mMsg.textContent='Uw sessie is verlopen of niet geldig. Herlaad de pagina (Cmd/Ctrl+R) en log opnieuw in.';
+            mSend.disabled=false; mSend.textContent='Opnieuw versturen';
+          } else {
+            var detail = (r.j && (r.j.detail || r.j.error)) || ('fout '+r.status);
+            mMsg.className='fk-modal-msg err';
+            mMsg.textContent = 'Versturen mislukt: '+detail+'.';
+            mSend.disabled=false; mSend.textContent='Opnieuw versturen';
+          }
+        });
       }).catch(function(err){
         mMsg.className='fk-modal-msg err';
         mMsg.textContent = 'Geen verbinding met de mail-backend: '+((err&&err.message)||err)+'.';
