@@ -24,6 +24,7 @@ const APP_CATALOG = [
   // verkopers aan wie je ze toekent (via de Gebruikers-tegel, app_id 'jacops');
   // managers zien ze automatisch. Opent in een nieuw tabblad (presenteren).
   // ↓ pas deze URL aan naar waar je de map effectief pusht.
+  //   Eigen Pages-repo 'jacops-presentatie' (files in de root, branch main).
   { id: 'jacops',      naam: 'Jacops-presentatie', ico: '🎬', beschrijving: 'Meer mogelijk met hetzelfde net — de Jacops-presentatie.', url: 'https://johanmmk.github.io/jacops-presentatie/index.html', extern: true },
   { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
