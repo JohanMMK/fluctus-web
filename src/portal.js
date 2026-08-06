@@ -46,6 +46,7 @@ function academyUrl() { return (CFG && CFG.academyUrl) || '/apps/academy.html'; 
 let CFG = null;
 let sb = null;       // Supabase client
 let SESSION = null;
+let USER_ROLE = 'seller';   // rol van de ingelogde gebruiker (uit app-access/check)
 
 async function loadConfig() {
   const r = await fetch('/api/config');
@@ -138,6 +139,7 @@ async function toegankelijkeApps(token) {
       if (j && (j.toegang || j.access || j.ok)) verleend.add(app.id);
     } catch (e) { /* verborgen bij fout */ }
   }));
+  USER_ROLE = role;   // onthouden voor renderLauncher (o.a. manager-doorklik Jacops)
   // In catalogus-volgorde teruggeven: echte apps met toegang, altijd-apps,
   // en manager-only apps enkel voor managers.
   return APP_CATALOG.filter((a) => {
@@ -156,7 +158,13 @@ function renderLauncher(apps) {
   apps.forEach(a => {
     const t = document.createElement('a');
     t.className = 'app-tile';
-    t.href = (a.id === 'academy') ? academyUrl() : a.url;
+    let href = (a.id === 'academy') ? academyUrl() : a.url;
+    // Jacops-presentatie: managers mogen vrij doorklikken (?manager=1);
+    // verkopers moeten elke film uitkijken.
+    if (a.id === 'jacops' && USER_ROLE === 'manager') {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'manager=1';
+    }
+    t.href = href;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
     host.appendChild(t);
