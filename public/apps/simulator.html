@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.57  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.58  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.58 (STOPGAP TRAGE ZWARE CASE, 06-08): per-stap-achtervang verruimd zodat een zware verzwaring/mix-case op
+              tegel 4 niet vroegtijdig wordt afgekapt vóór de 45-min Kamino-umbrella (kamino v0.9.19): SIM_MAX_WACHT_MS
+              20→35 min, _apRunSim-achtervang 20→35 min, _apGroeistap1-achtervang 15→20 min. Enkel constanten; geen
+              functionele wijziging aan het rekenhart. De ECHTE fix blijft server-side: /api/nominatie-sim-3 sneller
+              (parallelle sturingen / mix-zoektocht snoeien / cache) — vereist de fluctus-proxy-code (apart, getest).
      v1.63.57 (ROOT-FIX VRAAG 4 — PV-sweep start nu óók bij laadplein, 06-08): _pvSweepConfig() gaf null in het
               laadplein-'enkel'-geval (laadvraag past binnen de aansluiting → server geeft geen opstellingen-vergelijking
               en geen groeipad_gebouw → _kpiEngine()=null én groeipadGebouw=null). Nieuwe 4e fallback leidt de opstelling
@@ -490,7 +495,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.57</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.58</span>
   </div>
 </div>
 
@@ -1106,9 +1111,9 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.57';
+var SIM_VERSIE = 'v1.63.58';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
-var SIM_MAX_WACHT_MS = 20*60*1000;   // v1.63.21: ruim (was 12 min) — de Kamino-liveness-watchdog vangt echte vastlopers; dit is enkel achtervang voor een zware-maar-werkende run
+var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
   return apiPost('/api/nominatie-sim-3', input).then(function(r0){
     // Oude server (of 'enkel'-modus zonder job): meteen het resultaat.
@@ -1117,7 +1122,7 @@ function _sim3Async(input){
     return new Promise(function(resolve, reject){
       (function poll(){
         if(Date.now()-t0 > SIM_MAX_WACHT_MS)
-          return reject(new Error('Simulatie duurde langer dan 12 minuten — afgebroken.'));
+          return reject(new Error('Simulatie duurde langer dan 35 minuten — afgebroken.'));
         fetch(API_BASE+'/api/sim-voortgang/'+encodeURIComponent(jobId), {headers:_authHeaders({})})
           .then(function(res){
             if(res.status===404) throw new Error('De simulatie-opdracht is verlopen of de server is herstart. Probeer opnieuw.');
@@ -11467,7 +11472,7 @@ function _apSetState(h){
 function _apRunSim(){
   STATE.currentStep=9;
   try{ runSimulatie(); }catch(e){ return Promise.reject(e); }
-  return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 1200000, 'simulatie');   // v1.63.21: 20 min achtervang
+  return _apWait(function(){ return STATE.isRunning===false && STATE.resultaat; }, 2100000, 'simulatie');   // v1.63.58: 35 min achtervang (was 20) — zware zoektocht tegel 4
 }
 function _apPickPv(drempel, fixedKwp){
   drempel=drempel||80;   // v1.63.32: default 80% (was 90%); komt als parameter uit de payload (h.pvDrempel)
@@ -11529,7 +11534,7 @@ function _pvOptieUitSweep(kwp, drempel){
            eigen_rendement_pct:rend, eigen_terugverdientijd_jaar:tvt, marginale_zelfconsumptie_pct:mzc, drempel:drempel };
 }
 function _apGroeistap1(){
-  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 900000, 'groeipad').then(function(){   // v1.63.21: 15 min achtervang
+  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 1200000, 'groeipad').then(function(){   // v1.63.58: 20 min achtervang (was 15) — zware groeipad tegel 4
     var _in=JSON.parse(JSON.stringify(STATE.lastSimInput||{}));
     _in.aansluiting_kva=STATE.aansluitingKva; _in.aantal_batterijen=1;   // eerste groeistap, vaste aansluiting (gebouw)
     STATE.groeipadKeuze={k:1,c:STATE.aansluitingKva};
