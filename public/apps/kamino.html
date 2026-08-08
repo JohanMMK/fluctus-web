@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.19 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.20 (Mijn Fluctus-app · testmodus)
+     v0.9.20 (LOOPTIJD-METING PER VRAAG, 08-08): elke autopilot-studie meet nu haar looptijd. (1) Wachtscherm: een
+              meelopende teller + voortgangsbalk t.o.v. de VERWACHTE looptijd (rollend mediaan-gemiddelde per tegel,
+              zelf-kalibrerend in localStorage, seed-defaults tot ≥3 metingen; balk capt op 98%, tekst "duurt langer
+              dan gewoonlijk…" voorbij de verwachting). (2) Kaart: small-print "⏱ berekend in m:ss" onder een tegel die
+              deze sessie écht gedraaid is. Enkel geslaagde runs tellen mee voor het gemiddelde. Puur client-side,
+              geen backend-wijziging; schaalt vanzelf mee met de server-parallelisatie (server v15.59.0). De teller
+              zit óók op de snelle _bezig-wachtschermen: factuur inlezen = louter meelopende teller; het directe
+              API-pad van studie 1 (contract) en 2 (productie) = teller t.o.v. de verwachte looptijd.
      v0.9.19 (STOPGAP TRAGE ZWARE CASE, 06-08): absolute veiligheidscap 25 → 45 min (K_ABS_CAP_MS). Na de PV-sweep-fix
               (simulator v1.63.57) startte de sweep wél, maar een zware verzwaring/mix-case op tegel 4 (volledige
               zoektocht opstelling 2 + mix 1/2 batt + opstelling 3, elk × 3 sturingen) duurt server-side >25 min en werd
@@ -327,6 +335,8 @@ function renderOverzicht(){
       '<div class="p-vr">'+p.vr+'</div>'+
       '<div class="p-studie">Studie: <b>'+p.studie+'</b>'+badge+'</div>'+
       '<div class="kern3">'+kern.map(function(k){return '<div class="kern"><div class="kl">'+k.l+'</div><div class="kv">'+(_echt?k.v:'<span class="kv-leeg">—</span>')+'</div></div>';}).join('')+'</div>'+
+      // v0.9.20: small-print looptijd — enkel als de studie deze sessie écht gedraaid en gemeten is
+      (function(){ var _d=_kSimDurKaart(STATE.werk.id,p.id); return (_echt&&_d)?'<div class="p-duur" style="margin-top:6px;font-size:11px;color:#94A0B2">⏱ berekend in '+_d+'</div>':''; })()+
       '<div class="p-open">'+(_echt?'Bekijk opnieuw →':(done?'Bekijk opnieuw →':'Start deze studie →'))+'</div>'+
       (_rapportBeschikbaar(p.id)?'<div class="p-rapport" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">'+
         '<span onclick="event.stopPropagation();_bekijkRapport(\''+p.id+'\')" style="font-size:12px;font-weight:700;color:#1F3864;cursor:pointer">📄 Bekijk vorig rapport</span>'+
@@ -521,9 +531,20 @@ function renderPunt(id){
 }
 
 // ---------- START: echte factuur-opslag (slice 1a) → resultaat ----------
-function _bezig(msg){ app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
-  '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
-  '<div class="hint" style="margin-top:8px">Een factuur inlezen duurt ± 30–45 seconden. Sluit dit scherm niet.</div></div></div>'; }
+// v0.9.20: tweede parameter `tegel` → toont de teller t.o.v. de verwachte looptijd + balk (scherm 1/2 API-pad).
+// Zonder `tegel` (bv. factuur inlezen) toont het een louter meelopende teller.
+function _bezig(msg, tegel){
+  _kStopTeller(); _kSimT0=Date.now(); _kSimTegel=tegel||null;
+  var verwacht = tegel ? _kSimDuurVerwacht(tegel) : 0;
+  app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
+    '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
+    '<div class="hint" style="margin-top:8px">'+(tegel?'De kerncijfers verschijnen hier zodra het klaar is.':'Een factuur inlezen duurt ± 30–45 seconden. Sluit dit scherm niet.')+'</div>'+
+    (tegel?'<div style="max-width:360px;margin:16px auto 0;height:6px;background:#E7ECF3;border-radius:4px;overflow:hidden"><div id="k-balk" style="height:100%;width:0;background:#1F3864;transition:width .5s ease"></div></div>':'')+
+    '<div id="k-teller" style="margin-top:'+(tegel?'8':'12')+'px;font-size:13px;font-weight:700;color:#1F3864">'+(tegel?('0:00 / ~'+_kFmtDuur(verwacht)):'0:00')+'</div>'+
+    (tegel?'<div id="k-teller-extra" style="margin-top:4px;font-size:11.5px;color:#8A93A3;min-height:14px"></div>':'')+
+    '</div></div>';
+  _kStartTeller(tegel||null);
+}
 // async job-poller (studie 3/4): pollt /api/sim-voortgang tot 'klaar' of 'fout'; toont de laatste logregel.
 function _pollKamino(jobId, onKlaar, onFout){
   var pogingen=0, max=260; // ~6,5 min @ 1,5s
@@ -553,6 +574,50 @@ var _kMsgListener=null, _kIframe=null, _kTimeout=null, _kWatchdog=null, _kFallba
 //  die BEWUST niet door hartslagen wordt gereset: een lange-maar-werkende studie mag zo lang duren als nodig, enkel
 //  een echte oneindige lus loopt in de cap. Server-side hangs meldt de simulator zelf via zijn per-stap-timeouts.
 var K_ABS_CAP_MS=2700000;    // v0.9.19: 45 min absolute veiligheidscap (was 25) — zware verzwaring/mix-cases (tegel 4) haalden de 25 min niet; hartslagen resetten dit BEWUST niet
+// ─── v0.9.20 — LOOPTIJD-METING PER VRAAG (client-side, geen backend-afhankelijkheid) ─────────
+// Meet hoelang de autopilot-studie per tegel duurt, registreert een rollend mediaan-gemiddelde
+// per tegel in localStorage (= "verwachte looptijd", zelf-kalibrerend op deze machine/plan en
+// meeschalend met de server-parallelisatie), en voedt (a) de meelopende teller + voortgangsbalk
+// in het wachtscherm en (b) de small-print looptijd op de kaart. Enkel geslaagde runs tellen mee
+// (fouten skewen het gemiddelde niet).
+var _kSimT0=0, _kSimTegel=null, _kTellerTimer=null;
+var _kSimDurSessie={};                 // pid|id → ms (laatste meting deze sessie, voor de kaart)
+var K_SIMDUUR_KEY='FLX_KAMINO_SIMDUUR';
+var K_SIMDUUR_DEFAULT={ contract:25000, productie:30000, aansluiting:120000, mobiliteit:240000 };  // seed tot er ≥3 metingen zijn
+var K_SIMDUUR_MAX=10;                   // hou de laatste 10 metingen per tegel
+function _kSimDuurLees(){ try{ return JSON.parse(localStorage.getItem(K_SIMDUUR_KEY))||{}; }catch(e){ return {}; } }
+function _kSimDuurVerwacht(id){
+  var alle=_kSimDuurLees(), a=alle[id]||[];
+  if(a.length>=3){ var s=a.slice().sort(function(x,y){return x-y;}); return s[Math.floor(s.length/2)]; }   // mediaan
+  return K_SIMDUUR_DEFAULT[id]||60000;
+}
+function _kSimDuurBewaar(id,ms){
+  if(!(ms>0)) return;
+  var alle=_kSimDuurLees(), a=alle[id]||[]; a.push(Math.round(ms)); if(a.length>K_SIMDUUR_MAX) a=a.slice(-K_SIMDUUR_MAX);
+  alle[id]=a; try{ localStorage.setItem(K_SIMDUUR_KEY, JSON.stringify(alle)); }catch(e){}
+}
+function _kFmtDuur(ms){ var s=Math.max(0,Math.round(ms/1000)), m=Math.floor(s/60); s=s%60; return m+':'+('0'+s).slice(-2); }
+function _kSimDurKaart(pid,id){ var ms=_kSimDurSessie[pid+'|'+id]; return ms>0?_kFmtDuur(ms):null; }
+function _kStopTeller(){ if(_kTellerTimer){ clearInterval(_kTellerTimer); _kTellerTimer=null; } }
+// id gegeven → teller t.o.v. de verwachte looptijd + balk; id null → louter meelopende teller (bv. factuur inlezen).
+function _kStartTeller(id){
+  _kStopTeller();
+  var verwacht = id ? _kSimDuurVerwacht(id) : 0;
+  _kTellerTimer=setInterval(function(){
+    var el=document.getElementById('k-teller'), balk=document.getElementById('k-balk'), extra=document.getElementById('k-teller-extra');
+    if(!el){ _kStopTeller(); return; }   // wachtscherm is weg (klaar/fout/navigatie) → stop
+    var e=Date.now()-_kSimT0;
+    el.textContent = verwacht ? (_kFmtDuur(e)+' / ~'+_kFmtDuur(verwacht)) : _kFmtDuur(e);
+    if(balk && verwacht) balk.style.width=Math.min(98, Math.round(e/Math.max(1,verwacht)*100))+'%';
+    if(extra) extra.textContent=(verwacht && e>verwacht*1.15)?'Dit is een uitgebreide studie — duurt iets langer dan gewoonlijk…':'';
+  },1000);
+}
+// gemeten looptijd registreren (enkel geslaagde runs). pid default = actief project.
+function _kMeetKlaar(id, pid){
+  pid=pid||STATE.werk.id;
+  if(_kSimT0 && _kSimTegel===id){ var d=Date.now()-_kSimT0; if(pid) _kSimDurSessie[pid+'|'+id]=d; _kSimDuurBewaar(id,d); _kSimT0=0; _kSimTegel=null; }
+  _kStopTeller();
+}
 function _kStartTimers(id,pid){
   _kSeenHb=false;
   if(_kFallback) clearTimeout(_kFallback);
@@ -560,6 +625,7 @@ function _kStartTimers(id,pid){
 }
 function _kHeartbeat(id,pid){ /* v0.9.7: no-op — de hartslag dient enkel voor de live-status (zie message-handler), niet meer als kill-timer */ }
 function _kOpruimen(){
+  _kStopTeller();   // v0.9.20: teller stopt zodra de run klaar/fout is (of opnieuw start)
   if(_kTimeout){ clearTimeout(_kTimeout); _kTimeout=null; }
   if(_kWatchdog){ clearTimeout(_kWatchdog); _kWatchdog=null; }
   if(_kFallback){ clearTimeout(_kFallback); _kFallback=null; }
@@ -594,8 +660,10 @@ function _startStudieAutopilot(id, extra){
   }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
+  _kSimT0=Date.now(); _kSimTegel=id;   // v0.9.20: looptijd-meting start
   _toonBerekenen(id);
   _kOpruimen();
+  _kStartTeller(id);                    // v0.9.20: meelopende teller (ná _kOpruimen, die zou 'm anders wissen)
   _kMsgListener=function(e){
     if(e.origin!==location.origin) return;
     var d=e.data; if(!d) return;
@@ -692,6 +760,7 @@ if(typeof window!=='undefined' && !window._kblKaminoListen){ window._kblKaminoLi
   window.addEventListener('storage',function(e){ if(e.key===KBL_RESULT_KEY) _kblCheckResultKamino(); });
 }
 function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
+  _kMeetKlaar(id, pid);   // v0.9.20: looptijd registreren (enkel geslaagde runs) → kaart + rollend mediaan-gemiddelde
   var kern=null, diag='';
   var _pctv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' %'):'—'; };
   var _tvtv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' j'):'—'; };
@@ -774,6 +843,10 @@ function _toonBerekenen(id){
     '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie wordt berekend…</div>'+
     '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">We rekenen uw ontwerp volautomatisch door op uw factuur. Bij een uitgebreide studie kan dit enkele minuten duren; de kerncijfers verschijnen hier zodra het klaar is.</div>'+
     '<div id="k-status" style="margin-top:14px;font-size:12.5px;color:#5A6577;min-height:18px"></div>'+
+    // v0.9.20: meelopende teller t.o.v. de verwachte looptijd + voortgangsbalk
+    '<div style="max-width:360px;margin:16px auto 0;height:6px;background:#E7ECF3;border-radius:4px;overflow:hidden"><div id="k-balk" style="height:100%;width:0;background:#1F3864;transition:width .5s ease"></div></div>'+
+    '<div id="k-teller" style="margin-top:8px;font-size:13px;font-weight:700;color:#1F3864">0:00 / ~'+_kFmtDuur(_kSimDuurVerwacht(id))+'</div>'+
+    '<div id="k-teller-extra" style="margin-top:4px;font-size:11.5px;color:#8A93A3;min-height:14px"></div>'+
     '</div></div>';
 }
 function _kZetStatus(txt){ var el=document.getElementById('k-status'); if(el) el.textContent=txt||''; }
@@ -870,8 +943,9 @@ function resultaat(id){
   if(LAUNCHERS[id] && STATE.werk.baseCase && ingelogd()){ persistProject(); _startStudieAutopilot(id); return; }
   // Studie 1 (contract): echte onderhandelingsmarge draaien op de baseCase — zelfde sim als de simulator.
   if(id==='contract' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
-    _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…');
+    _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…', 'contract');   // v0.9.20: teller
     kApiPost('/api/kamino/onderhandel',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel }).then(function(r){
+      _kMeetKlaar(id);   // v0.9.20: looptijd registreren
       var kern=[
         {l:'Onderhandelingsmarge', v:'− '+eurJaar(r.marge_jaar)},
         {l:'Energiekost nu → dynamisch', v:(r.energiekost_nu_mwh!=null?('€'+r.energiekost_nu_mwh+' → €'+r.energiekost_dyn_mwh):'—')},
@@ -882,13 +956,14 @@ function resultaat(id){
       var dbg='<br><span style="font-family:monospace;font-size:10px;color:#8A93A3">debug · vergroening '+(di.vergroening)+' €/MWh · effectief jaarverbr. '+(d.effectief_jaarverbruik_mwh!=null?Math.round(d.effectief_jaarverbruik_mwh):'?')+' MWh · schijf '+(pr.schijf_label||pr.schijf_code||r.schijf||'?')+' · markup '+(pr.markup_dam!=null?pr.markup_dam:(r.markup!=null?r.markup:'?'))+' €/MWh · energiepost dyn € '+((d.A_energiekost&&d.A_energiekost._subtotaal!=null)?Math.round(d.A_energiekost._subtotaal):'?')+'</span>';
       bewaarDiag(id,'Berekend op verbruiksprofiel <b>'+(STATE.werk.profiel||'?')+'</b>'+(r.geprojecteerd_mwh!=null?(' · geprojecteerd '+r.geprojecteerd_mwh+' MWh/jaar'):'')+'. Kies in de simulator hetzelfde profiel voor een identiek cijfer.'+dbg);
       persistProject(); _toonResultaat(id);
-    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    }).catch(function(e){ _kStopTeller(); persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
   // Studie 2 (productie): echte injectie-opbrengst draaien — ZELFDE server-functie als de simulator (_analyseerInjectieOptimalisatie).
   if(id==='productie' && STATE.werk.baseCase && ingelogd() && (+STATE.werk.pv_kwp>0) && !kernOf(STATE.werk.id,id)){
-    _bezig('Uw extra injectie-opbrengst wordt berekend op spot + onbalans…');
+    _bezig('Uw extra injectie-opbrengst wordt berekend op spot + onbalans…', 'productie');   // v0.9.20: teller
     kApiPost('/api/kamino/productie',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel, pv_kwp:STATE.werk.pv_kwp, injectie_mwh_jaar:STATE.werk.pv_inj }).then(function(r){
+      _kMeetKlaar(id);   // v0.9.20: looptijd registreren
       var tvt=(r.terugverdientijd_jaar!=null)?(String(r.terugverdientijd_jaar).replace('.',',')+' j'):'—';
       var kern=[
         {l:'Extra opbrengst', v:'+ '+eurJaar(r.extra_opbrengst_jaar)},
@@ -898,7 +973,7 @@ function resultaat(id){
       bewaarKern(id,kern);
       bewaarDiag(id,'Berekend op bestaande PV <b>'+r.pv_kwp+' kWp</b> · injectie '+(STATE.werk.pv_inj||'?')+' MWh/j · profiel <b>'+(STATE.werk.profiel||'?')+'</b> (standaard: inverter '+r.inverter_kva+' kVA, piek '+r.piek_kw+' kW). Zelfde cijfer in de simulator met dezelfde PV-invoer.');
       persistProject(); _toonResultaat(id);
-    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    }).catch(function(e){ _kStopTeller(); persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
   // (Studie 3 aansluiting is nu een LAUNCHER — zie de LAUNCHERS-check bovenaan resultaat().)
