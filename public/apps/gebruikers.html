@@ -4,8 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
-<!-- Gebruikersbeheer v1.1 (08-08): app-toegang-fout wordt nu ook in een alert getoond (de #g-msg staat onder de tabel,
-     dus buiten beeld bij een lange lijst). Serverfix: POST /api/manager/app-access idempotent zónder on_conflict (server v15.60.0). -->
+<!-- Gebruikersbeheer v1.5 (08-08): "Preview"-knop per rij = dry-run van het verwijderen (server v15.64.0): toont
+     hoeveel scenario’s/Kamino zouden herlinken naar oekene, wat er zou verwijderd worden, of GitHub-token + Brevo
+     geconfigureerd zijn — zonder iets te wijzigen. Zo testbaar zonder wegwerp-account. Preview-export wordt gedownload.
+     Gebruikersbeheer v1.4 (08-08): (1) app-toegang-fout in een alert (de #g-msg staat onder de tabel, buiten beeld bij
+     een lange lijst); (2) bij toekennen stuurt de UI app_naam mee zodat de server een ontbrekende app-rij zelf aanmaakt
+     in `apps` (auto-provision, server v15.61.0); (3) NIEUW: "Verwijderen"-knop per rij (niet voor jezelf) → server
+     mailt eerst een .txt-export van alle gelogde info en verwijdert dan profiel+toegangen+log+login (server v15.62.0);
+     de UI downloadt de export ook lokaal als vangnet. Handig om een testmail te recyclen voor een verse onboarding.
+     v1.4 (08-08): de gelinkte projecten (scenario’s + Kamino) worden bij verwijderen herlinkt aan oekene@gmail.com
+     (server v15.63.0) i.p.v. verweesd; de UI meldt de herlink-aantallen. -->
 
 <style>
   :root{ --navy:#1F3864; --green:#05B050; --rood:#C0201A; --grijs:#6B7280; --lijn:#E5E7EB; --bg:#F5F6F8; }
@@ -229,10 +237,18 @@
     var deact = st==='active'
       ? '<button class="sec" id="'+rid+'_deact">Deactiveren</button>'
       : '<button class="gr" id="'+rid+'_react">Activeren</button>';
+    // v1.3: verwijderknop (niet voor jezelf). Verwijdert profiel + toegangen + log + auth-user en mailt eerst een export.
+    var isZelf = !!(SESSION && SESSION.user && (SESSION.user.email||'').toLowerCase()===(u.email||'').toLowerCase());
+    var preview = isZelf ? '' :
+      '<button id="'+rid+'_preview" title="Toon wat er zou gebeuren bij verwijderen — wijzigt niets" '+
+      'style="background:#fff;color:#1F3864;border:1px solid #C7D2E0;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer">Preview</button>';
+    var verwijder = isZelf ? '' :
+      '<button id="'+rid+'_verwijder" title="Gebruiker volledig verwijderen (met export per mail)" '+
+      'style="background:#fff;color:#B42318;border:1px solid #F1B0AB;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer">Verwijderen</button>';
     return '<tr>'+
       '<td><div class="u-email">'+esc(u.email)+'</div>'+ (u.name?'<div class="u-naam">'+esc(u.name)+(u.company?' · '+esc(u.company):'')+'</div>':'') +'</td>'+
       '<td>'+rolSel+'</td><td>'+stBadge+'</td>'+appsCells+
-      '<td><div class="acts">'+deact+'</div></td>'+
+      '<td><div class="acts">'+deact+preview+verwijder+'</div></td>'+
     '</tr>';
   }
 
@@ -245,6 +261,51 @@
     });
     var da=$(rid+'_deact'); if(da) da.onclick=function(){ zetStatus(u,'inactive'); };
     var ra=$(rid+'_react'); if(ra) ra.onclick=function(){ zetStatus(u,'active'); };
+    var vb=$(rid+'_verwijder'); if(vb) vb.onclick=function(){ verwijderGebruiker(u); };
+    var pb=$(rid+'_preview'); if(pb) pb.onclick=function(){ previewVerwijder(u); };
+  }
+
+  // v1.5: PREVIEW (dry-run) — server telt wat er zou gebeuren en wijzigt/verwijdert/maildt niets.
+  async function previewVerwijder(u){
+    gmsg('Preview (er wordt niets gewijzigd)…');
+    try{
+      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'delete', email:u.email, dry_run:true }) });
+      var j=await r.json().catch(function(){return {};});
+      if(!r.ok){ gmsg('Preview mislukt: '+(j.error||('fout '+r.status)),'err'); alert('Preview mislukt voor '+u.email+':\n\n'+(j.error||('fout '+r.status))); return; }
+      if(j.txt){ try{ var bl=new Blob([j.txt],{type:'text/plain;charset=utf-8'}); var a=document.createElement('a'); a.href=URL.createObjectURL(bl); a.download=j.bestandsnaam||('preview_'+u.email+'.txt'); document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(_e){} a.remove(); },1000); }catch(e){} }
+      var hl=j.herlink||{}, hs=(hl.scenarios||{}).herlinkt||0, hk=(hl.kamino||{}).herlinkt||0, d=j.diagnostiek||{}, zv=j.zou_verwijderen||{};
+      var sfout=(hl.scenarios&&hl.scenarios.fout)?(' ⚠ '+hl.scenarios.fout):'';
+      var kfout=(hl.kamino&&hl.kamino.fout)?(' ⚠ '+hl.kamino.fout):'';
+      var msg='PREVIEW voor '+u.email+' — er is NIETS gewijzigd.\n\n'+
+        '• Herlink-doel gevonden: '+(d.doel_gevonden?('ja → '+d.doel_email):'NEE ('+ (d.audit_naar||'?') +' niet als profiel gevonden)')+'\n'+
+        '• Zou herlinken: '+hs+' scenario’s'+sfout+' · '+hk+' Kamino-projecten'+kfout+'\n'+
+        '• Zou verwijderen: '+(zv.grants||0)+' toegangen, '+(zv.logs||0)+' logregels, '+(zv.certificaten||0)+' certificaten · login: '+(zv.auth_user?'ja':'nee')+'\n'+
+        '• GitHub-token (scenario-schrijven): '+(d.github_token?'aanwezig':'ONTBREEKT')+'\n'+
+        '• Brevo-mail: '+(d.brevo_key_gezet?('geconfigureerd → '+ (d.audit_naar||'?')):'NIET gezet (export wordt dan enkel gedownload)')+'\n\n'+
+        'De volledige preview-export is gedownload.';
+      gmsg('Preview klaar voor '+u.email+' — niets gewijzigd. Zou herlinken: '+hs+' scenario’s, '+hk+' Kamino.','ok');
+      alert(msg);
+    }catch(e){ gmsg('Netwerkfout bij preview: '+e.message,'err'); alert('Netwerkfout bij preview: '+e.message); }
+  }
+
+  // v1.3: gebruiker volledig verwijderen — server mailt eerst een .txt-export; UI downloadt 'm ook lokaal als vangnet.
+  async function verwijderGebruiker(u){
+    var ok=confirm('Gebruiker VOLLEDIG verwijderen?\n\n'+u.email+'\n\nDit verwijdert het profiel, alle app-toegangen, het activiteitslog én de login, en maakt het e-mailadres weer vrij voor een nieuwe uitnodiging. De gelinkte projecten (scenario’s + Kamino) worden herlinkt aan oekene@gmail.com, niet verwijderd. Er wordt eerst een export gemaild (en lokaal gedownload).\n\nDoorgaan?');
+    if(!ok) return;
+    gmsg('Verwijderen…');
+    try{
+      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'delete', email:u.email }) });
+      var j=await r.json().catch(function(){return {};});
+      if(!r.ok){ gmsg('Verwijderen mislukt: '+(j.error||('fout '+r.status)),'err'); alert('Verwijderen mislukt voor '+u.email+':\n\n'+(j.error||('fout '+r.status))); return; }
+      // Backup-download van de export (ook als de mail faalde)
+      if(j.txt){ try{ var bl=new Blob([j.txt],{type:'text/plain;charset=utf-8'}); var a=document.createElement('a'); a.href=URL.createObjectURL(bl); a.download=j.bestandsnaam||'export.txt'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(_e){} a.remove(); },1000); }catch(e){} }
+      var mailtxt=(j.mail&&j.mail.sent)?('Export gemaild naar '+(j.mail.naar||'de audit-mailbox')+'.'):('Mail NIET verstuurd ('+((j.mail&&j.mail.reden)||'onbekend')+') — de export is wel lokaal gedownload.');
+      var hl=j.herlink||{}, hs=(hl.scenarios||{}).herlinkt||0, hk=(hl.kamino||{}).herlinkt||0;
+      var herlinktxt='Projecten herlinkt aan '+(hl.doel||'oekene@gmail.com')+': '+hs+' scenario’s, '+hk+' Kamino-projecten.';
+      gmsg('Verwijderd: '+u.email+'. '+herlinktxt+' '+mailtxt,'ok');
+      alert('Verwijderd: '+u.email+'\n\n'+herlinktxt+'\n\n'+mailtxt);
+      await laadUsers();
+    }catch(e){ gmsg('Netwerkfout bij verwijderen: '+e.message,'err'); alert('Netwerkfout bij verwijderen: '+e.message); }
   }
 
   async function uitnodigen(){
@@ -269,7 +330,10 @@
   async function zetToegang(u, appId, aan, cb){
     cb.disabled=true; gmsg('');
     try{
-      var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId }) });
+      // v1.2: naam meesturen zodat de server een ontbrekende app-rij zelf kan aanmaken in `apps` (auto-provision).
+      var _a=APPS.filter(function(x){ return x.id===appId; })[0];
+      var _naam=(_a && _a.naam) || appId;
+      var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId, app_naam:_naam }) });
       cb.disabled=false;
       if(!r.ok){ cb.checked=!aan; var j=await r.json().catch(function(){return {};}); var _reden=(j.error||('fout '+r.status)); gmsg('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+' ('+_reden+').','err'); alert('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+':\n\n'+_reden); return; }   // v1.1: fout ook in alert (de #g-msg staat onder de tabel, dus buiten beeld bij een lange lijst)
       u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan) u.apps.push(appId);
