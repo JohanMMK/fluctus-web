@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.20 (Mijn Fluctus-app · testmodus)
+     KAMINO — single-page front v0.9.22 (Mijn Fluctus-app · testmodus)
+     v0.9.22 (08-08): profiel-label enkel voor managers (profiel-analyses zijn manager-only, server v15.68). Een
+              verkoper/adviseur rekent altijd op het standaardprofiel; het "🔵 opgeladen profiel"-label verschijnt dan niet.
+     v0.9.21 (FLUVIUS-PROFIEL FASE 1, 08-08): manager-only Fluvius-CSV-converter in elke tegel (1-4). Zet
+              Historiek_afname/injectie of de gecombineerde Verbruikshistoriek om naar een kwartier-CSV en uploadt die
+              naar de bucket via /api/kamino/profiel-upload (server v15.66) onder profielen/<projectID>_<EAN>_<klant>_
+              <type>.csv. Het profiel is gedeeld over de 4 tegels van hetzelfde project (rec.profielen, hersteld bij
+              heropenen + bewaard via persistProject). Zichtbaar enkel voor rol=manager (/api/app-access/check).
+              FASE 2 volgt: dit profiel effectief gebruiken in de analyse i.p.v. het standaardprofiel, de
+              toegangsvermogen-check, tegel-2 injectie-curtailment/onbalans, en de expliciete profiel-labels in
+              tegels + rapporten.
      v0.9.20 (LOOPTIJD-METING PER VRAAG, 08-08): elke autopilot-studie meet nu haar looptijd. (1) Wachtscherm: een
               meelopende teller + voortgangsbalk t.o.v. de VERWACHTE looptijd (rollend mediaan-gemiddelde per tegel,
               zelf-kalibrerend in localStorage, seed-defaults tot ≥3 metingen; balk capt op 98%, tekst "duurt langer
@@ -237,8 +247,9 @@ var VT_DEF={
 
 // ---------- state: project-centrisch (één factuur → studies 1–3; 4 voegt laadpleinen toe) ----------
 var STATE={
+  rol:null,   // v0.9.21: 'manager'|'seller' — bepaalt of de Fluvius-profielconverter zichtbaar is
   contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
-  werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false },
+  werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, profielen:{} },
   projecten:[],
   gedaan:{},  // { projectId: { puntId: true } }
   kern:{},    // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
@@ -255,6 +266,8 @@ function kToken(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStora
     return (v&&(v.access_token||(v.currentSession&&v.currentSession.access_token)))||null; } } }catch(e){} return null; }
 function ingelogd(){ return !!kToken(); }
 function kApiPost(path, body){ var tok=kToken(), h={'Content-Type':'application/json'}; if(tok) h['Authorization']='Bearer '+tok;
+  // v0.9.21: FLX-project-id meesturen naar de analyse-endpoints → server gebruikt het opgeladen profiel (fase 2), fallback standaard.
+  try{ if(body && typeof body==='object' && !body.project_id && STATE.werk && STATE.werk.id && /\/api\/kamino\/(onderhandel|productie|aansluiting)/.test(path)) body.project_id=STATE.werk.id; }catch(e){}
   return fetch(API_BASE+path,{method:'POST',headers:h,body:JSON.stringify(body)}).then(function(r){
     if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP '+r.status+': '+t); }); return r.json(); }); }
 function kApiGet(path){ var tok=kToken(), h={}; if(tok) h['Authorization']='Bearer '+tok;
@@ -280,7 +293,16 @@ function byId(id){ return PUNTEN.find(function(p){return p.id===id;}); }
 function heeftActief(){ return !!STATE.werk.id; }
 function projById(id){ return STATE.projecten.find(function(p){return p.id===id;}); }
 function gedaanMap(){ var id=STATE.werk.id; if(!id) return {}; return STATE.gedaan[id]||(STATE.gedaan[id]={}); }
-function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false }; _factuurFile=null; try{ sessionStorage.removeItem('FLX_KAMINO_KBL_STATE'); }catch(e){} }
+function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, profielen:{} }; _factuurFile=null; try{ sessionStorage.removeItem('FLX_KAMINO_KBL_STATE'); }catch(e){} }
+// v0.9.21: manager-detectie (voor de Fluvius-profielconverter). Rol komt uit /api/app-access/check.
+function isManager(){ return STATE.rol==='manager'; }
+function _laadRol(){
+  if(!ingelogd()) return;
+  kApiPost('/api/app-access/check',{ app_id:'kamino' }).then(function(r){
+    var rol=(r&&r.user&&r.user.role)||null;
+    if(rol && rol!==STATE.rol){ STATE.rol=rol; try{ router(); }catch(e){} }
+  }).catch(function(){});
+}
 function vandaag(){ var d=new Date(); return ('0'+d.getDate()).slice(-2)+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+d.getFullYear(); }
 function ci(k){ return (STATE.contact[k]||'').replace(/"/g,'&quot;'); }
 function heeftFactuur(){ return !!(STATE.werk.opgeslagen || STATE.werk.factuur); }
@@ -475,6 +497,100 @@ function _pleinNaarSim(pl,i){
 function delPlein(i){ STATE.werk.pleinen.splice(i,1); renderPunt(_HUIDIG); }
 
 var _HUIDIG=null;
+// ─── v0.9.21 — FLUVIUS-PROFIELCONVERTER (MANAGER-ONLY, gedeeld over de 4 tegels) ──────────────
+// Zet Fluvius-CSV (Historiek_afname/injectie of gecombineerde Verbruikshistoriek) om naar een
+// kwartier-CSV (Date;kWh) en uploadt die naar de bucket (profielen/<pid>_<EAN>_<klant>_<type>.csv),
+// gedeeld over alle 4 de tegels van hetzelfde project. Alleen zichtbaar voor managers. (FASE 1: opladen
+// + delen + zichtbaar maken; het gebruik in de analyse i.p.v. het standaardprofiel volgt in fase 2.)
+function _profielConverterBlok(){
+  if(!STATE.werk.id){
+    return '<div class="sec"><h3>Verbruiksprofiel opladen <span style="font-size:11px;color:#9E480E">· manager</span></h3>'+
+      '<div class="hint">Laad eerst een factuur op (project) — daarna kan je hier het Fluvius-kwartierprofiel opladen.</div></div>';
+  }
+  var pr=STATE.werk.profielen||{};
+  function statusRegel(type,kleur){
+    var p=pr[type];
+    if(p) return '<div style="font-size:12.5px;color:'+kleur+';font-weight:700">✓ '+type+'-profiel opgeladen'+(p.mwh!=null?(' — '+p.mwh+' MWh, piek '+p.piek_kw+' kW'):'')+'</div>';
+    return '<div style="font-size:12.5px;color:#7A8699">— nog geen '+type+'-profiel</div>';
+  }
+  return '<div class="sec"><h3>Verbruiksprofiel opladen <span style="font-size:11px;color:#9E480E">· manager</span></h3>'+
+    '<div class="hint">Sleep of kies de Fluvius-CSV (Historiek_afname / Historiek_injectie, of de gecombineerde Verbruikshistoriek). We zetten ze om naar een kwartierprofiel en bewaren ze bij dit project — gedeeld over de vier studies.</div>'+
+    '<input type="file" accept=".csv" multiple onchange="_pcVerwerkFiles(this.files)">'+
+    '<div id="pc-status" style="margin-top:8px;font-size:12.5px;color:#5A6577;min-height:16px"></div>'+
+    '<div style="margin-top:8px;display:grid;gap:4px">'+statusRegel('afname','#8A5A00')+statusRegel('injectie','#0A6B2E')+'</div>'+
+  '</div>';
+}
+function _pcStatus(t){ var el=document.getElementById('pc-status'); if(el) el.textContent=t||''; }
+function _pcSplitsRegel(regel){ var res=[],cur='',q=false; for(var i=0;i<regel.length;i++){ var ch=regel[i]; if(ch==='"'){q=!q;} else if(ch===';'&&!q){res.push(cur);cur='';} else {cur+=ch;} } res.push(cur); return res; }
+function _pcVindKol(h,c){ for(var i=0;i<h.length;i++){ for(var j=0;j<c.length;j++){ if(h[i].trim().toLowerCase()===c[j]) return i; } } return -1; }
+function _pcHeeftRegister(raw){ if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1); var h=_pcSplitsRegel(raw.split('\n')[0]); var iR=_pcVindKol(h,['register']); if(iR<0) return false; var rg=raw.split('\n'); for(var i=1;i<Math.min(10,rg.length);i++){ var k=_pcSplitsRegel(rg[i]); var r=(k[iR]||'').toLowerCase(); if(r.indexOf('afname')>=0||r.indexOf('injectie')>=0) return true; } return false; }
+function _pcMaakCsvMeta(map){ var s=Object.keys(map).sort(); if(!s.length) return null; var tot=0,mx=0; for(var i=0;i<s.length;i++){ tot+=map[s[i]]; if(map[s[i]]>mx) mx=map[s[i]]; } var csv='Date;kWh\n'; for(var j=0;j<s.length;j++){ csv+=s[j]+';'+map[s[j]].toFixed(3).replace('.',',')+'\n'; } return { csv:csv, mwh:Math.round(tot/1000), piek_kw:Math.round(mx*4), van:s[0], tot:s[s.length-1], n:s.length }; }
+function _pcSplitsGecombineerd(raw){
+  if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1);
+  var rg=raw.split('\n').filter(function(x){return x.trim();});
+  var h=_pcSplitsRegel(rg[0]);
+  var iReg=_pcVindKol(h,['register']), iDat=_pcVindKol(h,['van (datum)','van datum']), iTij=_pcVindKol(h,['van (tijdstip)','van tijdstip']), iVol=_pcVindKol(h,['volume']), iEen=_pcVindKol(h,['eenheid']), iEAN=_pcVindKol(h,['ean-code','ean']);
+  var vandaag=new Date(), grens=new Date(vandaag.getFullYear(),vandaag.getMonth()-13,vandaag.getDate());
+  var ean='', afn={}, inj={};
+  for(var j=1;j<rg.length;j++){ var k=_pcSplitsRegel(rg[j]); if(k.length<3) continue; if(iEen>=0&&(k[iEen]||'').trim()!=='kWh') continue; if(!ean&&iEAN>=0) ean=(k[iEAN]||'').replace(/^="?|"?=$/g,'').replace(/[^0-9]/g,''); var reg=(k[iReg]||'').toLowerCase(); var isA=reg.indexOf('afname')>=0, isI=reg.indexOf('injectie')>=0; if(!isA&&!isI) continue; var rDat=(k[iDat]||'').trim(), rTij=(k[iTij]||'').trim(), rVol=(k[iVol]||'').trim(); var dp=rDat.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); if(!dp) continue; var d=+dp[1],mo=+dp[2]-1,y=+dp[3]; if(new Date(y,mo,d)<grens) continue; var mm=String(mo+1).padStart(2,'0'); var tp=rTij.match(/^(\d{1,2}):(\d{2})/); var hh=tp?String(+tp[1]).padStart(2,'0'):'00'; var mn=tp?tp[2]:'00'; var ds=d+'/'+mm+'/'+y+' '+hh+':'+mn; var vol=parseFloat(rVol.replace(',','.')); if(isNaN(vol)) vol=0; if(isA){afn[ds]=(afn[ds]||0)+vol;} else {inj[ds]=(inj[ds]||0)+vol;} }
+  return { ean:ean, afname:_pcMaakCsvMeta(afn), injectie:_pcMaakCsvMeta(inj) };
+}
+function _pcTransformeer(raw){
+  if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1);
+  var rg=raw.split('\n').filter(function(x){return x.trim();});
+  if(rg.length<2) throw new Error('Bestand is leeg.');
+  var h=_pcSplitsRegel(rg[0]);
+  var iDat=_pcVindKol(h,['van (datum)','van datum']), iTij=_pcVindKol(h,['van (tijdstip)','van tijdstip']), iVol=_pcVindKol(h,['volume']), iEen=_pcVindKol(h,['eenheid']), iEAN=_pcVindKol(h,['ean-code','ean']);
+  if(iDat<0||iTij<0||iVol<0) throw new Error('Kolommen Van (datum)/(tijdstip)/Volume niet gevonden.');
+  var vandaag=new Date(), grens=new Date(vandaag.getFullYear(),vandaag.getMonth()-13,vandaag.getDate());
+  var ean='', map={};
+  for(var i=1;i<rg.length;i++){ var k=_pcSplitsRegel(rg[i]); if(k.length<3) continue; if(iEen>=0&&(k[iEen]||'').trim()!=='kWh') continue; if(!ean&&iEAN>=0) ean=(k[iEAN]||'').replace(/^="?|"?=$/g,'').replace(/[^0-9]/g,''); var rDat=(k[iDat]||'').trim(), rTij=(k[iTij]||'').trim(), rVol=(k[iVol]||'').trim(); var dp=rDat.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); if(!dp) continue; var d=+dp[1],mo=+dp[2]-1,y=+dp[3]; if(new Date(y,mo,d)<grens) continue; var mm=String(mo+1).padStart(2,'0'); var tp=rTij.match(/^(\d{1,2}):(\d{2})/); var hh=tp?String(+tp[1]).padStart(2,'0'):'00'; var mn=tp?tp[2]:'00'; var ds=d+'/'+mm+'/'+y+' '+hh+':'+mn; var vol=parseFloat(rVol.replace(',','.')); if(isNaN(vol)) vol=0; map[ds]=(map[ds]||0)+vol; }
+  var meta=_pcMaakCsvMeta(map); if(!meta) throw new Error('Geen kWh-rijen gevonden (laatste 13 maanden).');
+  meta.ean=ean; return meta;
+}
+function _pcVerwerkFiles(fileList){
+  var files=Array.prototype.slice.call(fileList||[]); if(!files.length) return;
+  if(!STATE.werk.id){ alert('Geen actief project.'); return; }
+  _pcStatus('Bestand(en) lezen…');
+  var teUploaden=[], restCount=files.length, fout=null;
+  files.forEach(function(f){
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var raw=e.target.result, fn=f.name.toLowerCase();
+        var isComb=fn.indexOf('verbruik')>=0 || _pcHeeftRegister(raw);
+        if(isComb){
+          var g=_pcSplitsGecombineerd(raw);
+          if(g.afname)   teUploaden.push({type:'afname',   csv:g.afname.csv,   ean:g.ean, meta:g.afname});
+          if(g.injectie) teUploaden.push({type:'injectie', csv:g.injectie.csv, ean:g.ean, meta:g.injectie});
+          if(!g.afname && !g.injectie) fout='Geen afname/injectie-rijen gevonden in het gecombineerde bestand.';
+        } else {
+          var type=fn.indexOf('injectie')>=0?'injectie':(fn.indexOf('afname')>=0?'afname':null);
+          if(!type){ type = confirm('"'+f.name+'": is dit een AFNAME-profiel?\n\nOK = afname · Annuleren = injectie')?'afname':'injectie'; }
+          var m=_pcTransformeer(raw);
+          teUploaden.push({type:type, csv:m.csv, ean:m.ean, meta:m});
+        }
+      }catch(err){ fout=err.message; }
+      if(--restCount===0) _pcUploadReeks(teUploaden, fout);
+    };
+    reader.readAsText(f,'UTF-8');
+  });
+}
+function _pcUploadReeks(lijst, fout){
+  if(fout && !lijst.length){ _pcStatus(''); alert('Kon het profiel niet lezen: '+fout); return; }
+  if(!lijst.length){ _pcStatus(''); return; }
+  var klant=STATE.werk.naam||STATE.contact.k_naam||'klant', i=0;
+  (function volgende(){
+    if(i>=lijst.length){ _pcStatus('Klaar — profiel(en) opgeladen.'); persistProject(); renderPunt(_HUIDIG); return; }
+    var it=lijst[i++];
+    _pcStatus('Uploaden: '+it.type+'-profiel ('+it.meta.mwh+' MWh)…');
+    kApiPost('/api/kamino/profiel-upload',{ project_id:STATE.werk.id, type:it.type, csv:it.csv, ean:it.ean, klant:klant,
+      meta:{ mwh:it.meta.mwh, piek_kw:it.meta.piek_kw, van:it.meta.van, tot:it.meta.tot, n:it.meta.n } })
+    .then(function(r){ if(r&&r.profielen){ STATE.werk.profielen=r.profielen; } volgende(); })
+    .catch(function(e){ _pcStatus(''); alert('Upload van het '+it.type+'-profiel mislukte: '+((e&&e.message)||e)); renderPunt(_HUIDIG); });
+  })();
+}
+
 function renderPunt(id){
   var p=byId(id); if(!p){ location.hash='#/'; return; } _HUIDIG=id;
   var kleur=p.gratis?'#048443':'#9E480E';
@@ -496,6 +612,8 @@ function renderPunt(id){
   // EXTRA PV effectief gedimensioneerd wordt. Tegel 2 (productie) doet géén extra PV — daar enkel betere sturing van de
   // bestaande PV. De waarde is project-breed (STATE.werk.pvDrempel), dus instellen op 3 of 4 geldt voor beide.
   if(p.id==='aansluiting' || p.id==='mobiliteit'){ inputSec += '<div class="sec"><h3>PV-strategie voor het ontwerp</h3>'+veldPvDrempel()+'</div>'; }
+  // v0.9.21: Fluvius-profielconverter — manager-only, op alle 4 de tegels; opgeladen profiel is gedeeld over het project.
+  if(isManager()){ inputSec += _profielConverterBlok(); }
 
   var tweestaps = p.tweestaps
     ? '<div class="tweestaps"><b>Zo verloopt deze studie:</b> u krijgt eerst een rapport op basis van een <b>standaardprofiel</b>. Daarna plannen we een korte <b>videovergadering</b> waarin we samen de <b>kabelplanner</b> doorlopen en bekijken of het zinvol is met úw specifieke verbruiksprofiel te rekenen — daarvoor vragen we dan uw mandaat.</div>'
@@ -821,6 +939,19 @@ function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
     ];
     diag='SolarActive — extra opbrengst uit uw bestaande PV via slimme injectie-sturing. Kaart en rapport uit dezelfde berekening.';
   }
+  // v0.9.21 (fase 5): expliciet label als dit project met opgeladen Fluvius-profielen rekent.
+  // De server gebruikt het opgeladen profiel automatisch zodra het bestaat → als STATE.werk.profielen
+  // gevuld is, is de analyse ermee gerekend. (afname = tegel 1/3/4; injectie is relevant voor tegel 2.)
+  try{
+    var _pf=STATE.werk.profielen||{}, _lab=[];
+    // v0.9.22: label enkel voor managers — profiel-analyses zijn manager-only (server gate v15.68). Een verkoper
+    // rekent altijd op het standaardprofiel, ook al heeft het project een opgeladen profiel.
+    if(isManager()){
+      if(_pf.afname) _lab.push('afname');
+      if(_pf.injectie && id==='productie') _lab.push('injectie');
+      if(_lab.length && diag) diag += ' 🔵 Gerekend met uw opgeladen '+_lab.join(' + ')+'-profiel'+((_pf.afname&&_pf.afname.ean)?(' (EAN '+_pf.afname.ean+')'):'')+' i.p.v. een standaardprofiel.';
+    }
+  }catch(e){}
   if(kern){
     (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern;
     (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=diag;
@@ -1037,7 +1168,7 @@ function laadProject(rec, rapporten){
   if(!projById(rec.id)) STATE.projecten.unshift({ id:rec.id, naam:rec.naam||k.naam||'', datum:'', factuur:rec.factuur||'', baseCase:rec.baseCase||null, opgeslagen:true });
   // v0.9.13: bewaard profiel herstellen (als het nog in de lijst zit), anders default. Voorheen ging het profiel bij
   // heropenen verloren (altijd PROFIELEN[0]).
-  STATE.werk={ id:rec.id, naam:rec.naam||k.naam||'', factuur:rec.factuur||'', profiel:((rec.profiel && PROFIELEN.indexOf(rec.profiel)>=0)?rec.profiel:(rec.profiel||PROFIELEN[0])), pv_kwp:pv.kwp||'', pv_inj:pv.inj||'', pleinen:[], baseCase:rec.baseCase||null, opgeslagen:true };
+  STATE.werk={ id:rec.id, naam:rec.naam||k.naam||'', factuur:rec.factuur||'', profiel:((rec.profiel && PROFIELEN.indexOf(rec.profiel)>=0)?rec.profiel:(rec.profiel||PROFIELEN[0])), pv_kwp:pv.kwp||'', pv_inj:pv.inj||'', pleinen:[], baseCase:rec.baseCase||null, opgeslagen:true, profielen:rec.profielen||{} };   // v0.9.21: opgeladen profielen herstellen
   STATE.gedaan[rec.id]=Object.assign({}, rec.studies||{});
   // v0.9.10: welke tegels hebben een BEWAARD rapport → per tegel een "bekijk vorig rapport"-knop.
   var m={}; if(rapporten && Array.isArray(rapporten.studies)){ rapporten.studies.forEach(function(t){ if(t) m[t]=true; }); }
@@ -1055,6 +1186,7 @@ function persistProject(){
     // v0.9.13 (Johan 03-08): profiel persisteren zodat het later (kamino-heropen én manager-open in de
     // interactieve simulator) correct terugkomt. Zonder dit veld viel de carryover terug op een default-profiel.
     profiel:STATE.werk.profiel||'',
+    profielen:STATE.werk.profielen||{},   // v0.9.21: opgeladen Fluvius-profielen mee bewaren (server whitelist v15.66)
     pv:{ kwp:STATE.werk.pv_kwp||'', inj:STATE.werk.pv_inj||'' }, studies:gedaanMap()
   }).catch(function(){});
 }
@@ -1070,6 +1202,7 @@ kApiGet('/api/profielen-lijst').then(function(r){
   var namen=lijst.map(function(x){ return (typeof x==='string')?x:(x&&(x.naam||x.name)||''); }).filter(Boolean);
   if(namen.length){ PROFIELEN=namen; if(PROFIELEN.indexOf(STATE.werk.profiel)<0) STATE.werk.profiel=PROFIELEN[0]; router(); }
 }).catch(function(){});
+_laadRol();   // v0.9.21: manager-status ophalen → toont de Fluvius-profielconverter waar van toepassing
 // Upload-brug voor rapporten die als Blob in de rapport-overlay draaien (bv. het inline SolarActive-rapport):
 // zij hebben zelf geen token/same-origin-fetch, dus posten ze de PDF hierheen. Kamino doet de authenticated
 // upload naar de bucket (kApiPost = absolute Railway-URL + sb-JWT).
