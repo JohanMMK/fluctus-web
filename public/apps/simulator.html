@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.59  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
-     v1.63.59 (OPGELADEN PROFIEL FASE 2, 08-08): apiPost stuurt het FLX-project_id mee naar /api/nominatie-sim-3,
-              /api/groeipad, /api/pv-sweep en /api/opstelling. Draagt het project een opgeladen Fluvius-afname-profiel,
-              dan rekent de server met dàt profiel i.p.v. het standaardprofiel (server v15.67). Guard server-side op het
-              FLX-formaat → geen opgeladen profiel of geen geldig id ⇒ standaardprofiel (fallback, geen regressie).
+     FLUCTUS SIMULATOR  v1.63.70  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.70 (#1 PROJECT_ID IN SIM-CALLS, 09-08): apiPost stuurt nu centraal het FLX-project_id mee voor de sim-
+              endpoints (nominatie-sim(-3), opstelling, pv-sweep, groeipad, kamino/onderhandel|productie|aansluiting),
+              zodat de server het OPGELADEN Fluvius-profiel effectief toepast i.p.v. stil terug te vallen op het
+              standaardprofiel. _apSetState zet STATE.projectId (autopilot); manual-flow valt terug op
+              _projectIdLokaal(STATE.project). Idempotent (enkel als project_id ontbreekt); geen ander gedrag gewijzigd.
      v1.63.58 (STOPGAP TRAGE ZWARE CASE, 06-08): per-stap-achtervang verruimd zodat een zware verzwaring/mix-case op
               tegel 4 niet vroegtijdig wordt afgekapt vóór de 45-min Kamino-umbrella (kamino v0.9.19): SIM_MAX_WACHT_MS
               20→35 min, _apRunSim-achtervang 20→35 min, _apGroeistap1-achtervang 15→20 min. Enkel constanten; geen
@@ -1091,13 +1092,14 @@ function apiGet(path){
   });
 }
 function apiPost(path,body){
-  // v1.63.59: FLX-project-id meesturen naar de sim-endpoints, zodat de server een OPGELADEN Fluvius-profiel
-  // (fase 2) kan gebruiken i.p.v. het standaardprofiel. De server guardt op het FLX-formaat → is er geen
-  // opgeladen profiel of geen geldig id, dan valt alles terug op het standaardprofiel (geen regressie).
+  // v1.63.70 (#1): opgeladen Fluvius-profiel wordt server-side enkel toegepast als de sim-request
+  // een geldig FLX-project_id draagt. De client stuurde dat NIET mee → server viel stil terug op het
+  // standaardprofiel. Hier centraal injecteren voor de sim-endpoints (idempotent: enkel als het ontbreekt).
   try{
-    if(body && typeof body==='object' && !body.project_id){
-      var _pid=(typeof _apH!=='undefined' && _apH && _apH.projectId) || (typeof STATE!=='undefined' && STATE && STATE.project) || null;
-      if(_pid && /\/api\/(nominatie-sim-3|groeipad|pv-sweep|opstelling)/.test(path)) body.project_id=_pid;
+    if(body && typeof body==='object' && !Array.isArray(body) && body.project_id==null
+       && /\/api\/(nominatie-sim|nominatie-sim-3|opstelling|pv-sweep|groeipad|kamino\/(onderhandel|productie|aansluiting))/.test(path)){
+      var _pid=(typeof STATE!=='undefined'&&STATE)?(STATE.projectId||((typeof _projectIdLokaal==='function'&&STATE.project)?_projectIdLokaal(STATE.project):'')):'';
+      if(_pid) body.project_id=_pid;
     }
   }catch(e){}
   var payload=JSON.stringify(body);
@@ -1124,7 +1126,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.59';   // v1.63.59: FLX-project_id meesturen naar sim-endpoints → server gebruikt opgeladen Fluvius-profiel (fase 2), fallback standaard
+var SIM_VERSIE = 'v1.63.58';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -11435,6 +11437,7 @@ function _apWait(test, timeoutMs, label){
 }
 function _apSetState(h){
   var bc=h.baseCase||{};
+  STATE.projectId = h.projectId || STATE.projectId || '';   // v1.63.70 (#1): FLX-id voor opgeladen-profiel-resolutie (apiPost valt anders terug op _projectIdLokaal(STATE.project))
   STATE.project = (typeof _cleanProjectName==='function') ? _cleanProjectName(bc.klantNaam||h.project||'Kamino') : (bc.klantNaam||h.project||'Kamino');
   STATE.scenario = (typeof _buildScenario1Naam==='function' && bc.periodeVan && bc.periodeTot) ? _buildScenario1Naam(bc.periodeVan,bc.periodeTot) : (STATE.scenario||'kamino');
   STATE.scenarioActie='nieuw';
