@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.70  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     FLUCTUS SIMULATOR  v1.63.71  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
+     v1.63.71 (LABEL + TOEGANGSVERMOGEN, 09-08): apiPost vangt profiel_bron/injectie_bron op → STATE; _margeData toont
+              het opgeladen-profiel-label + verlaagt het toegangsvermogen EFFECTIEF in de optimale (dynamische) kolom
+              (pro-rata, geguard op de 12-mnd maandpiek uit het opgeladen profiel); _ontwerpRapportData draagt de labels.
      v1.63.70 (#1 PROJECT_ID IN SIM-CALLS, 09-08): apiPost stuurt nu centraal het FLX-project_id mee voor de sim-
               endpoints (nominatie-sim(-3), opstelling, pv-sweep, groeipad, kamino/onderhandel|productie|aansluiting),
               zodat de server het OPGELADEN Fluvius-profiel effectief toepast i.p.v. stil terug te vallen op het
@@ -1091,13 +1094,14 @@ function apiGet(path){
     });
   });
 }
+function _capBron(j){ try{ if(j&&j.profiel_bron)STATE._profielBron=j.profiel_bron; if(j&&j.injectie_bron)STATE._injectieBron=j.injectie_bron; }catch(e){} return j; }   // v1.63.71 (label)
 function apiPost(path,body){
   // v1.63.70 (#1): opgeladen Fluvius-profiel wordt server-side enkel toegepast als de sim-request
   // een geldig FLX-project_id draagt. De client stuurde dat NIET mee → server viel stil terug op het
   // standaardprofiel. Hier centraal injecteren voor de sim-endpoints (idempotent: enkel als het ontbreekt).
   try{
     if(body && typeof body==='object' && !Array.isArray(body) && body.project_id==null
-       && /\/api\/(nominatie-sim|nominatie-sim-3|opstelling|pv-sweep|groeipad|kamino\/(onderhandel|productie|aansluiting))/.test(path)){
+       && /\/api\/(nominatie-sim|nominatie-sim-3|opstelling|pv-sweep|groeipad|injectie-optimalisatie|kamino\/(onderhandel|productie|aansluiting))/.test(path)){
       var _pid=(typeof STATE!=='undefined'&&STATE)?(STATE.projectId||((typeof _projectIdLokaal==='function'&&STATE.project)?_projectIdLokaal(STATE.project):'')):'';
       if(_pid) body.project_id=_pid;
     }
@@ -1110,13 +1114,13 @@ function apiPost(path,body){
         return _authHeadersRetry({'Content-Type':'application/json'}).then(function(h2){
           return fetch(API_BASE+path,{method:'POST',headers:h2,body:payload}).then(function(r2){
             if(!r2.ok)return r2.text().then(function(t){throw new Error('HTTP '+r2.status+': '+t);});
-            _activityHook(path, body); return r2.json();
+            _activityHook(path, body); return r2.json().then(_capBron);
           });
         });
       }
       if(!r.ok)return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t);});
       _activityHook(path, body);
-      return r.json();
+      return r.json().then(_capBron);
     });
   });
 }
@@ -3112,12 +3116,30 @@ function _margeData(){
     {grp:'Netkosten (distributie + transport)', items:_netItems},
     {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
   ];
+  // v1.63.71 (task 2): TOEGANGSVERMOGEN EFFECTIEF VERLAGEN in de optimale (dynamische) kolom wanneer de
+  // 12-maand maandpiek (uit het opgeladen profiel) onder het gecontracteerde toegangsvermogen ligt. Pro-rata op de
+  // factuur-capaciteit (€/kW lineair). Geguard: geen opgeladen maandpiek → geen wijziging (geen regressie).
+  var _tb=STATE._profielBron||null;
+  var _huidigKw=+bc.toegangsvermogenKw||Math.round((+bc.aansluitVermogenKva||STATE.aansluitingKva||0)*0.9);
+  var _piek12=(_tb&&+_tb.maandpiek_kw>0)?+_tb.maandpiek_kw:0;
+  var _tvOpt=null, _netPostenDyn=_netPosten, _netto_overig_dyn=netto_overig;
+  if(capaciteit>0 && _huidigKw>0 && _piek12>0 && _piek12 < _huidigKw*0.95){
+    var _nieuwKw=Math.max(5,Math.ceil(_piek12/5)*5);
+    var _capNieuw=Math.round(capaciteit*(_nieuwKw/_huidigKw));
+    var _capBesp=capaciteit-_capNieuw;
+    _netPostenDyn=[
+      {grp:'Netkosten (distributie + transport)', items:[['Capaciteit / maandpiek (verlaagd '+_huidigKw+'\u2192'+_nieuwKw+' kW)',_capNieuw],['Distributie (overig)',distributie-capaciteit]]},
+      {grp:'Heffingen + accijnzen', items:[['Bijdragen & accijnzen',heffingen]]}
+    ];
+    _netto_overig_dyn=netto_overig-_capBesp;
+    _tvOpt={huidig_kw:_huidigKw, nieuw_kw:_nieuwKw, besparing_periode_eur:Math.round(_capBesp), maandpiek_12m_kw:Math.round(_piek12)};
+  }
   var _dagen=_periodeDagen(bc.periodeVan,bc.periodeTot)||30;
   var factor=365/_dagen;
   // v1.63.49-fix (Johan 03-08): jaarbasis-extrapolatie NA de definitie van `factor` (stond eerder erboven → factor
   // undefined → subtot*undefined = NaN → "FACTUUR VANDAAG €0"). Actieve vergelijking = periode; jaar = indicatief ×factor.
   var _jaarBron = 'periode_x'+(Math.round(factor*10)/10);
-  var _jaarDyn  = (energie_dyn+netto_overig)*factor;   // dynamisch, op jaarbasis (indicatief)
+  var _jaarDyn  = (energie_dyn+_netto_overig_dyn)*factor;   // dynamisch, op jaarbasis (indicatief) — incl. toegangsvermogen-optimalisatie
   var _jaarBest = subtot*factor;                        // bestaand contract, op jaarbasis (indicatief)
   var ean=(Array.isArray(bc.eanNrs)&&bc.eanNrs.length)?bc.eanNrs[0]:(bc.eanNrs||'—');
   var scan={
@@ -3146,15 +3168,17 @@ function _margeData(){
         posten:[{grp:'Energie (commodity)', items:[['Afname energie',energie]]}].concat(_netPosten),
         subtotaal:subtot },
       dynamisch:{ label:'Scherp dynamisch contract',
-        posten:[{grp:'Energie (commodity)', items:[['Afname energie (dynamisch, '+(energie_dyn_bron==='simulatie'?'gesimuleerd op spot':'indicatief')+')',energie_dyn]]}].concat(_netPosten),
-        subtotaal:energie_dyn+netto_overig }
+        posten:[{grp:'Energie (commodity)', items:[['Afname energie (dynamisch, '+(energie_dyn_bron==='simulatie'?'gesimuleerd op spot':'indicatief')+')',energie_dyn]]}].concat(_netPostenDyn),
+        subtotaal:energie_dyn+_netto_overig_dyn }
     },
     extrapolatie_factor:factor,
     jaar_bron:_jaarBron,   // 'periode_x…' — jaarbasis is een INDICATIEVE extrapolatie van de periode
     jaar:{
       bestaand:{ label:'Huidig contract — jaarbasis (indicatief)', subtotaal:_jaarBest },
       dynamisch:{ label:'Scherp dynamisch — jaarbasis (indicatief)', subtotaal:_jaarDyn }
-    }
+    },
+    profiel_bron:(STATE._profielBron||null), injectie_bron:(STATE._injectieBron||null),
+    toegangsvermogen_optimalisatie:_tvOpt   // v1.63.71 (task 2)
   };
 }
 function _periodeDagen(v,t){ try{ var a=_parseBEdate(v),b=_parseBEdate(t); if(a&&b) return Math.max(1,Math.round((b-a)/86400000)+1);}catch(e){} return null; }
@@ -3829,6 +3853,7 @@ function _ontwerpRapportData(projectId, mode){
     verzwaring_eur:(beste&&beste.inv&&beste.inv.netaanpassing)||0, cabine_eur:(beste&&beste.inv&&beste.inv.cabine)||0 });   // v1.63.29: verzwaring + LS→MS-cabine apart meegeven → rapport telt/toon de cabine (was volledig weg uit de volledige-investering)
   out._mode=(mode==='management')?'management':'klant';
   out.project_id=projectId||'';
+  out.profiel_bron=(STATE._profielBron||null); out.injectie_bron=(STATE._injectieBron||null);   // v1.63.71 (label)
   out.scenario_naam=STATE.scenario||'';
   out.factuur={ afrekening_periode_mnd:fac.afrekening_periode_mnd||1, afrekening_bedrag:fac.afrekening_bedrag||0,
     bestaand_jaar:fac.bestaand_jaar||0, scherp_dynamisch_jaar:fac.scherp_dynamisch_jaar||fac.bestaand_jaar||0,

@@ -1,29 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     KAMINO — single-page front v0.9.22 (Mijn Fluctus-app · testmodus)
-     v0.9.22 (08-08): profiel-label enkel voor managers (profiel-analyses zijn manager-only, server v15.68). Een
-              verkoper/adviseur rekent altijd op het standaardprofiel; het "🔵 opgeladen profiel"-label verschijnt dan niet.
-     v0.9.21 (FLUVIUS-PROFIEL FASE 1, 08-08): manager-only Fluvius-CSV-converter in elke tegel (1-4). Zet
-              Historiek_afname/injectie of de gecombineerde Verbruikshistoriek om naar een kwartier-CSV en uploadt die
-              naar de bucket via /api/kamino/profiel-upload (server v15.66) onder profielen/<projectID>_<EAN>_<klant>_
-              <type>.csv. Het profiel is gedeeld over de 4 tegels van hetzelfde project (rec.profielen, hersteld bij
-              heropenen + bewaard via persistProject). Zichtbaar enkel voor rol=manager (/api/app-access/check).
-              FASE 2 volgt: dit profiel effectief gebruiken in de analyse i.p.v. het standaardprofiel, de
-              toegangsvermogen-check, tegel-2 injectie-curtailment/onbalans, en de expliciete profiel-labels in
-              tegels + rapporten.
-     v0.9.20 (LOOPTIJD-METING PER VRAAG, 08-08): elke autopilot-studie meet nu haar looptijd. (1) Wachtscherm: een
-              meelopende teller + voortgangsbalk t.o.v. de VERWACHTE looptijd (rollend mediaan-gemiddelde per tegel,
-              zelf-kalibrerend in localStorage, seed-defaults tot ≥3 metingen; balk capt op 98%, tekst "duurt langer
-              dan gewoonlijk…" voorbij de verwachting). (2) Kaart: small-print "⏱ berekend in m:ss" onder een tegel die
-              deze sessie écht gedraaid is. Enkel geslaagde runs tellen mee voor het gemiddelde. Puur client-side,
-              geen backend-wijziging; schaalt vanzelf mee met de server-parallelisatie (server v15.59.0). De teller
-              zit óók op de snelle _bezig-wachtschermen: factuur inlezen = louter meelopende teller; het directe
-              API-pad van studie 1 (contract) en 2 (productie) = teller t.o.v. de verwachte looptijd.
+     KAMINO — single-page front v0.9.19 (Mijn Fluctus-app · testmodus)
      v0.9.19 (STOPGAP TRAGE ZWARE CASE, 06-08): absolute veiligheidscap 25 → 45 min (K_ABS_CAP_MS). Na de PV-sweep-fix
               (simulator v1.63.57) startte de sweep wél, maar een zware verzwaring/mix-case op tegel 4 (volledige
               zoektocht opstelling 2 + mix 1/2 batt + opstelling 3, elk × 3 sturingen) duurt server-side >25 min en werd
               afgekapt. Dit is een tijdelijke verruiming zodat zulke cases afronden; de echte fix = /api/nominatie-sim-3
               server-side sneller (parallelle sturingen / mix-zoektocht snoeien / cache) — apart, met de proxy-code.
+     v0.9.20 (NO-FACTUUR-FLOW, 09-08, Johan): instappunt zonder factuur — 'Geen factuur? Manueel invullen' (klant/EAN/
+           postcode/DNB/spanning/kVA/jaarverbruik/referentieprijs) bouwt een baseCase zonder factuurposten; de server
+           (/api/kamino/onderhandel v15.70) rekent de marge op referentieprijs × verbruik. Bestaande factuur-flow ongewijzigd.
      v0.9.17 (Johan): KABELTRACÉ-KOPPELING tegel 3/4 — knop "Kabeltracé intekenen" op het resultaatscherm seedt de
            kabelplanner (adres + laadpunten + batterij + voorgestelde PV) uit de optimale opstelling; bij terugkeer
            herrekent de autopilot de optimale opstelling + groeistap 1 (PV/onbalans blijven optie) met de EXACTE
@@ -247,9 +232,8 @@ var VT_DEF={
 
 // ---------- state: project-centrisch (één factuur → studies 1–3; 4 voegt laadpleinen toe) ----------
 var STATE={
-  rol:null,   // v0.9.21: 'manager'|'seller' — bepaalt of de Fluvius-profielconverter zichtbaar is
   contact:{k_naam:'',k_mail:'',k_tel:'',a_naam:'',a_mail:'',a_tel:''},
-  werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, profielen:{} },
+  werk:{ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, nf:{}, noFactuur:false },
   projecten:[],
   gedaan:{},  // { projectId: { puntId: true } }
   kern:{},    // { projectId: { puntId: [{l,v},...] } } — echte kerncijfers na de run
@@ -266,8 +250,6 @@ function kToken(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStora
     return (v&&(v.access_token||(v.currentSession&&v.currentSession.access_token)))||null; } } }catch(e){} return null; }
 function ingelogd(){ return !!kToken(); }
 function kApiPost(path, body){ var tok=kToken(), h={'Content-Type':'application/json'}; if(tok) h['Authorization']='Bearer '+tok;
-  // v0.9.21: FLX-project-id meesturen naar de analyse-endpoints → server gebruikt het opgeladen profiel (fase 2), fallback standaard.
-  try{ if(body && typeof body==='object' && !body.project_id && STATE.werk && STATE.werk.id && /\/api\/kamino\/(onderhandel|productie|aansluiting)/.test(path)) body.project_id=STATE.werk.id; }catch(e){}
   return fetch(API_BASE+path,{method:'POST',headers:h,body:JSON.stringify(body)}).then(function(r){
     if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP '+r.status+': '+t); }); return r.json(); }); }
 function kApiGet(path){ var tok=kToken(), h={}; if(tok) h['Authorization']='Bearer '+tok;
@@ -293,16 +275,7 @@ function byId(id){ return PUNTEN.find(function(p){return p.id===id;}); }
 function heeftActief(){ return !!STATE.werk.id; }
 function projById(id){ return STATE.projecten.find(function(p){return p.id===id;}); }
 function gedaanMap(){ var id=STATE.werk.id; if(!id) return {}; return STATE.gedaan[id]||(STATE.gedaan[id]={}); }
-function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, profielen:{} }; _factuurFile=null; try{ sessionStorage.removeItem('FLX_KAMINO_KBL_STATE'); }catch(e){} }
-// v0.9.21: manager-detectie (voor de Fluvius-profielconverter). Rol komt uit /api/app-access/check.
-function isManager(){ return STATE.rol==='manager'; }
-function _laadRol(){
-  if(!ingelogd()) return;
-  kApiPost('/api/app-access/check',{ app_id:'kamino' }).then(function(r){
-    var rol=(r&&r.user&&r.user.role)||null;
-    if(rol && rol!==STATE.rol){ STATE.rol=rol; try{ router(); }catch(e){} }
-  }).catch(function(){});
-}
+function nieuwWerk(){ STATE.werk={ id:null, naam:'', factuur:'', profiel:PROFIELEN[0], pv_kwp:'', pv_inj:'', pleinen:[], baseCase:null, opgeslagen:false, nf:{}, noFactuur:false }; _factuurFile=null; try{ sessionStorage.removeItem('FLX_KAMINO_KBL_STATE'); }catch(e){} }
 function vandaag(){ var d=new Date(); return ('0'+d.getDate()).slice(-2)+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+d.getFullYear(); }
 function ci(k){ return (STATE.contact[k]||'').replace(/"/g,'&quot;'); }
 function heeftFactuur(){ return !!(STATE.werk.opgeslagen || STATE.werk.factuur); }
@@ -357,8 +330,6 @@ function renderOverzicht(){
       '<div class="p-vr">'+p.vr+'</div>'+
       '<div class="p-studie">Studie: <b>'+p.studie+'</b>'+badge+'</div>'+
       '<div class="kern3">'+kern.map(function(k){return '<div class="kern"><div class="kl">'+k.l+'</div><div class="kv">'+(_echt?k.v:'<span class="kv-leeg">—</span>')+'</div></div>';}).join('')+'</div>'+
-      // v0.9.20: small-print looptijd — enkel als de studie deze sessie écht gedraaid en gemeten is
-      (function(){ var _d=_kSimDurKaart(STATE.werk.id,p.id); return (_echt&&_d)?'<div class="p-duur" style="margin-top:6px;font-size:11px;color:#94A0B2">⏱ berekend in '+_d+'</div>':''; })()+
       '<div class="p-open">'+(_echt?'Bekijk opnieuw →':(done?'Bekijk opnieuw →':'Start deze studie →'))+'</div>'+
       (_rapportBeschikbaar(p.id)?'<div class="p-rapport" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">'+
         '<span onclick="event.stopPropagation();_bekijkRapport(\''+p.id+'\')" style="font-size:12px;font-weight:700;color:#1F3864;cursor:pointer">📄 Bekijk vorig rapport</span>'+
@@ -401,7 +372,22 @@ function veldFactuurBlok(){
   }
   return '<div class="fld"><label>Uw afrekening uit 2026 (maand of jaar)</label>'+
     '<input type="file" accept="application/pdf,image/*" onchange="_factuurFile=(this.files[0]||null);STATE.werk.factuur=(this.files[0]?this.files[0].name:\'\')">'+
-    '<div class="hint">Eén keer opladen — deze factuur voedt de studies contract, productie én aansluiting.'+(ingelogd()?'':' <b>Log in via Mijn Fluctus om echt op te slaan.</b>')+'</div></div>';
+    '<div class="hint">Eén keer opladen — deze factuur voedt de studies contract, productie én aansluiting.'+(ingelogd()?'':' <b>Log in via Mijn Fluctus om echt op te slaan.</b>')+'</div></div>'+
+    _noFactuurBlok();
+}
+// v0.9.20 (no-factuur-flow): manueel instappunt zonder factuur. Native <details> → geen re-render nodig.
+function _nfSet(k,v){ STATE.werk.nf=STATE.werk.nf||{}; STATE.werk.nf[k]=v; STATE.werk.noFactuur=true; }
+function _nfFld(label,key,ph){ return '<div class="fld"><label>'+label+'</label><input value="'+(((STATE.werk.nf||{})[key])||'')+'" oninput="_nfSet(\''+key+'\',this.value)" placeholder="'+ph+'"></div>'; }
+function _nfSpanning(){ var v=(STATE.werk.nf||{}).spanning||''; return '<div class="fld"><label>Spanning</label><select onchange="_nfSet(\'spanning\',this.value)"><option value=""'+(v?'':' selected')+'>auto</option><option'+(v==='LS'?' selected':'')+'>LS</option><option'+(v==='MS'?' selected':'')+'>MS</option></select></div>'; }
+function _noFactuurBlok(){ if(heeftActief()) return '';
+  return '<details class="fld" style="margin-top:10px"'+(STATE.werk.noFactuur?' open':'')+'><summary style="cursor:pointer">Geen factuur? Manueel invullen (referentieprijs)</summary>'+
+    '<div class="sec" style="margin-top:6px">'+
+    _nfFld('Klant','klant','bv. Van Oeckel Energy')+_nfFld('EAN (optioneel)','ean','54144...')+
+    '<div class="row">'+_nfFld('Postcode','postcode','2460')+_nfFld('Netbeheerder','dnb','Fluvius Kempen')+'</div>'+
+    '<div class="row">'+_nfSpanning()+_nfFld('Aansluiting (kVA)','kva','100')+'</div>'+
+    '<div class="row">'+_nfFld('Jaarverbruik (kWh)','afnameKwh','250000')+_nfFld('Referentie (€/MWh)','refEurMwh','90')+'</div>'+
+    '<div class="hint">Zonder factuur rekenen we de onderhandelingsmarge op referentieprijs × verbruik. Laad als manager het Fluvius-profiel op voor het echte verbruiksprofiel.</div>'+
+    '</div></details>';
 }
 function veldProfielPv(){
   return '<div class="fld"><label>Verbruiksprofiel</label><select onchange="STATE.werk.profiel=this.value">'+
@@ -497,100 +483,6 @@ function _pleinNaarSim(pl,i){
 function delPlein(i){ STATE.werk.pleinen.splice(i,1); renderPunt(_HUIDIG); }
 
 var _HUIDIG=null;
-// ─── v0.9.21 — FLUVIUS-PROFIELCONVERTER (MANAGER-ONLY, gedeeld over de 4 tegels) ──────────────
-// Zet Fluvius-CSV (Historiek_afname/injectie of gecombineerde Verbruikshistoriek) om naar een
-// kwartier-CSV (Date;kWh) en uploadt die naar de bucket (profielen/<pid>_<EAN>_<klant>_<type>.csv),
-// gedeeld over alle 4 de tegels van hetzelfde project. Alleen zichtbaar voor managers. (FASE 1: opladen
-// + delen + zichtbaar maken; het gebruik in de analyse i.p.v. het standaardprofiel volgt in fase 2.)
-function _profielConverterBlok(){
-  if(!STATE.werk.id){
-    return '<div class="sec"><h3>Verbruiksprofiel opladen <span style="font-size:11px;color:#9E480E">· manager</span></h3>'+
-      '<div class="hint">Laad eerst een factuur op (project) — daarna kan je hier het Fluvius-kwartierprofiel opladen.</div></div>';
-  }
-  var pr=STATE.werk.profielen||{};
-  function statusRegel(type,kleur){
-    var p=pr[type];
-    if(p) return '<div style="font-size:12.5px;color:'+kleur+';font-weight:700">✓ '+type+'-profiel opgeladen'+(p.mwh!=null?(' — '+p.mwh+' MWh, piek '+p.piek_kw+' kW'):'')+'</div>';
-    return '<div style="font-size:12.5px;color:#7A8699">— nog geen '+type+'-profiel</div>';
-  }
-  return '<div class="sec"><h3>Verbruiksprofiel opladen <span style="font-size:11px;color:#9E480E">· manager</span></h3>'+
-    '<div class="hint">Sleep of kies de Fluvius-CSV (Historiek_afname / Historiek_injectie, of de gecombineerde Verbruikshistoriek). We zetten ze om naar een kwartierprofiel en bewaren ze bij dit project — gedeeld over de vier studies.</div>'+
-    '<input type="file" accept=".csv" multiple onchange="_pcVerwerkFiles(this.files)">'+
-    '<div id="pc-status" style="margin-top:8px;font-size:12.5px;color:#5A6577;min-height:16px"></div>'+
-    '<div style="margin-top:8px;display:grid;gap:4px">'+statusRegel('afname','#8A5A00')+statusRegel('injectie','#0A6B2E')+'</div>'+
-  '</div>';
-}
-function _pcStatus(t){ var el=document.getElementById('pc-status'); if(el) el.textContent=t||''; }
-function _pcSplitsRegel(regel){ var res=[],cur='',q=false; for(var i=0;i<regel.length;i++){ var ch=regel[i]; if(ch==='"'){q=!q;} else if(ch===';'&&!q){res.push(cur);cur='';} else {cur+=ch;} } res.push(cur); return res; }
-function _pcVindKol(h,c){ for(var i=0;i<h.length;i++){ for(var j=0;j<c.length;j++){ if(h[i].trim().toLowerCase()===c[j]) return i; } } return -1; }
-function _pcHeeftRegister(raw){ if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1); var h=_pcSplitsRegel(raw.split('\n')[0]); var iR=_pcVindKol(h,['register']); if(iR<0) return false; var rg=raw.split('\n'); for(var i=1;i<Math.min(10,rg.length);i++){ var k=_pcSplitsRegel(rg[i]); var r=(k[iR]||'').toLowerCase(); if(r.indexOf('afname')>=0||r.indexOf('injectie')>=0) return true; } return false; }
-function _pcMaakCsvMeta(map){ var s=Object.keys(map).sort(); if(!s.length) return null; var tot=0,mx=0; for(var i=0;i<s.length;i++){ tot+=map[s[i]]; if(map[s[i]]>mx) mx=map[s[i]]; } var csv='Date;kWh\n'; for(var j=0;j<s.length;j++){ csv+=s[j]+';'+map[s[j]].toFixed(3).replace('.',',')+'\n'; } return { csv:csv, mwh:Math.round(tot/1000), piek_kw:Math.round(mx*4), van:s[0], tot:s[s.length-1], n:s.length }; }
-function _pcSplitsGecombineerd(raw){
-  if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1);
-  var rg=raw.split('\n').filter(function(x){return x.trim();});
-  var h=_pcSplitsRegel(rg[0]);
-  var iReg=_pcVindKol(h,['register']), iDat=_pcVindKol(h,['van (datum)','van datum']), iTij=_pcVindKol(h,['van (tijdstip)','van tijdstip']), iVol=_pcVindKol(h,['volume']), iEen=_pcVindKol(h,['eenheid']), iEAN=_pcVindKol(h,['ean-code','ean']);
-  var vandaag=new Date(), grens=new Date(vandaag.getFullYear(),vandaag.getMonth()-13,vandaag.getDate());
-  var ean='', afn={}, inj={};
-  for(var j=1;j<rg.length;j++){ var k=_pcSplitsRegel(rg[j]); if(k.length<3) continue; if(iEen>=0&&(k[iEen]||'').trim()!=='kWh') continue; if(!ean&&iEAN>=0) ean=(k[iEAN]||'').replace(/^="?|"?=$/g,'').replace(/[^0-9]/g,''); var reg=(k[iReg]||'').toLowerCase(); var isA=reg.indexOf('afname')>=0, isI=reg.indexOf('injectie')>=0; if(!isA&&!isI) continue; var rDat=(k[iDat]||'').trim(), rTij=(k[iTij]||'').trim(), rVol=(k[iVol]||'').trim(); var dp=rDat.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); if(!dp) continue; var d=+dp[1],mo=+dp[2]-1,y=+dp[3]; if(new Date(y,mo,d)<grens) continue; var mm=String(mo+1).padStart(2,'0'); var tp=rTij.match(/^(\d{1,2}):(\d{2})/); var hh=tp?String(+tp[1]).padStart(2,'0'):'00'; var mn=tp?tp[2]:'00'; var ds=d+'/'+mm+'/'+y+' '+hh+':'+mn; var vol=parseFloat(rVol.replace(',','.')); if(isNaN(vol)) vol=0; if(isA){afn[ds]=(afn[ds]||0)+vol;} else {inj[ds]=(inj[ds]||0)+vol;} }
-  return { ean:ean, afname:_pcMaakCsvMeta(afn), injectie:_pcMaakCsvMeta(inj) };
-}
-function _pcTransformeer(raw){
-  if(raw.charCodeAt(0)===0xFEFF) raw=raw.slice(1);
-  var rg=raw.split('\n').filter(function(x){return x.trim();});
-  if(rg.length<2) throw new Error('Bestand is leeg.');
-  var h=_pcSplitsRegel(rg[0]);
-  var iDat=_pcVindKol(h,['van (datum)','van datum']), iTij=_pcVindKol(h,['van (tijdstip)','van tijdstip']), iVol=_pcVindKol(h,['volume']), iEen=_pcVindKol(h,['eenheid']), iEAN=_pcVindKol(h,['ean-code','ean']);
-  if(iDat<0||iTij<0||iVol<0) throw new Error('Kolommen Van (datum)/(tijdstip)/Volume niet gevonden.');
-  var vandaag=new Date(), grens=new Date(vandaag.getFullYear(),vandaag.getMonth()-13,vandaag.getDate());
-  var ean='', map={};
-  for(var i=1;i<rg.length;i++){ var k=_pcSplitsRegel(rg[i]); if(k.length<3) continue; if(iEen>=0&&(k[iEen]||'').trim()!=='kWh') continue; if(!ean&&iEAN>=0) ean=(k[iEAN]||'').replace(/^="?|"?=$/g,'').replace(/[^0-9]/g,''); var rDat=(k[iDat]||'').trim(), rTij=(k[iTij]||'').trim(), rVol=(k[iVol]||'').trim(); var dp=rDat.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); if(!dp) continue; var d=+dp[1],mo=+dp[2]-1,y=+dp[3]; if(new Date(y,mo,d)<grens) continue; var mm=String(mo+1).padStart(2,'0'); var tp=rTij.match(/^(\d{1,2}):(\d{2})/); var hh=tp?String(+tp[1]).padStart(2,'0'):'00'; var mn=tp?tp[2]:'00'; var ds=d+'/'+mm+'/'+y+' '+hh+':'+mn; var vol=parseFloat(rVol.replace(',','.')); if(isNaN(vol)) vol=0; map[ds]=(map[ds]||0)+vol; }
-  var meta=_pcMaakCsvMeta(map); if(!meta) throw new Error('Geen kWh-rijen gevonden (laatste 13 maanden).');
-  meta.ean=ean; return meta;
-}
-function _pcVerwerkFiles(fileList){
-  var files=Array.prototype.slice.call(fileList||[]); if(!files.length) return;
-  if(!STATE.werk.id){ alert('Geen actief project.'); return; }
-  _pcStatus('Bestand(en) lezen…');
-  var teUploaden=[], restCount=files.length, fout=null;
-  files.forEach(function(f){
-    var reader=new FileReader();
-    reader.onload=function(e){
-      try{
-        var raw=e.target.result, fn=f.name.toLowerCase();
-        var isComb=fn.indexOf('verbruik')>=0 || _pcHeeftRegister(raw);
-        if(isComb){
-          var g=_pcSplitsGecombineerd(raw);
-          if(g.afname)   teUploaden.push({type:'afname',   csv:g.afname.csv,   ean:g.ean, meta:g.afname});
-          if(g.injectie) teUploaden.push({type:'injectie', csv:g.injectie.csv, ean:g.ean, meta:g.injectie});
-          if(!g.afname && !g.injectie) fout='Geen afname/injectie-rijen gevonden in het gecombineerde bestand.';
-        } else {
-          var type=fn.indexOf('injectie')>=0?'injectie':(fn.indexOf('afname')>=0?'afname':null);
-          if(!type){ type = confirm('"'+f.name+'": is dit een AFNAME-profiel?\n\nOK = afname · Annuleren = injectie')?'afname':'injectie'; }
-          var m=_pcTransformeer(raw);
-          teUploaden.push({type:type, csv:m.csv, ean:m.ean, meta:m});
-        }
-      }catch(err){ fout=err.message; }
-      if(--restCount===0) _pcUploadReeks(teUploaden, fout);
-    };
-    reader.readAsText(f,'UTF-8');
-  });
-}
-function _pcUploadReeks(lijst, fout){
-  if(fout && !lijst.length){ _pcStatus(''); alert('Kon het profiel niet lezen: '+fout); return; }
-  if(!lijst.length){ _pcStatus(''); return; }
-  var klant=STATE.werk.naam||STATE.contact.k_naam||'klant', i=0;
-  (function volgende(){
-    if(i>=lijst.length){ _pcStatus('Klaar — profiel(en) opgeladen.'); persistProject(); renderPunt(_HUIDIG); return; }
-    var it=lijst[i++];
-    _pcStatus('Uploaden: '+it.type+'-profiel ('+it.meta.mwh+' MWh)…');
-    kApiPost('/api/kamino/profiel-upload',{ project_id:STATE.werk.id, type:it.type, csv:it.csv, ean:it.ean, klant:klant,
-      meta:{ mwh:it.meta.mwh, piek_kw:it.meta.piek_kw, van:it.meta.van, tot:it.meta.tot, n:it.meta.n } })
-    .then(function(r){ if(r&&r.profielen){ STATE.werk.profielen=r.profielen; } volgende(); })
-    .catch(function(e){ _pcStatus(''); alert('Upload van het '+it.type+'-profiel mislukte: '+((e&&e.message)||e)); renderPunt(_HUIDIG); });
-  })();
-}
-
 function renderPunt(id){
   var p=byId(id); if(!p){ location.hash='#/'; return; } _HUIDIG=id;
   var kleur=p.gratis?'#048443':'#9E480E';
@@ -612,8 +504,6 @@ function renderPunt(id){
   // EXTRA PV effectief gedimensioneerd wordt. Tegel 2 (productie) doet géén extra PV — daar enkel betere sturing van de
   // bestaande PV. De waarde is project-breed (STATE.werk.pvDrempel), dus instellen op 3 of 4 geldt voor beide.
   if(p.id==='aansluiting' || p.id==='mobiliteit'){ inputSec += '<div class="sec"><h3>PV-strategie voor het ontwerp</h3>'+veldPvDrempel()+'</div>'; }
-  // v0.9.21: Fluvius-profielconverter — manager-only, op alle 4 de tegels; opgeladen profiel is gedeeld over het project.
-  if(isManager()){ inputSec += _profielConverterBlok(); }
 
   var tweestaps = p.tweestaps
     ? '<div class="tweestaps"><b>Zo verloopt deze studie:</b> u krijgt eerst een rapport op basis van een <b>standaardprofiel</b>. Daarna plannen we een korte <b>videovergadering</b> waarin we samen de <b>kabelplanner</b> doorlopen en bekijken of het zinvol is met úw specifieke verbruiksprofiel te rekenen — daarvoor vragen we dan uw mandaat.</div>'
@@ -649,20 +539,9 @@ function renderPunt(id){
 }
 
 // ---------- START: echte factuur-opslag (slice 1a) → resultaat ----------
-// v0.9.20: tweede parameter `tegel` → toont de teller t.o.v. de verwachte looptijd + balk (scherm 1/2 API-pad).
-// Zonder `tegel` (bv. factuur inlezen) toont het een louter meelopende teller.
-function _bezig(msg, tegel){
-  _kStopTeller(); _kSimT0=Date.now(); _kSimTegel=tegel||null;
-  var verwacht = tegel ? _kSimDuurVerwacht(tegel) : 0;
-  app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
-    '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
-    '<div class="hint" style="margin-top:8px">'+(tegel?'De kerncijfers verschijnen hier zodra het klaar is.':'Een factuur inlezen duurt ± 30–45 seconden. Sluit dit scherm niet.')+'</div>'+
-    (tegel?'<div style="max-width:360px;margin:16px auto 0;height:6px;background:#E7ECF3;border-radius:4px;overflow:hidden"><div id="k-balk" style="height:100%;width:0;background:#1F3864;transition:width .5s ease"></div></div>':'')+
-    '<div id="k-teller" style="margin-top:'+(tegel?'8':'12')+'px;font-size:13px;font-weight:700;color:#1F3864">'+(tegel?('0:00 / ~'+_kFmtDuur(verwacht)):'0:00')+'</div>'+
-    (tegel?'<div id="k-teller-extra" style="margin-top:4px;font-size:11.5px;color:#8A93A3;min-height:14px"></div>':'')+
-    '</div></div>';
-  _kStartTeller(tegel||null);
-}
+function _bezig(msg){ app.innerHTML='<div class="screen"><div class="card" style="text-align:center;padding:40px 24px">'+
+  '<div style="font-size:34px">⏳</div><div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">'+msg+'</div>'+
+  '<div class="hint" style="margin-top:8px">Een factuur inlezen duurt ± 30–45 seconden. Sluit dit scherm niet.</div></div></div>'; }
 // async job-poller (studie 3/4): pollt /api/sim-voortgang tot 'klaar' of 'fout'; toont de laatste logregel.
 function _pollKamino(jobId, onKlaar, onFout){
   var pogingen=0, max=260; // ~6,5 min @ 1,5s
@@ -692,50 +571,6 @@ var _kMsgListener=null, _kIframe=null, _kTimeout=null, _kWatchdog=null, _kFallba
 //  die BEWUST niet door hartslagen wordt gereset: een lange-maar-werkende studie mag zo lang duren als nodig, enkel
 //  een echte oneindige lus loopt in de cap. Server-side hangs meldt de simulator zelf via zijn per-stap-timeouts.
 var K_ABS_CAP_MS=2700000;    // v0.9.19: 45 min absolute veiligheidscap (was 25) — zware verzwaring/mix-cases (tegel 4) haalden de 25 min niet; hartslagen resetten dit BEWUST niet
-// ─── v0.9.20 — LOOPTIJD-METING PER VRAAG (client-side, geen backend-afhankelijkheid) ─────────
-// Meet hoelang de autopilot-studie per tegel duurt, registreert een rollend mediaan-gemiddelde
-// per tegel in localStorage (= "verwachte looptijd", zelf-kalibrerend op deze machine/plan en
-// meeschalend met de server-parallelisatie), en voedt (a) de meelopende teller + voortgangsbalk
-// in het wachtscherm en (b) de small-print looptijd op de kaart. Enkel geslaagde runs tellen mee
-// (fouten skewen het gemiddelde niet).
-var _kSimT0=0, _kSimTegel=null, _kTellerTimer=null;
-var _kSimDurSessie={};                 // pid|id → ms (laatste meting deze sessie, voor de kaart)
-var K_SIMDUUR_KEY='FLX_KAMINO_SIMDUUR';
-var K_SIMDUUR_DEFAULT={ contract:25000, productie:30000, aansluiting:120000, mobiliteit:240000 };  // seed tot er ≥3 metingen zijn
-var K_SIMDUUR_MAX=10;                   // hou de laatste 10 metingen per tegel
-function _kSimDuurLees(){ try{ return JSON.parse(localStorage.getItem(K_SIMDUUR_KEY))||{}; }catch(e){ return {}; } }
-function _kSimDuurVerwacht(id){
-  var alle=_kSimDuurLees(), a=alle[id]||[];
-  if(a.length>=3){ var s=a.slice().sort(function(x,y){return x-y;}); return s[Math.floor(s.length/2)]; }   // mediaan
-  return K_SIMDUUR_DEFAULT[id]||60000;
-}
-function _kSimDuurBewaar(id,ms){
-  if(!(ms>0)) return;
-  var alle=_kSimDuurLees(), a=alle[id]||[]; a.push(Math.round(ms)); if(a.length>K_SIMDUUR_MAX) a=a.slice(-K_SIMDUUR_MAX);
-  alle[id]=a; try{ localStorage.setItem(K_SIMDUUR_KEY, JSON.stringify(alle)); }catch(e){}
-}
-function _kFmtDuur(ms){ var s=Math.max(0,Math.round(ms/1000)), m=Math.floor(s/60); s=s%60; return m+':'+('0'+s).slice(-2); }
-function _kSimDurKaart(pid,id){ var ms=_kSimDurSessie[pid+'|'+id]; return ms>0?_kFmtDuur(ms):null; }
-function _kStopTeller(){ if(_kTellerTimer){ clearInterval(_kTellerTimer); _kTellerTimer=null; } }
-// id gegeven → teller t.o.v. de verwachte looptijd + balk; id null → louter meelopende teller (bv. factuur inlezen).
-function _kStartTeller(id){
-  _kStopTeller();
-  var verwacht = id ? _kSimDuurVerwacht(id) : 0;
-  _kTellerTimer=setInterval(function(){
-    var el=document.getElementById('k-teller'), balk=document.getElementById('k-balk'), extra=document.getElementById('k-teller-extra');
-    if(!el){ _kStopTeller(); return; }   // wachtscherm is weg (klaar/fout/navigatie) → stop
-    var e=Date.now()-_kSimT0;
-    el.textContent = verwacht ? (_kFmtDuur(e)+' / ~'+_kFmtDuur(verwacht)) : _kFmtDuur(e);
-    if(balk && verwacht) balk.style.width=Math.min(98, Math.round(e/Math.max(1,verwacht)*100))+'%';
-    if(extra) extra.textContent=(verwacht && e>verwacht*1.15)?'Dit is een uitgebreide studie — duurt iets langer dan gewoonlijk…':'';
-  },1000);
-}
-// gemeten looptijd registreren (enkel geslaagde runs). pid default = actief project.
-function _kMeetKlaar(id, pid){
-  pid=pid||STATE.werk.id;
-  if(_kSimT0 && _kSimTegel===id){ var d=Date.now()-_kSimT0; if(pid) _kSimDurSessie[pid+'|'+id]=d; _kSimDuurBewaar(id,d); _kSimT0=0; _kSimTegel=null; }
-  _kStopTeller();
-}
 function _kStartTimers(id,pid){
   _kSeenHb=false;
   if(_kFallback) clearTimeout(_kFallback);
@@ -743,7 +578,6 @@ function _kStartTimers(id,pid){
 }
 function _kHeartbeat(id,pid){ /* v0.9.7: no-op — de hartslag dient enkel voor de live-status (zie message-handler), niet meer als kill-timer */ }
 function _kOpruimen(){
-  _kStopTeller();   // v0.9.20: teller stopt zodra de run klaar/fout is (of opnieuw start)
   if(_kTimeout){ clearTimeout(_kTimeout); _kTimeout=null; }
   if(_kWatchdog){ clearTimeout(_kWatchdog); _kWatchdog=null; }
   if(_kFallback){ clearTimeout(_kFallback); _kFallback=null; }
@@ -778,10 +612,8 @@ function _startStudieAutopilot(id, extra){
   }
   try{ localStorage.setItem('FLUCTUS_AUTOPILOT', JSON.stringify(payload)); }
   catch(e){ alert('Kon de studie niet starten: '+((e&&e.message)||e)); return; }
-  _kSimT0=Date.now(); _kSimTegel=id;   // v0.9.20: looptijd-meting start
   _toonBerekenen(id);
   _kOpruimen();
-  _kStartTeller(id);                    // v0.9.20: meelopende teller (ná _kOpruimen, die zou 'm anders wissen)
   _kMsgListener=function(e){
     if(e.origin!==location.origin) return;
     var d=e.data; if(!d) return;
@@ -878,7 +710,6 @@ if(typeof window!=='undefined' && !window._kblKaminoListen){ window._kblKaminoLi
   window.addEventListener('storage',function(e){ if(e.key===KBL_RESULT_KEY) _kblCheckResultKamino(); });
 }
 function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
-  _kMeetKlaar(id, pid);   // v0.9.20: looptijd registreren (enkel geslaagde runs) → kaart + rollend mediaan-gemiddelde
   var kern=null, diag='';
   var _pctv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' %'):'—'; };
   var _tvtv=function(x){ return x!=null?(String(Math.round(x*10)/10).replace('.',',')+' j'):'—'; };
@@ -939,19 +770,6 @@ function _ontvangKern(id, pid, k, reportData, reportKey, reportHtml){
     ];
     diag='SolarActive — extra opbrengst uit uw bestaande PV via slimme injectie-sturing. Kaart en rapport uit dezelfde berekening.';
   }
-  // v0.9.21 (fase 5): expliciet label als dit project met opgeladen Fluvius-profielen rekent.
-  // De server gebruikt het opgeladen profiel automatisch zodra het bestaat → als STATE.werk.profielen
-  // gevuld is, is de analyse ermee gerekend. (afname = tegel 1/3/4; injectie is relevant voor tegel 2.)
-  try{
-    var _pf=STATE.werk.profielen||{}, _lab=[];
-    // v0.9.22: label enkel voor managers — profiel-analyses zijn manager-only (server gate v15.68). Een verkoper
-    // rekent altijd op het standaardprofiel, ook al heeft het project een opgeladen profiel.
-    if(isManager()){
-      if(_pf.afname) _lab.push('afname');
-      if(_pf.injectie && id==='productie') _lab.push('injectie');
-      if(_lab.length && diag) diag += ' 🔵 Gerekend met uw opgeladen '+_lab.join(' + ')+'-profiel'+((_pf.afname&&_pf.afname.ean)?(' (EAN '+_pf.afname.ean+')'):'')+' i.p.v. een standaardprofiel.';
-    }
-  }catch(e){}
   if(kern){
     (STATE.kern[pid]||(STATE.kern[pid]={}))[id]=kern;
     (STATE.diag[pid]||(STATE.diag[pid]={}))[id]=diag;
@@ -974,10 +792,6 @@ function _toonBerekenen(id){
     '<div style="font-size:16px;color:#1F3864;font-weight:700;margin-top:10px">Uw '+p.studie+'-studie wordt berekend…</div>'+
     '<div class="hint" style="margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto">We rekenen uw ontwerp volautomatisch door op uw factuur. Bij een uitgebreide studie kan dit enkele minuten duren; de kerncijfers verschijnen hier zodra het klaar is.</div>'+
     '<div id="k-status" style="margin-top:14px;font-size:12.5px;color:#5A6577;min-height:18px"></div>'+
-    // v0.9.20: meelopende teller t.o.v. de verwachte looptijd + voortgangsbalk
-    '<div style="max-width:360px;margin:16px auto 0;height:6px;background:#E7ECF3;border-radius:4px;overflow:hidden"><div id="k-balk" style="height:100%;width:0;background:#1F3864;transition:width .5s ease"></div></div>'+
-    '<div id="k-teller" style="margin-top:8px;font-size:13px;font-weight:700;color:#1F3864">0:00 / ~'+_kFmtDuur(_kSimDuurVerwacht(id))+'</div>'+
-    '<div id="k-teller-extra" style="margin-top:4px;font-size:11.5px;color:#8A93A3;min-height:14px"></div>'+
     '</div></div>';
 }
 function _kZetStatus(txt){ var el=document.getElementById('k-status'); if(el) el.textContent=txt||''; }
@@ -1029,6 +843,13 @@ function _fout(id,msg){ app.innerHTML='<div class="screen"><div class="crumb" on
   '<div class="bevestig" style="background:#FDECEC;border-color:#E88;color:#8A1F1F">'+msg+'</div>'+
   '<div style="margin-top:14px"><button class="btn green" onclick="renderPunt(\''+id+'\')">← Opnieuw</button></div></div></div>'; }
 
+// v0.9.20 (no-factuur-flow): baseCase uit manuele invoer (geen factuur). Server rekent op referentieprijs × verbruik.
+function _bouwNoFactuurBc(){ var nf=STATE.werk.nf||{}; var afname=+nf.afnameKwh||0; if(!(afname>0)) return null;
+  var kva=+nf.kva||0; var sp=(nf.spanning==='MS'||nf.spanning==='LS')?nf.spanning:(kva>=100?'MS':'LS');
+  return { klantNaam:(nf.klant||STATE.werk.naam||'Project zonder factuur'), postcode:(nf.postcode||''), dnb:(nf.dnb||''),
+    spanningsniveau:sp, aansluitVermogenKva:(kva||100), afnameKwh:afname, injectieKwh:0,
+    periodeVan:'2025-01-01', periodeTot:'2025-12-31', eanNrs:(nf.ean?[nf.ean]:[]), referentieEurMwh:(+nf.refEurMwh||0),
+    totaalEnergieExclBtw:0, totaalDistributieExclBtw:0, totaalHeffingenExclBtw:0, totaalExclBtw:0, _geenFactuur:true }; }
 function startStudie(id){
   var p=byId(id);
   // Factuur-studie zonder actief project + echte factuur + ingelogd → echt oplaadt/extract, dan resultaat.
@@ -1046,6 +867,10 @@ function startStudie(id){
       .catch(function(e){ _fout(id,'Het inlezen/opslaan van uw factuur is mislukt: '+((e&&e.message)||e)); });
     return;
   }
+  // v0.9.20: no-factuur → bouw baseCase uit manuele invoer en ga verder (geen factuur nodig).
+  if(!STATE.werk.id && !_factuurFile && STATE.werk.noFactuur){ var _nfbc=_bouwNoFactuurBc();
+    if(!_nfbc){ _fout(id,'Zonder factuur: vul minstens het jaarverbruik (kWh) in.'); return; }
+    _maakProject(_nfbc); resultaat(id); return; }
   if(!STATE.werk.id){ _maakProject(null); }   // mock-fallback (niet ingelogd / geen factuur)
   resultaat(id);
 }
@@ -1074,9 +899,8 @@ function resultaat(id){
   if(LAUNCHERS[id] && STATE.werk.baseCase && ingelogd()){ persistProject(); _startStudieAutopilot(id); return; }
   // Studie 1 (contract): echte onderhandelingsmarge draaien op de baseCase — zelfde sim als de simulator.
   if(id==='contract' && STATE.werk.baseCase && ingelogd() && !kernOf(STATE.werk.id,id)){
-    _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…', 'contract');   // v0.9.20: teller
+    _bezig('Uw onderhandelingsmarge wordt berekend op de spotmarkt (profiel × spot)…');
     kApiPost('/api/kamino/onderhandel',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel }).then(function(r){
-      _kMeetKlaar(id);   // v0.9.20: looptijd registreren
       var kern=[
         {l:'Onderhandelingsmarge', v:'− '+eurJaar(r.marge_jaar)},
         {l:'Energiekost nu → dynamisch', v:(r.energiekost_nu_mwh!=null?('€'+r.energiekost_nu_mwh+' → €'+r.energiekost_dyn_mwh):'—')},
@@ -1087,14 +911,13 @@ function resultaat(id){
       var dbg='<br><span style="font-family:monospace;font-size:10px;color:#8A93A3">debug · vergroening '+(di.vergroening)+' €/MWh · effectief jaarverbr. '+(d.effectief_jaarverbruik_mwh!=null?Math.round(d.effectief_jaarverbruik_mwh):'?')+' MWh · schijf '+(pr.schijf_label||pr.schijf_code||r.schijf||'?')+' · markup '+(pr.markup_dam!=null?pr.markup_dam:(r.markup!=null?r.markup:'?'))+' €/MWh · energiepost dyn € '+((d.A_energiekost&&d.A_energiekost._subtotaal!=null)?Math.round(d.A_energiekost._subtotaal):'?')+'</span>';
       bewaarDiag(id,'Berekend op verbruiksprofiel <b>'+(STATE.werk.profiel||'?')+'</b>'+(r.geprojecteerd_mwh!=null?(' · geprojecteerd '+r.geprojecteerd_mwh+' MWh/jaar'):'')+'. Kies in de simulator hetzelfde profiel voor een identiek cijfer.'+dbg);
       persistProject(); _toonResultaat(id);
-    }).catch(function(e){ _kStopTeller(); persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte marge-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
   // Studie 2 (productie): echte injectie-opbrengst draaien — ZELFDE server-functie als de simulator (_analyseerInjectieOptimalisatie).
   if(id==='productie' && STATE.werk.baseCase && ingelogd() && (+STATE.werk.pv_kwp>0) && !kernOf(STATE.werk.id,id)){
-    _bezig('Uw extra injectie-opbrengst wordt berekend op spot + onbalans…', 'productie');   // v0.9.20: teller
+    _bezig('Uw extra injectie-opbrengst wordt berekend op spot + onbalans…');
     kApiPost('/api/kamino/productie',{ baseCase:STATE.werk.baseCase, profielNaam:STATE.werk.profiel, pv_kwp:STATE.werk.pv_kwp, injectie_mwh_jaar:STATE.werk.pv_inj }).then(function(r){
-      _kMeetKlaar(id);   // v0.9.20: looptijd registreren
       var tvt=(r.terugverdientijd_jaar!=null)?(String(r.terugverdientijd_jaar).replace('.',',')+' j'):'—';
       var kern=[
         {l:'Extra opbrengst', v:'+ '+eurJaar(r.extra_opbrengst_jaar)},
@@ -1104,7 +927,7 @@ function resultaat(id){
       bewaarKern(id,kern);
       bewaarDiag(id,'Berekend op bestaande PV <b>'+r.pv_kwp+' kWp</b> · injectie '+(STATE.werk.pv_inj||'?')+' MWh/j · profiel <b>'+(STATE.werk.profiel||'?')+'</b> (standaard: inverter '+r.inverter_kva+' kVA, piek '+r.piek_kw+' kW). Zelfde cijfer in de simulator met dezelfde PV-invoer.');
       persistProject(); _toonResultaat(id);
-    }).catch(function(e){ _kStopTeller(); persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
+    }).catch(function(e){ persistProject(); _toonResultaat(id, 'De echte injectie-berekening lukte niet ('+((e&&e.message)||e)+'). Hieronder voorbeeldcijfers.'); });
     return;
   }
   // (Studie 3 aansluiting is nu een LAUNCHER — zie de LAUNCHERS-check bovenaan resultaat().)
@@ -1168,7 +991,7 @@ function laadProject(rec, rapporten){
   if(!projById(rec.id)) STATE.projecten.unshift({ id:rec.id, naam:rec.naam||k.naam||'', datum:'', factuur:rec.factuur||'', baseCase:rec.baseCase||null, opgeslagen:true });
   // v0.9.13: bewaard profiel herstellen (als het nog in de lijst zit), anders default. Voorheen ging het profiel bij
   // heropenen verloren (altijd PROFIELEN[0]).
-  STATE.werk={ id:rec.id, naam:rec.naam||k.naam||'', factuur:rec.factuur||'', profiel:((rec.profiel && PROFIELEN.indexOf(rec.profiel)>=0)?rec.profiel:(rec.profiel||PROFIELEN[0])), pv_kwp:pv.kwp||'', pv_inj:pv.inj||'', pleinen:[], baseCase:rec.baseCase||null, opgeslagen:true, profielen:rec.profielen||{} };   // v0.9.21: opgeladen profielen herstellen
+  STATE.werk={ id:rec.id, naam:rec.naam||k.naam||'', factuur:rec.factuur||'', profiel:((rec.profiel && PROFIELEN.indexOf(rec.profiel)>=0)?rec.profiel:(rec.profiel||PROFIELEN[0])), pv_kwp:pv.kwp||'', pv_inj:pv.inj||'', pleinen:[], baseCase:rec.baseCase||null, opgeslagen:true };
   STATE.gedaan[rec.id]=Object.assign({}, rec.studies||{});
   // v0.9.10: welke tegels hebben een BEWAARD rapport → per tegel een "bekijk vorig rapport"-knop.
   var m={}; if(rapporten && Array.isArray(rapporten.studies)){ rapporten.studies.forEach(function(t){ if(t) m[t]=true; }); }
@@ -1186,7 +1009,6 @@ function persistProject(){
     // v0.9.13 (Johan 03-08): profiel persisteren zodat het later (kamino-heropen én manager-open in de
     // interactieve simulator) correct terugkomt. Zonder dit veld viel de carryover terug op een default-profiel.
     profiel:STATE.werk.profiel||'',
-    profielen:STATE.werk.profielen||{},   // v0.9.21: opgeladen Fluvius-profielen mee bewaren (server whitelist v15.66)
     pv:{ kwp:STATE.werk.pv_kwp||'', inj:STATE.werk.pv_inj||'' }, studies:gedaanMap()
   }).catch(function(){});
 }
@@ -1202,7 +1024,6 @@ kApiGet('/api/profielen-lijst').then(function(r){
   var namen=lijst.map(function(x){ return (typeof x==='string')?x:(x&&(x.naam||x.name)||''); }).filter(Boolean);
   if(namen.length){ PROFIELEN=namen; if(PROFIELEN.indexOf(STATE.werk.profiel)<0) STATE.werk.profiel=PROFIELEN[0]; router(); }
 }).catch(function(){});
-_laadRol();   // v0.9.21: manager-status ophalen → toont de Fluvius-profielconverter waar van toepassing
 // Upload-brug voor rapporten die als Blob in de rapport-overlay draaien (bv. het inline SolarActive-rapport):
 // zij hebben zelf geen token/same-origin-fetch, dus posten ze de PDF hierheen. Kamino doet de authenticated
 // upload naar de bucket (kApiPost = absolute Railway-URL + sb-JWT).
