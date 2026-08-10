@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
-<!-- Gebruikersbeheer v1.5 (08-08): "Preview"-knop per rij = dry-run van het verwijderen (server v15.64.0): toont
+<!-- Gebruikersbeheer v1.6 (09-08): authHeaders() async → altijd live token (fix 401 "niet ingelogd" op manager-acties na token-expiry). // v1.5 (08-08): "Preview"-knop per rij = dry-run van het verwijderen (server v15.64.0): toont
      hoeveel scenario’s/Kamino zouden herlinken naar oekene, wat er zou verwijderd worden, of GitHub-token + Brevo
      geconfigureerd zijn — zonder iets te wijzigen. Zo testbaar zonder wegwerp-account. Preview-export wordt gedownload.
      Gebruikersbeheer v1.4 (08-08): (1) app-toegang-fout in een alert (de #g-msg staat onder de tabel, buiten beeld bij
@@ -115,12 +115,18 @@
     await laadUsers();
   }
 
-  function authHeaders(extra){ return Object.assign({ 'Authorization':'Bearer '+SESSION.access_token, 'Content-Type':'application/json' }, extra||{}); }
+  // v1.6 (09-08): ALTIJD het live token gebruiken. SESSION was een snapshot van bij page-load → na ~1u verlopen →
+  // de server gaf 401 "niet ingelogd" op manager-acties (o.a. verwijderen). getSession() geeft het (auto-ververste) huidige token.
+  async function authHeaders(extra){
+    var tok = SESSION && SESSION.access_token;
+    try{ if(sb){ var d = await sb.auth.getSession(); if(d && d.data && d.data.session){ SESSION = d.data.session; tok = SESSION.access_token; } } }catch(e){}
+    return Object.assign({ 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' }, extra||{});
+  }
 
   async function laadUsers(){
     root.className='laad'; root.textContent='Gebruikers laden…';
     var r;
-    try{ r = await fetch(PROXY+'/api/manager/users', { headers: authHeaders() }); }
+    try{ r = await fetch(PROXY+'/api/manager/users', { headers: await authHeaders() }); }
     catch(e){ root.className='fout-groot'; root.textContent='Kan de server niet bereiken: '+e.message; return; }
     if(r.status===403){ root.className='fout-groot'; root.innerHTML='Deze pagina is enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a>'; return; }
     if(r.status===401){ window.location.href='/portal.html'; return; }
@@ -269,7 +275,7 @@
   async function previewVerwijder(u){
     gmsg('Preview (er wordt niets gewijzigd)…');
     try{
-      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'delete', email:u.email, dry_run:true }) });
+      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'delete', email:u.email, dry_run:true }) });
       var j=await r.json().catch(function(){return {};});
       if(!r.ok){ gmsg('Preview mislukt: '+(j.error||('fout '+r.status)),'err'); alert('Preview mislukt voor '+u.email+':\n\n'+(j.error||('fout '+r.status))); return; }
       if(j.txt){ try{ var bl=new Blob([j.txt],{type:'text/plain;charset=utf-8'}); var a=document.createElement('a'); a.href=URL.createObjectURL(bl); a.download=j.bestandsnaam||('preview_'+u.email+'.txt'); document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(_e){} a.remove(); },1000); }catch(e){} }
@@ -294,7 +300,7 @@
     if(!ok) return;
     gmsg('Verwijderen…');
     try{
-      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'delete', email:u.email }) });
+      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'delete', email:u.email }) });
       var j=await r.json().catch(function(){return {};});
       if(!r.ok){ gmsg('Verwijderen mislukt: '+(j.error||('fout '+r.status)),'err'); alert('Verwijderen mislukt voor '+u.email+':\n\n'+(j.error||('fout '+r.status))); return; }
       // Backup-download van de export (ook als de mail faalde)
@@ -314,7 +320,7 @@
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ msg.className='msg err'; msg.textContent='Vul een geldig e-mailadres in.'; return; }
     $('inv-btn').disabled=true; msg.textContent='Bezig…';
     try{
-      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'invite', email:email, name:naam, company:bedrijf }) });
+      var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'invite', email:email, name:naam, company:bedrijf }) });
       var j=await r.json().catch(function(){return {};});
       $('inv-btn').disabled=false;
       if(!r.ok){ msg.className='msg err'; msg.textContent=(j.melding||j.error||('fout '+r.status)); return; }
@@ -333,7 +339,7 @@
       // v1.2: naam meesturen zodat de server een ontbrekende app-rij zelf kan aanmaken in `apps` (auto-provision).
       var _a=APPS.filter(function(x){ return x.id===appId; })[0];
       var _naam=(_a && _a.naam) || appId;
-      var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId, app_naam:_naam }) });
+      var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:await authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId, app_naam:_naam }) });
       cb.disabled=false;
       if(!r.ok){ cb.checked=!aan; var j=await r.json().catch(function(){return {};}); var _reden=(j.error||('fout '+r.status)); gmsg('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+' ('+_reden+').','err'); alert('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+':\n\n'+_reden); return; }   // v1.1: fout ook in alert (de #g-msg staat onder de tabel, dus buiten beeld bij een lange lijst)
       u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan) u.apps.push(appId);
@@ -343,12 +349,12 @@
   }
 
   async function zetRol(u, role){
-    var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'role', email:u.email, role:role }) });
+    var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'role', email:u.email, role:role }) });
     if(r.ok){ u.role=role; renderTable(); } else { alert('Kon rol niet wijzigen ('+r.status+').'); renderTable(); }
   }
 
   async function zetStatus(u, status){
-    var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:authHeaders(), body:JSON.stringify({ action:'status', email:u.email, status:status }) });
+    var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'status', email:u.email, status:status }) });
     if(r.ok){ u.status=status; renderTable(); } else { alert('Kon status niet wijzigen ('+r.status+').'); }
   }
 
