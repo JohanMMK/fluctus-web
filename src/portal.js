@@ -1,4 +1,4 @@
-// portal.js v1.4.1 — 2026-08-15 17:21 (Europe/Brussels) — Jacops: iedereen mag vrij doorklikken; i-infoknop per tegel (CSP-veilig)
+// portal.js v1.4.2 — 2026-08-15 20:11 (Europe/Brussels) — Jacops-tegel opent in HETZELFDE tabblad (extern-vlag weg) i.c.m. "← Mijn Fluctus"-knop in de presentatie; iedereen mag vrij doorklikken; i-infoknop per tegel (CSP-veilig)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
 //        Managers zien ze meteen (impliciet alle apps); sellers via een user_app_access-rij.
@@ -27,7 +27,8 @@ const APP_CATALOG = [
   // managers zien ze automatisch. Opent in een nieuw tabblad (presenteren).
   // ↓ pas deze URL aan naar waar je de map effectief pusht.
   //   Eigen Pages-repo 'jacops-presentatie' (files in de root, branch main).
-  { id: 'jacops',      naam: 'Jacops-presentatie', ico: '🎬', beschrijving: 'Meer mogelijk met hetzelfde net — de Jacops-presentatie.', url: 'https://johanmmk.github.io/jacops-presentatie/index.html', extern: true },
+  // extern-vlag bewust WEG (Johan 15-08): Jacops opent nu in hetzelfde tabblad, zodat "← Mijn Fluctus" in de presentatie echt terugbrengt.
+  { id: 'jacops',      naam: 'Jacops-presentatie', ico: '🎬', beschrijving: 'Meer mogelijk met hetzelfde net — de Jacops-presentatie.', url: 'https://johanmmk.github.io/jacops-presentatie/index.html' },
   { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
   // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
