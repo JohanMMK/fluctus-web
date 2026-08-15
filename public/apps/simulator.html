@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.63.73  (2026-08-15 20:11 Europe/Brussels)
+     v1.63.73 (SIMULEER-KNOP, Johan 15-08): Periode-stap-knop "Run simulatie ▶" hernoemd naar "Ontwerp ▶" (ongewijzigd
+              gedrag = nominatie-sim-3 aftasting). Nieuwe knop "Simuleer ▶" rechts ervan → simuleerVasteInstallatie():
+              draait EXACT de ingegeven installatie (bestaande/gekozen) door in 3 sturingen via /api/nominatie-sim-3 met
+              vlag _simuleer_enkel (server v15.72 hergebruikt de 'enkel'-tak: geen sweep/opstellingen/groeipad). Kern-
+              payload via _bouwKernSimInput() (spiegel van runSimulatie-kern; runSimulatie zelf ONgewijzigd).
      FLUCTUS SIMULATOR  v1.63.72  (Kamino ontwerpscherm + bestaande PV / SolarActive + AUTOPILOT embed)
      v1.63.71 (LABEL + TOEGANGSVERMOGEN, 09-08): apiPost vangt profiel_bron/injectie_bron op → STATE; _margeData toont
               het opgeladen-profiel-label + verlaagt het toegangsvermogen EFFECTIEF in de optimale (dynamische) kolom
@@ -503,7 +509,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.58</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.73</span>
   </div>
 </div>
 
@@ -524,6 +530,7 @@
   <button class="fdsim-btn ghost" id="fdsim-prev">« Vorige</button>
   <div class="fdsim-nav-info" id="fdsim-navinfo">Stap 1 / 9</div>
   <button class="fdsim-btn" id="fdsim-next">Volgende »</button>
+  <button class="fdsim-btn" id="fdsim-simuleer" style="display:none;background:#1F3864;color:#fff" title="Simuleer exact de ingegeven installatie (bestaande of gekozen), zonder ontwerp-aftasting">Simuleer ▶</button>
 </div>
 
 
@@ -2389,9 +2396,11 @@ function renderSteps(){
   var ni=$('fdsim-navinfo');if(ni)ni.textContent='Stap '+(STATE.currentStep+1)+' / 11';
   var pb=$('fdsim-prev');if(pb)pb.disabled=STATE.currentStep===0;
   var next=$('fdsim-next');
+  // v1.63.73 (Johan 15-08): "Simuleer"-knop staat enkel op de Periode-stap (index 9), rechts van "Ontwerp".
+  var _simBtn=$('fdsim-simuleer'); if(_simBtn){ _simBtn.style.display=(STATE.currentStep===9)?'':'none'; }
   if(!next)return;
   if(STATE.currentStep===9){
-    next.textContent='Run simulatie ▶ ';
+    next.textContent='Ontwerp ▶ ';
     next.disabled=false;
     next.classList.remove('ghost');
     next.classList.add('green');
@@ -10452,6 +10461,123 @@ function runSimulatie(){
 }
 
 // ============================================================
+//   v1.63.73 (Johan 15-08) — "SIMULEER"-KNOP (geforceerde installatie)
+// ============================================================
+// _bouwKernSimInput(): bouwt ENKEL de kern-payload (installatie + periode + contract),
+// bewust SPIEGEL van het kern-input-blok in runSimulatie() (contractBlock + periode +
+// _ontwerpJaar + var input). De sweep-only extra's (_investering/_tco/_kpi_*/batt_module)
+// vallen weg — die dienen enkel de nominatie-sim-3-mixkeuze. Bij payload-wijzigingen in
+// runSimulatie deze helper mee bijwerken. Geeft null terug bij ontbrekend periode-volume.
+function _bouwKernSimInput(){
+  var contractBlock={
+    leverancier:STATE.leverancier||'Enwyse',
+    modus:STATE.modus,
+    staffel:STATE.contractStaffel||[],
+    vergroening_eur_per_mwh:STATE.contractVergroening,
+    vaste_kost_eur_maand:STATE.contractVastMaand,
+    injectie_toegelaten:true,
+    gsc_eur_mwh:0,
+    wkk_eur_mwh:0
+  };
+  var periode=getPeriodeRange();
+  var _ontwerpJaar=(STATE.jaar==='specifiek')?'rolling12':STATE.jaar;
+  var jaarverbruikVoorSim;
+  if(_ontwerpJaar==='specifiek'){
+    if(!STATE.periodeVolumeMwh || STATE.periodeVolumeMwh<=0){
+      alert('Periode-volume ontbreekt in base case. Upload de factuur opnieuw.');
+      return null;
+    }
+    jaarverbruikVoorSim=STATE.periodeVolumeMwh;
+  }else{
+    jaarverbruikVoorSim=STATE.jaarverbruik;
+  }
+  return {
+    project:STATE.project,
+    scenario:STATE.scenario,
+    postcode:STATE.postcode,
+    grd:STATE.grd,
+    spanning:STATE.spanning,
+    profielNaam:STATE.profielNaam,
+    jaarverbruik_mwh:jaarverbruikVoorSim,
+    pv_kwp:STATE.pvKwp,
+    bestaande_pv:(function(){ var b=STATE.bestaandePv||{}; if(!(b.aanwezig && (+b.kwp>0||+b.kva>0||+b.piekKw>0))) return null;
+      return { aanwezig:true, kwp:+b.kwp||0, kva:+b.kva||0, piek_kw:+b.piekKw||0,
+               inj_mwh_jaar:+b.injMwhJaar||0, inj_mwh_maand:+b.injMwhMaand||0, maand:+b.maand||6 }; })(),
+    pv_curtailment:{
+      actief:STATE.pvKwp>0 && STATE.pvInjStrategie==='curtail_neg',
+      trigger_eur_mwh:STATE.pvCurtailDrempel||0,
+      strategie:'cap_op_verbruik'
+    },
+    bsp:{
+      actief:STATE.pvKwp>0 && STATE.pvInjStrategie==='bsp_actief',
+      forecast_modus:STATE.bspForecastModus||'realistic',
+      pv_curtailment_allowed:true
+    },
+    batterijId:STATE.batterijId,
+    batterijCustom:(STATE.batterijId === 'CUSTOM' ? STATE.batterijCustom : null),
+    laadpleinen:(STATE.laadpleinen||[]),
+    contract:contractBlock,
+    aansluiting_kva:STATE.aansluitingKva,
+    toegangsvermogen_kw:_gecontracteerdToegangsvermogenKw(),
+    max_injectie_kw:(STATE._maxInjectieKwManueel && STATE.maxInjectieKw > 0 ? STATE.maxInjectieKw : 0),
+    jaar:_ontwerpJaar,
+    periodeVan:(_ontwerpJaar==='specifiek'?(STATE.periodeVan||null):null),
+    periodeTot:(_ontwerpJaar==='specifiek'?(STATE.periodeTot||null):null),
+    simulatieperiode:{
+      van:periode.van,
+      tot:periode.tot,
+      type:(_ontwerpJaar==='specifiek'?'specifiek':'kalenderjaar')
+    }
+  };
+}
+
+// simuleerVasteInstallatie(): draait EXACT de ingegeven installatie door (één config, 3 sturingen)
+// via /api/nominatie-sim-3 met de vlag _simuleer_enkel → de server slaat de ontwerp-aftasting,
+// opstellingen-vergelijking, batterij-/PV-sweep en groeipad over. Resultaat = gesimuleerde factuur
+// + meerwaarde-sturing voor die installatie. Zo forceer je een bestaande of gekozen installatie.
+function simuleerVasteInstallatie(){
+  if(!validateStep(9))return;
+  if(STATE.isRunning)return;
+  var input=_bouwKernSimInput();
+  if(!input) return;   // _bouwKernSimInput toont zelf de alert bij ontbrekend volume
+  STATE.isRunning=true;
+  STATE.simuleerModus=true;   // geforceerde single-run (geen ontwerp-aftasting)
+  // reset ontwerp-only state zodat het resultaatscherm geen oude sweep/groeipad toont
+  STATE.opstellingen=null; STATE.vergelijkingOpstellingen=null; STATE.capaciteit=null; STATE.groeipadGebouw=null;
+  STATE.groeipad=null; STATE.groeipadFout=null; STATE.groeipadLoading=false; STATE.groeipadKeuze=null;
+  STATE.groeistap1=null; STATE.groeistap1Loading=false; STATE.groeistap1Fout=null;
+  STATE.pvOptie=null; STATE.pvSweep=null; STATE.pvSweepLoading=false; STATE.pvSweepFout=null; STATE.pvKeuzeKwp=null;
+  STATE.currentStep=10; STATE.visited[9]=true;
+  renderAll();
+  setStatus('Simulatie loopt...','info');
+  input._async=true;
+  input._simuleer_enkel=true;   // v15.72: server draait exact deze config in 3 sturingen
+  STATE.simLog=[]; STATE.simLogStart=Date.now();
+  try { STATE.lastSimInput=JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput=null; }
+  _sim3Async(input).then(function(r){
+    var varianten=(r&&r.varianten)||{};
+    var sim=varianten.sturing||r.result||r.resultaat||r;
+    sim._serverLog=(sim&&sim._serverLog)||r._serverLog||'';
+    sim._buildErrors=r.build_errors||[];
+    sim._elapsedMs=(r._meta&&r._meta.elapsed_ms)||0;
+    STATE.resultaat=sim;
+    STATE.resultaatVarianten=varianten;
+    STATE.kpiSturing=r.kpi_sturing||null;
+    STATE.capaciteit=r.capaciteit||null;
+    STATE.isRunning=false;
+    STATE._marktRetryCount=0;
+    setStatus('Simulatie klaar','ok');
+    renderAll();
+  }).catch(function(e){
+    STATE.isRunning=false;
+    STATE.resultaat={error:e.message};
+    setStatus('Simulatie mislukt','err');
+    alert('Simulatie mislukt: '+e.message);
+    renderAll();
+  });
+}
+
+// ============================================================
 //   v1.17 SESSIE 5b — MAAK-VOORSTEL-FLOW
 // ============================================================
 // Architectuur:
@@ -11366,6 +11492,7 @@ function _fdsimInit(){
       try{
         $('fdsim-prev').onclick=prevStep;
         $('fdsim-next').onclick=nextStep;
+        try{ var _sib=$('fdsim-simuleer'); if(_sib) _sib.onclick=simuleerVasteInstallatie; }catch(e){}   // v1.63.73
         renderAll();
         // v1.19 sessie 7 — UI-bug fix laag 3: prefetch projecten zodra DOM
         // klaar is, vóór de 250ms safety-renderAll. Zo is CACHE.projecten
