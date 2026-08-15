@@ -153,6 +153,7 @@ async function toegankelijkeApps(token) {
 
 function renderLauncher(apps) {
   const host = $('apps'); host.innerHTML = '';
+  if (typeof _tegelInfoStyle === 'function') _tegelInfoStyle();   // v09-08b: i-knop-stijl meteen injecteren (niet pas bij modal-open)
   if (!apps.length) {
     host.innerHTML = '<p class="notice">Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.</p>';
     return;
@@ -169,10 +170,15 @@ function renderLauncher(apps) {
     t.href = href;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.style.position = 'relative';
-    const infoBtn = TEGEL_INFO[a.id]
-      ? `<button class="tile-i" title="Wat is dit?" aria-label="Info over ${a.naam}" onclick="event.preventDefault();event.stopPropagation();openTegelInfo('${a.id}');return false;">i</button>`
-      : '';
-    t.innerHTML = `${infoBtn}<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
+    t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
+    // v09-08b: knop via DOM + addEventListener (geen inline onclick → werkt ook met strikte CSP).
+    if (TEGEL_INFO[a.id]) {
+      const ib = document.createElement('button');
+      ib.type = 'button'; ib.className = 'tile-i'; ib.textContent = 'i';
+      ib.title = 'Wat is dit?'; ib.setAttribute('aria-label', 'Info over ' + a.naam);
+      ib.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openTegelInfo(a.id); });
+      t.appendChild(ib);
+    }
     host.appendChild(t);
   });
 }
@@ -309,10 +315,10 @@ function _tegelInfoStyle() {
   if (document.getElementById('tegel-info-style')) return;
   const s = document.createElement('style'); s.id = 'tegel-info-style';
   s.textContent = `
-  .tile-i{position:absolute;top:8px;right:10px;width:22px;height:22px;border-radius:50%;border:1px solid #C9D2E0;
-    background:#fff;color:#1F3864;font-weight:800;font-family:Georgia,serif;font-style:italic;font-size:13px;
-    line-height:20px;text-align:center;cursor:pointer;padding:0;z-index:2;opacity:.75}
-  .tile-i:hover{opacity:1;background:#EFF6FF;border-color:#93C5FD}
+  .tile-i{position:absolute;top:10px;right:12px;width:30px;height:30px;border-radius:50%;border:1px solid #C9D2E0;
+    background:#fff;color:#1F3864;font-weight:800;font-family:Georgia,serif;font-style:italic;font-size:17px;
+    line-height:28px;text-align:center;cursor:pointer;padding:0;z-index:5;opacity:.9;box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .tile-i:hover{opacity:1;background:#EFF6FF;border-color:#93C5FD;transform:scale(1.08)}
   .tegel-modal-ov{position:fixed;inset:0;background:rgba(31,56,100,.45);display:flex;align-items:center;
     justify-content:center;z-index:9999;padding:20px}
   .tegel-modal{background:#fff;max-width:520px;width:100%;border-radius:14px;overflow:hidden;
@@ -345,9 +351,10 @@ function openTegelInfo(id){
       ${sec('Wat er gebeurt', d.gebeurt)}
       ${sec('De ervaring', d.cx)}
     </div>
-    <div class="vt"><button type="button" onclick="sluitTegelInfo()">Sluiten</button></div>
+    <div class="vt"><button type="button" class="tegel-sluit">Sluiten</button></div>
   </div>`;
   ov.addEventListener('click', (e)=>{ if (e.target === ov) sluitTegelInfo(); });
   document.body.appendChild(ov);
+  const sb = ov.querySelector('.tegel-sluit'); if (sb) sb.addEventListener('click', sluitTegelInfo);   // geen inline onclick → CSP-veilig
   document.addEventListener('keydown', _tegelInfoEsc);
 }
