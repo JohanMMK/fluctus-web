@@ -1,3 +1,4 @@
+// portal.js v1.4.1 — 2026-08-15 17:21 (Europe/Brussels) — Jacops: iedereen mag vrij doorklikken; i-infoknop per tegel (CSP-veilig)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
 //        Managers zien ze meteen (impliciet alle apps); sellers via een user_app_access-rij.
@@ -162,9 +163,8 @@ function renderLauncher(apps) {
     const t = document.createElement('a');
     t.className = 'app-tile';
     let href = (a.id === 'academy') ? academyUrl() : a.url;
-    // Jacops-presentatie: managers mogen vrij doorklikken (?manager=1);
-    // verkopers moeten elke film uitkijken.
-    if (a.id === 'jacops' && USER_ROLE === 'manager') {
+    // Jacops-presentatie: IEDEREEN mag vrij doorklikken (?manager=1) — niet enkel managers (Johan).
+    if (a.id === 'jacops') {
       href += (href.indexOf('?') >= 0 ? '&' : '?') + 'manager=1';
     }
     t.href = href;
@@ -301,7 +301,7 @@ const TEGEL_INFO = {
     cx: `Je stapt met vertrouwen naar de klant omdat je het model écht begrijpt — dat voelt de klant.` },
   jacops: { titel: 'Jacops-presentatie', ico: '🎬',
     waarde: `Het volledige elektrificatie- en laadpleinverhaal in beeld — ideaal om een prospect warm te maken.`,
-    gebruik: `Speel de presentatie af vóór of tijdens het gesprek. (Als manager klik je vrij door; adviseurs kijken de films uit.)`,
+    gebruik: `Speel de presentatie af vóór of tijdens het gesprek. Je kan vrij doorklikken tussen de films.`,
     gebeurt: `Een reeks korte films neemt de klant mee van probleem naar oplossing.`,
     cx: `De klant ziet en voelt het verhaal; jij hoeft niet alles zelf uit te leggen.` },
   gebruikers: { titel: 'Gebruikers', ico: '👥',
