@@ -1,56 +1,23 @@
-// portal.js v1.4.2 — 2026-08-15 20:11 (Europe/Brussels) — Jacops-tegel opent in HETZELFDE tabblad (extern-vlag weg) i.c.m. "← Mijn Fluctus"-knop in de presentatie; iedereen mag vrij doorklikken; i-infoknop per tegel (CSP-veilig)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
-// 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
-//        Managers zien ze meteen (impliciet alle apps); sellers via een user_app_access-rij.
 // Bouwt voort op het bestaande 9a-toegangsmodel: de fluctus-proxy valideert de
 // Supabase-JWT en checkt user_app_access via POST /api/app-access/check.
 // Niet-toegankelijke apps worden VERBORGEN (geen disabled).
 
-// 09-08: 'i'-infoknop per tegel → wervende modal (waarde · gebruik · wat gebeurt · CX). Zie TEGEL_INFO + openTegelInfo onderaan.
 const $ = (id) => document.getElementById(id);
 
 // App-catalogus = de 9a-apps. url is configureerbaar; de eigenlijke inbedding
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
-// Vlaggen:
-//   altijd:true      → tegel altijd zichtbaar voor elke ingelogde gebruiker
-//                      (geen app-access/check nodig).
-//   managerOnly:true → tegel enkel voor managers (role==='manager').
-//   extern:true      → opent in een nieuw tabblad (externe site).
-// De 'echte' tools (kamino/simulator/gemeenteplan) worden per gebruiker
-// gefilterd via de fluctus-proxy /api/app-access/check.
-// Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
-//   1 Jacops-presentatie · 2 Academy · 3 Energiemarkt · 4 Gemeenteplan · 5 Kamino · 6 Simulator · 7 Gebruikers
 const APP_CATALOG = [
-  // Jacops-presentatie: statische map (index.html + 7 MP4's) op GitHub Pages,
-  // zodat de fluctus-web-repo licht blijft. GRANTBAAR: enkel zichtbaar voor
-  // verkopers aan wie je ze toekent (via de Gebruikers-tegel, app_id 'jacops');
-  // managers zien ze automatisch. Opent in een nieuw tabblad (presenteren).
-  // ↓ pas deze URL aan naar waar je de map effectief pusht.
-  //   Eigen Pages-repo 'jacops-presentatie' (files in de root, branch main).
-  // extern-vlag bewust WEG (Johan 15-08): Jacops opent nu in hetzelfde tabblad, zodat "← Mijn Fluctus" in de presentatie echt terugbrengt.
-  { id: 'jacops',      naam: 'Jacops-presentatie', ico: '🎬', beschrijving: 'Meer mogelijk met hetzelfde net — de Jacops-presentatie.', url: 'https://johanmmk.github.io/jacops-presentatie/index.html' },
-  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
-  // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
-  // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
-  // gedeelde marktdata bij die de simulator gebruikt.
-  { id: 'energiemarkt', naam: 'Energiemarkt',    ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulator-data bij.', url: '/apps/energiemarkt.html' },
-  { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
-  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
-  { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
-  // Congestie wordt toegevoegd zodra ze in de app ingebed is.
+  { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html' },
+  // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
+  // { id: 'energiemarkt',naam: 'Energiemarkt', ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.', url: '/apps/energiemarkt.html' },
 ];
-
-// Academy-URL. Standaard same-origin (/apps/academy.html) → deelt de Supabase-
-// sessie met de portal, dus geen tweede login (single sign-on). Kan overschreven
-// worden via /api/config → academyUrl (bv. een externe URL; dan vervalt SSO).
-function academyUrl() { return (CFG && CFG.academyUrl) || '/apps/academy.html'; }
 
 let CFG = null;
 let sb = null;       // Supabase client
 let SESSION = null;
-let USER_ROLE = 'seller';   // rol van de ingelogde gebruiker (uit app-access/check)
 
 async function loadConfig() {
   const r = await fetch('/api/config');
@@ -123,14 +90,10 @@ function resetLogin() {
 async function logout() { await sb.auth.signOut(); }
 
 // RBAC: per app checken via de bestaande fluctus-proxy (9a). Managers → alle apps.
-// 'altijd'-tegels (Academy) tonen we altijd; 'managerOnly'-tegels (Gebruikers)
-// enkel voor managers. De rol lezen we uit het antwoord van app-access/check.
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);
-  const verleend = new Set();
-  let role = 'seller';
-  await Promise.all(echte.map(async (app) => {
+  const out = [];
+  await Promise.all(APP_CATALOG.map(async (app) => {
     try {
       const r = await fetch(`${base}/api/app-access/check`, {
         method: 'POST',
@@ -139,47 +102,22 @@ async function toegankelijkeApps(token) {
       });
       if (!r.ok) return;
       const j = await r.json();
-      if (j && j.user && j.user.role) role = j.user.role;
-      if (j && (j.toegang || j.access || j.ok)) verleend.add(app.id);
+      if (j && (j.toegang || j.access || j.ok)) out.push(app);
     } catch (e) { /* verborgen bij fout */ }
   }));
-  USER_ROLE = role;   // onthouden voor renderLauncher (o.a. manager-doorklik Jacops)
-  // In catalogus-volgorde teruggeven: echte apps met toegang, altijd-apps,
-  // en manager-only apps enkel voor managers.
-  return APP_CATALOG.filter((a) => {
-    if (a.altijd) return true;
-    if (a.managerOnly) return role === 'manager';
-    return verleend.has(a.id);
-  });
+  return out;
 }
 
 function renderLauncher(apps) {
   const host = $('apps'); host.innerHTML = '';
-  if (typeof _tegelInfoStyle === 'function') _tegelInfoStyle();   // v09-08b: i-knop-stijl meteen injecteren (niet pas bij modal-open)
   if (!apps.length) {
     host.innerHTML = '<p class="notice">Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.</p>';
     return;
   }
   apps.forEach(a => {
     const t = document.createElement('a');
-    t.className = 'app-tile';
-    let href = (a.id === 'academy') ? academyUrl() : a.url;
-    // Jacops-presentatie: IEDEREEN mag vrij doorklikken (?manager=1) — niet enkel managers (Johan).
-    if (a.id === 'jacops') {
-      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'manager=1';
-    }
-    t.href = href;
-    if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
-    t.style.position = 'relative';
+    t.className = 'app-tile'; t.href = a.url;
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
-    // v09-08b: knop via DOM + addEventListener (geen inline onclick → werkt ook met strikte CSP).
-    if (TEGEL_INFO[a.id]) {
-      const ib = document.createElement('button');
-      ib.type = 'button'; ib.className = 'tile-i'; ib.textContent = 'i';
-      ib.title = 'Wat is dit?'; ib.setAttribute('aria-label', 'Info over ' + a.naam);
-      ib.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openTegelInfo(a.id); });
-      t.appendChild(ib);
-    }
     host.appendChild(t);
   });
 }
@@ -272,90 +210,3 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { await loadConfig(); await initAuth(); }
   catch (e) { $('login-msg').textContent = 'Init-fout: ' + e.message; }
 });
-
-// ── Tegel-info: wervende "i"-modal per tegel (waarde · gebruik · wat gebeurt · CX) ──────────
-const TEGEL_INFO = {
-  kamino: { titel: 'Kamino', ico: '🧭',
-    waarde: `In vier vragen weet je meteen waar bij deze klant het meeste geld zit — zonder een offerte te forceren. Je opent het gesprek met inzicht, niet met een prijs.`,
-    gebruik: `Kies de vraag die de klant bezighoudt (contract, zonnepanelen, batterij of laadplein), geef factuur of verbruik in en klik. Meerdere vragen? Ze delen dezelfde gegevens.`,
-    gebeurt: `Kamino draait op de achtergrond dezelfde rekenmotor als de Simulator, op het échte verbruik, en levert per vraag een kerncijfer plus een rapport.`,
-    cx: `De klant krijgt in enkele minuten een helder antwoord, zwart-op-wit. Jij komt binnen als adviseur die rekent, niet als verkoper die duwt.` },
-  simulator: { titel: 'Simulator', ico: '⚡',
-    waarde: `Van factuur tot volledig onderbouwd voorstel: batterij, PV, aansluiting en laadplein in één berekening — met een rapport dat de klant zelf kan verifiëren.`,
-    gebruik: `Laad de factuur op (of vul manueel in), kies het verbruiksprofiel, laat het ontwerp doorrekenen en genereer de offerte en het rapport.`,
-    gebeurt: `De motor simuleert je verbruik op echte spot- en onbalansdata, dimensioneert de installatie en berekent rendement en terugverdientijd.`,
-    cx: `Elke euro is herleidbaar. De klant krijgt geen “geloof ons”, maar cijfers die kloppen — dat wint vertrouwen en verkort de beslissing.` },
-  energiemarkt: { titel: 'Energiemarkt', ico: '📈',
-    waarde: `Voel de markt: waar staan de spot- en onbalansprijzen vandaag, en waarom slim sturen loont.`,
-    gebruik: `Open het dashboard om de actuele markt te bekijken. Het houdt tegelijk de data vers waarop je studies in Kamino en de Simulator rekenen.`,
-    gebeurt: `Live day-ahead- en onbalansdata worden opgehaald en bijgewerkt voor de rekentools.`,
-    cx: `Je onderbouwt je verhaal met de markt van vandaag, niet met een oude vuistregel — dat maakt indruk.` },
-  gemeenteplan: { titel: 'Gemeenteplan', ico: '🗺️',
-    waarde: `Een kant-en-klaar laadplan per gemeente om lokaal meteen het gesprek te openen.`,
-    gebruik: `Kies de gemeente. Je krijgt een plan met kaart en laadbehoefte, klaar om te versturen als PPTX en PDF.`,
-    gebeurt: `De tool bundelt de laadbehoefte-data tot een presentatie plus rapport en mailt ze.`,
-    cx: `Je komt bij een gemeente of lokale speler binnen met een concreet plan in plaats van een blanco blad.` },
-  academy: { titel: 'Fluctus Academy', ico: '🎓',
-    waarde: `Alles om als adviseur meteen sterk te staan: het verhaal, de scripts en de cijfers achter het aanbod.`,
-    gebruik: `Doorloop de modules op je eigen tempo en sluit af met een certificaat.`,
-    gebeurt: `Je vordering en behaalde certificaten worden bijgehouden.`,
-    cx: `Je stapt met vertrouwen naar de klant omdat je het model écht begrijpt — dat voelt de klant.` },
-  jacops: { titel: 'Jacops-presentatie', ico: '🎬',
-    waarde: `Het volledige elektrificatie- en laadpleinverhaal in beeld — ideaal om een prospect warm te maken.`,
-    gebruik: `Speel de presentatie af vóór of tijdens het gesprek. Je kan vrij doorklikken tussen de films.`,
-    gebeurt: `Een reeks korte films neemt de klant mee van probleem naar oplossing.`,
-    cx: `De klant ziet en voelt het verhaal; jij hoeft niet alles zelf uit te leggen.` },
-  gebruikers: { titel: 'Gebruikers', ico: '👥',
-    waarde: `Grip op wie welke tool mag gebruiken — zonder tussenkomst van IT.`,
-    gebruik: `Nodig een adviseur uit, ken tegels toe, pas rol of status aan, of verwijder een account.`,
-    gebeurt: `De uitnodiging, de toegang en het account worden meteen in orde gezet (met een lokale audit-export bij verwijderen).`,
-    cx: `Een nieuwe adviseur is in een minuut operationeel; jij houdt het overzicht. (Enkel voor managers.)` }
-};
-
-function _tegelInfoStyle() {
-  if (document.getElementById('tegel-info-style')) return;
-  const s = document.createElement('style'); s.id = 'tegel-info-style';
-  s.textContent = `
-  .tile-i{position:absolute;top:10px;right:12px;width:30px;height:30px;border-radius:50%;border:1px solid #C9D2E0;
-    background:#fff;color:#1F3864;font-weight:800;font-family:Georgia,serif;font-style:italic;font-size:17px;
-    line-height:28px;text-align:center;cursor:pointer;padding:0;z-index:5;opacity:.9;box-shadow:0 1px 3px rgba(16,24,40,.12)}
-  .tile-i:hover{opacity:1;background:#EFF6FF;border-color:#93C5FD;transform:scale(1.08)}
-  .tegel-modal-ov{position:fixed;inset:0;background:rgba(31,56,100,.45);display:flex;align-items:center;
-    justify-content:center;z-index:9999;padding:20px}
-  .tegel-modal{background:#fff;max-width:520px;width:100%;border-radius:14px;overflow:hidden;
-    box-shadow:0 18px 50px rgba(16,24,40,.28);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-  .tegel-modal .kop{background:#1F3864;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:10px}
-  .tegel-modal .kop .e{font-size:22px}
-  .tegel-modal .kop h3{margin:0;font-size:17px;font-weight:700}
-  .tegel-modal .body{padding:16px 20px 6px}
-  .tegel-modal .sec{margin:0 0 13px}
-  .tegel-modal .sec .l{font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:#1E7F4F;font-weight:800;margin:0 0 3px}
-  .tegel-modal .sec p{margin:0;font-size:13.5px;line-height:1.55;color:#243}
-  .tegel-modal .vt{padding:12px 20px 18px;text-align:right}
-  .tegel-modal .vt button{background:#1F3864;color:#fff;border:0;border-radius:9px;padding:9px 18px;font-weight:700;cursor:pointer}
-  `;
-  document.head.appendChild(s);
-}
-function sluitTegelInfo(){ const o = document.getElementById('tegel-info-ov'); if (o) o.remove(); document.removeEventListener('keydown', _tegelInfoEsc); }
-function _tegelInfoEsc(e){ if (e.key === 'Escape') sluitTegelInfo(); }
-function openTegelInfo(id){
-  const d = TEGEL_INFO[id]; if (!d) return;
-  _tegelInfoStyle(); sluitTegelInfo();
-  const esc = (x)=>String(x==null?'':x).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-  const sec = (l,t)=>`<div class="sec"><p class="l">${l}</p><p>${esc(t)}</p></div>`;
-  const ov = document.createElement('div'); ov.className='tegel-modal-ov'; ov.id='tegel-info-ov';
-  ov.innerHTML = `<div class="tegel-modal" role="dialog" aria-modal="true">
-    <div class="kop"><span class="e">${d.ico||'ℹ️'}</span><h3>${esc(d.titel)}</h3></div>
-    <div class="body">
-      ${sec('Wat het je brengt', d.waarde)}
-      ${sec('Hoe je het gebruikt', d.gebruik)}
-      ${sec('Wat er gebeurt', d.gebeurt)}
-      ${sec('De ervaring', d.cx)}
-    </div>
-    <div class="vt"><button type="button" class="tegel-sluit">Sluiten</button></div>
-  </div>`;
-  ov.addEventListener('click', (e)=>{ if (e.target === ov) sluitTegelInfo(); });
-  document.body.appendChild(ov);
-  const sb = ov.querySelector('.tegel-sluit'); if (sb) sb.addEventListener('click', sluitTegelInfo);   // geen inline onclick → CSP-veilig
-  document.addEventListener('keydown', _tegelInfoEsc);
-}
