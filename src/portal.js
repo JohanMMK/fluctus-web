@@ -1,4 +1,8 @@
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// 16-08: Thuisladen-tegel toegevoegd aan APP_CATALOG (app_id 'thuisladen' → /apps/thuisladen.html),
+//        net na Simulator. Gewone grantbare app: managers zien ze meteen, sellers via user_app_access.
+// 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
+//        Managers zien ze meteen (impliciet alle apps); sellers via een user_app_access-rij.
 // Bouwt voort op het bestaande 9a-toegangsmodel: de fluctus-proxy valideert de
 // Supabase-JWT en checkt user_app_access via POST /api/app-access/check.
 // Niet-toegankelijke apps worden VERBORGEN (geen disabled).
@@ -7,13 +11,34 @@ const $ = (id) => document.getElementById(id);
 
 // App-catalogus = de 9a-apps. url is configureerbaar; de eigenlijke inbedding
 // van de simulator in deze app is de resterende integratiestap (workflow-taak).
+// Vlaggen:
+//   altijd:true      → tegel altijd zichtbaar voor elke ingelogde gebruiker
+//                      (geen app-access/check nodig).
+//   managerOnly:true → tegel enkel voor managers (role==='manager').
+//   extern:true      → opent in een nieuw tabblad (externe site).
+// De 'echte' tools (kamino/simulator/gemeenteplan/thuisladen) worden per gebruiker
+// gefilterd via de fluctus-proxy /api/app-access/check.
+// Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
+//   1 Academy · 2 Energiemarkt · 3 Gemeenteplan · 4 Kamino · 5 Simulator · 6 Thuisladen · 7 Gebruikers
 const APP_CATALOG = [
+  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
+  // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
+  // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
+  // gedeelde marktdata bij die de simulator gebruikt.
+  { id: 'energiemarkt', naam: 'Energiemarkt',    ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulator-data bij.', url: '/apps/energiemarkt.html' },
+  { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
+  { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html' },
-  // Congestie & Energiemarkt worden toegevoegd zodra ze in de app ingebed zijn.
+  { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
+  // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
-  // { id: 'energiemarkt',naam: 'Energiemarkt', ico: '📈', beschrijving: 'Marktdashboard spot & imbalance.', url: '/apps/energiemarkt.html' },
 ];
+
+// Academy-URL. Standaard same-origin (/apps/academy.html) → deelt de Supabase-
+// sessie met de portal, dus geen tweede login (single sign-on). Kan overschreven
+// worden via /api/config → academyUrl (bv. een externe URL; dan vervalt SSO).
+function academyUrl() { return (CFG && CFG.academyUrl) || '/apps/academy.html'; }
 
 let CFG = null;
 let sb = null;       // Supabase client
@@ -90,10 +115,14 @@ function resetLogin() {
 async function logout() { await sb.auth.signOut(); }
 
 // RBAC: per app checken via de bestaande fluctus-proxy (9a). Managers → alle apps.
+// 'altijd'-tegels (Academy) tonen we altijd; 'managerOnly'-tegels (Gebruikers)
+// enkel voor managers. De rol lezen we uit het antwoord van app-access/check.
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const out = [];
-  await Promise.all(APP_CATALOG.map(async (app) => {
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);
+  const verleend = new Set();
+  let role = 'seller';
+  await Promise.all(echte.map(async (app) => {
     try {
       const r = await fetch(`${base}/api/app-access/check`, {
         method: 'POST',
@@ -102,10 +131,17 @@ async function toegankelijkeApps(token) {
       });
       if (!r.ok) return;
       const j = await r.json();
-      if (j && (j.toegang || j.access || j.ok)) out.push(app);
+      if (j && j.user && j.user.role) role = j.user.role;
+      if (j && (j.toegang || j.access || j.ok)) verleend.add(app.id);
     } catch (e) { /* verborgen bij fout */ }
   }));
-  return out;
+  // In catalogus-volgorde teruggeven: echte apps met toegang, altijd-apps,
+  // en manager-only apps enkel voor managers.
+  return APP_CATALOG.filter((a) => {
+    if (a.altijd) return true;
+    if (a.managerOnly) return role === 'manager';
+    return verleend.has(a.id);
+  });
 }
 
 function renderLauncher(apps) {
@@ -116,7 +152,9 @@ function renderLauncher(apps) {
   }
   apps.forEach(a => {
     const t = document.createElement('a');
-    t.className = 'app-tile'; t.href = a.url;
+    t.className = 'app-tile';
+    t.href = (a.id === 'academy') ? academyUrl() : a.url;
+    if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
     host.appendChild(t);
   });
