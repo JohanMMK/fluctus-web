@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     FLUCTUS THUISLADEN  v0.2.0  (2026-08-16)
+     v0.2.0: (1) APP-TOEGANG — FluctusAppAuth-snippet + requireAccess('thuisladen')
+             gate op #tl-root (zelfde patroon als de simulator). Managers krijgen
+             impliciet toegang; verkopers moeten 'thuisladen' toegekend krijgen.
+             Deploy = fluctus-web (public/apps/thuisladen.html), NIET Odoo; tegel
+             hoort in src/portal.js APP_CATALOG. "← Mijn Fluctus"-teruglink toegevoegd.
+             NAAMGEVING: FluctusAppAuth (NIET FluctusAuth = Academy-login).
+         (2) SERVER-DISPATCH — /api/thuisladen levert de 30 echte anker-dispatches
+             (zonder onbalans); local model() blijft gegarandeerde fallback.
+     ---------------------------------------------------------------------------
+     v0.1.0  (prototype)
+     Volledige standalone-prototype van de Thuisladen-tegel (cafetariaplan-laadpaal).
+     Implementeert de hele flow uit de build-spec: invoer → 50-anker residentieel
+     kostmodel → spline-interpolatie → 4 interactieve heatmaps (hover/klik/simuleer)
+     → randvoorwaarden-auto-zoek (≤5 iteraties) → rapportpaneel (referentie/besparing/
+     TVT/rendement + onbalans-extra) → manager-parametermodal.
+
+     LET OP: het rekenhart hier is een TRANSPARANT, INDICATIEF residentieel model
+     (self-consumptie/piekshaving/laadverschuiving-heuristiek), GEEN LP-dispatch. De
+     productie-versie vervangt model() door /api/thuisladen (de echte simulator.py-
+     dispatch). De UX, heatmaps, interpolatie, iteratie en rapportstructuur zijn wél
+     de definitieve. Geen onbalans in de zoektocht (per Johan); onbalans = extra winst.
+     ============================================================================ -->
+<html lang="nl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fluctus — Thuisladen</title>
+<style>
+  :root{--blauw:#1F3864;--blauw-l:#2E4E86;--groen:#05B050;--groen-d:#048443;--oranje:#9E480E;--grijs:#5A6577;--lijn:#D5DBE3;--bg:#F5F7FA;--zwart:#1A1F2B;--rood:#C0392B;--jacops:#E8352A;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);background:#eef1f5;font-size:13px;line-height:1.45}
+  .top{background:var(--blauw);color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:space-between}
+  .top .t{font-weight:800;font-size:16px}.top .t span{color:#80C539}
+  .top .jc{background:var(--jacops);color:#fff;font-family:Arial;font-weight:900;font-size:12px;padding:2px 7px;border-radius:3px}
+  .wrap{display:grid;grid-template-columns:320px 1fr;gap:0;min-height:calc(100vh - 42px)}
+  .side{background:#fff;border-right:1px solid var(--lijn);padding:14px 15px;overflow-y:auto;max-height:calc(100vh - 42px)}
+  .main{padding:16px 20px;overflow-y:auto;max-height:calc(100vh - 42px)}
+  h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--blauw);font-weight:800;margin:14px 0 6px;border-bottom:1px solid var(--lijn);padding-bottom:3px}
+  h3:first-child{margin-top:0}
+  label{display:block;font-size:11px;color:var(--grijs);font-weight:600;margin:7px 0 2px}
+  input,select{width:100%;padding:5px 7px;border:1px solid var(--lijn);border-radius:5px;font-family:inherit;font-size:12.5px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  button{font-family:inherit;font-weight:700;border:none;border-radius:6px;cursor:pointer}
+  .btn{background:var(--blauw);color:#fff;padding:8px 12px;font-size:13px}
+  .btn:hover{background:var(--blauw-l)}
+  .btn.g{background:var(--groen)}.btn.o{background:var(--oranje)}
+  .btn.sm{padding:4px 9px;font-size:11px}
+  .btn.ghost{background:#fff;color:var(--blauw);border:1px solid var(--lijn)}
+  .wagen{border:1px solid var(--lijn);border-radius:6px;padding:8px;margin:6px 0;background:var(--bg);position:relative}
+  .wagen .del{position:absolute;top:5px;right:6px;background:none;color:var(--rood);font-size:14px;padding:0 3px}
+  .hint{font-size:10.5px;color:#8A94A6;font-style:italic;margin-top:3px}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:2px 0 14px}
+  .hm-card{background:#fff;border:1px solid var(--lijn);border-radius:8px;padding:8px 9px}
+  .hm-card .h{font-size:11px;font-weight:800;color:var(--blauw);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px}
+  canvas.hm{width:100%;height:150px;image-rendering:pixelated;border-radius:4px;cursor:crosshair;display:block}
+  .axis{font-size:9px;color:var(--grijs);display:flex;justify-content:space-between;margin-top:2px}
+  .sel{background:#fff;border:1px solid var(--lijn);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+  .sel .tt{font-weight:800;color:var(--blauw);font-size:14px;margin-bottom:6px}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}
+  .kpi{border:1px solid var(--lijn);border-left:4px solid var(--blauw);border-radius:5px;padding:8px 9px}
+  .kpi.g{border-left-color:var(--groen)}.kpi.o{border-left-color:var(--oranje)}.kpi.r{border-left-color:var(--jacops)}
+  .kpi .l{font-size:9px;text-transform:uppercase;color:var(--grijs);font-weight:700;letter-spacing:.03em}
+  .kpi .v{font-size:18px;font-weight:800;margin-top:2px}
+  .kpi .s{font-size:9.5px;color:var(--grijs);margin-top:1px}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+  th,td{padding:4px 8px;text-align:right;border-bottom:1px solid var(--lijn)}th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--blauw);color:#fff;font-weight:700;font-size:10.5px}
+  tbody tr:nth-child(even){background:var(--bg)}
+  .pos{color:var(--groen-d);font-weight:700}.neg{color:var(--rood);font-weight:700}
+  .modal-bg{position:fixed;inset:0;background:rgba(20,30,50,.55);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal{background:#fff;border-radius:10px;padding:18px 20px;width:640px;max-height:88vh;overflow-y:auto}
+  .modal h2{color:var(--blauw);font-size:16px;margin-bottom:8px}
+  .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px}
+  .note{font-size:10.5px;color:var(--grijs);font-style:italic}
+  .badge{display:inline-block;font-size:9px;font-weight:800;background:#FFF3E0;color:var(--oranje);border:1px solid #9E480E44;border-radius:10px;padding:1px 7px;margin-left:6px}
+  .tt{position:fixed;pointer-events:none;background:#1A1F2B;color:#fff;font-size:11px;padding:5px 8px;border-radius:5px;display:none;z-index:60;line-height:1.4}
+</style></head>
+<body>
+<div class="top">
+  <div class="t"><a href="/portal.html" style="color:#cfe3ff;text-decoration:none;font-weight:700;font-size:12px;margin-right:12px">← Mijn Fluctus</a>Fluctus<span>.</span> Thuisladen <span class="badge" id="modeBadge" style="background:#80C53922;color:#80C539;border-color:#80C53955">prototype-model</span></div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn ghost sm" id="mgrBtn" style="display:none">⚙ Parameters (manager)</button>
+    <span class="jc">JACOPS.</span>
+  </div>
+</div>
+<div class="wrap" id="tl-root">
+  <div class="side" id="side"></div>
+  <div class="main">
+    <div id="constraintsBar" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div class="cards" id="cards"></div>
+    <div class="sel" id="selPanel"></div>
+    <div id="report"></div>
+  </div>
+</div>
+<div class="modal-bg" id="mgrModal"><div class="modal" id="mgrModalInner"></div></div>
+<div class="tt" id="tooltip"></div>
+
+<script>
+// ============================================================
+//   FLUCTUS APP-AUTH SNIPPET — v1.2 (sessie 9a, token-verversing)
+//   Globale naam = FluctusAppAuth (NIET FluctusAuth: die is al bezet
+//   door de Academy-login op hetzelfde Odoo-domein).
+//   Identiek aan fluctus_auth_snippet.js (Snippets-repo). Wijzigingen
+//   ALTIJD eerst daar, dan hier spiegelen.
+// ============================================================
+(function(global){
+'use strict';
+var FA_API = 'https://lucid-amazement-production.up.railway.app';
+var FA_SB  = 'https://haagysosdaorrxkrwkcj.supabase.co';
+var FA_KEY = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3'; // publiek (zelfde als Academy)
+
+var _token = null;   // laatst bekende geldige access_token
+var _timer = null;   // achtergrond-verversing
+
+function _sessie(){
+  // Vindt de supabase-js sessie in localStorage. Returnt {key, s} of null.
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k = localStorage.key(i);
+      if(/^sb-.+-auth-token$/.test(k)){
+        var v = JSON.parse(localStorage.getItem(k));
+        if(v && v.currentSession) v = v.currentSession; // legacy v1-formaat
+        if(v && v.access_token) return { key: k, s: v };
+      }
+    }
+  }catch(e){ /* localStorage niet beschikbaar — behandel als uitgelogd */ }
+  return null;
+}
+
+function _geldig(s){
+  // 60s marge zodat we nooit met een net-verlopen token de server raken.
+  return !!(s.expires_at && s.expires_at * 1000 > Date.now() + 60000);
+}
+
+function _vernieuw(o){
+  // Ververst via refresh_token en schrijft terug naar localStorage.
+  if(!o || !o.s.refresh_token) return Promise.resolve(null);
+  return fetch(FA_SB + '/auth/v1/token?grant_type=refresh_token', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'apikey': FA_KEY },
+    body: JSON.stringify({ refresh_token: o.s.refresh_token })
+  })
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(n){
+    if(!n || !n.access_token){
+      var o2 = _sessie();
+      return (o2 && _geldig(o2.s)) ? o2.s.access_token : null;
+    }
+    if(!n.expires_at && n.expires_in){
+      n.expires_at = Math.floor(Date.now() / 1000) + n.expires_in;
+    }
+    try{
+      var samengevoegd = {};
+      for (var a in o.s) samengevoegd[a] = o.s[a];
+      for (var b in n)   samengevoegd[b] = n[b];
+      localStorage.setItem(o.key, JSON.stringify(samengevoegd));
+    }catch(e){ /* terugschrijven best-effort */ }
+    return n.access_token;
+  })
+  .catch(function(){ return null; });
+}
+
+function _zorgToken(){
+  var o = _sessie();
+  if(!o){ _token = null; return Promise.resolve(null); }
+  if(_geldig(o.s)){ _token = o.s.access_token; return Promise.resolve(_token); }
+  return _vernieuw(o).then(function(t){ _token = t; return t; });
+}
+
+function _startVerversing(){
+  if(_timer) return;
+  _timer = setInterval(function(){
+    var o = _sessie();
+    if(!o) return;
+    if(o.s.expires_at && o.s.expires_at * 1000 - Date.now() < 10 * 60 * 1000){
+      _zorgToken();
+    }else{
+      _token = o.s.access_token;
+    }
+  }, 5 * 60 * 1000);
+}
+
+function _blok(rootEl, titel, tekst){
+  if(!rootEl) return;
+  rootEl.innerHTML =
+    '<div style="font-family:Helvetica,Arial,sans-serif;border:1px solid #D5DBE3;border-radius:8px;'+
+    'padding:32px;text-align:center;background:#F5F7FA;color:#1A1F2B;margin:20px 0;">'+
+    '<div style="font-size:16px;font-weight:700;color:#1F3864;margin-bottom:8px;">'+titel+'</div>'+
+    '<div style="font-size:13px;color:#5A6577;line-height:1.6;">'+tekst+'</div></div>';
+}
+
+var FluctusAppAuth = {
+  user: null,
+  toegang: false,
+
+  token: function(){
+    if(_token) return _token;
+    var o = _sessie();
+    return o ? o.s.access_token : null;
+  },
+
+  // Controleert login + app-permissie. Ververst eerst het token indien nodig.
+  // Blokkeert rootEl bij weigering. Returnt Promise<boolean>.
+  requireAccess: function(appId, rootEl){
+    return _zorgToken().then(function(t){
+      if(!t){
+        _blok(rootEl, 'Aanmelden vereist',
+          'Log in via de Fluctus Academy om deze app te gebruiken.');
+        return false;
+      }
+      return fetch(FA_API + '/api/app-access/check', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + t },
+        body: JSON.stringify({ app_id: appId })
+      })
+      .then(function(r){ return r.json().then(function(j){ return { status: r.status, j: j }; }); })
+      .then(function(res){
+        if(res.status === 200 && res.j && res.j.toegang){
+          FluctusAppAuth.user = res.j.user || null;
+          FluctusAppAuth.toegang = true;
+          _startVerversing();
+          return true;
+        }
+        if(res.status === 401){
+          _blok(rootEl, 'Sessie verlopen',
+            'Uw sessie is verlopen. Log opnieuw in via de Fluctus Academy en herlaad deze pagina.');
+        }else{
+          _blok(rootEl, 'Geen toegang',
+            'U heeft nog geen toegang tot deze app. Vraag toegang aan uw manager.');
+        }
+        return false;
+      })
+      .catch(function(){
+        _blok(rootEl, 'Toegangscontrole niet bereikbaar',
+          'De server is tijdelijk niet bereikbaar. Herlaad de pagina of probeer over enkele minuten opnieuw.');
+        return false;
+      });
+    });
+  },
+
+  tokenAsync: function(){ try{ return _zorgToken(); }catch(e){ return Promise.resolve(FluctusAppAuth.token()); } },
+  vernieuwNu: function(){ try{ var o=_sessie(); return o ? _vernieuw(o).then(function(t){ _token=t; return t; }) : Promise.resolve(null); }catch(e){ return Promise.resolve(null); } },
+
+  logActivity: function(appId, actie, payload){
+    try{
+      var t = FluctusAppAuth.token();
+      if(!t) return;
+      var p = payload || {};
+      fetch(FA_API + '/api/app-activity/log', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + t },
+        body: JSON.stringify({
+          app_id: appId, actie: actie,
+          klant_btw: p.klant_btw || null,
+          klant_naam: p.klant_naam || null,
+          details: p
+        }),
+        keepalive: true
+      }).catch(function(){ /* stil */ });
+    }catch(e){ /* stil */ }
+  }
+};
+
+global.FluctusAppAuth = FluctusAppAuth;
+})(typeof window !== 'undefined' ? window : this);
+</script>
+
+<script>
+// ============================ MODEL-/PROCESPARAMETERS ============================
+var P = {
+  MAX_KVA_2F:5, MAX_KVA_3F:25, LAADVERMOGEN_BASIS:4,
+  PANEEL_WP:450, PANEEL_M2:2, PV_KOST:500, PV_MIN:4, PV_MAX:40, PV_STAP:2,
+  RENDEMENT_MIN:10, INFLATIE:2, NETINDEX:2, CREG:60, DIESEL_100KM:9.0,
+  SPOT:95, NETKOST_MWH:70, HEFFING_MWH:35, CAPACITEIT_KW_JR:45, INJECTIE_MWH:40,
+  PV_YIELD:950, RTE:0.90, HORIZON:15,
+  BATT:[ {kva:5,kwh:5,eur:3000},{kva:5,kwh:10,eur:5000},{kva:5,kwh:15,eur:7500},{kva:5,kwh:20,eur:10000},{kva:5,kwh:25,eur:12500},
+         {kva:10,kwh:10,eur:7000},{kva:10,kwh:15,eur:9500},{kva:10,kwh:20,eur:12000},{kva:10,kwh:25,eur:14500},
+         {kva:15,kwh:15,eur:11000},{kva:15,kwh:20,eur:14000},{kva:15,kwh:25,eur:16500} ]
+};
+// ============================ KLANT-INVOER ============================
+var IN = {
+  profiel:'residentieel', jaarverbruik_mwh:3.5, piek_kw:5.0, fasen:3,
+  bestaand_pv_kwp:0, bestaand_inj_mwh:0,
+  referentiekost:1400,
+  wagens:[ {km:15000, kwhkm:0.16, wd_start:0, wd_eind:7, we_start:0, we_eind:9, creg:true} ],
+  max_pv_pan:null, max_budget:null, min_rend:null
+};
+var STATE = { rol:'manager', grid:null, gemeten:{}, sel:null, iterLog:[] };
+
+// ============================ HELPERS ============================
+function fmtE(x){ return '€ '+Math.round(x).toLocaleString('nl-BE'); }
+function fmtE1(x){ return '€ '+(+x).toLocaleString('nl-BE',{minimumFractionDigits:1,maximumFractionDigits:1}); }
+function fmtN(x,d){ return (+x).toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+function maxKva(){ return IN.fasen===2 ? P.MAX_KVA_2F : P.MAX_KVA_3F; }
+function evMwh(){ return IN.wagens.reduce(function(s,w){return s+(w.km*w.kwhkm/1000);},0); }
+function paneelKwp(pan){ return pan*P.PANEEL_WP/1000; }
+function battPrijs(kwh){ // goedkoopste serie-entry voor die kWh binnen de fasegrens
+  if(kwh<=0) return {kwh:0,kva:0,eur:0};
+  var cand=P.BATT.filter(function(b){return b.kwh===kwh && b.kva<=maxKva();});
+  if(!cand.length) return null;   // past niet op deze aansluiting
+  cand.sort(function(a,b){return a.eur-b.eur;});
+  return cand[0];
+}
+// as-waarden
+function battAs(){ return [0,5,10,15,20,25]; }
+function pvAs(){ var a=[0]; for(var n=P.PV_MIN;n<=P.PV_MAX;n+=P.PV_STAP) a.push(n); return a; }
+
+// ============================ REKENHART (indicatief prototype) ============================
+// Berekent voor één combinatie (batterij-kWh, extra-PV-panelen) de jaarkost, besparing, capex, rendement, €/MWh.
+// Transparante heuristiek: zelfconsumptie stijgt met PV én batterij; batterij verschuift laden naar goedkope/PV-uren
+// en shaaft de piek (capaciteitskost). GEEN onbalans. Onbalans-extra = losse bonus (zie onbalansExtra()).
+function model(battKwh, pvPan){
+  // Server-dispatch heeft voorrang op het indicatieve model zodra de echte ankers geladen zijn.
+  if(STATE.serverMode){ var sv=svModel(battKwh,pvPan); if(sv) return sv; }
+  var bt = battPrijs(battKwh);
+  if(bt===null) return null;   // batterij past niet op de aansluiting
+  var ev = evMwh();                                  // MWh/jaar laden
+  var gebouw = IN.jaarverbruik_mwh;                  // MWh/jaar woning
+  var totLoad = gebouw + ev;
+  var pvKwp = IN.bestaand_pv_kwp + paneelKwp(pvPan);
+  var pvProd = pvKwp * P.PV_YIELD / 1000;            // MWh/jaar
+  var battBruik = battKwh * 0.9;                      // bruikbaar (DoD)
+  // Zelfconsumptie: direct overdag (~32% van de overlap load↔PV) + wat de batterij 's avonds/nachts buffert
+  // (≈300 nuttige woning-cycli/jaar). Nooit meer dan de last of de productie.
+  var directSC = Math.min(pvProd, totLoad) * 0.32;
+  var battSC = Math.min( battBruik*300/1000, Math.max(0, Math.min(pvProd,totLoad) - directSC) );
+  var zelfverbruik = Math.min(pvProd, totLoad, directSC + battSC);
+  var injectieBruto = Math.max(0, pvProd - zelfverbruik);
+  // Injectie realistisch waarderen: nuttige injectie (tot ~de jaarlast) aan INJECTIE_MWH, overschot ~waardeloos
+  // (curtailment/lage terugleverprijs) → oversized PV verhoogt de capex zonder evenredige besparing.
+  var injNuttig = Math.min(injectieBruto, totLoad);
+  var injOver = Math.max(0, injectieBruto - totLoad);
+  var netAfname = Math.max(0, totLoad - zelfverbruik);                   // MWh uit net
+  var laadP = Math.min(P.LAADVERMOGEN_BASIS, Math.max(0.5, maxKva()-IN.piek_kw));
+  var piekMetEV = IN.piek_kw + laadP;
+  var piekEff = Math.max(IN.piek_kw, piekMetEV - bt.kva);               // batterij shaaft de laadpiek
+  var energie = netAfname * (P.SPOT + P.NETKOST_MWH + P.HEFFING_MWH);
+  var injOpbr = injNuttig * P.INJECTIE_MWH + injOver * 5;
+  var capac = piekEff * P.CAPACITEIT_KW_JR;
+  var kostScenario = Math.max(capac*0.2, energie - injOpbr + capac);    // vloer: capaciteit blijft altijd betaald
+  var injectie = injectieBruto;
+  // tussenkomst werkgever: CREG voor vergoede wagens, dieselbesparing voor niet-vergoede
+  var creg=0, diesel=0;
+  IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*P.CREG; else diesel += (w.km/100)*P.DIESEL_100KM; });
+  var besparing = IN.referentiekost + creg + diesel - kostScenario;
+  var capex = bt.eur + paneelKwp(pvPan)*1000*P.PV_KOST/1000*1000/1000; // = bt.eur + kWp*PV_KOST
+  capex = bt.eur + paneelKwp(pvPan)*P.PV_KOST;
+  var rend = capex>0 ? (besparing/capex*100) : (besparing>0?999:0);
+  var eurMwh = totLoad>0 ? kostScenario/totLoad : 0;
+  return { battKwh:battKwh, kva:bt.kva, pvPan:pvPan, kwp:pvKwp, capex:capex,
+    kostScenario:kostScenario, besparing:besparing, rendement:rend, eurMwh:eurMwh,
+    netAfname:netAfname, injectie:injectie, zelfverbruik:zelfverbruik, piekEff:piekEff,
+    creg:creg, diesel:diesel };
+}
+// onbalans-extra (losse bonus, niet in de zoektocht): kleine % extra winst die stijgt met batterijgrootte
+function onbalansExtra(m){ if(!m||m.battKwh<=0) return 0; return Math.min(0.18,0.05+m.battKwh*0.004) * Math.max(0,m.kostScenario) * 0.25; }
+
+// ============================ ANKERNET + SPLINE-INTERPOLATIE ============================
+function pctPanelen(pct){ return Math.round(P.PV_MAX*pct/100/P.PV_STAP)*P.PV_STAP; }
+function buildGrid(){
+  var by=battAs(), px=pvAs();
+  var battAnk=[0,5,10,15,20,25];                        // 5 kVA dekt alle kWh → alle klassen als anker
+  var pvAnk=[0, pctPanelen(25), pctPanelen(50), pctPanelen(75), pctPanelen(100)];
+  // exacte ankerwaarden
+  var A={}; var runs=0;
+  battAnk.forEach(function(b){ pvAnk.forEach(function(pv){ var key=b+'_'+pv; A[key]=model(b,pv); runs++; }); });
+  // ingemeten (klik-)cellen overschrijven
+  for(var kk in STATE.gemeten){ A[kk]=STATE.gemeten[kk]; }
+  // interpoleer volledige grid (bilineair over de anker-assen; splinevlak-benadering)
+  function interp(field, b, pv){
+    // vind omliggende anker-b en anker-pv
+    function bracket(arr,v){ var lo=arr[0],hi=arr[arr.length-1]; for(var i=0;i<arr.length-1;i++){ if(v>=arr[i]&&v<=arr[i+1]){lo=arr[i];hi=arr[i+1];break;} } return [lo,hi]; }
+    var bb=bracket(battAnk,b), pp=bracket(pvAnk,pv);
+    function val(bx,px){ var m=A[bx+'_'+px]; return m?m[field]:null; }
+    var q11=val(bb[0],pp[0]),q12=val(bb[0],pp[1]),q21=val(bb[1],pp[0]),q22=val(bb[1],pp[1]);
+    if(q11==null) return null;
+    var tb=bb[1]===bb[0]?0:(b-bb[0])/(bb[1]-bb[0]);
+    var tp=pp[1]===pp[0]?0:(pv-pp[0])/(pp[1]-pp[0]);
+    var a=q11+(q21-q11)*tb, c=q12+(q22-q12)*tb;
+    return a+(c-a)*tp;
+  }
+  var G=[];
+  by.forEach(function(b){ px.forEach(function(pv){
+    var exact=A[b+'_'+pv];
+    var cell={ b:b, pv:pv, exact:!!exact };
+    ['kostScenario','besparing','capex','rendement','eurMwh'].forEach(function(f){
+      cell[f]= exact? exact[f] : interp(f,b,pv);
+    });
+    // capex is exact bekend (geen interpolatie nodig): batterijprijs + PV
+    var bt=battPrijs(b); cell.capex = bt? (bt.eur + paneelKwp(pv)*P.PV_KOST) : null;
+    cell.kva = bt? bt.kva : null;
+    G.push(cell);
+  }); });
+  STATE.grid={ cells:G, by:by, px:px, runs:runs };
+  return STATE.grid;
+}
+
+// ============================ HEATMAPS ============================
+var HM=[ {f:'eurMwh',t:'€ / MWh',fmt:function(v){return fmtE1(v);},inv:true},
+         {f:'besparing',t:'Besparing €/jaar',fmt:function(v){return fmtE(v);},inv:false},
+         {f:'capex',t:'Investering (capex)',fmt:function(v){return fmtE(v);},inv:true},
+         {f:'rendement',t:'Rendement %',fmt:function(v){return fmtN(v,1)+' %';},inv:false} ];
+function ramp(t,inv){ // groen(goed)→rood(slecht); inv=true → hoog is slecht
+  t=Math.max(0,Math.min(1,t)); if(inv) t=1-t;
+  var r,g,b; if(t<0.5){var k=t/0.5; r=Math.round(200-40*k); g=Math.round(60+150*k); b=70;} else {var k2=(t-0.5)/0.5; r=Math.round(5+0); g=Math.round(210-40*k2); b=Math.round(80-10*k2);}
+  // t=0 → rood, t=1 → groen
+  r=Math.round(200*(1-t)+5*t); g=Math.round(60*(1-t)+176*t); b=Math.round(60*(1-t)+80*t);
+  return [r,g,b];
+}
+function drawAll(){
+  var G=STATE.grid; if(!G) return;
+  HM.forEach(function(h){
+    var cv=document.getElementById('cv_'+h.f); if(!cv) return;
+    var by=G.by, px=G.px; cv.width=px.length; cv.height=by.length;
+    var ctx=cv.getContext('2d'); var img=ctx.createImageData(px.length,by.length);
+    var vals=G.cells.map(function(c){return c[h.f];}).filter(function(v){return v!=null && isFinite(v);});
+    var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals); if(hi===lo)hi=lo+1;
+    G.cells.forEach(function(c){
+      var xi=px.indexOf(c.pv), yi=by.indexOf(c.b);
+      var v=c[h.f]; var col= (v==null||!isFinite(v))?[225,228,232]:ramp((v-lo)/(hi-lo), h.inv);
+      var idx=((by.length-1-yi)*px.length+xi)*4;   // y omgekeerd: kleine batterij onderaan
+      img.data[idx]=col[0];img.data[idx+1]=col[1];img.data[idx+2]=col[2];img.data[idx+3]=255;
+    });
+    ctx.putImageData(img,0,0);
+    // markeer geselecteerde cel
+    if(STATE.sel){ var sx=px.indexOf(STATE.sel.pv), sy=by.indexOf(STATE.sel.b);
+      if(sx>=0&&sy>=0){ ctx.strokeStyle='#111'; ctx.lineWidth=0.14; ctx.strokeRect(sx+0.07,(by.length-1-sy)+0.07,0.86,0.86);} }
+  });
+}
+function cellAt(h,ev){ var cv=document.getElementById('cv_'+h.f); var r=cv.getBoundingClientRect(); var G=STATE.grid;
+  var xi=Math.floor((ev.clientX-r.left)/r.width*G.px.length); var yiTop=Math.floor((ev.clientY-r.top)/r.height*G.by.length);
+  var yi=G.by.length-1-yiTop; xi=Math.max(0,Math.min(G.px.length-1,xi)); yi=Math.max(0,Math.min(G.by.length-1,yi));
+  return G.cells.find(function(c){return c.pv===G.px[xi]&&c.b===G.by[yi];});
+}
+function bindHeatmaps(){
+  var tip=document.getElementById('tooltip');
+  HM.forEach(function(h){ var cv=document.getElementById('cv_'+h.f);
+    cv.onmousemove=function(ev){ var c=cellAt(h,ev); if(!c){tip.style.display='none';return;}
+      tip.style.display='block'; tip.style.left=(ev.clientX+12)+'px'; tip.style.top=(ev.clientY+12)+'px';
+      tip.innerHTML='<b>'+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen</b><br>'+
+        '€/MWh '+ (c.eurMwh!=null?fmtE1(c.eurMwh):'—') +' · besp. '+(c.besparing!=null?fmtE(c.besparing):'—')+'<br>'+
+        'capex '+(c.capex!=null?fmtE(c.capex):'—')+' · rend. '+(c.rendement!=null?fmtN(c.rendement,1)+'%':'—')+
+        (c.exact?'':' <i>(interpol.)</i>');
+      showHover(c);
+    };
+    cv.onmouseleave=function(){ tip.style.display='none'; };
+    cv.onclick=function(ev){ var c=cellAt(h,ev); if(c){ simulateCell(c.b,c.pv); } };
+  });
+}
+function showHover(c){ document.getElementById('hoverInfo').innerHTML =
+  '<b>'+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp)</b> — klik om exact te simuleren'; }
+
+// klik = "echt simuleren" → exact model + verfijn interpolatie
+function simulateCell(b,pv){ var m=model(b,pv); if(!m) return; STATE.gemeten[b+'_'+pv]=m; buildGrid(); STATE.sel={b:b,pv:pv}; render(); }
+
+// ============================ RANDVOORWAARDEN-ZOEK (≤5 iter) ============================
+function autoZoek(){
+  STATE.iterLog=[];
+  var G=STATE.grid; var maxPan=IN.max_pv_pan, maxBud=IN.max_budget, minR=IN.min_rend!=null?IN.min_rend:P.RENDEMENT_MIN;
+  function kandidaten(){ return G.cells.filter(function(c){
+    if(c.rendement==null||c.capex==null) return false;
+    if(c.rendement < minR) return false;
+    if(maxBud!=null && c.capex>maxBud) return false;
+    if(maxPan!=null && c.pv>maxPan) return false;
+    return true; }); }
+  var pick=null;
+  for(var it=1; it<=5; it++){
+    var K=kandidaten(); if(!K.length){ STATE.iterLog.push('Iteratie '+it+': geen cel voldoet aan de randvoorwaarden.'); break; }
+    K.sort(function(a,b){return b.capex-a.capex;});          // grootste investering die nog voldoet
+    pick=K[0];
+    if(pick.exact){ STATE.iterLog.push('Iteratie '+it+': cel '+pick.b+'kWh/'+pick.pv+'p is al exact — bevestigd.'); break; }
+    // simuleer exact → verfijn
+    var before=pick.rendement; simulateCellQuiet(pick.b,pick.pv); G=STATE.grid;
+    var now=STATE.grid.cells.find(function(c){return c.b===pick.b&&c.pv===pick.pv;});
+    STATE.iterLog.push('Iteratie '+it+': '+pick.b+'kWh/'+pick.pv+'p gesimuleerd (rend. '+fmtN(before,1)+'% → '+fmtN(now.rendement,1)+'%).');
+    // blijft dit de grootste-capex-kandidaat? zo ja klaar
+    var K2=kandidaten(); K2.sort(function(a,b){return b.capex-a.capex;});
+    if(K2.length && K2[0].b===pick.b && K2[0].pv===pick.pv && K2[0].exact){ pick=K2[0]; STATE.iterLog.push('→ bevestigd als optimale opstelling.'); break; }
+    pick = K2.length? K2[0] : pick;
+  }
+  if(pick){ STATE.sel={b:pick.b,pv:pick.pv}; }
+  render();
+}
+function simulateCellQuiet(b,pv){ var m=model(b,pv); if(m){ STATE.gemeten[b+'_'+pv]=m; buildGrid(); } }
+
+// ============================ RENDER ============================
+function selCell(){ if(!STATE.sel) return null; return STATE.grid.cells.find(function(c){return c.b===STATE.sel.b&&c.pv===STATE.sel.pv;}); }
+function render(){ buildGrid(); renderCards(); renderConstraints(); renderSel(); renderReport(); drawAll(); bindHeatmaps(); }
+function renderCards(){
+  document.getElementById('cards').innerHTML = HM.map(function(h){
+    return '<div class="hm-card"><div class="h">'+h.t+'</div>'+
+      '<canvas class="hm" id="cv_'+h.f+'"></canvas>'+
+      '<div class="axis"><span>0 pan.</span><span>extra PV →</span><span>'+P.PV_MAX+' pan.</span></div>'+
+      '<div class="axis"><span>↑ batterij 0→25 kWh</span></div></div>';
+  }).join('') + '<div style="grid-column:1/-1;font-size:11px;color:#5A6577" id="hoverInfo">Beweeg over een heatmap; klik een cel om die exact te simuleren.</div>';
+}
+function renderConstraints(){
+  document.getElementById('constraintsBar').innerHTML =
+    '<div><label>Max PV (panelen)</label><input id="c_pan" style="width:110px" value="'+(IN.max_pv_pan!=null?IN.max_pv_pan:'')+'" placeholder="—"></div>'+
+    '<div><label>Max budget (€)</label><input id="c_bud" style="width:120px" value="'+(IN.max_budget!=null?IN.max_budget:'')+'" placeholder="—"></div>'+
+    '<div><label>Min rendement (%)</label><input id="c_rend" style="width:110px" value="'+(IN.min_rend!=null?IN.min_rend:'')+'" placeholder="'+P.RENDEMENT_MIN+'"></div>'+
+    '<button class="btn o" onclick="applyConstraints()">Zoek optimale opstelling ▶</button>'+
+    (STATE.iterLog.length?'<div class="note" style="flex-basis:100%">'+STATE.iterLog.join('<br>')+'</div>':'');
+}
+window.applyConstraints=function(){ IN.max_pv_pan=numOrNull('c_pan'); IN.max_budget=numOrNull('c_bud'); IN.min_rend=numOrNull('c_rend'); autoZoek(); };
+function numOrNull(id){ var v=document.getElementById(id).value.replace(/[^0-9.]/g,''); return v===''?null:+v; }
+function renderSel(){
+  var c=selCell(); var el=document.getElementById('selPanel');
+  if(!c){ el.innerHTML='<div class="tt" style="position:static;display:block;background:none;color:#5A6577">Geen cel geselecteerd — klik een cel of gebruik “Zoek optimale opstelling”.</div>'; return; }
+  var m = STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv);
+  var onb = m?onbalansExtra(m):0;
+  el.innerHTML='<div class="tt">Geselecteerde opstelling'+(c.exact?' · gesimuleerd':' · geïnterpoleerd')+'</div>'+
+    '<div style="font-weight:800;color:#1F3864;margin-bottom:8px">Batterij '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · extra PV '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp) · investering '+fmtE(c.capex)+'</div>'+
+    '<div class="kpis">'+
+     '<div class="kpi"><div class="l">Jaarkost scenario</div><div class="v">'+fmtE(c.kostScenario)+'</div><div class="s">woning + laden</div></div>'+
+     '<div class="kpi g"><div class="l">Besparing/jaar</div><div class="v">'+fmtE(c.besparing)+'</div><div class="s">vs. referentie '+fmtE(IN.referentiekost)+'</div></div>'+
+     '<div class="kpi o"><div class="l">Terugverdientijd</div><div class="v">'+(c.besparing>0?fmtN(c.capex/c.besparing,1)+' jr':'—')+'</div><div class="s">capex ÷ besparing</div></div>'+
+     '<div class="kpi r"><div class="l">Rendement (jr 1)</div><div class="v">'+fmtN(c.rendement,1)+' %</div><div class="s">besparing ÷ capex</div></div>'+
+     '<div class="kpi"><div class="l">€/MWh</div><div class="v">'+fmtE1(c.eurMwh)+'</div><div class="s">volledige site</div></div>'+
+    '</div>'+
+    '<div class="note" style="margin-top:8px">Onbalans-extra (opportunistisch, niet in het rendement): ~'+fmtE(onb)+'/jaar bovenop — enkel indicatief.</div>';
+}
+function renderReport(){
+  var c=selCell(); var el=document.getElementById('report'); if(!c){ el.innerHTML=''; return; }
+  var m = STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv); if(!m){el.innerHTML='';return;}
+  // meerjaren met inflatie + netkosten-indexatie
+  var rows=''; var cum=-c.capex; var infl=P.INFLATIE/100, netx=(P.INFLATIE+P.NETINDEX)/100;
+  for(var y=1;y<=P.HORIZON;y++){
+    var besp = m.besparing * Math.pow(1+ (infl+ (netx-infl)*0.5), y-1);   // besparing groeit ~mee met kosteninflatie
+    cum += besp;
+    if(y<=8 || y===P.HORIZON) rows+='<tr><td>Jaar '+y+'</td><td>'+fmtE(besp)+'</td><td class="'+(cum>=0?'pos':'neg')+'">'+fmtE(cum)+'</td></tr>';
+  }
+  el.innerHTML='<h3 style="border:none;margin-top:4px">Rapport — aanbevolen opstelling</h3>'+
+    '<table><thead><tr><th>Onderdeel</th><th>Waarde</th></tr></thead><tbody>'+
+     '<tr><td>Referentie (bestaande jaarkost)</td><td>'+fmtE(IN.referentiekost)+'</td></tr>'+
+     '<tr><td>Werkgever-tussenkomst (CREG)</td><td>'+fmtE(m.creg)+'</td></tr>'+
+     '<tr><td>Vermeden dieselkost (niet-vergoede wagens)</td><td>'+fmtE(m.diesel)+'</td></tr>'+
+     '<tr><td>Jaarkost scenario (PV+batterij, sturing z. onbalans)</td><td>'+fmtE(m.kostScenario)+'</td></tr>'+
+     '<tr style="font-weight:700"><td>Besparing/jaar</td><td class="pos">'+fmtE(m.besparing)+'</td></tr>'+
+     '<tr><td>Investering (capex)</td><td>'+fmtE(c.capex)+'</td></tr>'+
+     '<tr><td>Terugverdientijd · rendement jr 1</td><td>'+(m.besparing>0?fmtN(c.capex/m.besparing,1)+' jr':'—')+' · '+fmtN(c.rendement,1)+' %</td></tr>'+
+    '</tbody></table>'+
+    '<div class="note">Cumulatieve cashflow met inflatie '+P.INFLATIE+' % en netkosten-indexatie '+P.NETINDEX+' % boven inflatie (horizon '+P.HORIZON+' jr):</div>'+
+    '<table><thead><tr><th>Jaar</th><th>Besparing</th><th>Cumulatief</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div class="note">Prototype-model — vervang door /api/thuisladen (echte LP-dispatch) voor productie. Onbalans blijft buiten de zoektocht en het rendement.</div>';
+}
+
+// ============================ INVOER-PANEEL ============================
+function renderSide(){
+  var w=IN.wagens.map(function(wg,i){ return '<div class="wagen"><button class="del" onclick="delWagen('+i+')">✕</button>'+
+    '<div style="font-weight:700;color:#1F3864;font-size:12px;margin-bottom:4px">Wagen '+(i+1)+'</div>'+
+    '<div class="row2"><div><label>km/jaar</label><input value="'+wg.km+'" onchange="setW('+i+',\'km\',this.value)"></div>'+
+    '<div><label>kWh/km</label><input value="'+wg.kwhkm+'" onchange="setW('+i+',\'kwhkm\',this.value)"></div></div>'+
+    '<div class="row2"><div><label>Laadvenster weekdag</label><div class="row2"><input value="'+wg.wd_start+'" onchange="setW('+i+',\'wd_start\',this.value)"><input value="'+wg.wd_eind+'" onchange="setW('+i+',\'wd_eind\',this.value)"></div></div>'+
+    '<div><label>weekend</label><div class="row2"><input value="'+wg.we_start+'" onchange="setW('+i+',\'we_start\',this.value)"><input value="'+wg.we_eind+'" onchange="setW('+i+',\'we_eind\',this.value)"></div></div></div>'+
+    '<label style="margin-top:5px"><input type="checkbox" style="width:auto;margin-right:5px" '+(wg.creg?'checked':'')+' onchange="setW('+i+',\'creg\',this.checked)">Werkgever vergoedt (CREG); anders diesel-benchmark</label>'+
+    '</div>'; }).join('');
+  document.getElementById('side').innerHTML=
+    '<h3>Invoer</h3>'+
+    '<div class="hint">Bij voorkeur via factuur inlezen (simulator/Kamino-weg). Manueel hieronder.</div>'+
+    '<label>Jaarverbruik woning (MWh)</label><input value="'+IN.jaarverbruik_mwh+'" onchange="setIn(\'jaarverbruik_mwh\',this.value)">'+
+    '<label>Piekvermogen (kW)</label><input value="'+IN.piek_kw+'" onchange="setIn(\'piek_kw\',this.value)">'+
+    '<label>Bestaande jaarlijkse energiekost (€) — referentie</label><input value="'+IN.referentiekost+'" onchange="setIn(\'referentiekost\',this.value)">'+
+    '<div class="row2"><div><label>Fasen</label><select onchange="setIn(\'fasen\',this.value)"><option value="2"'+(IN.fasen===2?' selected':'')+'>2 fasen (≤5 kVA)</option><option value="3"'+(IN.fasen===3?' selected':'')+'>3 fasen (≤25 kVA)</option></select></div>'+
+    '<div><label>Harde grens</label><input value="'+maxKva()+' kVA" disabled></div></div>'+
+    '<div class="row2"><div><label>Bestaande PV (kWp)</label><input value="'+IN.bestaand_pv_kwp+'" onchange="setIn(\'bestaand_pv_kwp\',this.value)"></div>'+
+    '<div><label>Injectie (MWh/jr)</label><input value="'+IN.bestaand_inj_mwh+'" onchange="setIn(\'bestaand_inj_mwh\',this.value)"></div></div>'+
+    '<h3>Wagens (laadvraag per wagen)</h3>'+w+
+    '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
+    '<div style="margin-top:14px"><button class="btn g" style="width:100%" onclick="rerun()">↻ Herbereken heatmaps</button></div>'+
+    '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar · '+STATE.grid?(STATE.grid.runs+' anker-runs'):''+'</div>';
+}
+window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){STATE.gemeten={};} };
+window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
+window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:0,wd_eind:7,we_start:0,we_eind:9,creg:true}); renderSide(); };
+window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
+window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; render(); renderSide(); };
+
+// ============================ MANAGER-MODAL ============================
+function renderMgrBtn(){ document.getElementById('mgrBtn').style.display = (STATE.rol==='manager')?'inline-block':'none'; }
+window.openMgr=function(){ var g=document.getElementById('mgrModal'); g.style.display='flex';
+  var f=[['MAX_KVA_2F','Harde grens 2 fasen (kVA)'],['MAX_KVA_3F','Harde grens 3 fasen (kVA)'],['LAADVERMOGEN_BASIS','Laadvermogen basis (kVA)'],
+    ['PANEEL_WP','Vermogen paneel (Wp)'],['PANEEL_M2','m² per paneel'],['PV_KOST','PV-kost (€/kWp)'],['PV_MIN','PV min panelen'],['PV_MAX','PV max panelen'],['PV_STAP','PV stap'],
+    ['RENDEMENT_MIN','Min rendement (%)'],['INFLATIE','Inflatie (%)'],['NETINDEX','Netkosten-index boven inflatie (%)'],['HORIZON','Horizon (jaar)'],
+    ['CREG','CREG-tarief (€/MWh)'],['DIESEL_100KM','Dieselkost (€/100 km)'],['SPOT','Spot gemiddeld (€/MWh)'],['NETKOST_MWH','Netkost energie (€/MWh)'],['HEFFING_MWH','Heffingen (€/MWh)'],
+    ['CAPACITEIT_KW_JR','Capaciteitstarief (€/kW/jr)'],['INJECTIE_MWH','Injectievergoeding (€/MWh)'],['PV_YIELD','PV-opbrengst (kWh/kWp)']];
+  var bt='<table><thead><tr><th>kVA</th><th>kWh</th><th>€</th></tr></thead><tbody>'+P.BATT.map(function(b,i){return '<tr><td>'+b.kva+'</td><td>'+b.kwh+'</td><td><input style="width:90px;text-align:right" value="'+b.eur+'" onchange="P.BATT['+i+'].eur=+this.value"></td></tr>';}).join('')+'</tbody></table>';
+  document.getElementById('mgrModalInner').innerHTML='<h2>Parameters (manager)</h2>'+
+    '<div class="pgrid">'+f.map(function(x){return '<div><label>'+x[1]+'</label><input value="'+P[x[0]]+'" onchange="P[\''+x[0]+'\']=+this.value"></div>';}).join('')+'</div>'+
+    '<h3 style="margin-top:12px">Batterijreeks (prijzen)</h3>'+bt+
+    '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn ghost" onclick="closeMgr()">Annuleren</button><button class="btn g" onclick="saveMgr()">Toepassen</button></div>';
+};
+window.closeMgr=function(){ document.getElementById('mgrModal').style.display='none'; };
+window.saveMgr=function(){ closeMgr(); STATE.gemeten={}; STATE.sel=null; render(); renderSide(); };
+document.getElementById('mgrBtn').onclick=window.openMgr;
+
+// ============================ SERVER-DISPATCH (/api/thuisladen) ============================
+// De heatmap-ankers (30 cellen) komen uit de ECHTE simulator.py-dispatch (zonder onbalans).
+// Local model() blijft de gegarandeerde fallback: faalt/ontbreekt de server → indicatief model,
+// zodat de app nooit onbruikbaar wordt. Zodra server-ankers geladen zijn, gebruikt model() die.
+var API_BASE = 'https://lucid-amazement-production.up.railway.app';
+STATE.serverAnchors = {};   // 'b_pv' → {kost,besparing,rendement,eurMwh,capex,kva,ev_mwh}
+STATE.serverMode = false;
+
+function tlHeaders(){
+  var h = { 'Content-Type':'application/json' };
+  try{ if(window.FluctusAppAuth){ var t = window.FluctusAppAuth.token(); if(t) h['Authorization']='Bearer '+t; } }catch(e){}
+  return h;
+}
+function cregDiesel(){
+  var creg=0, diesel=0;
+  IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*P.CREG; else diesel += (w.km/100)*P.DIESEL_100KM; });
+  return { creg:creg, diesel:diesel };
+}
+// Server-anker → model-vormig object (server-cijfers + lokaal berekende CREG/diesel voor het rapport).
+function svModel(b, pv){
+  var a = STATE.serverAnchors[b+'_'+pv]; if(!a || a.kost==null) return null;
+  var bt = battPrijs(b); var cd = cregDiesel();
+  return { battKwh:b, kva:(a.kva!=null?a.kva:(bt?bt.kva:null)), pvPan:pv, kwp:IN.bestaand_pv_kwp+paneelKwp(pv),
+    capex:(a.capex!=null?a.capex:(bt?(bt.eur+paneelKwp(pv)*P.PV_KOST):null)),
+    kostScenario:a.kost, besparing:a.besparing, rendement:a.rendement, eurMwh:a.eurMwh,
+    netAfname:null, injectie:null, zelfverbruik:null, piekEff:null,
+    creg:cd.creg, diesel:cd.diesel, _server:true };
+}
+// POST /api/thuisladen → 30 ankers. Vult STATE.serverAnchors + hertekent. Faalt stil → local model.
+function fetchServerGrid(){
+  var badge = document.getElementById('modeBadge');
+  if(badge){ badge.textContent='server rekent…'; badge.style.background='#FFF3E0'; badge.style.color='#9E480E'; badge.style.borderColor='#9E480E55'; }
+  return fetch(API_BASE+'/api/thuisladen', { method:'POST', headers:tlHeaders(),
+      body: JSON.stringify({ in: IN, params: P }) })
+    .then(function(r){ return r.json().then(function(j){ return { status:r.status, j:j }; }); })
+    .then(function(res){
+      if(res.status!==200 || !res.j || !Array.isArray(res.j.anchors)) throw new Error((res.j&&res.j.error)||('HTTP '+res.status));
+      var map={};
+      res.j.anchors.forEach(function(a){
+        if(a.battKwh==null||a.pvPan==null) return;
+        map[a.battKwh+'_'+a.pvPan] = { kost:a.kost, besparing:a.besparing, rendement:a.rendement,
+          eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh };
+      });
+      STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {};
+      if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
+      try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','grid_gedraaid',{ runs:res.j.runs, ev_mwh:res.j.ev_mwh }); }catch(e){}
+      render(); renderSide();
+    })
+    .catch(function(err){
+      STATE.serverMode = false;
+      if(badge){ badge.textContent='prototype-model'; badge.style.background='#80C53922'; badge.style.color='#80C539'; badge.style.borderColor='#80C53955'; }
+      console.warn('[thuisladen] server niet bereikbaar, local model:', err && err.message);
+      render(); renderSide();
+    });
+}
+
+// ============================ INIT + APP-TOEGANG ============================
+// De app draait pas na een geslaagde toegangscontrole (FluctusAppAuth.requireAccess).
+// Managers krijgen impliciet toegang tot elke app; verkopers moeten de app 'thuisladen'
+// toegekend krijgen. In een embed (Kamino-iframe) zit de login al vóór → gate overslaan.
+// NAAMGEVING: bewust FluctusAppAuth, NIET FluctusAuth (Academy-login) — nooit verwarren.
+(function _boot(){
+  var root = document.getElementById('tl-root');
+  var _embed = false; try{ _embed = (window.self !== window.top); }catch(e){ _embed = true; }
+  var toegangsCheck = _embed
+    ? Promise.resolve(true)
+    : ((window.FluctusAppAuth && typeof window.FluctusAppAuth.requireAccess === 'function')
+        ? window.FluctusAppAuth.requireAccess('thuisladen', root)
+        : Promise.resolve(true));   // fail-open bij ontbrekend snippet (app niet blokkeren)
+  toegangsCheck.then(function(toegang){
+    if(!toegang) return;   // requireAccess heeft #tl-root al met een melding vervangen
+    // Rol uit de toegangscontrole: manager ziet de parametermodal.
+    try{ var u = window.FluctusAppAuth && window.FluctusAppAuth.user;
+      STATE.rol = (u && u.role === 'manager') ? 'manager' : 'seller'; }catch(e){}
+    render(); renderSide(); renderMgrBtn();
+    fetchServerGrid();   // vervang de indicatieve ankers meteen door de echte dispatch
+  });
+})();
+</script>
+</body></html>
