@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.2.0  (2026-08-16)
+     FLUCTUS THUISLADEN  v0.2.1  (2026-08-16)
+     v0.2.1: FIX invoerkolom leeg (operator-precedence bug in renderSide → hele
+             invoer-HTML werd vervangen door enkel "N anker-runs"). "Herbereken
+             heatmaps" re-runt nu de server-dispatch (i.p.v. enkel lokaal). Server-
+             call krijgt een 150s-timeout + toont meteen de heatmaps terwijl hij rekent.
+     ---------------------------------------------------------------------------
+     v0.2.0  (2026-08-16)
      v0.2.0: (1) APP-TOEGANG — FluctusAppAuth-snippet + requireAccess('thuisladen')
              gate op #tl-root (zelfde patroon als de simulator). Managers krijgen
              impliciet toegang; verkopers moeten 'thuisladen' toegekend krijgen.
@@ -569,13 +575,13 @@ function renderSide(){
     '<h3>Wagens (laadvraag per wagen)</h3>'+w+
     '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
     '<div style="margin-top:14px"><button class="btn g" style="width:100%" onclick="rerun()">↻ Herbereken heatmaps</button></div>'+
-    '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar · '+STATE.grid?(STATE.grid.runs+' anker-runs'):''+'</div>';
+    '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar'+(STATE.grid?(' · '+STATE.grid.runs+' anker-runs'):'')+'</div>';
 }
 window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){STATE.gemeten={};} };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:0,wd_eind:7,we_start:0,we_eind:9,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
-window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; render(); renderSide(); };
+window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; fetchServerGrid(); };
 
 // ============================ MANAGER-MODAL ============================
 function renderMgrBtn(){ document.getElementById('mgrBtn').style.display = (STATE.rol==='manager')?'inline-block':'none'; }
@@ -627,9 +633,14 @@ function svModel(b, pv){
 function fetchServerGrid(){
   var badge = document.getElementById('modeBadge');
   if(badge){ badge.textContent='server rekent…'; badge.style.background='#FFF3E0'; badge.style.color='#9E480E'; badge.style.borderColor='#9E480E55'; }
+  // Toon meteen de (indicatieve) heatmaps terwijl de server rekent, zodat de UI nooit leeg oogt.
+  render(); renderSide();
+  // Timeout: 30 residentiële dispatches kunnen even duren; na 150s val terug op het lokale model.
+  var ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  var to = setTimeout(function(){ try{ if(ctrl) ctrl.abort(); }catch(e){} }, 150000);
   return fetch(API_BASE+'/api/thuisladen', { method:'POST', headers:tlHeaders(),
-      body: JSON.stringify({ in: IN, params: P }) })
-    .then(function(r){ return r.json().then(function(j){ return { status:r.status, j:j }; }); })
+      body: JSON.stringify({ in: IN, params: P }), signal: ctrl?ctrl.signal:undefined })
+    .then(function(r){ clearTimeout(to); return r.json().then(function(j){ return { status:r.status, j:j }; }); })
     .then(function(res){
       if(res.status!==200 || !res.j || !Array.isArray(res.j.anchors)) throw new Error((res.j&&res.j.error)||('HTTP '+res.status));
       var map={};
@@ -644,6 +655,7 @@ function fetchServerGrid(){
       render(); renderSide();
     })
     .catch(function(err){
+      clearTimeout(to);
       STATE.serverMode = false;
       if(badge){ badge.textContent='prototype-model'; badge.style.background='#80C53922'; badge.style.color='#80C539'; badge.style.borderColor='#80C53955'; }
       console.warn('[thuisladen] server niet bereikbaar, local model:', err && err.message);
