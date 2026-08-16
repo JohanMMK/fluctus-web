@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.2.1  (2026-08-16)
+     FLUCTUS THUISLADEN  v0.3.0  (2026-08-16)
+     v0.3.0: (1) FACTUUR INLEZEN — knop "📄 Factuur inlezen (PDF)" bovenaan de invoer;
+             POST /api/factuur-extract (zelfde weg als de simulator) → mapt afnameKwh/
+             totaalExclBtw/aansluitVermogenKva/pvKwpAanwezig naar de invoer, jaargerekend
+             op de factuurperiode. Fasen blijft manueel. (2) HEATMAPS kleurenblind-veilig:
+             viridis (paars→geel) i.p.v. rood-groen, met kleurlegende.
+     ---------------------------------------------------------------------------
+     v0.2.1  (2026-08-16)
      v0.2.1: FIX invoerkolom leeg (operator-precedence bug in renderSide → hele
              invoer-HTML werd vervangen door enkel "N anker-runs"). "Herbereken
              heatmaps" re-runt nu de server-dispatch (i.p.v. enkel lokaal). Server-
@@ -407,12 +414,15 @@ var HM=[ {f:'eurMwh',t:'€ / MWh',fmt:function(v){return fmtE1(v);},inv:true},
          {f:'besparing',t:'Besparing €/jaar',fmt:function(v){return fmtE(v);},inv:false},
          {f:'capex',t:'Investering (capex)',fmt:function(v){return fmtE(v);},inv:true},
          {f:'rendement',t:'Rendement %',fmt:function(v){return fmtN(v,1)+' %';},inv:false} ];
-function ramp(t,inv){ // groen(goed)→rood(slecht); inv=true → hoog is slecht
-  t=Math.max(0,Math.min(1,t)); if(inv) t=1-t;
-  var r,g,b; if(t<0.5){var k=t/0.5; r=Math.round(200-40*k); g=Math.round(60+150*k); b=70;} else {var k2=(t-0.5)/0.5; r=Math.round(5+0); g=Math.round(210-40*k2); b=Math.round(80-10*k2);}
-  // t=0 → rood, t=1 → groen
-  r=Math.round(200*(1-t)+5*t); g=Math.round(60*(1-t)+176*t); b=Math.round(60*(1-t)+80*t);
-  return [r,g,b];
+// Viridis — kleurenblind-veilig, perceptueel uniform. Paars = ongunstig, geel = gunstig.
+// (Vervangt de oude rood-groen schaal, die voor rood-groen-kleurenblinden niet leesbaar was.)
+var VIRIDIS=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+function ramp(t,inv){
+  t=Math.max(0,Math.min(1,t)); if(inv) t=1-t;   // inv → hoog is ongunstig; geel blijft altijd 'goed'
+  var seg=t*(VIRIDIS.length-1), i=Math.floor(seg), f=seg-i;
+  if(i>=VIRIDIS.length-1) return VIRIDIS[VIRIDIS.length-1].slice();
+  var a=VIRIDIS[i], b=VIRIDIS[i+1];
+  return [Math.round(a[0]+(b[0]-a[0])*f), Math.round(a[1]+(b[1]-a[1])*f), Math.round(a[2]+(b[2]-a[2])*f)];
 }
 function drawAll(){
   var G=STATE.grid; if(!G) return;
@@ -431,7 +441,7 @@ function drawAll(){
     ctx.putImageData(img,0,0);
     // markeer geselecteerde cel
     if(STATE.sel){ var sx=px.indexOf(STATE.sel.pv), sy=by.indexOf(STATE.sel.b);
-      if(sx>=0&&sy>=0){ ctx.strokeStyle='#111'; ctx.lineWidth=0.14; ctx.strokeRect(sx+0.07,(by.length-1-sy)+0.07,0.86,0.86);} }
+      if(sx>=0&&sy>=0){ ctx.strokeStyle='#fff'; ctx.lineWidth=0.16; ctx.strokeRect(sx+0.08,(by.length-1-sy)+0.08,0.84,0.84);} }
   });
 }
 function cellAt(h,ev){ var cv=document.getElementById('cv_'+h.f); var r=cv.getBoundingClientRect(); var G=STATE.grid;
@@ -499,7 +509,11 @@ function renderCards(){
       '<canvas class="hm" id="cv_'+h.f+'"></canvas>'+
       '<div class="axis"><span>0 pan.</span><span>extra PV →</span><span>'+P.PV_MAX+' pan.</span></div>'+
       '<div class="axis"><span>↑ batterij 0→25 kWh</span></div></div>';
-  }).join('') + '<div style="grid-column:1/-1;font-size:11px;color:#5A6577" id="hoverInfo">Beweeg over een heatmap; klik een cel om die exact te simuleren.</div>';
+  }).join('') + '<div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:11px;color:#5A6577;flex-wrap:wrap">'+
+    '<span id="hoverInfo">Beweeg over een heatmap; klik een cel om die exact te simuleren.</span>'+
+    '<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">ongunstig'+
+      '<span style="display:inline-block;width:120px;height:11px;border-radius:3px;background:linear-gradient(90deg,rgb(68,1,84),rgb(59,82,139),rgb(33,145,140),rgb(94,201,98),rgb(253,231,37))"></span>gunstig</span>'+
+    '</div>';
 }
 function renderConstraints(){
   document.getElementById('constraintsBar').innerHTML =
@@ -564,7 +578,10 @@ function renderSide(){
     '</div>'; }).join('');
   document.getElementById('side').innerHTML=
     '<h3>Invoer</h3>'+
-    '<div class="hint">Bij voorkeur via factuur inlezen (simulator/Kamino-weg). Manueel hieronder.</div>'+
+    '<div class="hint">Bij voorkeur via factuur inlezen (zelfde weg als de simulator). Manueel kan ook hieronder.</div>'+
+    '<button class="btn" style="width:100%;margin:2px 0 6px" onclick="document.getElementById(\'tlFactuurInput\').click()">📄 Factuur inlezen (PDF)</button>'+
+    '<input type="file" id="tlFactuurInput" accept="application/pdf" multiple style="display:none" onchange="tlFactuurUpload(this)">'+
+    '<div id="tlFactuurMsg" class="hint" style="margin:0 0 8px">'+(STATE.factuurMsg||'')+'</div>'+
     '<label>Jaarverbruik woning (MWh)</label><input value="'+IN.jaarverbruik_mwh+'" onchange="setIn(\'jaarverbruik_mwh\',this.value)">'+
     '<label>Piekvermogen (kW)</label><input value="'+IN.piek_kw+'" onchange="setIn(\'piek_kw\',this.value)">'+
     '<label>Bestaande jaarlijkse energiekost (€) — referentie</label><input value="'+IN.referentiekost+'" onchange="setIn(\'referentiekost\',this.value)">'+
@@ -582,6 +599,52 @@ window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:0,wd_eind:7,we_start:0,we_eind:9,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
 window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; fetchServerGrid(); };
+
+// ============================ FACTUUR INLEZEN (/api/factuur-extract) ============================
+// Zelfde weg als de simulator: PDF('s) → base64 → /api/factuur-extract → baseCase.
+// We mappen enkel de velden die de Thuisladen-tegel nodig heeft en jaarrekenen op
+// de factuurperiode (residentieel jaarmodel). De rest kan de klant manueel bijstellen.
+function _tlFileB64(file){
+  return new Promise(function(res,rej){
+    var r=new FileReader();
+    r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); };
+    r.onerror=function(){ rej(new Error('Kon bestand niet lezen')); };
+    r.readAsDataURL(file);
+  });
+}
+function _tlDagen(a,b){ try{ var d=(new Date(b)-new Date(a))/86400000; return (isFinite(d)&&d>0)?d:0; }catch(e){ return 0; } }
+function _tlZetMsg(txt){ STATE.factuurMsg=txt; var el=document.getElementById('tlFactuurMsg'); if(el) el.innerHTML=txt; }
+window.tlFactuurUpload=function(input){
+  if(!input || !input.files || !input.files.length) return;
+  var files=[]; for(var i=0;i<input.files.length;i++) files.push(input.files[i]);
+  input.value='';   // zelfde bestand opnieuw kiezen toestaan
+  _tlZetMsg('⏳ Factuur wordt gelezen… (Anthropic API, ~15-25s)');
+  Promise.all(files.map(_tlFileB64)).then(function(b64s){
+    return fetch(API_BASE+'/api/factuur-extract', { method:'POST', headers:tlHeaders(),
+      body: JSON.stringify({ files: b64s.map(function(b,ix){ return { base64:b, mediaType:'application/pdf', fileName:files[ix].name }; }) }) });
+  }).then(function(r){ return r.json().then(function(j){ return { status:r.status, j:j }; }); })
+    .then(function(res){
+      var r=res.j;
+      if(res.status!==200 || !r || !r.ok || !r.baseCase){ _tlZetMsg('⚠️ Kon de factuur niet lezen'+((r&&r.error)?(': '+r.error):'')+'. Vul manueel in.'); return; }
+      var bc=r.baseCase;
+      // Jaarrekenen op de factuurperiode (voor een jaarafrekening ≈ ×1).
+      var dagen=_tlDagen(bc.periodeVan, bc.periodeTot); var jf=(dagen>0)?(365/dagen):1;
+      var afnKwh=+bc.afnameKwh||0;
+      if(afnKwh>0) IN.jaarverbruik_mwh = Math.round(afnKwh/1000*jf*100)/100;
+      var tot=+bc.totaalExclBtw||0;
+      if(tot>0) IN.referentiekost = Math.round(tot*jf);
+      var kva=+bc.aansluitVermogenKva||0;
+      if(kva>0) IN.piek_kw = Math.round(kva*10)/10;
+      var pv=+bc.pvKwpAanwezig||0;
+      if(pv>0) IN.bestaand_pv_kwp = Math.round(pv*10)/10;
+      // Fasen: enkel LS is relevant; laat de klant 2/3 fasen zelf kiezen (staat niet betrouwbaar op de factuur).
+      try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','factuur_geparseerd',{ klant_naam:bc.klantNaam||null, klant_btw:bc.klantBtw||null }); }catch(e){}
+      var naam=bc.klantNaam?(' — '+bc.klantNaam):'';
+      _tlZetMsg('✅ Factuur ingelezen'+naam+'. Verbruik '+fmtN(IN.jaarverbruik_mwh,2)+' MWh/jaar'+(tot>0?(', referentie '+fmtE(IN.referentiekost)):'')+(dagen>0&&Math.abs(jf-1)>0.05?(' (naar jaar herrekend uit '+Math.round(dagen)+' dagen)'):'')+'. Controleer + vul fasen/wagens aan, dan Herbereken.');
+      renderSide(); STATE.serverMode=false; fetchServerGrid();
+    })
+    .catch(function(e){ _tlZetMsg('⚠️ Factuur lezen mislukt: '+(e&&e.message||'netwerkfout')+'. Vul manueel in.'); });
+};
 
 // ============================ MANAGER-MODAL ============================
 function renderMgrBtn(){ document.getElementById('mgrBtn').style.display = (STATE.rol==='manager')?'inline-block':'none'; }
