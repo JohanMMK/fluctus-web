@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.63.82  (2026-08-16 17:30 Europe/Brussels)
+     v1.63.82 (Johan 16-08): KAMINO-HANG FIX (tegel 4). De autopilot bleef op "Groeistap 1 vastleggen…" hangen
+              (zandloper, tot 20 min) en faalde daarna de HELE studie. Oorzaak: _apGroeistap1 wachtte via _apWait op
+              /api/groeipad maar brak NIET af bij een groeipad-fout, en evenmin wanneer het groeipad niet werd
+              afgevuurd (bv. beste opstelling = 'verhogen', typisch bij een kleine aansluiting zoals 5 kVA). Fix:
+              _apGroeistap1 is nu volledig niet-blokkerend — stopt zodra het groeipad klaar/gefaald is óf niet (meer)
+              laadt, time-out is niet-fataal, en zonder groeipad wordt groeistap 1 overgeslagen zodat de studie altijd
+              tot _apKlaar komt. Enkel front-end (simulator.html).
      FLUCTUS SIMULATOR  v1.63.81  (2026-08-16 16:10 Europe/Brussels)
      v1.63.81 (Johan 16-08): _simuleerRapportData() geeft nu ook project (STATE.project) + scenario (STATE.scenario)
               mee → het E+Drive-voorblad van simuleer-rapport.html toont projectnaam, scenarionaam, aantal km/jaar en
@@ -12051,12 +12059,26 @@ function _pvOptieUitSweep(kwp, drempel){
            eigen_rendement_pct:rend, eigen_terugverdientijd_jaar:tvt, marginale_zelfconsumptie_pct:mzc, drempel:drempel };
 }
 function _apGroeistap1(){
-  return _apWait(function(){ return STATE.groeipadGebouw || STATE.groeipad; }, 1200000, 'groeipad').then(function(){   // v1.63.58: 20 min achtervang (was 15) — zware groeipad tegel 4
+  // v1.63.82 (Johan 16-08): groeistap 1 VOLLEDIG NIET-BLOKKEREND. De wacht op /api/groeipad brak vroeger
+  // niet af bij een groeipad-FOUT en evenmin wanneer het groeipad niet werd afgevuurd (bv. beste opstelling =
+  // 'verhogen') → de Kamino-autopilot bleef tot 20 min op "Groeistap 1 vastleggen…" hangen (zandloper) en
+  // faalde daarna de HELE studie met 'time-out bij groeipad'. Nu: stop met wachten zodra het groeipad klaar is,
+  // gefaald is, of niet (meer) laadt; een time-out is niet-fataal; zonder groeipad slaan we groeistap 1 gewoon over
+  // (het ontwerp-rapport toont dan de rest). Zo komt de studie altijd tot _apKlaar.
+  return _apWait(function(){
+    if(STATE.groeipadGebouw || STATE.groeipad) return true;   // groeipad binnen
+    if(STATE.groeipadFout) return true;                        // groeipad gefaald → niet 20 min blijven pollen
+    if(!STATE.groeipadLoading) return true;                    // nooit gestart (bv. beste=verhogen) of al afgerond
+    return false;                                              // nog aan het laden
+  }, 1200000, 'groeipad')
+  .catch(function(){ /* time-out op het groeipad is niet-blokkerend voor de studie */ })
+  .then(function(){
+    if(!(STATE.groeipadGebouw || STATE.groeipad)) return;      // geen groeipad → groeistap 1 overslaan
     var _in=JSON.parse(JSON.stringify(STATE.lastSimInput||{}));
     _in.aansluiting_kva=STATE.aansluitingKva; _in.aantal_batterijen=1;   // eerste groeistap, vaste aansluiting (gebouw)
     STATE.groeipadKeuze={k:1,c:STATE.aansluitingKva};
     return apiPost('/api/opstelling',_in).then(function(r){ STATE.groeistap1=(r&&r.opstelling)||null; })
-      .catch(function(){ /* groeistap 1 niet-blokkerend: ontwerp toont dan het groeipad */ });
+      .catch(function(){ /* groeistap 1 niet-blokkerend */ });
   });
 }
 function _apOpenOntwerp(mode){
