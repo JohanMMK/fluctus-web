@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.63.77  (2026-08-16 12:45 Europe/Brussels)
+     v1.63.77 (3-STURINGEN-KOLOMMEN bij Simuleer, Johan 16-08): "Meerwaarde van sturing"-lijst wordt bij Simuleer
+              een 3-kolommen-blok: per sturing Totaal excl. btw (navy/wit) + €/MWh, Totaal incl. btw (licht) + €/MWh,
+              effectief geladen km + €/km (excl. btw ÷ geladen km). Ontwerp houdt de compacte lijst. _stuur3Kolom().
      FLUCTUS SIMULATOR  v1.63.76  (2026-08-16 12:20 Europe/Brussels)
      v1.63.76 (GROEIRUIMTE km bij Simuleer, Johan 16-08): dekt de installatie de volledige laadvraag, dan tonen we
               de geschatte groeiruimte in km/jaar (energieplafond: aansluiting × venster + bruikbare batterij, min
@@ -521,7 +525,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.76</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.77</span>
   </div>
 </div>
 
@@ -9117,6 +9121,37 @@ function _bewaarOpstelling1(naam, btn){
     .catch(function(e){ btn.disabled=false; btn.textContent='💾 Bewaar als basisscenario'; alert('Bewaren mislukt: '+e.message); });
 }
 
+// v1.63.77 (Johan 16-08): 3-kolommen-weergave van de drie sturingen (Simuleer). Per kolom: Totaal excl. btw
+// (in de navy/wit-kleur van de vroegere incl-btw-rij), €/MWh eronder; Totaal incl. btw (in de lichte kleur van
+// de vroegere excl-btw-rij), €/MWh eronder; en de effectief geladen km + €/km (= excl. btw ÷ geladen km).
+function _stuur3Kolom(kg, ks, ko){
+  var res=STATE.resultaat||{};
+  var mwhGebouw=(STATE.jaar==='specifiek' && STATE.periodeVolumeMwh>0)?STATE.periodeVolumeMwh:(STATE.jaarverbruik||1);
+  var mwhLp=(res.laadplein && res.laadplein.ev_last_mwh)||0;
+  var mwhTot=Math.max(1e-6, mwhGebouw+mwhLp);
+  var demandMwh=(STATE.laadpleinen||[]).reduce(function(s,p){ return s+(typeof _lpEnergieMwh==='function'?_lpEnergieMwh(p):0); },0);
+  var delivMwh=mwhLp||demandMwh;
+  var kmDeliv=(typeof _vlootKmJaar==='function'?_vlootKmJaar():0)*(demandMwh>0?Math.min(1, delivMwh/demandMwh):1);
+  var cols=[{t:'1 · Geen sturing',excl:kg},{t:'2 · Volledig excl. onbalans',excl:ks},{t:'3 · Volledig incl. onbalans',excl:ko}];
+  var grid=el('div',{style:'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px'});
+  cols.forEach(function(c){
+    var incl=c.excl*1.21;
+    var card=el('div',{style:'border:1px solid #D5DBE3;border-radius:6px;overflow:hidden'});
+    card.appendChild(el('div',{style:'background:#1F386410;color:#1F3864;font-weight:700;padding:6px 8px;font-size:11.5px'},c.t));
+    var ex=el('div',{style:'background:#1F3864;color:#fff;padding:7px 8px'});
+    ex.innerHTML='<div style="font-size:10px;opacity:.85">Totaal excl. btw</div><div style="font-size:15px;font-weight:700">'+fmtEur(c.excl)+'</div><div style="font-size:10.5px;opacity:.9">'+fmtEurDec(c.excl/mwhTot,2)+' /MWh</div>';
+    card.appendChild(ex);
+    var inb=el('div',{style:'background:#F4F6FA;color:#1F3864;padding:7px 8px;border-top:1px solid #E5EAF1'});
+    inb.innerHTML='<div style="font-size:10px;color:#5A6577">Totaal incl. btw</div><div style="font-size:14px;font-weight:600">'+fmtEur(incl)+'</div><div style="font-size:10.5px;color:#5A6577">'+fmtEurDec(incl/mwhTot,2)+' /MWh</div>';
+    card.appendChild(inb);
+    var kmb=el('div',{style:'padding:7px 8px;border-top:1px solid #E5EAF1;color:#1A1F2B'});
+    kmb.innerHTML='<div style="font-size:10px;color:#5A6577">Effectief geladen</div><div style="font-size:13px;font-weight:600">'+fmtNum(kmDeliv,0)+' km/jaar</div><div style="font-size:11px;color:#05B050;font-weight:700">'+fmtEurDec(kmDeliv>0?c.excl/kmDeliv:0,3)+' /km</div>';
+    card.appendChild(kmb);
+    grid.appendChild(card);
+  });
+  return grid;
+}
+
 function _renderSturingKPIs(){
   var k = STATE.kpiSturing || {};
   // v1.20.12 FIX: aantalMnd (voor de /jaar-extrapolatie) mag ENKEL uit de
@@ -9139,7 +9174,9 @@ function _renderSturingKPIs(){
   var sec = el('div',{class:'fdsim-section',style:'background:#1F386408;border-color:#1F386430;margin-bottom:14px'});
   sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:4px'},'Meerwaarde van sturing'));
   sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:12px'},
-    'Elke simulatie berekent 3 sturingen. De detailfactuur hieronder toont sturing 2 (volledig, excl. onbalans). Bedragen excl. btw over de simulatieperiode'+(perJaar!==1?(' · '+fmtNum(aantalMnd,1)+' mnd, /jaar tussen haakjes'):'')+'.'));
+    STATE.simuleerModus
+      ? 'De drie sturingen naast elkaar: totaal excl. én incl. btw met €/MWh, en de effectief geladen km met €/km. Bedragen over de simulatieperiode.'
+      : ('Elke simulatie berekent 3 sturingen. De detailfactuur hieronder toont sturing 2 (volledig, excl. onbalans). Bedragen excl. btw over de simulatieperiode'+(perJaar!==1?(' · '+fmtNum(aantalMnd,1)+' mnd, /jaar tussen haakjes'):'')+'.')));
 
   var grid = el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:10px'});
   function kaart(titel, sub, bedrag, pct, kleur){
@@ -9166,12 +9203,17 @@ function _renderSturingKPIs(){
   }
   sec.appendChild(grid);
 
-  var tbl = el('div',{style:'margin-top:12px;font-size:12px;color:#1A1F2B'});
-  tbl.innerHTML =
-    '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #E3E8EF"><span>1 · Geen sturing (batterij: enkel zelfconsumptie + piekshaving)</span><b>'+fmtEur(kg)+'</b></div>'+
-    '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #E3E8EF"><span>2 · Volledig excl. onbalans <i>(detailfactuur)</i></span><b>'+fmtEur(ks)+'</b></div>'+
-    '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>3 · Volledig incl. onbalans</span><b>'+fmtEur(ko)+'</b></div>';
-  sec.appendChild(tbl);
+  if(STATE.simuleerModus){
+    // v1.63.77: geforceerde installatie → de drie sturingen als 3 kolommen (excl/incl btw + €/MWh + km + €/km).
+    sec.appendChild(_stuur3Kolom(kg, ks, ko));
+  }else{
+    var tbl = el('div',{style:'margin-top:12px;font-size:12px;color:#1A1F2B'});
+    tbl.innerHTML =
+      '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #E3E8EF"><span>1 · Geen sturing (batterij: enkel zelfconsumptie + piekshaving)</span><b>'+fmtEur(kg)+'</b></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #E3E8EF"><span>2 · Volledig excl. onbalans <i>(detailfactuur)</i></span><b>'+fmtEur(ks)+'</b></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>3 · Volledig incl. onbalans</span><b>'+fmtEur(ko)+'</b></div>';
+    sec.appendChild(tbl);
+  }
   return sec;
 }
 
