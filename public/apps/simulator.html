@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.63.79  (2026-08-16 13:30 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.63.80  (2026-08-16 15:10 Europe/Brussels)
+     v1.63.80 (Johan 16-08): SIMULEER-KLANTRAPPORT. Nieuwe knop "📄 Rapport openen" in de Simuleer-resultaten
+              (STATE.simuleerModus) → schrijft _simuleerRapportData() naar sessionStorage['FLUCTUS_SIMULEER_RAPPORT']
+              en opent /apps/simuleer-rapport.html (eenvoudig, klant-leesbaar, Jacops-voorblad/stijl). De data-
+              builder spiegelt EXACT het scherm (geen herberekening): STATE.kpiSturing-totalen per sturing, €/MWh op
+              de _stuur3Kolom-noemer (gebouw+laadplein-MWh), €/100 km op de effectief-geladen-km-noemer, km-dekking via
+              _kmTekortBlok/_groeiruimteKm-gating, en de 3-kolom factuur via _simFactuur3Data() (spiegel van
+              _factuurSamenvatting3Kolom). Geen managementdata. VEREIST simuleer-rapport.html op /apps/ (fluctus-web).
      v1.63.79 (Johan 16-08): Simuleer past de INPUT niet meer aan — simuleerVasteInstallatie zet nu ook
               input.geen_aansluiting_verhoging=true, zodat de hoofdsim het toegangsvermogen NIET stil verhoogt.
               630 kVA blijft 630 kVA; wat niet past wordt echt tekort. VEREIST dat server.js/buildSimInput die vlag
@@ -9289,7 +9296,123 @@ function _renderSturingKPIs(){
       '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>3 · Volledig incl. onbalans</span><b>'+fmtEur(ko)+'</b></div>';
     sec.appendChild(tbl);
   }
+  // v1.63.80 (Johan 16-08): bij Simuleer → knop naar het eenvoudige klantrapport (Jacops-voorblad/stijl).
+  if(STATE.simuleerModus){
+    var rbtn=el('button',{style:'font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;'+
+      'background:#1F3864;color:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 2px 8px rgba(31,56,100,.18)'},
+      '📄 Rapport openen');
+    rbtn.onmouseover=function(){ this.style.background='#2E4E86'; };
+    rbtn.onmouseout=function(){ this.style.background='#1F3864'; };
+    rbtn.onclick=_openSimuleerRapport;
+    var rbrow=el('div',{style:'margin-top:16px;display:flex;justify-content:flex-end;align-items:center;gap:10px'});
+    rbrow.appendChild(el('span',{style:'font-size:11.5px;color:#8A94A6'},'Eenvoudig, klant-leesbaar rapport van deze simulatie.'));
+    rbrow.appendChild(rbtn);
+    sec.appendChild(rbrow);
+  }
   return sec;
+}
+
+// v1.63.80 (Johan 16-08): FACTUUR-3-KOLOM als DATA (spiegelt _factuurSamenvatting3Kolom exact) voor het klantrapport.
+function _simFactuur3Data(){
+  var V=STATE.resultaatVarianten||{};
+  var jf=(STATE.resultaat&&(STATE.resultaat.jaarfactuur||STATE.resultaat.factuur))||{};
+  function _grp(x){ var f=(x&&(x.jaarfactuur||x.factuur))||{}; return f.groepen||{}; }
+  function _fac(x){ return (x&&(x.jaarfactuur||x.factuur))||{}; }
+  var G0=_grp(V.geen), G1=(jf.groepen)||_grp(V.sturing), G2=_grp(V.onbalans);
+  var F0=_fac(V.geen), F1=jf, F2=_fac(V.onbalans);
+  function humaniseer(key){ return key.replace(/_/g,' ').replace(/^./,function(c){return c.toUpperCase();}); }
+  function groupName(g){ var p=g.split('_'); return p.length>=2?(p[0]+' — '+p.slice(1).join(' ').replace(/^./,function(c){return c.toUpperCase();})):g; }
+  function gt(G,g){ var grp=G[g]||{}; return (grp._subtotaal!==undefined?grp._subtotaal:(grp.totaal||grp.total||0)); }
+  function sub(F){ return +F.subtotaal_excl_btw||0; }
+  function btw(F){ return F.btw_bedrag!==undefined?(+F.btw_bedrag||0):(sub(F)*0.21); }
+  function tot(F){ return F.totaal_incl_btw!==undefined?(+F.totaal_incl_btw||0):(sub(F)*1.21); }
+  var rows=[];
+  Object.keys(G1).forEach(function(g){
+    var grp=G1[g]||{};
+    rows.push({label:'Groep '+groupName(g), groep:true, geen:gt(G0,g), sturing:gt(G1,g), onbalans:gt(G2,g)});
+    Object.keys(grp).forEach(function(kk){
+      if(kk.charAt(0)==='_')return;
+      var v1=grp[kk]; if(typeof v1!=='number')return;
+      var v0=(G0[g]||{})[kk], v2=(G2[g]||{})[kk];
+      if(Math.abs(v1)<0.01 && Math.abs(+v0||0)<0.01 && Math.abs(+v2||0)<0.01)return;
+      rows.push({label:humaniseer(kk), item:true, geen:+v0||0, sturing:v1, onbalans:+v2||0});
+    });
+  });
+  return { headers:['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'], rows:rows,
+    subtotaal:{geen:sub(F0),sturing:sub(F1),onbalans:sub(F2)},
+    btw:{geen:btw(F0),sturing:btw(F1),onbalans:btw(F2)},
+    totaal:{geen:tot(F0),sturing:tot(F1),onbalans:tot(F2)} };
+}
+
+// v1.63.80 (Johan 16-08): bouwt het WEERGAVEKLARE data-object voor simuleer-rapport.html. Rekent niets nieuws —
+// spiegelt exact wat het Simuleer-scherm toont (_stuur3Kolom €/MWh + €/km-noemers, _kmTekortBlok/_groeiruimteKm
+// km-dekking, STATE.kpiSturing-totalen). Geen managementdata.
+function _simuleerRapportData(){
+  var res=STATE.resultaat||{};
+  var k=STATE.kpiSturing||{};
+  var kg=+k.kost_geen_excl_btw||0, ks=+k.kost_sturing_excl_btw||0, ko=+k.kost_onbalans_excl_btw||0;
+  // MWh-noemer (identiek aan _stuur3Kolom)
+  var mwhGebouw=(STATE.jaar==='specifiek' && STATE.periodeVolumeMwh>0)?STATE.periodeVolumeMwh:(+STATE.jaarverbruik||1);
+  var mwhLp=(res.laadplein && +res.laadplein.ev_last_mwh)||0;
+  var mwhTot=Math.max(1e-6, mwhGebouw+mwhLp);
+  // effectief geladen km (identiek aan _stuur3Kolom)
+  var demandMwh=(STATE.laadpleinen||[]).reduce(function(s,p){return s+(_lpEnergieMwh(p)||0);},0);
+  var delivMwh=mwhLp||demandMwh;
+  var kmDeliv=_vlootKmJaar()*(demandMwh>0?Math.min(1,delivMwh/demandMwh):1);
+  var heeftLp=!!(res.laadplein) || ((STATE.laadpleinen||[]).length>0);
+  function eurMwh(c){ return c/mwhTot; }
+  function eur100(c){ return kmDeliv>0?(c/kmDeliv)*100:0; }
+  // km-dekking (identieke gating als _renderLaadpleinResultaat: cap-check + groeiruimte)
+  var lp=res.laadplein||null, cap=(lp&&lp.capaciteit)||null;
+  var totKm=_vlootKmJaar();
+  var tekortMwh=(cap&&+cap.tekort_mwh)||0;
+  var demandKm=demandMwh; if(demandKm<=0 && lp&&lp.pleinen) demandKm=lp.pleinen.reduce(function(s,p){return s+(+p.gevraagd_mwh||0);},0);
+  var frac=(demandKm>0)?Math.max(0,Math.min(1,tekortMwh/demandKm)):0;
+  var toonTekort=!!(cap && !cap.voldoende && tekortMwh>0.5);
+  if(!toonTekort) frac=0;
+  var pctGeladen=(1-frac)*100, geladenKm=Math.max(0,totKm*(1-frac)), tekortKm=totKm*frac;
+  var gr=(!toonTekort && lp && typeof _groeiruimteKm==='function')?_groeiruimteKm(lp):null;
+  // input-samenvatting
+  var bt=(typeof _frBatterij==='function')?_frBatterij():{kw:0,kwh:0};
+  var batObj=(bt&&(+bt.kwh>0||+bt.kw>0))?{kw:+bt.kw||0,kwh:+bt.kwh||0}:null;
+  if(batObj && STATE.batterijId==='CUSTOM' && STATE.batterijCustom){ batObj.dod_pct=+STATE.batterijCustom.dod_pct||0; batObj.rte_pct=+STATE.batterijCustom.rte_pct||0; }
+  function _palen(p){ var o={ac22:0,dc160:0,dc300:0}; (p.laadpunten||[]).forEach(function(x){ var t=(x.type||'').toUpperCase(),n=+x.aantal||0; if(t==='AC22')o.ac22+=n; else if(t==='DC160')o.dc160+=n; else if(t==='DC300'||t==='DC400')o.dc300+=n; }); return o; }
+  var pleinen=(STATE.laadpleinen||[]).map(function(p){ return {
+    naam:p.naam||'', voertuigtype:p.voertuigtype||'', aantal:+p.aantal||0, km_per_jaar:+p.km_per_jaar||0,
+    kwh_per_km:+p.kwh_per_km||0, venster_start:(p.venster_start!=null?+p.venster_start:null), venster_eind:(p.venster_eind!=null?+p.venster_eind:null),
+    dagen_per_week:+p.dagen_per_week||0, energie_mwh:(_lpEnergieMwh(p)||0), laadpunten:_palen(p) }; });
+  var bc=STATE.baseCase||{};
+  var pid=''; try{ pid=(typeof _projectIdLokaal==='function' && STATE.project)?_projectIdLokaal(STATE.project):(STATE.projectId||''); }catch(e){}
+  var dnb=bc.dnb||STATE.grd||'';
+  var locatie=[(STATE.postcode||''),dnb,(STATE.spanning||'LS')].filter(function(x){return x;}).join(' · ');
+  var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
+  return {
+    klant: bc.klantNaam||STATE.klantNaam||'',
+    locatie: locatie, datum: datum, project_id: pid,
+    heeftLaadplein: heeftLp,
+    onbalans_nvt: !!k.onbalans_niet_van_toepassing,
+    mwhTot: mwhTot, kmDeliv: kmDeliv,
+    input:{
+      aansluiting:{ kva:+STATE.aansluitingKva||0, spanning:STATE.spanning||'', max_injectie_kw:(STATE.maxInjectieKw!=null?+STATE.maxInjectieKw:null) },
+      verbruik:{ mwh:mwhGebouw, label:STATE.profielNaam||STATE.profielBeschrijving||'' },
+      pv:((+STATE.pvKwp||0)>0)?{kwp:+STATE.pvKwp}:null,
+      batterij:batObj,
+      laadpleinen:heeftLp?pleinen:null
+    },
+    tegels:{ kost_excl_btw:ks, kost_per_mwh:eurMwh(ks), pct_km_geladen:pctGeladen, pct_extra_km:(gr?gr.pct:0), eur_per_100km:eur100(ks) },
+    km:{ gevraagd:totKm, geladen:geladenKm, tekort:tekortKm, pct_geladen:pctGeladen, pct_extra:(gr?gr.pct:0), extra_km:(gr?gr.km:0) },
+    sturingen:{
+      geen:{ kost_excl_btw:kg, eur_per_mwh:eurMwh(kg), eur_per_100km:eur100(kg) },
+      sturing:{ kost_excl_btw:ks, eur_per_mwh:eurMwh(ks), eur_per_100km:eur100(ks) },
+      onbalans:{ kost_excl_btw:ko, eur_per_mwh:eurMwh(ko), eur_per_100km:eur100(ko) }
+    },
+    factuur3:_simFactuur3Data()
+  };
+}
+// Opener — sessionStorage + window.open MOETEN synchroon in de user-gesture blijven (anders popup-block).
+function _openSimuleerRapport(){
+  try{ sessionStorage.setItem('FLUCTUS_SIMULEER_RAPPORT', JSON.stringify(_simuleerRapportData())); }catch(e){ console.error('[simrapport]',e); }
+  window.open('/apps/simuleer-rapport.html','_blank');
 }
 
 // ═══ v1.59.0 — ONTWERP-navigatie: de vier logische stappen bovenaan het ontwerpscherm ═══

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     FLUCTUS SIMULATIERAPPORT  v1.0.0  (2026-08-16, Johan)
+     Eenvoudig, klant-leesbaar rapport voor de "Simuleer"-knop in de simulator.
+     Voorblad + stijl overgenomen van ontwerp-rapport.html (Jacops-look): zelfde
+     A4-systeem, palette, kaarten, tabellen en Fluctus-voettekst — GEEN management-
+     data, GEEN financierings-/groeipad-inhoud. Louter: de ingegeven installatie,
+     de drie tegels (kost excl. btw, kost/MWh, en bij een laadplein €/100 km),
+     de km-dekking, de factuurdetails voor de drie sturingen en de KPI's voor
+     sturing zonder én met onbalans.
+
+     DATA: window.FLUCTUS_SIMULEER_RAPPORT of sessionStorage['FLUCTUS_SIMULEER_RAPPORT'].
+     Alle cijfers zijn AL weergaveklaar berekend in de simulator (_simuleerRapportData);
+     deze pagina rekent niets opnieuw — ze toont enkel. Bij ontbrekende data valt ze
+     terug op een voorbeeld zodat de pagina standalone rendert.
+     ============================================================================ -->
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluctus — Simulatierapport</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --blauw:#1F3864; --blauw-l:#2d4f8e; --groen:#05B050; --groen-d:#048443;
+    --oranje:#9E480E; --oranje-l:#E8A33D; --grijs:#5A6577; --lijn:#D5DBE3; --bg:#F5F7FA; --zwart:#1A1F2B;
+    --rood:#C0392B; --jacops:#E8352A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);background:#e9edf2;font-size:14px;line-height:1.55}
+  .a4{background:#fff;width:210mm;min-height:297mm;margin:14px auto;padding:16mm 18mm 12mm;box-shadow:0 2px 14px rgba(0,0,0,.12);display:flex;flex-direction:column;position:relative}
+  .a4 > .a4-content{flex:1}
+  .a4-foot{margin-top:auto;padding-top:8px;font-size:9px;color:var(--grijs);border-top:1px solid var(--lijn);display:flex;justify-content:space-between}
+  .eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--grijs);font-weight:700}
+  h1{font-size:34px;color:var(--blauw);line-height:1.1;margin:6px 0 10px;font-weight:800}
+  h2{font-size:22px;color:var(--blauw);margin:0 0 4px;font-weight:800}
+  h3{font-size:15px;color:var(--blauw);margin:16px 0 6px;font-weight:700}
+  .lead{font-size:15px;color:var(--grijs);margin-bottom:14px}
+  p{margin:8px 0}
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .kpi-row.k3{grid-template-columns:repeat(3,1fr)}
+  .kpi-row.k2{grid-template-columns:repeat(2,1fr)}
+  .kpi{border:1px solid var(--lijn);border-left:4px solid var(--blauw);border-radius:4px;padding:12px}
+  .kpi.groen{border-left-color:var(--groen)}
+  .kpi.oranje{border-left-color:var(--oranje)}
+  .kpi.rood{border-left-color:var(--jacops)}
+  .kpi .l{font-size:10px;color:var(--grijs);text-transform:uppercase;letter-spacing:.05em;line-height:1.25;min-height:2.5em;display:block}
+  .kpi .v{font-size:24px;font-weight:800;color:var(--zwart);margin-top:3px}
+  .kpi .s{font-size:10px;color:var(--grijs);margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--lijn)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--blauw);color:#fff;font-weight:700;border-bottom:none}
+  tbody tr:nth-child(even){background:var(--bg)}
+  tfoot td{font-weight:800;border-top:2px solid var(--blauw);background:#eef2f8}
+  tr.grp td{background:#eaf0f8;font-weight:700;color:var(--blauw)}
+  tr.item td:first-child{padding-left:20px;color:#3A424C}
+  .pos{color:var(--groen-d);font-weight:700}
+  .neg{color:var(--rood);font-weight:700}
+  .box{border:1px solid var(--lijn);border-radius:6px;padding:14px;margin:12px 0;background:var(--bg)}
+  .box.blauw{background:#1F386408;border-color:#1F386430}
+  .box.groen{background:#05B0500f;border-color:#05B05040}
+  .box.oranje{background:#FFF3E0;border-color:#9E480E55}
+  .note{font-size:11px;color:var(--grijs);font-style:italic}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .stap-band{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+  .stap-band .nr{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:var(--blauw);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px}
+  /* Jacops-merkband op het voorblad */
+  .merk{display:flex;align-items:center;justify-content:space-between;gap:8mm;margin-bottom:8px}
+  .merk .fl{font-weight:800;font-size:20px;color:var(--blauw);letter-spacing:-.4px}
+  .merk .fl span{color:var(--jacops)}
+  .merk .jc{background:var(--jacops);color:#fff;font-family:Arial;font-weight:900;font-size:15px;letter-spacing:-.5px;padding:2.2mm 3mm;border-radius:1.4mm;display:inline-block}
+  .merk .jc .sub{display:block;font-size:7px;font-weight:700;letter-spacing:.18em;opacity:.9;margin-bottom:1px}
+  .titel-accent{height:4px;width:64px;background:var(--jacops);border-radius:3px;margin:2px 0 10px}
+  .inbox{display:grid;grid-template-columns:150px 1fr;gap:2px 12px;font-size:12.5px;padding:2px 0}
+  .inbox .k{color:var(--grijs);font-weight:700}
+  .inbox .v{color:var(--zwart)}
+  #fdpdf-bar{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;gap:8px}
+  #fdpdf-bar button{font-family:inherit;font-size:12px;font-weight:700;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
+  #fdpdf-save{background:var(--groen);color:#fff}
+  #fdpdf-print{background:#fff;color:var(--blauw);border:1px solid var(--lijn)!important}
+  @page{size:A4;margin:0}
+  @media print{ body{background:#fff} .a4{box-shadow:none;margin:0;min-height:297mm;page-break-after:always;break-after:page} .a4:last-child{page-break-after:auto;break-after:auto} table,.box,.kpi-row{break-inside:avoid} #fdpdf-bar{display:none} }
+</style>
+</head>
+<body>
+<div id="rapport"></div>
+
+<div id="fdpdf-bar">
+  <button id="fdpdf-print" onclick="window.print()">🖨️ Print</button>
+  <button id="fdpdf-save">⬇ PDF opslaan</button>
+</div>
+
+<script>
+// ============================================================================
+//  FLUCTUS SIMULATIERAPPORT — renderer (toont enkel; rekent niets opnieuw)
+// ============================================================================
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _num(x,d){ x=+x||0; return x.toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+function eur(x){ return '€ '+_num(x,0); }
+function eur1(x){ return '€ '+_num(x,1); }
+function eur2(x){ return '€ '+_num(x,2); }
+function pct(x,d){ return _num(x,d==null?0:d)+' %'; }
+
+// ---------- INVOER ----------
+function _uitSessie(){ try{ return JSON.parse(sessionStorage.getItem('FLUCTUS_SIMULEER_RAPPORT')||'null'); }catch(e){ return null; } }
+var D = window.FLUCTUS_SIMULEER_RAPPORT || _uitSessie() || _demo();
+
+var R=document.getElementById('rapport'), _pg=0;
+var PID=D.project_id||'';
+function pagina(inner){
+  var p=document.createElement('div'); p.className='a4'; _pg++;
+  p.innerHTML='<div class="a4-content">'+inner+'</div>'+
+    '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies</span>'+
+    '<span>'+(PID?'Projectnr. '+esc(PID)+' · ':'')+'Simulatierapport · p. '+_pg+'</span></div>';
+  R.appendChild(p); return p;
+}
+function merkband(){
+  return '<div class="merk"><div class="fl">Fluctus<span>.</span></div>'+
+    '<div class="jc"><span class="sub">ENERGIE-INTEGRATOR</span>JACOPS.</div></div>';
+}
+
+var IN=D.input||{}, T=D.tegels||{}, KM=D.km||{}, ST=D.sturingen||{}, F3=D.factuur3||{};
+var heeftLp=!!D.heeftLaadplein;
+
+// ---------------------------------------------------------------------------
+// PAGINA 1 — VOORBLAD + de drie tegels
+// ---------------------------------------------------------------------------
+(function(){
+  var tegels='<div class="kpi-row k'+(heeftLp?'3':'2')+'">'+
+    '<div class="kpi"><div class="l">Totale energiekost (excl. btw)</div><div class="v">'+eur(T.kost_excl_btw)+'</div><div class="s">per jaar · met slimme sturing</div></div>'+
+    '<div class="kpi rood"><div class="l">Kost per MWh</div><div class="v">'+eur1(T.kost_per_mwh)+'</div><div class="s">gebouw + laadpleinen samen</div></div>'+
+    (heeftLp?'<div class="kpi groen"><div class="l">Kost per 100 km</div><div class="v">'+eur2(T.eur_per_100km)+'</div><div class="s">'+pct(T.pct_km_geladen)+' van de gevraagde km geladen</div></div>':'')+
+  '</div>';
+
+  pagina(
+    merkband()+
+    '<div class="eyebrow">Simulatierapport'+(D.klant?' · voor '+esc(D.klant):'')+'</div>'+
+    '<h1>Uw gesimuleerde energiefactuur</h1>'+
+    '<div class="titel-accent"></div>'+
+    '<p class="lead">'+esc(D.klant||'—')+(D.locatie?' · '+esc(D.locatie):'')+(D.datum?' · '+esc(D.datum):'')+(PID?' · <b>Projectnr. '+esc(PID)+'</b>':'')+'</p>'+
+    '<div class="box groen"><b>De kern.</b> Deze simulatie rekent uw énige, exact ingegeven installatie door — de aansluiting, het verbruik'+(heeftLp?', de laadpleinen':'')+(IN.pv?', de PV':'')+(IN.batterij?' en de batterij':'')+'. '+
+      'Ze past niets aan uw opstelling aan. Hieronder ziet u de resulterende jaarkost met slimme sturing, en verderop hoe die kost zich verhoudt onder drie sturingswijzen.</div>'+
+    '<h3>De kerncijfers van deze simulatie</h3>'+
+    tegels+
+    (heeftLp?'<p class="note">De kost per 100 km is de totale energiekost gedeeld door de effectief geladen kilometers. '+
+      pct(KM.pct_geladen)+' van de gevraagde '+_num(KM.gevraagd)+' km/jaar wordt binnen de installatie geladen'+
+      ((KM.pct_extra||0)>0?'; er is nog ~'+pct(KM.pct_extra)+' groeiruimte vóór de capaciteit knelt.':'.')+'</p>'
+      :'<p class="note">Deze cijfers gelden voor de exact ingegeven opstelling; ze zijn de resultante van de slimme sturing zonder onbalans.</p>')
+  );
+})();
+
+// ---------------------------------------------------------------------------
+// PAGINA 2 — DE INGEGEVEN INSTALLATIE
+// ---------------------------------------------------------------------------
+(function(){
+  var a=IN.aansluiting||{}, v=IN.verbruik||{};
+  var rijen='';
+  function rij(k,val){ return '<div class="inbox"><div class="k">'+esc(k)+'</div><div class="v">'+val+'</div></div>'; }
+
+  var aansl=rij('Toegangsvermogen', _num(a.kva)+' kVA'+(a.spanning?' · '+esc(a.spanning):''))+
+    (a.max_injectie_kw!=null?rij('Max. injectie', _num(a.max_injectie_kw)+' kW'):'');
+  var verbr=rij('Jaarverbruik gebouw', _num(v.mwh,1)+' MWh'+(v.label?' · '+esc(v.label):''));
+
+  var pv = IN.pv ? rij('Zonnepanelen (PV)', _num(IN.pv.kwp)+' kWp') : rij('Zonnepanelen (PV)', '—');
+  var bat = IN.batterij
+    ? rij('Batterij (opslag)', _num(IN.batterij.kw)+' kW / '+_num(IN.batterij.kwh)+' kWh'+
+        ((IN.batterij.dod_pct||IN.batterij.rte_pct)?' · DoD '+_num(IN.batterij.dod_pct)+' % · RTE '+_num(IN.batterij.rte_pct)+' %':''))
+    : rij('Batterij (opslag)', '—');
+
+  var lp='';
+  if(heeftLp && IN.laadpleinen && IN.laadpleinen.length){
+    lp='<h3>Laadpleinen</h3>';
+    IN.laadpleinen.forEach(function(p,i){
+      var lpn=p.laadpunten||{};
+      var palen=[]; if(lpn.ac22)palen.push(_num(lpn.ac22)+'× AC 22 kW'); if(lpn.dc160)palen.push(_num(lpn.dc160)+'× DC 160 kW'); if(lpn.dc300)palen.push(_num(lpn.dc300)+'× DC 300 kW');
+      var kva=(lpn.ac22||0)*22+(lpn.dc160||0)*160+(lpn.dc300||0)*300;
+      lp+='<div class="box blauw" style="margin:8px 0">'+
+        '<div style="font-weight:800;color:#1F3864;margin-bottom:4px">'+esc(p.naam||('Laadplein '+(i+1)))+(p.voertuigtype?' <span class="note">· '+esc(p.voertuigtype)+'</span>':'')+'</div>'+
+        rij('Voertuigen', _num(p.aantal)+' × '+_num(p.km_per_jaar)+' km/jaar')+
+        rij('Verbruik', _num(p.kwh_per_km,2)+' kWh/km · '+_num(p.energie_mwh,1)+' MWh/jaar')+
+        (p.venster_start!=null?rij('Laadvenster', _num(p.venster_start)+'u–'+_num(p.venster_eind)+'u · '+_num(p.dagen_per_week)+' d/week'):'')+
+        rij('Laadpalen', (palen.length?palen.join(' · ')+' <span class="note">('+_num(kva)+' kVA laadvermogen)</span>':'ideaal gespreid — geen palen opgegeven'))+
+      '</div>';
+    });
+  }
+
+  pagina(
+    '<div class="stap-band"><div class="nr">1</div><div><h2>De ingegeven installatie</h2><div class="note">Precies wat u opgaf — ongewijzigd doorgerekend.</div></div></div>'+
+    '<h3>Aansluiting</h3>'+aansl+
+    '<h3>Verbruik</h3>'+verbr+
+    '<h3>Productie &amp; opslag</h3>'+pv+bat+
+    lp
+  );
+})();
+
+// ---------------------------------------------------------------------------
+// PAGINA 3 — km-dekking (indien laadplein) + KPI's sturing zonder/met onbalans
+// ---------------------------------------------------------------------------
+(function(){
+  var kmBlok='';
+  if(heeftLp){
+    var tekort=(KM.pct_geladen||0)<99.5;
+    kmBlok='<div class="stap-band"><div class="nr">2</div><div><h2>Kilometerdekking</h2><div class="note">Hoeveel van de gevraagde ritten laadt deze installatie?</div></div></div>'+
+      '<div class="kpi-row k3">'+
+        '<div class="kpi'+(tekort?' oranje':' groen')+'"><div class="l">Gevraagde km geladen</div><div class="v">'+pct(KM.pct_geladen)+'</div><div class="s">'+_num(KM.geladen)+' van '+_num(KM.gevraagd)+' km/jaar</div></div>'+
+        '<div class="kpi"><div class="l">'+(tekort?'Tekort':'Volledig geladen')+'</div><div class="v">'+(tekort?_num(KM.tekort)+' km':'✓')+'</div><div class="s">'+(tekort?'raakt niet geladen binnen de aansluiting':'de volledige laadvraag wordt geleverd')+'</div></div>'+
+        '<div class="kpi groen"><div class="l">Potentieel extra (groeiruimte)</div><div class="v">'+((KM.pct_extra||0)>0?'+'+pct(KM.pct_extra):'—')+'</div><div class="s">'+((KM.pct_extra||0)>0?'~'+_num(KM.extra_km)+' km/jaar vóór de capaciteit knelt':'geen vrije capaciteit')+'</div></div>'+
+      '</div>'+
+      (tekort
+        ? '<div class="box oranje">Onder het opgegeven toegangsvermogen raakt <b>'+_num(KM.tekort)+' km/jaar ('+pct(100-(KM.pct_geladen||0))+')</b> niet geladen binnen het laadvenster. De simulatie levert het maximum dat binnen de aansluiting past; om alles te laden is een grotere batterij of een hoger toegangsvermogen nodig (zie Ontwerp).</div>'
+        : '<div class="box groen">Met deze installatie wordt de <b>volledige laadvraag</b> ('+_num(KM.gevraagd)+' km/jaar) geleverd binnen de aansluiting.'+((KM.pct_extra||0)>0?' Er is bovendien nog ~'+pct(KM.pct_extra)+' groeiruimte.':'')+'</div>');
+  }
+
+  // KPI's: sturing zonder onbalans (ST.sturing) vs met onbalans (ST.onbalans)
+  var kpi='<div class="stap-band"><div class="nr">'+(heeftLp?'3':'2')+'</div><div><h2>Kern-KPI\'s per sturing</h2><div class="note">Slimme sturing zonder onbalans (gegarandeerde basis) versus mét onbalans (opportunistische extra winst).</div></div></div>';
+  function kpiKaart(titel, s, accent){
+    return '<div class="kpi'+accent+'"><div class="l">'+esc(titel)+'</div>'+
+      '<div class="v">'+eur1(s.eur_per_mwh)+' <span style="font-size:12px;color:#5A6577">/MWh</span></div>'+
+      '<div class="s">totale kost '+eur(s.kost_excl_btw)+'/jaar (excl. btw)'+(heeftLp?' · '+eur2(s.eur_per_100km)+' /100 km':'')+'</div></div>';
+  }
+  kpi+='<div class="kpi-row k2">'+
+    kpiKaart('Sturing zonder onbalans', ST.sturing||{}, ' rood')+
+    (D.onbalans_nvt
+      ? '<div class="kpi"><div class="l">Sturing met onbalans</div><div class="v">n.v.t.</div><div class="s">geen onbalans-meerwaarde in deze simulatie</div></div>'
+      : kpiKaart('Sturing met onbalans', ST.onbalans||{}, ' groen'))+
+  '</div>';
+  kpi+='<div class="box blauw"><b>Lezen:</b> de kost per MWh en per 100 km dalen naarmate de sturing slimmer wordt. '+
+    '<b>Zonder onbalans</b> is de gegarandeerde, herhaalbare basis (spot-arbitrage + piekshaving + zelfconsumptie). '+
+    '<b>Met onbalans</b> telt de opportunistische winst van het bijsturen op de onbalansprijs erbij — extra, maar niet gegarandeerd.</div>';
+
+  pagina(kmBlok+kpi);
+})();
+
+// ---------------------------------------------------------------------------
+// PAGINA 4 — Factuurdetails: de drie sturingen naast elkaar
+// ---------------------------------------------------------------------------
+(function(){
+  var rows=F3.rows||[];
+  var h=F3.headers||['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'];
+  var body='';
+  rows.forEach(function(r){
+    var cls=r.groep?'grp':(r.item?'item':'');
+    body+='<tr'+(cls?' class="'+cls+'"':'')+'><td>'+esc(r.label)+'</td>'+
+      '<td>'+eur(r.geen)+'</td><td>'+eur(r.sturing)+'</td><td>'+eur(r.onbalans)+'</td></tr>';
+  });
+  var foot='';
+  if(F3.subtotaal){
+    foot='<tfoot>'+
+      '<tr><td>Subtotaal (excl. btw)</td><td>'+eur(F3.subtotaal.geen)+'</td><td>'+eur(F3.subtotaal.sturing)+'</td><td>'+eur(F3.subtotaal.onbalans)+'</td></tr>'+
+      (F3.btw?'<tr><td>Btw (21 %)</td><td>'+eur(F3.btw.geen)+'</td><td>'+eur(F3.btw.sturing)+'</td><td>'+eur(F3.btw.onbalans)+'</td></tr>':'')+
+      (F3.totaal?'<tr><td>Totaal (incl. btw)</td><td>'+eur(F3.totaal.geen)+'</td><td>'+eur(F3.totaal.sturing)+'</td><td>'+eur(F3.totaal.onbalans)+'</td></tr>':'')+
+    '</tfoot>';
+  }
+  pagina(
+    '<div class="stap-band"><div class="nr">'+(heeftLp?'4':'3')+'</div><div><h2>Factuurdetails — de drie sturingen</h2><div class="note">Dezelfde installatie, drie sturingswijzen: geen sturing · slim zonder onbalans · slim mét onbalans.</div></div></div>'+
+    (rows.length
+      ? '<table><thead><tr><th>'+esc(h[0])+'</th><th>'+esc(h[1])+'</th><th>'+esc(h[2])+'</th><th>'+esc(h[3])+'</th></tr></thead><tbody>'+body+'</tbody>'+foot+'</table>'
+      : '<div class="box">Geen factuurdetail beschikbaar in deze simulatie.</div>')+
+    '<p class="note">Bedragen per jaar, excl. btw tenzij anders vermeld. De kolom “Excl. onbalans” is de gegarandeerde slimme sturing; “Incl. onbalans” telt de opportunistische onbalans-winst erbij.</p>'
+  );
+})();
+
+// ---------------------------------------------------------------------------
+// PDF / print
+// ---------------------------------------------------------------------------
+(function(){
+  var btn=document.getElementById('fdpdf-save');
+  async function genPdf(){
+    if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internetverbinding?)');
+    var pages=document.querySelectorAll('.a4');
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+    for(var i=0;i<pages.length;i++){
+      var canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var img=canvas.toDataURL('image/jpeg',0.92);
+      var hh=canvas.height*210/canvas.width;
+      if(i>0) pdf.addPage();
+      pdf.addImage(img,'JPEG',0,0,210,hh>297?297:hh);
+    }
+    return pdf;
+  }
+  btn.onclick=async function(){
+    btn.disabled=true; var orig=btn.textContent; btn.textContent='⏳ PDF…';
+    try{ var pdf=await genPdf(); pdf.save('Fluctus_simulatierapport'+(PID?'_'+PID:'')+'.pdf'); }
+    catch(e){ alert('PDF maken lukte niet: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent=orig; }
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// DEMO-data (enkel als er geen echte data is → standalone preview)
+// ---------------------------------------------------------------------------
+function _demo(){
+  return {
+    klant:'Boer aardappel', locatie:'9220 · Fluvius Midden-Vlaanderen · MS', datum:'augustus 2026', project_id:'FLX-DEMO-001',
+    heeftLaadplein:true, onbalans_nvt:false, mwhTot:1180, kmDeliv:1470000,
+    input:{
+      aansluiting:{ kva:635, spanning:'MS', max_injectie_kw:400 },
+      verbruik:{ mwh:420, label:'slager-profiel (kwartier)' },
+      pv:{ kwp:250 },
+      batterij:{ kw:600, kwh:1260, dod_pct:90, rte_pct:92 },
+      laadpleinen:[
+        { naam:'Vrachtwagens', voertuigtype:'truck', aantal:6, km_per_jaar:120000, kwh_per_km:1.1, venster_start:20, venster_eind:6, dagen_per_week:6, energie_mwh:792, laadpunten:{ac22:0,dc160:4,dc300:0} },
+        { naam:'Bestelwagens', voertuigtype:'bestelwagen', aantal:10, km_per_jaar:45000, kwh_per_km:0.35, venster_start:18, venster_eind:6, dagen_per_week:5, energie_mwh:158, laadpunten:{ac22:10,dc160:0,dc300:0} }
+      ]
+    },
+    tegels:{ kost_excl_btw:214800, kost_per_mwh:182.0, pct_km_geladen:100, pct_extra_km:18, eur_per_100km:14.6 },
+    km:{ gevraagd:1170000, geladen:1170000, tekort:0, pct_geladen:100, pct_extra:18, extra_km:210600 },
+    sturingen:{
+      geen:     { kost_excl_btw:268400, eur_per_mwh:227.5, eur_per_100km:18.3 },
+      sturing:  { kost_excl_btw:214800, eur_per_mwh:182.0, eur_per_100km:14.6 },
+      onbalans: { kost_excl_btw:201900, eur_per_mwh:171.1, eur_per_100km:13.7 }
+    },
+    factuur3:{
+      headers:['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'],
+      rows:[
+        { label:'Groep Energie', groep:true, geen:198500, sturing:151200, onbalans:139400 },
+        { label:'Afname spotmarkt', item:true, geen:210300, sturing:168900, onbalans:157400 },
+        { label:'Injectie-opbrengst', item:true, geen:-11800, sturing:-17700, onbalans:-18000 },
+        { label:'Groep Netkosten', groep:true, geen:58200, sturing:52100, onbalans:51200 },
+        { label:'Capaciteitstarief (per MW)', item:true, geen:34600, sturing:29100, onbalans:28400 },
+        { label:'Distributie (per MWh)', item:true, geen:23600, sturing:23000, onbalans:22800 },
+        { label:'Groep Heffingen', groep:true, geen:11700, sturing:11500, onbalans:11300 }
+      ],
+      subtotaal:{ geen:268400, sturing:214800, onbalans:201900 },
+      btw:{ geen:56364, sturing:45108, onbalans:42399 },
+      totaal:{ geen:324764, sturing:259908, onbalans:244299 }
+    }
+  };
+}
+</script>
+</body>
+</html>
