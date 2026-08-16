@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.63.75  (2026-08-16 10:20 Europe/Brussels)
+     v1.63.75 (KM-TEKORT bij Simuleer, Johan 16-08): bij een geforceerde installatie met te weinig capaciteit tonen
+              we max geleverd + het jaarlijkse km-TEKORT (totaal over alle laadpleinen + tabel per plein) i.p.v. de
+              verhoog-opties (die blijven de Ontwerp-boodschap). _kmTekortBlok(); geguard op STATE.simuleerModus.
      FLUCTUS SIMULATOR  v1.63.74  (2026-08-15 20:34 Europe/Brussels)
      v1.63.74 (€/MWH-NOEMER FIX, Johan 15-08): de €/MWh-kolom in de Factuur-samenvatting deelde door enkel het
               gebouwverbruik (STATE.jaarverbruik) → bij een laadplein absurd hoge €/MWh (bv. 28.660 i.p.v. 97,65).
@@ -513,7 +517,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.74</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.75</span>
   </div>
 </div>
 
@@ -6153,6 +6157,51 @@ function _renderAssetTegels(R){
 // v1.20.4: meerwaarde-KPI-kaarten voor de 3 sturingen (geen / excl. onbalans /
 // incl. onbalans). Leest STATE.kpiSturing uit /api/nominatie-sim-3.
 // v1.20.8: laadplein-resultaat + capaciteits-advies (aansluiting verhogen vs batterij).
+// v1.63.75 (Johan 16-08): KM-TEKORT-BLOK. Bij een geforceerde installatie (Simuleer) leveren we max wat kan
+// en geven we het jaarlijkse km-tekort aan — totaal over alle laadpleinen + een tabel per plein. De km-fractie
+// per plein = tekort_mwh/gevraagd_mwh (dimensieloos), toegepast op gevraagd_km = aantal × km/jaar (uit STATE).
+function _kmTekortBlok(lp, cap){
+  var pleinen=(lp && lp.pleinen) || [];
+  var stl=STATE.laadpleinen || [];
+  var rows=[]; var gevTot=0, tekTot=0;
+  for(var i=0;i<pleinen.length;i++){
+    var p=pleinen[i]||{}, s=stl[i]||{};
+    var aantal=(+s.aantal || +p.aantal || 0);
+    var kmpj=(+s.km_per_jaar || 0);
+    var gevraagd_km=aantal*kmpj;
+    var gm=(+p.gevraagd_mwh||0), tm=(+p.tekort_mwh||0);
+    var frac=(gm>0)?Math.max(0,Math.min(1, tm/gm)):0;
+    var tekort_km=gevraagd_km*frac;
+    gevTot+=gevraagd_km; tekTot+=tekort_km;
+    rows.push({naam:(p.naam||s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gevraagd_km-tekort_km, tekort:tekort_km});
+  }
+  // Terugval als de per-plein-data ontbreekt: totaal via globale fractie (tekort_mwh / EV-laadvraag).
+  if(gevTot<=0){
+    var gT=_vlootKmJaar(), evM=(+lp.ev_last_mwh||0), tM=(cap&&+cap.tekort_mwh||0);
+    var fr=(evM>0)?Math.max(0,Math.min(1, tM/evM)):0;
+    gevTot=gT; tekTot=gT*fr; rows=[];
+  }
+  var gelTot=Math.max(0,gevTot-tekTot);
+  var pct=(gevTot>0)?(tekTot/gevTot*100):0;
+  var box=el('div',{style:'background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;padding:12px 14px;font-size:13px;color:#7A3608;line-height:1.55'});
+  box.innerHTML='<b>⚠ Met deze installatie raakt niet alle laadvraag geladen.</b> We laden maximaal wat binnen het venster onder je aansluiting ('+fmtNum((cap&&cap.huidig_toegangsvermogen_kw)||0,0)+' kW) past.'+
+    '<div style="margin-top:8px;font-size:14px;color:#1F3864"><b>Geleverd: '+fmtNum(gelTot,0)+' km/jaar</b> · <b style="color:#9E480E">Tekort: '+fmtNum(tekTot,0)+' km/jaar ('+fmtNum(pct,0)+'%)</b> — over alle laadpleinen samen (van '+fmtNum(gevTot,0)+' km/jaar gevraagd).</div>';
+  if(rows.length>1){
+    var t='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;color:#1F3864">'+
+      '<tr style="color:#7A3608"><th style="text-align:left;padding:3px 6px">Laadplein</th><th style="text-align:right;padding:3px 6px">Gevraagd km/jr</th><th style="text-align:right;padding:3px 6px">Geleverd km/jr</th><th style="text-align:right;padding:3px 6px">Tekort km/jr</th></tr>';
+    rows.forEach(function(r){
+      t+='<tr style="border-top:1px solid #E7C9A0"><td style="padding:3px 6px">'+escapeHtml(String(r.naam))+'</td>'+
+        '<td style="text-align:right;padding:3px 6px">'+fmtNum(r.gevraagd,0)+'</td>'+
+        '<td style="text-align:right;padding:3px 6px">'+fmtNum(r.geleverd,0)+'</td>'+
+        '<td style="text-align:right;padding:3px 6px;color:'+(r.tekort>0.5?'#9E480E':'#05B050')+';font-weight:600">'+fmtNum(r.tekort,0)+'</td></tr>';
+    });
+    t+='</table>';
+    var td=el('div'); td.innerHTML=t; box.appendChild(td);
+  }
+  box.appendChild(el('div',{style:'margin-top:8px;font-size:11.5px;color:#7A3608'},'Wil je alles laden? Kies de Ontwerp-knop — die berekent hoeveel toegangsvermogen of batterij daarvoor nodig is.'));
+  return box;
+}
+
 function _renderLaadpleinResultaat(lp){
   var sec=el('div',{class:'fdsim-section',style:'margin-bottom:14px'});
   sec.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin-bottom:6px'},'Laadpleinen (EV)'));
@@ -6160,6 +6209,18 @@ function _renderLaadpleinResultaat(lp){
     lp.aantal_pleinen+' laadplein(en) · EV-laadvraag '+fmtNum(lp.ev_last_mwh,1)+' MWh in deze periode · totaal laadvermogen '+fmtNum(lp.totaal_laadvermogen_kw,0)+' kW (= ondergrens batterij)'
     + (lp.bestaand_afgetrokken_mwh>0 ? (' · '+fmtNum(lp.bestaand_afgetrokken_mwh,1)+' MWh bestaand uit basisverbruik gehaald') : '')));
   var cap=lp.capaciteit;
+  // v1.63.75: bij Simuleer (geforceerde installatie, incl. batterij) → km-framing centraal i.p.v. de verhoog-opties.
+  // Bron = per-plein tekort_mwh uit de HOOFDsim (battery-bewust: wat déze installatie effectief niet levert),
+  // niet cap.tekort_mwh (dat is de aansluiting-alléén-check die het Ontwerp-advies voedt).
+  if(STATE.simuleerModus && (lp.pleinen && lp.pleinen.length)){
+    var _realTekortMwh=(lp.pleinen||[]).reduce(function(s,p){ return s+(+p.tekort_mwh||0); },0);
+    if(_realTekortMwh>0.5){
+      sec.appendChild(_kmTekortBlok(lp, cap));
+    }else{
+      sec.appendChild(el('div',{class:'fdsim-hint',style:'color:#05B050'},'✓ Met deze installatie wordt de volledige laadvraag geleverd ('+fmtNum(_vlootKmJaar(),0)+' km/jaar).'));
+    }
+    return sec;
+  }
   if(cap && !cap.voldoende){
     var w=el('div',{style:'background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;padding:12px 14px;font-size:13px;color:#7A3608;line-height:1.6'});
     // v1.23.4: DRIE opties. De derde is adaptief (server.js v15.20.1): staat de site
