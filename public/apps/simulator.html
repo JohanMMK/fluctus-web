@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.63.79  (2026-08-16 13:30 Europe/Brussels)
+     v1.63.79 (Johan 16-08): Simuleer past de INPUT niet meer aan — simuleerVasteInstallatie zet nu ook
+              input.geen_aansluiting_verhoging=true, zodat de hoofdsim het toegangsvermogen NIET stil verhoogt.
+              630 kVA blijft 630 kVA; wat niet past wordt echt tekort. VEREIST dat server.js/buildSimInput die vlag
+              doorgeeft aan simulator.py (te bevestigen op de live server.js).
+     FLUCTUS SIMULATOR  v1.63.78  (2026-08-16 13:10 Europe/Brussels)
+     v1.63.78 (Johan 16-08): (1) km-tekort bij Simuleer rekent nu op cap.tekort_mwh (eerlijke onhaalbaarheid onder
+              de opgegeven aansluiting+batterij, ZONDER de stille auto-verhoging die het per-plein-tekort 0 maakte),
+              + nuance dat de sim de km wél levert door de aansluiting te overschrijden. (2) Factuur-samenvatting bij
+              Simuleer met DRIE bedrag-kolommen (geen/sturing/onbalans) via _factuurSamenvatting3Kolom().
      FLUCTUS SIMULATOR  v1.63.77  (2026-08-16 12:45 Europe/Brussels)
      v1.63.77 (3-STURINGEN-KOLOMMEN bij Simuleer, Johan 16-08): "Meerwaarde van sturing"-lijst wordt bij Simuleer
               een 3-kolommen-blok: per sturing Totaal excl. btw (navy/wit) + €/MWh, Totaal incl. btw (licht) + €/MWh,
@@ -525,7 +535,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <span id="fdsim-status" class="fdsim-badge info">Klaar</span>
-    <span class="fdsim-version" id="fdsim-version">v1.63.77</span>
+    <span class="fdsim-version" id="fdsim-version">v1.63.79</span>
   </div>
 </div>
 
@@ -6169,31 +6179,28 @@ function _renderAssetTegels(R){
 // en geven we het jaarlijkse km-tekort aan — totaal over alle laadpleinen + een tabel per plein. De km-fractie
 // per plein = tekort_mwh/gevraagd_mwh (dimensieloos), toegepast op gevraagd_km = aantal × km/jaar (uit STATE).
 function _kmTekortBlok(lp, cap){
-  var pleinen=(lp && lp.pleinen) || [];
   var stl=STATE.laadpleinen || [];
-  var rows=[]; var gevTot=0, tekTot=0;
-  for(var i=0;i<pleinen.length;i++){
-    var p=pleinen[i]||{}, s=stl[i]||{};
-    var aantal=(+s.aantal || +p.aantal || 0);
-    var kmpj=(+s.km_per_jaar || 0);
-    var gevraagd_km=aantal*kmpj;
-    var gm=(+p.gevraagd_mwh||0), tm=(+p.tekort_mwh||0);
-    var frac=(gm>0)?Math.max(0,Math.min(1, tm/gm)):0;
-    var tekort_km=gevraagd_km*frac;
-    gevTot+=gevraagd_km; tekTot+=tekort_km;
-    rows.push({naam:(p.naam||s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gevraagd_km-tekort_km, tekort:tekort_km});
+  // Vraag-energie van de vloot (aantal × km/jaar × kWh/km); terugval op de sim-gevraagde energie.
+  var demandMwh=stl.reduce(function(s,p){ return s+((typeof _lpEnergieMwh==='function'?_lpEnergieMwh(p):0)||0); },0);
+  if(demandMwh<=0) demandMwh=((lp&&lp.pleinen)||[]).reduce(function(s,p){ return s+(+p.gevraagd_mwh||0); },0);
+  // TEKORT = cap.tekort_mwh: de EERLIJKE onhaalbaarheid onder de OPGEGEVEN aansluiting + batterij,
+  // ZONDER de stille auto-verhoging van het toegangsvermogen die de hoofdsim doet (die maakt het per-plein-
+  // tekort kunstmatig 0). Zo klopt het km-tekort met de "CAPACITEIT ONTOEREIKEND"-vaststelling.
+  var tekortMwh=(cap && +cap.tekort_mwh) || 0;
+  var totKm=(typeof _vlootKmJaar==='function'?_vlootKmJaar():0);
+  var frac=(demandMwh>0)?Math.max(0,Math.min(1, tekortMwh/demandMwh)):0;
+  var tekTot=totKm*frac, gelTot=Math.max(0, totKm-tekTot), pct=frac*100;
+  var P=(cap && +cap.huidig_toegangsvermogen_kw) || (+STATE.aansluitingKva||0);
+  // per plein: proportioneel op de gevraagde energie (cap.tekort is een vloot-cijfer)
+  var rows=[];
+  for(var i=0;i<stl.length;i++){
+    var s=stl[i]||{}; var gevraagd_km=(+s.aantal||0)*(+s.km_per_jaar||0);
+    if(gevraagd_km<=0) continue;
+    rows.push({naam:(s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gevraagd_km*(1-frac), tekort:gevraagd_km*frac});
   }
-  // Terugval als de per-plein-data ontbreekt: totaal via globale fractie (tekort_mwh / EV-laadvraag).
-  if(gevTot<=0){
-    var gT=_vlootKmJaar(), evM=(+lp.ev_last_mwh||0), tM=(cap&&+cap.tekort_mwh||0);
-    var fr=(evM>0)?Math.max(0,Math.min(1, tM/evM)):0;
-    gevTot=gT; tekTot=gT*fr; rows=[];
-  }
-  var gelTot=Math.max(0,gevTot-tekTot);
-  var pct=(gevTot>0)?(tekTot/gevTot*100):0;
   var box=el('div',{style:'background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;padding:12px 14px;font-size:13px;color:#7A3608;line-height:1.55'});
-  box.innerHTML='<b>⚠ Met deze installatie raakt niet alle laadvraag geladen.</b> We laden maximaal wat binnen het venster onder je aansluiting ('+fmtNum((cap&&cap.huidig_toegangsvermogen_kw)||0,0)+' kW) past.'+
-    '<div style="margin-top:8px;font-size:14px;color:#1F3864"><b>Geleverd: '+fmtNum(gelTot,0)+' km/jaar</b> · <b style="color:#9E480E">Tekort: '+fmtNum(tekTot,0)+' km/jaar ('+fmtNum(pct,0)+'%)</b> — over alle laadpleinen samen (van '+fmtNum(gevTot,0)+' km/jaar gevraagd).</div>';
+  box.innerHTML='<b>⚠ Onder je toegangsvermogen ('+fmtNum(P,0)+' kW) raakt niet alle laadvraag geladen.</b>'+
+    '<div style="margin-top:8px;font-size:14px;color:#1F3864"><b>Binnen de aansluiting: '+fmtNum(gelTot,0)+' km/jaar</b> · <b style="color:#9E480E">Tekort: '+fmtNum(tekTot,0)+' km/jaar ('+fmtNum(pct,0)+'%)</b> — over alle laadpleinen samen (van '+fmtNum(totKm,0)+' km/jaar gevraagd).</div>';
   if(rows.length>1){
     var t='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;color:#1F3864">'+
       '<tr style="color:#7A3608"><th style="text-align:left;padding:3px 6px">Laadplein</th><th style="text-align:right;padding:3px 6px">Gevraagd km/jr</th><th style="text-align:right;padding:3px 6px">Geleverd km/jr</th><th style="text-align:right;padding:3px 6px">Tekort km/jr</th></tr>';
@@ -6206,7 +6213,11 @@ function _kmTekortBlok(lp, cap){
     t+='</table>';
     var td=el('div'); td.innerHTML=t; box.appendChild(td);
   }
-  box.appendChild(el('div',{style:'margin-top:8px;font-size:11.5px;color:#7A3608'},'Wil je alles laden? Kies de Ontwerp-knop — die berekent hoeveel toegangsvermogen of batterij daarvoor nodig is.'));
+  var _verh=(+((lp&&lp.toegangsvermogen_verhoogd_kw))||0);
+  var _note=(_verh>0)
+    ? 'Let op: de simulatie lévert deze km wél, maar door het toegangsvermogen te overschrijden (piek ~'+fmtNum(P+_verh,0)+' kW i.p.v. '+fmtNum(P,0)+' kW) — de overschrijdingskost zit in de factuur. Om binnen '+fmtNum(P,0)+' kW te blijven: grotere batterij of hoger toegangsvermogen (zie Ontwerp).'
+    : 'Wil je alles binnen de aansluiting laden? Kies Ontwerp — die berekent hoeveel toegangsvermogen of batterij daarvoor nodig is.';
+  box.appendChild(el('div',{style:'margin-top:8px;font-size:11.5px;color:#7A3608'}, _note));
   return box;
 }
 
@@ -6243,8 +6254,9 @@ function _renderLaadpleinResultaat(lp){
   // Bron = per-plein tekort_mwh uit de HOOFDsim (battery-bewust: wat déze installatie effectief niet levert),
   // niet cap.tekort_mwh (dat is de aansluiting-alléén-check die het Ontwerp-advies voedt).
   if(STATE.simuleerModus && (lp.pleinen && lp.pleinen.length)){
-    var _realTekortMwh=(lp.pleinen||[]).reduce(function(s,p){ return s+(+p.tekort_mwh||0); },0);
-    if(_realTekortMwh>0.5){
+    // v1.63.78: gate op cap (eerlijke capaciteitscheck, mét batterij maar ZONDER auto-verhoging),
+    // niet op het per-plein-tekort (dat 0 wordt zodra de hoofdsim het toegangsvermogen stil verhoogt).
+    if(cap && !cap.voldoende && (+cap.tekort_mwh||0)>0.5){
       sec.appendChild(_kmTekortBlok(lp, cap));
     }else{
       sec.appendChild(el('div',{class:'fdsim-hint',style:'color:#05B050'},'✓ Met deze installatie wordt de volledige laadvraag geleverd ('+fmtNum(_vlootKmJaar(),0)+' km/jaar).'));
@@ -9152,6 +9164,69 @@ function _stuur3Kolom(kg, ks, ko){
   return grid;
 }
 
+// v1.63.78 (Johan 16-08): Factuur-samenvatting met DRIE bedrag-kolommen (de drie sturingen) i.p.v. één + €/MWh.
+// Gebruikt de jaarfactuur-groepen van elke variant (geen/sturing/onbalans) uit STATE.resultaatVarianten.
+function _factuurSamenvatting3Kolom(jfSturing){
+  var V=STATE.resultaatVarianten||{};
+  function _grp(x){ var f=(x&&(x.jaarfactuur||x.factuur))||{}; return f.groepen||{}; }
+  function _fac(x){ return (x&&(x.jaarfactuur||x.factuur))||{}; }
+  var G0=_grp(V.geen), G1=(jfSturing.groepen)||_grp(V.sturing), G2=_grp(V.onbalans);
+  var F0=_fac(V.geen), F2=_fac(V.onbalans);
+  function humaniseer(key){ return key.replace(/_/g,' ').replace(/^./,function(c){return c.toUpperCase();}); }
+  function groupName(g){ var p=g.split('_'); return p.length>=2?(p[0]+' — '+p.slice(1).join(' ').replace(/^./,function(c){return c.toUpperCase();})):g; }
+  function gt(G,g){ var grp=G[g]||{}; return (grp._subtotaal!==undefined?grp._subtotaal:(grp.totaal||grp.total||0)); }
+  function sub(F){ return +F.subtotaal_excl_btw||0; }
+  function btw(F){ return F.btw_bedrag!==undefined?(+F.btw_bedrag||0):(sub(F)*0.21); }
+  function tot(F){ return F.totaal_incl_btw!==undefined?(+F.totaal_incl_btw||0):(sub(F)*1.21); }
+  var tw=el('div',null);
+  tw.appendChild(el('h3',{style:'color:#1F3864;font-size:14px;margin:14px 0 8px'},'Factuur-samenvatting — de drie sturingen'));
+  var t=el('table',{class:'fdsim-table'});
+  var thead=el('thead');
+  thead.appendChild(el('tr',null,[
+    el('th',null,'Onderdeel'),
+    el('th',{style:'text-align:right'},'Geen sturing'),
+    el('th',{style:'text-align:right'},'Excl. onbalans'),
+    el('th',{style:'text-align:right'},'Incl. onbalans')
+  ]));
+  t.appendChild(thead);
+  var tbody=el('tbody');
+  Object.keys(G1).forEach(function(g){
+    var grp=G1[g]||{};
+    tbody.appendChild(el('tr',{class:'group'},[
+      el('td',null,'Groep '+groupName(g)),
+      el('td',{class:'num'},fmtEur(gt(G0,g))),
+      el('td',{class:'num'},fmtEur(gt(G1,g))),
+      el('td',{class:'num'},fmtEur(gt(G2,g)))
+    ]));
+    Object.keys(grp).forEach(function(k){
+      if(k.charAt(0)==='_')return;
+      var v1=grp[k]; if(typeof v1!=='number')return;
+      var v0=(G0[g]||{})[k], v2=(G2[g]||{})[k];
+      if(Math.abs(v1)<0.01 && Math.abs(+v0||0)<0.01 && Math.abs(+v2||0)<0.01)return;
+      tbody.appendChild(el('tr',null,[
+        el('td',{style:'padding-left:24px'},humaniseer(k)),
+        el('td',{class:'num'},fmtEur(+v0||0)),
+        el('td',{class:'num'},fmtEur(v1)),
+        el('td',{class:'num'},fmtEur(+v2||0))
+      ]));
+    });
+  });
+  tbody.appendChild(el('tr',{style:'background:#F4F6FA;font-weight:600'},[
+    el('td',null,'Subtotaal excl. btw'),
+    el('td',{class:'num'},fmtEur(sub(F0))), el('td',{class:'num'},fmtEur(sub(jfSturing))), el('td',{class:'num'},fmtEur(sub(F2)))
+  ]));
+  tbody.appendChild(el('tr',null,[
+    el('td',null,'BTW (21%)'),
+    el('td',{class:'num'},fmtEur(btw(F0))), el('td',{class:'num'},fmtEur(btw(jfSturing))), el('td',{class:'num'},fmtEur(btw(F2)))
+  ]));
+  tbody.appendChild(el('tr',{class:'total'},[
+    el('td',null,'TOTAAL incl. btw'),
+    el('td',{class:'num'},fmtEur(tot(F0))), el('td',{class:'num'},fmtEur(tot(jfSturing))), el('td',{class:'num'},fmtEur(tot(F2)))
+  ]));
+  t.appendChild(tbody); tw.appendChild(t);
+  return tw;
+}
+
 function _renderSturingKPIs(){
   var k = STATE.kpiSturing || {};
   // v1.20.12 FIX: aantalMnd (voor de /jaar-extrapolatie) mag ENKEL uit de
@@ -9789,7 +9864,10 @@ function renderStep9Resultaat(){
   box.appendChild(kpis);
 
   // factuur tabel
-  if(jf && jf.groepen){
+  if(jf && jf.groepen && STATE.simuleerModus && STATE.resultaatVarianten && (STATE.resultaatVarianten.geen||STATE.resultaatVarianten.onbalans)){
+    // v1.63.78: bij Simuleer → drie bedrag-kolommen (de drie sturingen) i.p.v. één + €/MWh.
+    box.appendChild(_factuurSamenvatting3Kolom(jf));
+  }else if(jf && jf.groepen){
     // v1.63.74 (Johan 15-08): €/MWh-kolom deelt door _mwhVoorKpi (= gebouw + laadplein-EV),
     // identiek aan de "Per MWh"-tegel. Voorheen door STATE.jaarverbruik (enkel gebouw) → bij een
     // laadplein was de noemer veel te klein (bv. 10 i.p.v. 2935 MWh) en €/MWh absurd hoog.
@@ -10693,6 +10771,9 @@ function simuleerVasteInstallatie(){
   setStatus('Simulatie loopt...','info');
   input._async=true;
   input._simuleer_enkel=true;   // v15.72: server draait exact deze config in 3 sturingen
+  // v1.63.79 (Johan 16-08): Simuleer mag de INPUT niet aanpassen — géén stille verhoging van het
+  // toegangsvermogen. 630 kVA blijft 630 kVA; wat niet past wordt echt tekort (geen overschrijding-truc).
+  input.geen_aansluiting_verhoging=true;
   STATE.simLog=[]; STATE.simLogStart=Date.now();
   try { STATE.lastSimInput=JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput=null; }
   _sim3Async(input).then(function(r){
