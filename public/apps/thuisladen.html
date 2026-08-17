@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.5.1  (2026-08-16)
+     FLUCTUS THUISLADEN  v0.6.0  (2026-08-16)
+     v0.6.0: (1) 2 fasen: harde grens springt nu naar 5 kVA (fasenwissel hertekent) + PV-as
+             gekapt op 20 panelen; omvormers >5 kVA blijven uit de heatmap. (2) Rapport: factuur-
+             detail referentie vs scenario (groepen A–E). (3) Cashflow jaar 1 per wagen (kosten
+             gebouw + laden per wagen + CREG/diesel-bijdrage per wagen), referentie vs scenario.
+             (4) Energiebalans jaar met twee pie charts: verbruik (herkomst PV/net, al dan niet via
+             batterij) + PV-productie (bestemming direct/batterij/injectie). Server (simulator.py)
+             levert per anker factuurgroepen + energieflows; lokaal model geeft een benadering.
+     ---------------------------------------------------------------------------
+     v0.5.1  (2026-08-16)
      v0.5.1: Heatmaps 2×2 (i.p.v. 4 naast elkaar) en groter (250px). Duidelijke assen per
              kaart: verticaal batterij-kWh (25→0), horizontaal extra PV-panelen (0→40).
      ---------------------------------------------------------------------------
@@ -343,6 +352,8 @@ function fmtE(x){ return '€ '+Math.round(x).toLocaleString('nl-BE'); }
 function fmtE1(x){ return '€ '+(+x).toLocaleString('nl-BE',{minimumFractionDigits:1,maximumFractionDigits:1}); }
 function fmtN(x,d){ return (+x).toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
 function maxKva(){ return IN.fasen===2 ? P.MAX_KVA_2F : P.MAX_KVA_3F; }
+// Bij 2 fasen (5 kVA) heeft méér dan ~20 panelen geen zin (kleine aansluiting) → PV-as afkappen op 20.
+function pvMaxEff(){ return IN.fasen===2 ? Math.min(20, P.PV_MAX) : P.PV_MAX; }
 // Actief CREG-tarief volgens de gekozen regio (VL/BR/WA).
 var REGIO_NAAM={VL:'Vlaanderen',BR:'Brussel',WA:'Wallonië'};
 function cregTarief(){ return P['CREG_'+(IN.regio||'VL')] || P.CREG_VL; }
@@ -362,7 +373,7 @@ function battPrijs(kwh){ // goedkoopste serie-entry voor die kWh binnen de faseg
 }
 // as-waarden
 function battAs(){ return [0,5,10,15,20,25]; }
-function pvAs(){ var a=[0]; for(var n=P.PV_MIN;n<=P.PV_MAX;n+=P.PV_STAP) a.push(n); return a; }
+function pvAs(){ var a=[0]; for(var n=P.PV_MIN;n<=pvMaxEff();n+=P.PV_STAP) a.push(n); return a; }
 
 // ============================ REKENHART (indicatief prototype) ============================
 // Berekent voor één combinatie (batterij-kWh, extra-PV-panelen) de jaarkost, besparing, capex, rendement, €/MWh.
@@ -403,14 +414,24 @@ function model(battKwh, pvPan, _isRef){
   IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*cregTarief(); else diesel += (w.km/100)*P.DIESEL_100KM; });
   var capex = bt.eur + paneelKwp(pvPan)*P.PV_KOST;
   var eurMwh = totLoad>0 ? kostScenario/totLoad : 0;
-  // Referentie-run (0 batterij, 0 extra PV): enkel de kost teruggeven, geen besparing → geen recursie.
-  if(_isRef){ return { kostScenario:kostScenario }; }
+  // Benaderende factuur + energiebalans (prototype). De server levert de echte cijfers.
+  var locFactuur = { A_energie:Math.round(netAfname*P.SPOT), B_afname:Math.round(netAfname*P.NETKOST_MWH+capac),
+    C_injectie:-Math.round(injOpbr), D_transport:0, E_heffingen:Math.round(netAfname*P.HEFFING_MWH),
+    subtotaal:Math.round(kostScenario) };
+  var locEnergie = { afname_mwh:totLoad, pv_prod_mwh:pvProd,
+    verbruik:{ pv_direct:directSC, pv_batt:battSC, net_direct:netAfname, net_batt:0 },
+    productie:{ pv_direct:directSC, pv_batt:battSC, pv_inj:injectieBruto },
+    pct_zelfconsumptie: pvProd>0?Math.round(zelfverbruik/pvProd*100):0,
+    pct_zelfvoorziening: totLoad>0?Math.round(zelfverbruik/totLoad*100):0 };
+  // Referentie-run (0 batterij, 0 extra PV): kost + factuur + energie teruggeven, geen besparing → geen recursie.
+  if(_isRef){ return { kostScenario:kostScenario, factuur:locFactuur, energie:locEnergie }; }
   // BESPARING = referentie (gebouw + laden, geen PV/batterij) − scenariokost (met PV+batterij+sturing).
   var ref = model(0, 0, true); var refKost = ref ? ref.kostScenario : kostScenario;
   var besparing = refKost - kostScenario;
   var rend = capex>0 ? (besparing/capex*100) : (besparing>0?999:0);
   return { battKwh:battKwh, kva:bt.kva, pvPan:pvPan, kwp:pvKwp, capex:capex,
     kostScenario:kostScenario, besparing:besparing, rendement:rend, eurMwh:eurMwh, refKost:refKost,
+    factuur:locFactuur, energie:locEnergie, refFactuur:(ref?ref.factuur:null), refEnergie:(ref?ref.energie:null),
     netAfname:netAfname, injectie:injectie, zelfverbruik:zelfverbruik, piekEff:piekEff,
     creg:creg, diesel:diesel };
 }
@@ -418,7 +439,7 @@ function model(battKwh, pvPan, _isRef){
 function onbalansExtra(m){ if(!m||m.battKwh<=0) return 0; return Math.min(0.18,0.05+m.battKwh*0.004) * Math.max(0,m.kostScenario) * 0.25; }
 
 // ============================ ANKERNET + SPLINE-INTERPOLATIE ============================
-function pctPanelen(pct){ return Math.round(P.PV_MAX*pct/100/P.PV_STAP)*P.PV_STAP; }
+function pctPanelen(pct){ return Math.round(pvMaxEff()*pct/100/P.PV_STAP)*P.PV_STAP; }
 function buildGrid(){
   var by=battAs(), px=pvAs();
   var battAnk=[0,5,10,15,20,25];                        // 5 kVA dekt alle kWh → alle klassen als anker
@@ -553,10 +574,11 @@ function simulateCellQuiet(b,pv){ var m=model(b,pv); if(m){ STATE.gemeten[b+'_'+
 
 // ============================ RENDER ============================
 function selCell(){ if(!STATE.sel) return null; return STATE.grid.cells.find(function(c){return c.b===STATE.sel.b&&c.pv===STATE.sel.pv;}); }
-function render(){ buildGrid(); renderCards(); renderConstraints(); renderSel(); renderReport(); drawAll(); bindHeatmaps(); }
+function render(){ buildGrid(); renderCards(); renderConstraints(); renderSel(); renderReport(); drawAll(); bindHeatmaps(); drawReportPies(); }
 function renderCards(){
   var by=[25,20,15,10,5,0];                       // batterij-kWh, top→bottom (groot bovenaan)
-  var px=[0,10,20,30,40];                          // extra PV-panelen, links→rechts
+  var pm=pvMaxEff();                                // 40 (3 fasen) of 20 (2 fasen)
+  var px=[0, pm*0.25, pm*0.5, pm*0.75, pm].map(function(v){return Math.round(v);}); // extra PV-panelen, links→rechts
   var yax='<div class="yax">'+by.map(function(v){return '<span>'+v+'</span>';}).join('')+'</div>';
   var xax='<div class="axis">'+px.map(function(v){return '<span>'+v+'</span>';}).join('')+'</div>';
   document.getElementById('cards').innerHTML = HM.map(function(h){
@@ -615,7 +637,9 @@ function renderReport(){
   }
   var ref=(m&&m.refKost!=null)?m.refKost:refKostWaarde();
   var cregInfo=(m&&m.creg)?m.creg:0, dieselInfo=(m&&m.diesel)?m.diesel:0;
-  el.innerHTML='<h3 style="border:none;margin-top:4px">Rapport — aanbevolen opstelling</h3>'+
+  var refF=(m&&m.refFactuur)||null, scnF=(m&&m.factuur)||null;
+  var scnE=(m&&m.energie)||null;
+  el.innerHTML='<h3 style="border:none;margin-top:4px">Financieel plan — aanbevolen opstelling</h3>'+
     '<table><thead><tr><th>Onderdeel</th><th>Waarde</th></tr></thead><tbody>'+
      '<tr><td>Referentie — gebouw + laden, <b>zonder</b> PV/batterij</td><td>'+(ref!=null?fmtE(ref):'—')+'</td></tr>'+
      '<tr><td>Scenario — gebouw + laden, <b>met</b> PV+batterij (slim, z. onbalans)</td><td>'+fmtE(m.kostScenario)+'</td></tr>'+
@@ -623,10 +647,107 @@ function renderReport(){
      '<tr><td>Investering (capex)</td><td>'+fmtE(c.capex)+'</td></tr>'+
      '<tr><td>Terugverdientijd · rendement jr 1</td><td>'+(m.besparing>0?fmtN(c.capex/m.besparing,1)+' jr':'—')+' · '+fmtN(c.rendement,1)+' %</td></tr>'+
     '</tbody></table>'+
-    '<div class="note">Ter info, buiten de besparing (reikt op referentie én scenario evenveel): werkgever-tussenkomst thuisladen ≈ '+fmtE(cregInfo)+'/jaar (CREG)'+(dieselInfo>0?(' · vermeden diesel ≈ '+fmtE(dieselInfo)+'/jaar'):'')+'. De bestaande factuur die je invulde: '+fmtE(IN.referentiekost)+'.</div>'+
-    '<div class="note">Cumulatieve cashflow met inflatie '+P.INFLATIE+' % en netkosten-indexatie '+P.NETINDEX+' % boven inflatie (horizon '+P.HORIZON+' jr):</div>'+
+    // ── Factuurdetail referentie vs scenario ──
+    _factuurDetailBlok(refF, scnF, ref)+
+    // ── Cashflow jaar 1 per wagen ──
+    _cashflowBlok(m, ref)+
+    // ── Energiebalans + pie charts ──
+    _energieBlok(scnE)+
+    // ── Meerjaren-cashflow ──
+    '<h3 style="border:none;margin-top:14px">Cumulatieve cashflow</h3>'+
+    '<div class="note">Met inflatie '+P.INFLATIE+' % en netkosten-indexatie '+P.NETINDEX+' % boven inflatie (horizon '+P.HORIZON+' jr):</div>'+
     '<table><thead><tr><th>Jaar</th><th>Besparing</th><th>Cumulatief</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    '<div class="note">Besparing = kost (gebouw + laden) zonder PV/batterij − kost mét PV+batterij en slimme sturing (zonder onbalans). Onbalans blijft buiten de zoektocht en het rendement.</div>';
+    '<div class="note">Besparing = kost (gebouw + laden) zonder PV/batterij − kost mét PV+batterij en slimme sturing (zonder onbalans). CREG/diesel reiken op beide kanten evenveel → buiten de besparing.</div>';
+}
+
+// Factuurdetail — referentie (0/0) naast het gekozen scenario.
+function _factuurDetailBlok(refF, scnF, refKost){
+  if(!scnF) return '';
+  function rij(lbl, key, klasse){
+    var r=refF?refF[key]:null, s=scnF[key];
+    return '<tr'+(klasse?(' style="font-weight:700"'):'')+'><td>'+lbl+'</td><td>'+(r!=null?fmtE(r):'—')+'</td><td>'+(s!=null?fmtE(s):'—')+'</td></tr>';
+  }
+  return '<h3 style="border:none;margin-top:14px">Factuurdetail — referentie vs scenario</h3>'+
+    '<table><thead><tr><th>Component (excl. btw)</th><th>Referentie</th><th>Scenario</th></tr></thead><tbody>'+
+     rij('Energie (leverancier)','A_energie')+
+     rij('Netkosten afname','B_afname')+
+     rij('Netkosten injectie','C_injectie')+
+     rij('Transport','D_transport')+
+     rij('Heffingen','E_heffingen')+
+     rij('Totaal excl. btw','subtotaal',true)+
+    '</tbody></table>';
+}
+
+// Cashflow jaar 1: kosten gebouw + kosten laden per wagen + CREG/diesel-bijdrage per wagen.
+function _cashflowBlok(m, refKost){
+  var gebouw=IN.jaarverbruik_mwh, evTot=evMwh(), totL=gebouw+evTot;
+  if(totL<=0) return '';
+  var eS = m.kostScenario/totL;                         // €/MWh scenario (uniform verdeeld)
+  var eR = (refKost!=null?refKost:m.kostScenario)/totL; // €/MWh referentie
+  var rows='', kostR=0, kostS=0, bij=0;
+  rows+='<tr><td>Kosten gebouw</td><td>'+fmtE(gebouw*eR)+'</td><td>'+fmtE(gebouw*eS)+'</td></tr>';
+  kostR+=gebouw*eR; kostS+=gebouw*eS;
+  IN.wagens.forEach(function(w,i){ var mwh=w.km*w.kwhkm/1000;
+    rows+='<tr><td>Kosten laden wagen '+(i+1)+'</td><td>'+fmtE(mwh*eR)+'</td><td>'+fmtE(mwh*eS)+'</td></tr>';
+    kostR+=mwh*eR; kostS+=mwh*eS;
+  });
+  IN.wagens.forEach(function(w,i){ var mwh=w.km*w.kwhkm/1000;
+    var b = w.creg ? mwh*cregTarief() : (w.km/100)*P.DIESEL_100KM;
+    var lbl = w.creg ? ('Bijdrage CREG wagen '+(i+1)) : ('Vermeden diesel wagen '+(i+1));
+    rows+='<tr><td>'+lbl+'</td><td class="pos">− '+fmtE(b)+'</td><td class="pos">− '+fmtE(b)+'</td></tr>';
+    bij+=b;
+  });
+  rows+='<tr style="font-weight:700"><td>Netto jaar 1 (kosten − bijdragen)</td><td>'+fmtE(kostR-bij)+'</td><td>'+fmtE(kostS-bij)+'</td></tr>';
+  return '<h3 style="border:none;margin-top:14px">Cashflow jaar 1 — referentie vs scenario</h3>'+
+    '<table><thead><tr><th>Post</th><th>Referentie</th><th>Scenario</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div class="note">Kosten laden/gebouw verdeeld naar rato van verbruik (€/MWh × MWh). CREG/diesel-bijdragen zijn gelijk in beide kolommen; het netto-verschil = de jaarbesparing.</div>';
+}
+
+// Energiebalans jaar (scenario) + twee pie charts.
+function _energieBlok(e){
+  if(!e) return '';
+  var v=e.verbruik||{}, pr=e.productie||{};
+  return '<h3 style="border:none;margin-top:14px">Energiebalans (jaar) — scenario</h3>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+      '<div><div style="font-weight:700;color:#1F3864;font-size:12px;margin-bottom:4px">Verbruik — herkomst ('+fmtN(e.afname_mwh,2)+' MWh)</div>'+
+        '<div style="display:flex;gap:10px;align-items:center"><canvas id="pieVerbruik" width="150" height="150" style="width:150px;height:150px"></canvas>'+
+        '<div id="legVerbruik" style="font-size:11px;flex:1"></div></div></div>'+
+      '<div><div style="font-weight:700;color:#1F3864;font-size:12px;margin-bottom:4px">PV-productie — bestemming ('+fmtN(e.pv_prod_mwh,2)+' MWh)</div>'+
+        '<div style="display:flex;gap:10px;align-items:center"><canvas id="pieProductie" width="150" height="150" style="width:150px;height:150px"></canvas>'+
+        '<div id="legProductie" style="font-size:11px;flex:1"></div></div></div>'+
+    '</div>'+
+    '<div class="note">Zelfconsumptie '+fmtN(e.pct_zelfconsumptie,0)+' % (van de PV-productie) · zelfvoorziening '+fmtN(e.pct_zelfvoorziening,0)+' % (van het verbruik).</div>';
+}
+
+// Canvas pie + legende (kleurenblind-veilig: verschil in tint én helderheid, met directe labels).
+function drawPie(canvasId, legId, slices){
+  var cv=document.getElementById(canvasId); if(!cv) return;
+  var ctx=cv.getContext('2d'); var W=cv.width, H=cv.height, R=Math.min(W,H)/2-2, cx=W/2, cy=H/2;
+  ctx.clearRect(0,0,W,H);
+  var tot=slices.reduce(function(s,x){return s+Math.max(0,x.value);},0);
+  if(tot<=0){ ctx.fillStyle='#E1E4E8'; ctx.beginPath(); ctx.arc(cx,cy,R,0,2*Math.PI); ctx.fill(); return; }
+  var a0=-Math.PI/2;
+  slices.forEach(function(x){ var frac=Math.max(0,x.value)/tot; var a1=a0+frac*2*Math.PI;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R,a0,a1); ctx.closePath();
+    ctx.fillStyle=x.color; ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke(); a0=a1; });
+  var leg=document.getElementById(legId);
+  if(leg){ leg.innerHTML=slices.map(function(x){ var pct=tot>0?Math.round(x.value/tot*100):0;
+    return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0"><span style="width:11px;height:11px;border-radius:2px;background:'+x.color+';display:inline-block;flex:none"></span>'+
+      '<span>'+x.label+' — '+fmtN(x.value,2)+' MWh ('+pct+' %)</span></div>'; }).join(''); }
+}
+function drawReportPies(){
+  var c=selCell(); if(!c) return;
+  var m=STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv); if(!m||!m.energie) return;
+  var v=m.energie.verbruik||{}, pr=m.energie.productie||{};
+  drawPie('pieVerbruik','legVerbruik',[
+    {label:'PV rechtstreeks', value:+v.pv_direct||0, color:'#1A7A3E'},
+    {label:'PV via batterij',  value:+v.pv_batt||0,   color:'#8FCB6A'},
+    {label:'Net rechtstreeks', value:+v.net_direct||0,color:'#3F6FB0'},
+    {label:'Net via batterij', value:+v.net_batt||0,  color:'#E0A030'} ]);
+  drawPie('pieProductie','legProductie',[
+    {label:'Direct verbruikt',  value:+pr.pv_direct||0, color:'#1A7A3E'},
+    {label:'Naar batterij',     value:+pr.pv_batt||0,   color:'#8FCB6A'},
+    {label:'Geïnjecteerd (net)',value:+pr.pv_inj||0,    color:'#35B0AB'} ]);
 }
 
 // ============================ INVOER-PANEEL ============================
@@ -662,7 +783,7 @@ function renderSide(){
     '<div style="margin-top:14px"><button class="btn g" style="width:100%" onclick="rerun()">↻ Herbereken heatmaps</button></div>'+
     '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar'+(STATE.grid?(' · '+STATE.grid.runs+' anker-runs'):'')+'</div>';
 }
-window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){STATE.gemeten={};} };
+window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; renderSide(); render(); } };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:0,wd_eind:7,we_start:0,we_eind:9,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
@@ -767,6 +888,8 @@ function svModel(b, pv){
     capex:(a.capex!=null?a.capex:(bt?(bt.eur+paneelKwp(pv)*P.PV_KOST):null)),
     kostScenario:a.kost, besparing:a.besparing, rendement:a.rendement, eurMwh:a.eurMwh,
     refKost:(a.ref_kost!=null?a.ref_kost:(r0&&r0.kost!=null?r0.kost:null)),
+    factuur:a.factuur||null, energie:a.energie||null,
+    refFactuur:(r0&&r0.factuur)||null, refEnergie:(r0&&r0.energie)||null,
     netAfname:null, injectie:null, zelfverbruik:null, piekEff:null,
     creg:cd.creg, diesel:cd.diesel, _server:true };
 }
@@ -788,7 +911,8 @@ function fetchServerGrid(){
       res.j.anchors.forEach(function(a){
         if(a.battKwh==null||a.pvPan==null) return;
         map[a.battKwh+'_'+a.pvPan] = { kost:a.kost, besparing:a.besparing, rendement:a.rendement,
-          eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh, ref_kost:a.ref_kost };
+          eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh, ref_kost:a.ref_kost,
+          factuur:a.factuur, energie:a.energie };
       });
       STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {};
       if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
