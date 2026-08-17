@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.8.0  (2026-08-17 11:58 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.9.0  (2026-08-17 13:36 Europe/Brussels)
+     v0.9.0: UX — ENKEL server-cijfers tonen (geen browser-benadering meer als resultaat). States:
+             idle (klik “Bereken heatmaps”) · rekenen (rekenscherm) · klaar (heatmaps) · fout (foutscherm).
+             Niet meer rekenen bij openen; pas bij de knop. Per heatmap staat het getal rechts boven de
+             kaart (updatet op hover/selectie). Klik op een geïnterpoleerde cel → info verschijnt PAS als
+             de echte single-cell dispatch binnen is (anker-cel = meteen, want al berekend).
+     ---------------------------------------------------------------------------
+     v0.8.0  (2026-08-17 11:58 Europe/Brussels)
      v0.8.0: Omvormer-sizing via C-rate (default 2, instelbaar in de invoer én de parametermodal).
              battPrijs() kiest nu de omvormer die net groter is dan kWh/C-rate i.p.v. de goedkoopste
              (was altijd 5 kVA → piek/laadfactor vlak). Grotere batterij → grotere omvormer → hogere
@@ -152,7 +159,7 @@
 </style></head>
 <body>
 <div class="top">
-  <div class="t"><a href="/portal.html" style="color:#cfe3ff;text-decoration:none;font-weight:700;font-size:12px;margin-right:12px">← Mijn Fluctus</a>Fluctus<span>.</span> Thuisladen <span class="badge" id="modeBadge" style="background:#80C53922;color:#80C539;border-color:#80C53955">prototype-model</span></div>
+  <div class="t"><a href="/portal.html" style="color:#cfe3ff;text-decoration:none;font-weight:700;font-size:12px;margin-right:12px">← Mijn Fluctus</a>Fluctus<span>.</span> Thuisladen <span class="badge" id="modeBadge" style="background:#EAEFF5;color:#5A6577;border-color:#D5DBE3">nog niet berekend</span></div>
   <div style="display:flex;gap:10px;align-items:center">
     <button class="btn ghost sm" id="mgrBtn" style="display:none">⚙ Parameters (manager)</button>
     <span class="jc">JACOPS.</span>
@@ -364,7 +371,7 @@ var IN = {
   wagens:[ {km:15000, kwhkm:0.16, wd_start:19, wd_eind:7, we_start:0, we_eind:24, creg:true} ],
   max_pv_pan:null, max_budget:null, min_rend:null
 };
-var STATE = { rol:'manager', grid:null, gemeten:{}, sel:null, iterLog:[] };
+var STATE = { rol:'manager', grid:null, gemeten:{}, sel:null, iterLog:[], status:'idle', selBusy:false };
 
 // ============================ HELPERS ============================
 function fmtE(x){ return '€ '+Math.round(x).toLocaleString('nl-BE'); }
@@ -404,8 +411,8 @@ function pvAs(){ var a=[0]; for(var n=P.PV_MIN;n<=pvMaxEff();n+=P.PV_STAP) a.pus
 // Transparante heuristiek: zelfconsumptie stijgt met PV én batterij; batterij verschuift laden naar goedkope/PV-uren
 // en shaaft de piek (capaciteitskost). GEEN onbalans. Onbalans-extra = losse bonus (zie onbalansExtra()).
 function model(battKwh, pvPan, _isRef){
-  // Server-dispatch heeft voorrang op het indicatieve model zodra de echte ankers geladen zijn.
-  if(!_isRef && STATE.serverMode){ var sv=svModel(battKwh,pvPan); if(sv) return sv; }
+  // In server-modus ENKEL de echte dispatch tonen (geen lokaal benaderingsmodel meer als resultaat).
+  if(!_isRef && STATE.serverMode){ return svModel(battKwh,pvPan); }
   var bt = battPrijs(battKwh);
   if(bt===null) return null;   // batterij past niet op de aansluiting
   var ev = evMwh();                                  // MWh/jaar laden
@@ -546,54 +553,40 @@ function cellAt(h,ev){ var cv=document.getElementById('cv_'+h.f); var r=cv.getBo
 function bindHeatmaps(){
   var tip=document.getElementById('tooltip');
   HM.forEach(function(h){ var cv=document.getElementById('cv_'+h.f);
-    cv.onmousemove=function(ev){ var c=cellAt(h,ev); if(!c){tip.style.display='none';return;}
-      tip.style.display='block'; tip.style.left=(ev.clientX+14)+'px'; tip.style.top=(ev.clientY+14)+'px';
-      // Enkel de KPI van DEZE heatmap, groot.
-      var val=(c[h.f]!=null&&isFinite(c[h.f]))?h.fmt(c[h.f]):'—';
-      tip.innerHTML='<div style="font-size:22px;font-weight:800;line-height:1.05">'+val+'</div>'+
-        '<div style="font-size:11px;opacity:.85;margin-top:3px">'+h.t+' · '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' pan.'+(c.exact?'':' (interpol.)')+'</div>';
-      showHover(c,h);
-    };
-    cv.onmouseleave=function(){ tip.style.display='none'; };
+    cv.onmousemove=function(ev){ var c=cellAt(h,ev); if(!c) return; updateHvals(c); };
+    cv.onmouseleave=function(){ updateHvals(STATE.sel?selCell():null); };   // terug naar de gekozen cel
     cv.onclick=function(ev){ var c=cellAt(h,ev); if(c){ simulateCell(c.b,c.pv); } };
   });
 }
-function showHover(c,h){
-  var val=(h&&c[h.f]!=null&&isFinite(c[h.f]))?h.fmt(c[h.f]):'—';
-  document.getElementById('hoverInfo').innerHTML =
-    (h?'<span style="font-size:19px;font-weight:800;color:#1F3864;margin-right:12px">'+h.t+': '+val+'</span>':'')+
-    '<span style="color:#5A6577">'+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp) — klik om exact te simuleren</span>'; }
 
-// klik = "echt simuleren" → exact model + verfijn interpolatie
+// klik = exact (laten) berekenen. Anker-cel = al berekend → meteen tonen. Geïnterpoleerde cel = échte
+// single-cell dispatch op de server; de info onder de heatmap verschijnt PAS als die berekening binnen is.
 function simulateCell(b,pv){
-  if(STATE.serverMode){ simulateCellServer(b,pv); return; }   // server: échte single-cell dispatch
-  var m=model(b,pv); if(!m) return; STATE.gemeten[b+'_'+pv]=m; buildGrid(); STATE.sel={b:b,pv:pv}; render();
-}
-// Server-modus: POST /api/thuisladen-cel voor exact deze cel (één echte dispatch). De besparing
-// rekenen we uit de al gekende 0/0-referentie. Faalt de call → geen lokale-model-override (voorkomt
-// de inconsistente uitschieters die je zag). Toont intussen "rekent…" op de cel.
-function simulateCellServer(b,pv){
   STATE.sel={b:b,pv:pv};
-  var badge=document.getElementById('modeBadge'); var _old=badge?badge.textContent:'';
-  if(badge){ badge.textContent='cel rekent…'; }
-  render();
+  var key=b+'_'+pv;
+  var have = STATE.serverAnchors[key] && STATE.serverAnchors[key].kost!=null;   // anker of eerder berekend
+  if(have){ STATE.selBusy=false; render(); return; }                            // instant is hier terecht
+  STATE.selBusy=true; render();                                                 // toon "rekenen…" onder de heatmap
+  var badge=document.getElementById('modeBadge'); if(badge){ badge.textContent='cel rekent…'; }
   fetch(API_BASE+'/api/thuisladen-cel',{ method:'POST', headers:tlHeaders(),
       body: JSON.stringify({ in:IN, params:Object.assign({},P,{CREG:cregTarief()}), cel:{b:b,pv:pv} }) })
     .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
     .then(function(res){
-      if(badge){ badge.textContent=_old||'server-dispatch'; }
+      if(badge){ badge.textContent='server-dispatch'; }
       var cell=(res.j&&res.j.cell)||null;
-      if(res.status!==200 || !cell || cell.kost==null){ console.warn('[thuisladen-cel] geen cijfer', res.j&&res.j.error); render(); return; }
+      STATE.selBusy=false;
+      if(res.status!==200 || !cell || cell.kost==null){ STATE.selError=true; console.warn('[thuisladen-cel] geen cijfer', res.j&&res.j.error); render(); return; }
+      STATE.selError=false;
       var r0=STATE.serverAnchors['0_0']; var ref=(r0&&r0.kost!=null)?r0.kost:null;
       var besp=(ref!=null)?Math.round((ref-cell.kost)*10)/10:null;
       var rend=(besp!=null&&cell.capex>0)?Math.round(besp/cell.capex*100*100)/100:(besp>0?999:0);
-      STATE.serverAnchors[b+'_'+pv]={ kost:cell.kost, besparing:besp, rendement:rend, eurMwh:cell.eurMwh,
+      STATE.serverAnchors[key]={ kost:cell.kost, besparing:besp, rendement:rend, eurMwh:cell.eurMwh,
         capex:cell.capex, kva:cell.kva, ev_mwh:cell.ev_mwh, ref_kost:ref, piek_kw:cell.piek_kw,
         factuur:cell.factuur, energie:cell.energie };
-      STATE.gemeten[b+'_'+pv]=svModel(b,pv);   // exact anker → verfijnt de interpolatie consistent
+      STATE.gemeten[key]=svModel(b,pv);   // exacte cel → verfijnt de heatmap consistent
       render();
     })
-    .catch(function(e){ if(badge){ badge.textContent=_old||'server-dispatch'; } console.warn('[thuisladen-cel] faalde', e&&e.message); render(); });
+    .catch(function(e){ if(badge){ badge.textContent='server-dispatch'; } STATE.selBusy=false; STATE.selError=true; console.warn('[thuisladen-cel] faalde', e&&e.message); render(); });
 }
 
 // ============================ RANDVOORWAARDEN-ZOEK (≤5 iter) ============================
@@ -621,8 +614,9 @@ function autoZoek(){
     if(K2.length && K2[0].b===pick.b && K2[0].pv===pick.pv && K2[0].exact){ pick=K2[0]; STATE.iterLog.push('→ bevestigd als optimale opstelling.'); break; }
     pick = K2.length? K2[0] : pick;
   }
-  if(pick){ STATE.sel={b:pick.b,pv:pick.pv};
-    if(STATE.serverMode && !pick.exact){ simulateCellServer(pick.b,pick.pv); return; }   // gekozen cel echt simuleren
+  if(pick){
+    if(STATE.serverMode && !pick.exact){ simulateCell(pick.b,pick.pv); return; }   // gekozen cel echt (laten) berekenen
+    STATE.sel={b:pick.b,pv:pick.pv};
   }
   render();
 }
@@ -630,15 +624,34 @@ function simulateCellQuiet(b,pv){ if(STATE.serverMode) return; var m=model(b,pv)
 
 // ============================ RENDER ============================
 function selCell(){ if(!STATE.sel) return null; return STATE.grid.cells.find(function(c){return c.b===STATE.sel.b&&c.pv===STATE.sel.pv;}); }
-function render(){ buildGrid(); renderCards(); renderConstraints(); renderSel(); renderReport(); drawAll(); bindHeatmaps(); drawReportPies(); }
+function render(){
+  if(STATE.status==='klaar'){ buildGrid(); }
+  renderCards(); renderConstraints(); renderSel(); renderReport();
+  if(STATE.status==='klaar'){ drawAll(); bindHeatmaps(); drawReportPies(); updateHvals(STATE.sel?selCell():null); }
+}
+// Status-schermen: we tonen de heatmaps ENKEL als de server ze berekend heeft (geen browser-benadering).
+function statusBoodschap(){
+  if(STATE.status==='rekenen') return '<div style="grid-column:1/-1;padding:60px 20px;text-align:center;color:#1F3864">'+
+    '<div style="font-size:28px;margin-bottom:10px">⏳</div><div style="font-size:16px;font-weight:800">De server rekent uw ontwerp door…</div>'+
+    '<div style="font-size:13px;color:#5A6577;margin-top:6px">30 scenario’s worden volledig doorgerekend (jaar-dispatch per kwartier). Dit duurt even — het is een échte berekening, geen schatting.</div></div>';
+  if(STATE.status==='fout') return '<div style="grid-column:1/-1;padding:60px 20px;text-align:center;color:#C0392B">'+
+    '<div style="font-size:28px;margin-bottom:10px">⚠️</div><div style="font-size:16px;font-weight:800">De berekening lukte niet</div>'+
+    '<div style="font-size:13px;color:#5A6577;margin-top:6px">'+(STATE.foutTekst||'Controleer de invoer en klik opnieuw op “Bereken heatmaps”.')+'</div></div>';
+  return '<div style="grid-column:1/-1;padding:60px 20px;text-align:center;color:#5A6577">'+
+    '<div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-size:16px;font-weight:800;color:#1F3864">Klaar om te rekenen</div>'+
+    '<div style="font-size:13px;margin-top:6px">Vul de invoer links in en klik op <b>“Bereken heatmaps”</b>. De 30 scenario’s worden dan op de server doorgerekend.</div></div>';
+}
 function renderCards(){
+  var host=document.getElementById('cards');
+  if(STATE.status!=='klaar'){ host.innerHTML=statusBoodschap(); return; }
   var by=[25,20,15,10,5,0];                       // batterij-kWh, top→bottom (groot bovenaan)
   var pm=pvMaxEff();                                // 40 (3 fasen) of 20 (2 fasen)
   var px=[0, pm*0.25, pm*0.5, pm*0.75, pm].map(function(v){return Math.round(v);}); // extra PV-panelen, links→rechts
   var yax='<div class="yax">'+by.map(function(v){return '<span>'+v+'</span>';}).join('')+'</div>';
   var xax='<div class="axis">'+px.map(function(v){return '<span>'+v+'</span>';}).join('')+'</div>';
-  document.getElementById('cards').innerHTML = HM.map(function(h){
-    return '<div class="hm-card"><div class="h">'+h.t+'</div>'+
+  host.innerHTML = HM.map(function(h){
+    return '<div class="hm-card"><div class="h" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'+
+        '<span>'+h.t+'</span><span class="hval" id="hval_'+h.f+'" style="font-size:16px;font-weight:800;color:#1A1F2B">—</span></div>'+
       '<div style="display:flex;gap:7px;align-items:flex-start">'+yax+
         '<div style="flex:1">'+
           '<canvas class="hm" id="cv_'+h.f+'"></canvas>'+
@@ -649,10 +662,18 @@ function renderCards(){
       '<div class="axttl" style="margin-top:4px">↑ verticaal: batterij (kWh) &nbsp;·&nbsp; → horizontaal: extra PV (panelen)</div>'+
       '</div>';
   }).join('') + '<div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:12px;color:#5A6577;flex-wrap:wrap">'+
-    '<span id="hoverInfo">Beweeg over een heatmap; klik een cel om die exact te simuleren.</span>'+
+    '<span id="hoverInfo">Beweeg over een heatmap voor de waarden; klik een cel om ze exact te (laten) berekenen.</span>'+
     '<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">ongunstig'+
       '<span style="display:inline-block;width:120px;height:11px;border-radius:3px;border:1px solid #D5DBE3;background:linear-gradient(90deg,rgb(240,249,237),rgb(186,228,179),rgb(116,196,118),rgb(49,163,84),rgb(0,68,27))"></span>gunstig</span>'+
     '</div>';
+}
+// Zet boven elke heatmap (rechts uitgelijnd) de waarde van díe heatmap voor de gekozen/gehoverde cel.
+function updateHvals(c){
+  HM.forEach(function(h){ var el=document.getElementById('hval_'+h.f); if(!el) return;
+    var v=(c && c[h.f]!=null && isFinite(c[h.f]))?h.fmt(c[h.f]):'—'; el.textContent=v; });
+  var hi=document.getElementById('hoverInfo');
+  if(hi){ hi.innerHTML = c ? ('<b>Batterij '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen'+(c.exact?'':' (interpolatie — klik voor de echte berekening)')+'</b>')
+    : 'Beweeg over een heatmap voor de waarden; klik een cel om ze exact te (laten) berekenen.'; }
 }
 function renderConstraints(){
   document.getElementById('constraintsBar').innerHTML =
@@ -665,9 +686,14 @@ function renderConstraints(){
 window.applyConstraints=function(){ IN.max_pv_pan=numOrNull('c_pan'); IN.max_budget=numOrNull('c_bud'); IN.min_rend=numOrNull('c_rend'); autoZoek(); };
 function numOrNull(id){ var v=document.getElementById(id).value.replace(/[^0-9.]/g,''); return v===''?null:+v; }
 function renderSel(){
-  var c=selCell(); var el=document.getElementById('selPanel');
+  var el=document.getElementById('selPanel');
+  if(STATE.status!=='klaar'){ el.innerHTML=''; return; }
+  if(STATE.selBusy){ el.innerHTML='<div style="padding:14px;text-align:center;color:#1F3864"><b>⏳ De server berekent dit ontwerp door…</b><div style="font-size:12px;color:#5A6577;margin-top:4px">Volledige jaar-dispatch voor de gekozen combinatie — de cijfers verschijnen zodra de berekening klaar is.</div></div>'; return; }
+  if(STATE.selError){ el.innerHTML='<div style="padding:14px;text-align:center;color:#C0392B">⚠️ Deze cel kon niet berekend worden. Klik opnieuw of kies een andere cel.</div>'; return; }
+  var c=selCell();
   if(!c){ el.innerHTML='<div class="tt" style="position:static;display:block;background:none;color:#5A6577">Geen cel geselecteerd — klik een cel of gebruik “Zoek optimale opstelling”.</div>'; return; }
   var m = STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv);
+  if(!m){ el.innerHTML='<div class="note">Cel niet beschikbaar — klik opnieuw.</div>'; return; }
   var onb = m?onbalansExtra(m):0;
   var ref = (m&&m.refKost!=null)?m.refKost:refKostWaarde();
   el.innerHTML='<div class="tt">Geselecteerde opstelling'+(c.exact?' · gesimuleerd':' · geïnterpoleerd')+'</div>'+
@@ -682,7 +708,9 @@ function renderSel(){
     '<div class="note" style="margin-top:8px">Onbalans-extra (opportunistisch, niet in het rendement): ~'+fmtE(onb)+'/jaar bovenop — enkel indicatief.</div>';
 }
 function renderReport(){
-  var c=selCell(); var el=document.getElementById('report'); if(!c){ el.innerHTML=''; return; }
+  var el=document.getElementById('report');
+  if(STATE.status!=='klaar' || STATE.selBusy || STATE.selError){ el.innerHTML=''; return; }
+  var c=selCell(); if(!c){ el.innerHTML=''; return; }
   var m = STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv); if(!m){el.innerHTML='';return;}
   // meerjaren met inflatie + netkosten-indexatie
   var rows=''; var cum=-c.capex; var infl=P.INFLATIE/100, netx=(P.INFLATIE+P.NETINDEX)/100;
@@ -838,15 +866,15 @@ function renderSide(){
     '<div class="hint">C = 2 → 2-uurs batterij. Hoger = kleinere/goedkopere omvormer, minder piekshaving.</div>'+
     '<h3>Wagens (laadvraag per wagen)</h3>'+w+
     '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
-    '<div style="margin-top:14px"><button class="btn g" style="width:100%" onclick="rerun()">↻ Herbereken heatmaps</button></div>'+
-    '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar'+(STATE.grid?(' · '+STATE.grid.runs+' anker-runs'):'')+'</div>';
+    '<div style="margin-top:14px"><button class="btn g" style="width:100%;font-size:14px;padding:10px" onclick="rerun()">▶ Bereken heatmaps</button></div>'+
+    '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar · 30 scenario’s worden op de server doorgerekend.</div>';
 }
-window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; renderSide(); render(); } };
+window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; if(STATE.status==='klaar') STATE.status='idle'; renderSide(); render(); } };
 window.setCrate=function(v){ var n=+v; if(n>0) P.BATT_CRATE=n; };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
-window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; fetchServerGrid(); };
+window.rerun=function(){ fetchServerGrid(); };   // valideer input + reken de 30 scenario's op de server
 
 // ============================ FACTUUR INLEZEN (/api/factuur-extract) ============================
 // Zelfde weg als de simulator: PDF('s) → base64 → /api/factuur-extract → baseCase.
@@ -891,8 +919,8 @@ window.tlFactuurUpload=function(input){
       // Fasen: enkel LS is relevant; laat de klant 2/3 fasen zelf kiezen (staat niet betrouwbaar op de factuur).
       try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','factuur_geparseerd',{ klant_naam:bc.klantNaam||null, klant_btw:bc.klantBtw||null }); }catch(e){}
       var naam=bc.klantNaam?(' — '+bc.klantNaam):'';
-      _tlZetMsg('✅ Factuur ingelezen'+naam+'. Verbruik '+fmtN(IN.jaarverbruik_mwh,2)+' MWh/jaar'+(tot>0?(', referentie '+fmtE(IN.referentiekost)):'')+(reg?(', regio '+REGIO_NAAM[reg]+' → CREG '+fmtE(cregTarief())+'/MWh'):'')+(dagen>0&&Math.abs(jf-1)>0.05?(' (naar jaar herrekend uit '+Math.round(dagen)+' dagen)'):'')+'. Controleer + vul fasen/wagens aan, dan Herbereken.');
-      renderSide(); STATE.serverMode=false; fetchServerGrid();
+      _tlZetMsg('✅ Factuur ingelezen'+naam+'. Verbruik '+fmtN(IN.jaarverbruik_mwh,2)+' MWh/jaar'+(tot>0?(', referentie '+fmtE(IN.referentiekost)):'')+(reg?(', regio '+REGIO_NAAM[reg]+' → CREG '+fmtE(cregTarief())+'/MWh'):'')+(dagen>0&&Math.abs(jf-1)>0.05?(' (naar jaar herrekend uit '+Math.round(dagen)+' dagen)'):'')+'. Controleer + vul fasen/wagens aan, klik dan “Bereken heatmaps”.');
+      STATE.status='idle'; STATE.serverMode=false; render(); renderSide();
     })
     .catch(function(e){ _tlZetMsg('⚠️ Factuur lezen mislukt: '+(e&&e.message||'netwerkfout')+'. Vul manueel in.'); });
 };
@@ -912,13 +940,13 @@ window.openMgr=function(){ var g=document.getElementById('mgrModal'); g.style.di
     '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn ghost" onclick="closeMgr()">Annuleren</button><button class="btn g" onclick="saveMgr()">Toepassen</button></div>';
 };
 window.closeMgr=function(){ document.getElementById('mgrModal').style.display='none'; };
-window.saveMgr=function(){ closeMgr(); STATE.gemeten={}; STATE.sel=null; if(STATE.serverMode){ STATE.serverMode=false; fetchServerGrid(); } else { render(); renderSide(); } };
+window.saveMgr=function(){ closeMgr(); STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; if(STATE.status==='klaar') STATE.status='idle'; render(); renderSide(); };
 document.getElementById('mgrBtn').onclick=window.openMgr;
 
 // ============================ SERVER-DISPATCH (/api/thuisladen) ============================
-// De heatmap-ankers (30 cellen) komen uit de ECHTE simulator.py-dispatch (zonder onbalans).
-// Local model() blijft de gegarandeerde fallback: faalt/ontbreekt de server → indicatief model,
-// zodat de app nooit onbruikbaar wordt. Zodra server-ankers geladen zijn, gebruikt model() die.
+// De heatmaps tonen ENKEL de echte simulator.py-dispatch (30 cellen, zonder onbalans). Geen
+// browser-benaderingsmodel meer als resultaat: vóór berekening = idle-scherm, tijdens = rekenscherm,
+// bij fout = foutscherm. Het lokale model() blijft in de code maar wordt niet meer aan de klant getoond.
 var API_BASE = 'https://lucid-amazement-production.up.railway.app';
 STATE.serverAnchors = {};   // 'b_pv' → {kost,besparing,rendement,eurMwh,capex,kva,ev_mwh}
 STATE.serverMode = false;
@@ -953,15 +981,15 @@ function svModel(b, pv){
     netAfname:null, injectie:null, zelfverbruik:null, piekEff:null,
     creg:cd.creg, diesel:cd.diesel, _server:true };
 }
-// POST /api/thuisladen → 30 ankers. Vult STATE.serverAnchors + hertekent. Faalt stil → local model.
+// POST /api/thuisladen → 30 ankers. De heatmaps verschijnen ENKEL bij succes (server-dispatch).
+// Geen browser-benadering meer als resultaat: bij fout → foutscherm, geen (misleidende) prototype-cijfers.
 function fetchServerGrid(){
   var badge = document.getElementById('modeBadge');
+  STATE.status='rekenen'; STATE.sel=null; STATE.selBusy=false; STATE.selError=false; STATE.iterLog=[];
   if(badge){ badge.textContent='server rekent…'; badge.style.background='#FFF3E0'; badge.style.color='#9E480E'; badge.style.borderColor='#9E480E55'; }
-  // Toon meteen de (indicatieve) heatmaps terwijl de server rekent, zodat de UI nooit leeg oogt.
   render(); renderSide();
-  // Timeout: 30 residentiële dispatches kunnen even duren; na 150s val terug op het lokale model.
   var ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
-  var to = setTimeout(function(){ try{ if(ctrl) ctrl.abort(); }catch(e){} }, 150000);
+  var to = setTimeout(function(){ try{ if(ctrl) ctrl.abort(); }catch(e){} }, 180000);
   return fetch(API_BASE+'/api/thuisladen', { method:'POST', headers:tlHeaders(),
       body: JSON.stringify({ in: IN, params: Object.assign({}, P, { CREG: cregTarief() }) }), signal: ctrl?ctrl.signal:undefined })
     .then(function(r){ clearTimeout(to); return r.json().then(function(j){ return { status:r.status, j:j }; }); })
@@ -974,16 +1002,17 @@ function fetchServerGrid(){
           eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh, ref_kost:a.ref_kost,
           piek_kw:a.piek_kw, factuur:a.factuur, energie:a.energie };
       });
-      STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {};
+      STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {}; STATE.status='klaar';
       if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
       try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','grid_gedraaid',{ runs:res.j.runs, ev_mwh:res.j.ev_mwh }); }catch(e){}
       render(); renderSide();
     })
     .catch(function(err){
       clearTimeout(to);
-      STATE.serverMode = false;
-      if(badge){ badge.textContent='prototype-model'; badge.style.background='#80C53922'; badge.style.color='#80C539'; badge.style.borderColor='#80C53955'; }
-      console.warn('[thuisladen] server niet bereikbaar, local model:', err && err.message);
+      STATE.serverMode = false; STATE.status='fout';
+      STATE.foutTekst = (err && err.name==='AbortError') ? 'De berekening duurde te lang (time-out). Probeer opnieuw.' : ('Serverfout: '+((err&&err.message)||'onbekend')+'. Klik opnieuw op “Bereken heatmaps”.');
+      if(badge){ badge.textContent='berekening mislukt'; badge.style.background='#F9E0DE'; badge.style.color='#C0392B'; badge.style.borderColor='#C0392B55'; }
+      console.warn('[thuisladen] fout:', err && err.message);
       render(); renderSide();
     });
 }
@@ -1006,8 +1035,8 @@ function fetchServerGrid(){
     // Rol uit de toegangscontrole: manager ziet de parametermodal.
     try{ var u = window.FluctusAppAuth && window.FluctusAppAuth.user;
       STATE.rol = (u && u.role === 'manager') ? 'manager' : 'seller'; }catch(e){}
+    STATE.status='idle';                 // niet rekenen bij openen; pas bij "Bereken heatmaps"
     render(); renderSide(); renderMgrBtn();
-    fetchServerGrid();   // vervang de indicatieve ankers meteen door de echte dispatch
   });
 })();
 </script>
