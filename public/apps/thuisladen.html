@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.7.0  (2026-08-17 11:11 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.7.1  (2026-08-17 11:49 Europe/Brussels)
+     v0.7.1: KLIK = ECHTE dispatch in server-modus. Een klik riep tot nu het lokale benaderings-
+             model op (instant maar inconsistent met de server-ankers → uitschieters in de heatmap).
+             Nu POST /api/thuisladen-cel voor exact die cel; besparing uit de 0/0-referentie. AutoZoek
+             simuleert de gekozen cel ook echt op de server. Prototype-modus ongewijzigd.
+     ---------------------------------------------------------------------------
+     v0.7.0  (2026-08-17 11:11 Europe/Brussels)
      v0.7.0: (1) Standaard laadvensters: weekdag 19→7 (overnacht), weekend 0→24 — beide tellen nu
              echt mee (server maakt aparte weekdag-/weekend-sessie). (2) Heatmaps gewijzigd:
              "Investering"→"Laadfactor (%)" (= (gebouw+wagens)/(max piek×8760), hoger=gunstig) en
@@ -550,7 +556,36 @@ function showHover(c,h){
     '<span style="color:#5A6577">'+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp) — klik om exact te simuleren</span>'; }
 
 // klik = "echt simuleren" → exact model + verfijn interpolatie
-function simulateCell(b,pv){ var m=model(b,pv); if(!m) return; STATE.gemeten[b+'_'+pv]=m; buildGrid(); STATE.sel={b:b,pv:pv}; render(); }
+function simulateCell(b,pv){
+  if(STATE.serverMode){ simulateCellServer(b,pv); return; }   // server: échte single-cell dispatch
+  var m=model(b,pv); if(!m) return; STATE.gemeten[b+'_'+pv]=m; buildGrid(); STATE.sel={b:b,pv:pv}; render();
+}
+// Server-modus: POST /api/thuisladen-cel voor exact deze cel (één echte dispatch). De besparing
+// rekenen we uit de al gekende 0/0-referentie. Faalt de call → geen lokale-model-override (voorkomt
+// de inconsistente uitschieters die je zag). Toont intussen "rekent…" op de cel.
+function simulateCellServer(b,pv){
+  STATE.sel={b:b,pv:pv};
+  var badge=document.getElementById('modeBadge'); var _old=badge?badge.textContent:'';
+  if(badge){ badge.textContent='cel rekent…'; }
+  render();
+  fetch(API_BASE+'/api/thuisladen-cel',{ method:'POST', headers:tlHeaders(),
+      body: JSON.stringify({ in:IN, params:Object.assign({},P,{CREG:cregTarief()}), cel:{b:b,pv:pv} }) })
+    .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
+    .then(function(res){
+      if(badge){ badge.textContent=_old||'server-dispatch'; }
+      var cell=(res.j&&res.j.cell)||null;
+      if(res.status!==200 || !cell || cell.kost==null){ console.warn('[thuisladen-cel] geen cijfer', res.j&&res.j.error); render(); return; }
+      var r0=STATE.serverAnchors['0_0']; var ref=(r0&&r0.kost!=null)?r0.kost:null;
+      var besp=(ref!=null)?Math.round((ref-cell.kost)*10)/10:null;
+      var rend=(besp!=null&&cell.capex>0)?Math.round(besp/cell.capex*100*100)/100:(besp>0?999:0);
+      STATE.serverAnchors[b+'_'+pv]={ kost:cell.kost, besparing:besp, rendement:rend, eurMwh:cell.eurMwh,
+        capex:cell.capex, kva:cell.kva, ev_mwh:cell.ev_mwh, ref_kost:ref, piek_kw:cell.piek_kw,
+        factuur:cell.factuur, energie:cell.energie };
+      STATE.gemeten[b+'_'+pv]=svModel(b,pv);   // exact anker → verfijnt de interpolatie consistent
+      render();
+    })
+    .catch(function(e){ if(badge){ badge.textContent=_old||'server-dispatch'; } console.warn('[thuisladen-cel] faalde', e&&e.message); render(); });
+}
 
 // ============================ RANDVOORWAARDEN-ZOEK (≤5 iter) ============================
 function autoZoek(){
@@ -568,19 +603,21 @@ function autoZoek(){
     K.sort(function(a,b){return b.capex-a.capex;});          // grootste investering die nog voldoet
     pick=K[0];
     if(pick.exact){ STATE.iterLog.push('Iteratie '+it+': cel '+pick.b+'kWh/'+pick.pv+'p is al exact — bevestigd.'); break; }
-    // simuleer exact → verfijn
+    if(STATE.serverMode){ STATE.iterLog.push('Cel '+pick.b+'kWh/'+pick.pv+'p wordt exact op de server gesimuleerd…'); break; }
+    // prototype: simuleer exact → verfijn
     var before=pick.rendement; simulateCellQuiet(pick.b,pick.pv); G=STATE.grid;
     var now=STATE.grid.cells.find(function(c){return c.b===pick.b&&c.pv===pick.pv;});
     STATE.iterLog.push('Iteratie '+it+': '+pick.b+'kWh/'+pick.pv+'p gesimuleerd (rend. '+fmtN(before,1)+'% → '+fmtN(now.rendement,1)+'%).');
-    // blijft dit de grootste-capex-kandidaat? zo ja klaar
     var K2=kandidaten(); K2.sort(function(a,b){return b.capex-a.capex;});
     if(K2.length && K2[0].b===pick.b && K2[0].pv===pick.pv && K2[0].exact){ pick=K2[0]; STATE.iterLog.push('→ bevestigd als optimale opstelling.'); break; }
     pick = K2.length? K2[0] : pick;
   }
-  if(pick){ STATE.sel={b:pick.b,pv:pick.pv}; }
+  if(pick){ STATE.sel={b:pick.b,pv:pick.pv};
+    if(STATE.serverMode && !pick.exact){ simulateCellServer(pick.b,pick.pv); return; }   // gekozen cel echt simuleren
+  }
   render();
 }
-function simulateCellQuiet(b,pv){ var m=model(b,pv); if(m){ STATE.gemeten[b+'_'+pv]=m; buildGrid(); } }
+function simulateCellQuiet(b,pv){ if(STATE.serverMode) return; var m=model(b,pv); if(m){ STATE.gemeten[b+'_'+pv]=m; buildGrid(); } }
 
 // ============================ RENDER ============================
 function selCell(){ if(!STATE.sel) return null; return STATE.grid.cells.find(function(c){return c.b===STATE.sel.b&&c.pv===STATE.sel.pv;}); }
