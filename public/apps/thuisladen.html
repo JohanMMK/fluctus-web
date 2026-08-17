@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.6.0  (2026-08-16)
+     FLUCTUS THUISLADEN  v0.7.0  (2026-08-17 11:11 Europe/Brussels)
+     v0.7.0: (1) Standaard laadvensters: weekdag 19→7 (overnacht), weekend 0→24 — beide tellen nu
+             echt mee (server maakt aparte weekdag-/weekend-sessie). (2) Heatmaps gewijzigd:
+             "Investering"→"Laadfactor (%)" (= (gebouw+wagens)/(max piek×8760), hoger=gunstig) en
+             "Besparing"→"Maximale piek (kW)" (lager=gunstig). €/MWh en Rendement blijven. Besparing/
+             capex blijven in het rapport.
+     ---------------------------------------------------------------------------
+     v0.6.0  (2026-08-17 11:00 Europe/Brussels)
      v0.6.0: (1) 2 fasen: harde grens springt nu naar 5 kVA (fasenwissel hertekent) + PV-as
              gekapt op 20 panelen; omvormers >5 kVA blijven uit de heatmap. (2) Rapport: factuur-
              detail referentie vs scenario (groepen A–E). (3) Cashflow jaar 1 per wagen (kosten
@@ -342,7 +349,7 @@ var IN = {
   regio:'VL',                 // CREG-tarief-regio (VL/BR/WA); wordt uit de factuur-postcode afgeleid
   bestaand_pv_kwp:0, bestaand_inj_mwh:0,
   referentiekost:1400,
-  wagens:[ {km:15000, kwhkm:0.16, wd_start:0, wd_eind:7, we_start:0, we_eind:9, creg:true} ],
+  wagens:[ {km:15000, kwhkm:0.16, wd_start:19, wd_eind:7, we_start:0, we_eind:24, creg:true} ],
   max_pv_pan:null, max_budget:null, min_rend:null
 };
 var STATE = { rol:'manager', grid:null, gemeten:{}, sel:null, iterLog:[] };
@@ -363,6 +370,8 @@ function regioVanPostcode(pc){ pc=parseInt(pc,10); if(!pc) return null;
   if((pc>=1300&&pc<=1499)||(pc>=4000&&pc<=7999)) return 'WA';
   return 'VL'; }
 function evMwh(){ return IN.wagens.reduce(function(s,w){return s+(w.km*w.kwhkm/1000);},0); }
+// Laadfactor = totaal jaarverbruik (gebouw + wagens) / (maximale piek × 8760 u), in %. Hoger = vlakker = gunstig.
+function laadfactorVan(piek){ var totKwh=(IN.jaarverbruik_mwh+evMwh())*1000; return (piek>0)? totKwh/(piek*8760)*100 : 0; }
 function paneelKwp(pan){ return pan*P.PANEEL_WP/1000; }
 function battPrijs(kwh){ // goedkoopste serie-entry voor die kWh binnen de fasegrens
   if(kwh<=0) return {kwh:0,kva:0,eur:0};
@@ -431,6 +440,7 @@ function model(battKwh, pvPan, _isRef){
   var rend = capex>0 ? (besparing/capex*100) : (besparing>0?999:0);
   return { battKwh:battKwh, kva:bt.kva, pvPan:pvPan, kwp:pvKwp, capex:capex,
     kostScenario:kostScenario, besparing:besparing, rendement:rend, eurMwh:eurMwh, refKost:refKost,
+    piek:piekEff, laadfactor:laadfactorVan(piekEff),
     factuur:locFactuur, energie:locEnergie, refFactuur:(ref?ref.factuur:null), refEnergie:(ref?ref.energie:null),
     netAfname:netAfname, injectie:injectie, zelfverbruik:zelfverbruik, piekEff:piekEff,
     creg:creg, diesel:diesel };
@@ -466,7 +476,7 @@ function buildGrid(){
   by.forEach(function(b){ px.forEach(function(pv){
     var exact=A[b+'_'+pv];
     var cell={ b:b, pv:pv, exact:!!exact };
-    ['kostScenario','besparing','capex','rendement','eurMwh'].forEach(function(f){
+    ['kostScenario','besparing','capex','rendement','eurMwh','piek','laadfactor'].forEach(function(f){
       cell[f]= exact? exact[f] : interp(f,b,pv);
     });
     // capex is exact bekend (geen interpolatie nodig): batterijprijs + PV
@@ -480,8 +490,8 @@ function buildGrid(){
 
 // ============================ HEATMAPS ============================
 var HM=[ {f:'eurMwh',t:'€ / MWh',fmt:function(v){return fmtE1(v);},inv:true},
-         {f:'besparing',t:'Besparing €/jaar',fmt:function(v){return fmtE(v);},inv:false},
-         {f:'capex',t:'Investering (capex)',fmt:function(v){return fmtE(v);},inv:true},
+         {f:'piek',t:'Maximale piek (kW)',fmt:function(v){return fmtN(v,1)+' kW';},inv:true},
+         {f:'laadfactor',t:'Laadfactor (%)',fmt:function(v){return fmtN(v,1)+' %';},inv:false},
          {f:'rendement',t:'Rendement %',fmt:function(v){return fmtN(v,1)+' %';},inv:false} ];
 // Wit → donkergroen (ColorBrewer Greens). Eén tint, enkel helderheid varieert →
 // kleurenblind-veilig (geen rood-groen). Wit = ongunstig, donkergroen = gunstig.
@@ -785,7 +795,7 @@ function renderSide(){
 }
 window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; renderSide(); render(); } };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
-window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:0,wd_eind:7,we_start:0,we_eind:9,creg:true}); renderSide(); };
+window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
 window.rerun=function(){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; fetchServerGrid(); };
 
@@ -888,6 +898,7 @@ function svModel(b, pv){
     capex:(a.capex!=null?a.capex:(bt?(bt.eur+paneelKwp(pv)*P.PV_KOST):null)),
     kostScenario:a.kost, besparing:a.besparing, rendement:a.rendement, eurMwh:a.eurMwh,
     refKost:(a.ref_kost!=null?a.ref_kost:(r0&&r0.kost!=null?r0.kost:null)),
+    piek:(a.piek_kw!=null?a.piek_kw:null), laadfactor:(a.piek_kw>0?laadfactorVan(a.piek_kw):null),
     factuur:a.factuur||null, energie:a.energie||null,
     refFactuur:(r0&&r0.factuur)||null, refEnergie:(r0&&r0.energie)||null,
     netAfname:null, injectie:null, zelfverbruik:null, piekEff:null,
@@ -912,7 +923,7 @@ function fetchServerGrid(){
         if(a.battKwh==null||a.pvPan==null) return;
         map[a.battKwh+'_'+a.pvPan] = { kost:a.kost, besparing:a.besparing, rendement:a.rendement,
           eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh, ref_kost:a.ref_kost,
-          factuur:a.factuur, energie:a.energie };
+          piek_kw:a.piek_kw, factuur:a.factuur, energie:a.energie };
       });
       STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {};
       if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
