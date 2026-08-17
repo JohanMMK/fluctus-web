@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.4.0  (2026-08-16)
+     FLUCTUS THUISLADEN  v0.5.0  (2026-08-16)
+     v0.5.0: BESPARINGSDEFINITIE herzien (Johan). Referentie = kost van (gebouw + laden)
+             ZONDER PV/batterij/sturing = de 0-batterij/0-PV-cel. Scenario = kost van
+             (gebouw + wagens) MET PV+batterij+slimme sturing (z. onbalans). Besparing =
+             referentie − scenario. CREG/diesel vallen uit het verschil (gelijk aan beide
+             kanten) → enkel informatief in het rapport. Server (simulator.py) + lokaal model
+             + KPI's + rapport aangepast.
+     ---------------------------------------------------------------------------
+     v0.4.0  (2026-08-16)
      v0.4.0: CREG-tarief per REGIO als modelparameter — CREG_VL 322 / CREG_BR 372 /
              CREG_WA 378 €/MWh (Q3 2026), default Vlaanderen. Regio-keuze in de invoer;
              bij factuur-upload wordt de regio automatisch uit de postcode afgeleid
@@ -354,9 +362,9 @@ function pvAs(){ var a=[0]; for(var n=P.PV_MIN;n<=P.PV_MAX;n+=P.PV_STAP) a.push(
 // Berekent voor één combinatie (batterij-kWh, extra-PV-panelen) de jaarkost, besparing, capex, rendement, €/MWh.
 // Transparante heuristiek: zelfconsumptie stijgt met PV én batterij; batterij verschuift laden naar goedkope/PV-uren
 // en shaaft de piek (capaciteitskost). GEEN onbalans. Onbalans-extra = losse bonus (zie onbalansExtra()).
-function model(battKwh, pvPan){
+function model(battKwh, pvPan, _isRef){
   // Server-dispatch heeft voorrang op het indicatieve model zodra de echte ankers geladen zijn.
-  if(STATE.serverMode){ var sv=svModel(battKwh,pvPan); if(sv) return sv; }
+  if(!_isRef && STATE.serverMode){ var sv=svModel(battKwh,pvPan); if(sv) return sv; }
   var bt = battPrijs(battKwh);
   if(bt===null) return null;   // batterij past niet op de aansluiting
   var ev = evMwh();                                  // MWh/jaar laden
@@ -387,13 +395,16 @@ function model(battKwh, pvPan){
   // tussenkomst werkgever: CREG voor vergoede wagens, dieselbesparing voor niet-vergoede
   var creg=0, diesel=0;
   IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*cregTarief(); else diesel += (w.km/100)*P.DIESEL_100KM; });
-  var besparing = IN.referentiekost + creg + diesel - kostScenario;
-  var capex = bt.eur + paneelKwp(pvPan)*1000*P.PV_KOST/1000*1000/1000; // = bt.eur + kWp*PV_KOST
-  capex = bt.eur + paneelKwp(pvPan)*P.PV_KOST;
-  var rend = capex>0 ? (besparing/capex*100) : (besparing>0?999:0);
+  var capex = bt.eur + paneelKwp(pvPan)*P.PV_KOST;
   var eurMwh = totLoad>0 ? kostScenario/totLoad : 0;
+  // Referentie-run (0 batterij, 0 extra PV): enkel de kost teruggeven, geen besparing → geen recursie.
+  if(_isRef){ return { kostScenario:kostScenario }; }
+  // BESPARING = referentie (gebouw + laden, geen PV/batterij) − scenariokost (met PV+batterij+sturing).
+  var ref = model(0, 0, true); var refKost = ref ? ref.kostScenario : kostScenario;
+  var besparing = refKost - kostScenario;
+  var rend = capex>0 ? (besparing/capex*100) : (besparing>0?999:0);
   return { battKwh:battKwh, kva:bt.kva, pvPan:pvPan, kwp:pvKwp, capex:capex,
-    kostScenario:kostScenario, besparing:besparing, rendement:rend, eurMwh:eurMwh,
+    kostScenario:kostScenario, besparing:besparing, rendement:rend, eurMwh:eurMwh, refKost:refKost,
     netAfname:netAfname, injectie:injectie, zelfverbruik:zelfverbruik, piekEff:piekEff,
     creg:creg, diesel:diesel };
 }
@@ -564,11 +575,12 @@ function renderSel(){
   if(!c){ el.innerHTML='<div class="tt" style="position:static;display:block;background:none;color:#5A6577">Geen cel geselecteerd — klik een cel of gebruik “Zoek optimale opstelling”.</div>'; return; }
   var m = STATE.gemeten[c.b+'_'+c.pv] || model(c.b,c.pv);
   var onb = m?onbalansExtra(m):0;
+  var ref = (m&&m.refKost!=null)?m.refKost:refKostWaarde();
   el.innerHTML='<div class="tt">Geselecteerde opstelling'+(c.exact?' · gesimuleerd':' · geïnterpoleerd')+'</div>'+
     '<div style="font-size:19px;font-weight:800;color:#1F3864;margin-bottom:10px;line-height:1.3">Batterij '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · extra PV '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp) · investering '+fmtE(c.capex)+'</div>'+
     '<div class="kpis">'+
-     '<div class="kpi"><div class="l">Jaarkost scenario</div><div class="v">'+fmtE(c.kostScenario)+'</div><div class="s">woning + laden</div></div>'+
-     '<div class="kpi g"><div class="l">Besparing/jaar</div><div class="v">'+fmtE(c.besparing)+'</div><div class="s">vs. referentie '+fmtE(IN.referentiekost)+'</div></div>'+
+     '<div class="kpi"><div class="l">Jaarkost scenario</div><div class="v">'+fmtE(c.kostScenario)+'</div><div class="s">gebouw + laden, met PV+batterij</div></div>'+
+     '<div class="kpi g"><div class="l">Besparing/jaar</div><div class="v">'+fmtE(c.besparing)+'</div><div class="s">referentie'+(ref!=null?(' '+fmtE(ref)):'')+' − scenario</div></div>'+
      '<div class="kpi o"><div class="l">Terugverdientijd</div><div class="v">'+(c.besparing>0?fmtN(c.capex/c.besparing,1)+' jr':'—')+'</div><div class="s">capex ÷ besparing</div></div>'+
      '<div class="kpi r"><div class="l">Rendement (jr 1)</div><div class="v">'+fmtN(c.rendement,1)+' %</div><div class="s">besparing ÷ capex</div></div>'+
      '<div class="kpi"><div class="l">€/MWh</div><div class="v">'+fmtE1(c.eurMwh)+'</div><div class="s">volledige site</div></div>'+
@@ -585,19 +597,20 @@ function renderReport(){
     cum += besp;
     if(y<=8 || y===P.HORIZON) rows+='<tr><td>Jaar '+y+'</td><td>'+fmtE(besp)+'</td><td class="'+(cum>=0?'pos':'neg')+'">'+fmtE(cum)+'</td></tr>';
   }
+  var ref=(m&&m.refKost!=null)?m.refKost:refKostWaarde();
+  var cregInfo=(m&&m.creg)?m.creg:0, dieselInfo=(m&&m.diesel)?m.diesel:0;
   el.innerHTML='<h3 style="border:none;margin-top:4px">Rapport — aanbevolen opstelling</h3>'+
     '<table><thead><tr><th>Onderdeel</th><th>Waarde</th></tr></thead><tbody>'+
-     '<tr><td>Referentie (bestaande jaarkost)</td><td>'+fmtE(IN.referentiekost)+'</td></tr>'+
-     '<tr><td>Werkgever-tussenkomst (CREG)</td><td>'+fmtE(m.creg)+'</td></tr>'+
-     '<tr><td>Vermeden dieselkost (niet-vergoede wagens)</td><td>'+fmtE(m.diesel)+'</td></tr>'+
-     '<tr><td>Jaarkost scenario (PV+batterij, sturing z. onbalans)</td><td>'+fmtE(m.kostScenario)+'</td></tr>'+
-     '<tr style="font-weight:700"><td>Besparing/jaar</td><td class="pos">'+fmtE(m.besparing)+'</td></tr>'+
+     '<tr><td>Referentie — gebouw + laden, <b>zonder</b> PV/batterij</td><td>'+(ref!=null?fmtE(ref):'—')+'</td></tr>'+
+     '<tr><td>Scenario — gebouw + laden, <b>met</b> PV+batterij (slim, z. onbalans)</td><td>'+fmtE(m.kostScenario)+'</td></tr>'+
+     '<tr style="font-weight:700"><td>Besparing/jaar (referentie − scenario)</td><td class="pos">'+fmtE(m.besparing)+'</td></tr>'+
      '<tr><td>Investering (capex)</td><td>'+fmtE(c.capex)+'</td></tr>'+
      '<tr><td>Terugverdientijd · rendement jr 1</td><td>'+(m.besparing>0?fmtN(c.capex/m.besparing,1)+' jr':'—')+' · '+fmtN(c.rendement,1)+' %</td></tr>'+
     '</tbody></table>'+
+    '<div class="note">Ter info, buiten de besparing (reikt op referentie én scenario evenveel): werkgever-tussenkomst thuisladen ≈ '+fmtE(cregInfo)+'/jaar (CREG)'+(dieselInfo>0?(' · vermeden diesel ≈ '+fmtE(dieselInfo)+'/jaar'):'')+'. De bestaande factuur die je invulde: '+fmtE(IN.referentiekost)+'.</div>'+
     '<div class="note">Cumulatieve cashflow met inflatie '+P.INFLATIE+' % en netkosten-indexatie '+P.NETINDEX+' % boven inflatie (horizon '+P.HORIZON+' jr):</div>'+
     '<table><thead><tr><th>Jaar</th><th>Besparing</th><th>Cumulatief</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    '<div class="note">Prototype-model — vervang door /api/thuisladen (echte LP-dispatch) voor productie. Onbalans blijft buiten de zoektocht en het rendement.</div>';
+    '<div class="note">Besparing = kost (gebouw + laden) zonder PV/batterij − kost mét PV+batterij en slimme sturing (zonder onbalans). Onbalans blijft buiten de zoektocht en het rendement.</div>';
 }
 
 // ============================ INVOER-PANEEL ============================
@@ -724,13 +737,20 @@ function cregDiesel(){
   IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*cregTarief(); else diesel += (w.km/100)*P.DIESEL_100KM; });
   return { creg:creg, diesel:diesel };
 }
+// Referentiekost (gebouw + laden, geen PV/batterij) — server: de 0/0-cel; lokaal: het 0/0-model.
+function refKostWaarde(){
+  if(STATE.serverMode){ var r=STATE.serverAnchors['0_0']; return (r&&r.kost!=null)?r.kost:null; }
+  var m0=model(0,0,true); return m0?m0.kostScenario:null;
+}
 // Server-anker → model-vormig object (server-cijfers + lokaal berekende CREG/diesel voor het rapport).
 function svModel(b, pv){
   var a = STATE.serverAnchors[b+'_'+pv]; if(!a || a.kost==null) return null;
   var bt = battPrijs(b); var cd = cregDiesel();
+  var r0 = STATE.serverAnchors['0_0'];
   return { battKwh:b, kva:(a.kva!=null?a.kva:(bt?bt.kva:null)), pvPan:pv, kwp:IN.bestaand_pv_kwp+paneelKwp(pv),
     capex:(a.capex!=null?a.capex:(bt?(bt.eur+paneelKwp(pv)*P.PV_KOST):null)),
     kostScenario:a.kost, besparing:a.besparing, rendement:a.rendement, eurMwh:a.eurMwh,
+    refKost:(a.ref_kost!=null?a.ref_kost:(r0&&r0.kost!=null?r0.kost:null)),
     netAfname:null, injectie:null, zelfverbruik:null, piekEff:null,
     creg:cd.creg, diesel:cd.diesel, _server:true };
 }
@@ -752,7 +772,7 @@ function fetchServerGrid(){
       res.j.anchors.forEach(function(a){
         if(a.battKwh==null||a.pvPan==null) return;
         map[a.battKwh+'_'+a.pvPan] = { kost:a.kost, besparing:a.besparing, rendement:a.rendement,
-          eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh };
+          eurMwh:a.eurMwh, capex:a.capex, kva:a.kva, ev_mwh:a.ev_mwh, ref_kost:a.ref_kost };
       });
       STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {};
       if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
