@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.7.1  (2026-08-17 11:49 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.8.0  (2026-08-17 11:58 Europe/Brussels)
+     v0.8.0: Omvormer-sizing via C-rate (default 2, instelbaar in de invoer én de parametermodal).
+             battPrijs() kiest nu de omvormer die net groter is dan kWh/C-rate i.p.v. de goedkoopste
+             (was altijd 5 kVA → piek/laadfactor vlak). Grotere batterij → grotere omvormer → hogere
+             piekshaving. saveMgr herrekent in server-modus.
+     ---------------------------------------------------------------------------
+     v0.7.1  (2026-08-17 11:49 Europe/Brussels)
      v0.7.1: KLIK = ECHTE dispatch in server-modus. Een klik riep tot nu het lokale benaderings-
              model op (instant maar inconsistent met de server-ankers → uitschieters in de heatmap).
              Nu POST /api/thuisladen-cel voor exact die cel; besparing uit de 0/0-referentie. AutoZoek
@@ -344,7 +350,7 @@ var P = {
   // Q3 2026: Vlaanderen 32,22 c/kWh · Brussel 37,19 · Wallonië 37,83. Kwartaal- en regio-afhankelijk → instelbaar.
   CREG_VL:322, CREG_BR:372, CREG_WA:378,
   SPOT:95, NETKOST_MWH:70, HEFFING_MWH:35, CAPACITEIT_KW_JR:45, INJECTIE_MWH:40,
-  PV_YIELD:950, RTE:0.90, HORIZON:15,
+  PV_YIELD:950, RTE:0.90, HORIZON:15, BATT_CRATE:2,   // omvormer-sizing: kW = kWh / C-rate (2 = 2-uurs batterij)
   BATT:[ {kva:5,kwh:5,eur:3000},{kva:5,kwh:10,eur:5000},{kva:5,kwh:15,eur:7500},{kva:5,kwh:20,eur:10000},{kva:5,kwh:25,eur:12500},
          {kva:10,kwh:10,eur:7000},{kva:10,kwh:15,eur:9500},{kva:10,kwh:20,eur:12000},{kva:10,kwh:25,eur:14500},
          {kva:15,kwh:15,eur:11000},{kva:15,kwh:20,eur:14000},{kva:15,kwh:25,eur:16500} ]
@@ -379,12 +385,15 @@ function evMwh(){ return IN.wagens.reduce(function(s,w){return s+(w.km*w.kwhkm/1
 // Laadfactor = totaal jaarverbruik (gebouw + wagens) / (maximale piek × 8760 u), in %. Hoger = vlakker = gunstig.
 function laadfactorVan(piek){ var totKwh=(IN.jaarverbruik_mwh+evMwh())*1000; return (piek>0)? totKwh/(piek*8760)*100 : 0; }
 function paneelKwp(pan){ return pan*P.PANEEL_WP/1000; }
-function battPrijs(kwh){ // goedkoopste serie-entry voor die kWh binnen de fasegrens
+function battCrate(){ return (P.BATT_CRATE>0)?P.BATT_CRATE:2; }
+function battPrijs(kwh){ // omvormer = kleinste kVA ≥ (kWh / C-rate), binnen de fasegrens
   if(kwh<=0) return {kwh:0,kva:0,eur:0};
   var cand=P.BATT.filter(function(b){return b.kwh===kwh && b.kva<=maxKva();});
   if(!cand.length) return null;   // past niet op deze aansluiting
-  cand.sort(function(a,b){return a.eur-b.eur;});
-  return cand[0];
+  cand.sort(function(a,b){return a.kva-b.kva;});
+  var req=kwh/battCrate();        // vereist omvormervermogen (kW)
+  for(var i=0;i<cand.length;i++){ if(cand[i].kva>=req) return cand[i]; }
+  return cand[cand.length-1];     // geen enkele haalt de vereiste power → grootste beschikbare
 }
 // as-waarden
 function battAs(){ return [0,5,10,15,20,25]; }
@@ -825,12 +834,15 @@ function renderSide(){
     '<div class="hint">Wordt bij factuur-upload automatisch uit de postcode gehaald.</div>'+
     '<div class="row2"><div><label>Bestaande PV (kWp)</label><input value="'+IN.bestaand_pv_kwp+'" onchange="setIn(\'bestaand_pv_kwp\',this.value)"></div>'+
     '<div><label>Injectie (MWh/jr)</label><input value="'+IN.bestaand_inj_mwh+'" onchange="setIn(\'bestaand_inj_mwh\',this.value)"></div></div>'+
+    '<label>Batterij C-rate (omvormer-kW = kWh ÷ C)</label><input value="'+P.BATT_CRATE+'" onchange="setCrate(this.value)">'+
+    '<div class="hint">C = 2 → 2-uurs batterij. Hoger = kleinere/goedkopere omvormer, minder piekshaving.</div>'+
     '<h3>Wagens (laadvraag per wagen)</h3>'+w+
     '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
     '<div style="margin-top:14px"><button class="btn g" style="width:100%" onclick="rerun()">↻ Herbereken heatmaps</button></div>'+
     '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar'+(STATE.grid?(' · '+STATE.grid.runs+' anker-runs'):'')+'</div>';
 }
 window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; renderSide(); render(); } };
+window.setCrate=function(v){ var n=+v; if(n>0) P.BATT_CRATE=n; };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
@@ -892,7 +904,7 @@ window.openMgr=function(){ var g=document.getElementById('mgrModal'); g.style.di
     ['PANEEL_WP','Vermogen paneel (Wp)'],['PANEEL_M2','m² per paneel'],['PV_KOST','PV-kost (€/kWp)'],['PV_MIN','PV min panelen'],['PV_MAX','PV max panelen'],['PV_STAP','PV stap'],
     ['RENDEMENT_MIN','Min rendement (%)'],['INFLATIE','Inflatie (%)'],['NETINDEX','Netkosten-index boven inflatie (%)'],['HORIZON','Horizon (jaar)'],
     ['CREG_VL','CREG thuisladen Vlaanderen (€/MWh)'],['CREG_BR','CREG thuisladen Brussel (€/MWh)'],['CREG_WA','CREG thuisladen Wallonië (€/MWh)'],['DIESEL_100KM','Dieselkost (€/100 km)'],['SPOT','Spot gemiddeld (€/MWh)'],['NETKOST_MWH','Netkost energie (€/MWh)'],['HEFFING_MWH','Heffingen (€/MWh)'],
-    ['CAPACITEIT_KW_JR','Capaciteitstarief (€/kW/jr)'],['INJECTIE_MWH','Injectievergoeding (€/MWh)'],['PV_YIELD','PV-opbrengst (kWh/kWp)']];
+    ['CAPACITEIT_KW_JR','Capaciteitstarief (€/kW/jr)'],['INJECTIE_MWH','Injectievergoeding (€/MWh)'],['PV_YIELD','PV-opbrengst (kWh/kWp)'],['BATT_CRATE','C-rate omvormer (kW = kWh ÷ C; 2 = 2-uurs)']];
   var bt='<table><thead><tr><th>kVA</th><th>kWh</th><th>€</th></tr></thead><tbody>'+P.BATT.map(function(b,i){return '<tr><td>'+b.kva+'</td><td>'+b.kwh+'</td><td><input style="width:90px;text-align:right" value="'+b.eur+'" onchange="P.BATT['+i+'].eur=+this.value"></td></tr>';}).join('')+'</tbody></table>';
   document.getElementById('mgrModalInner').innerHTML='<h2>Parameters (manager)</h2>'+
     '<div class="pgrid">'+f.map(function(x){return '<div><label>'+x[1]+'</label><input value="'+P[x[0]]+'" onchange="P[\''+x[0]+'\']=+this.value"></div>';}).join('')+'</div>'+
@@ -900,7 +912,7 @@ window.openMgr=function(){ var g=document.getElementById('mgrModal'); g.style.di
     '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn ghost" onclick="closeMgr()">Annuleren</button><button class="btn g" onclick="saveMgr()">Toepassen</button></div>';
 };
 window.closeMgr=function(){ document.getElementById('mgrModal').style.display='none'; };
-window.saveMgr=function(){ closeMgr(); STATE.gemeten={}; STATE.sel=null; render(); renderSide(); };
+window.saveMgr=function(){ closeMgr(); STATE.gemeten={}; STATE.sel=null; if(STATE.serverMode){ STATE.serverMode=false; fetchServerGrid(); } else { render(); renderSide(); } };
 document.getElementById('mgrBtn').onclick=window.openMgr;
 
 // ============================ SERVER-DISPATCH (/api/thuisladen) ============================
