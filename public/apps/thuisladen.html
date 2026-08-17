@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.9.0  (2026-08-17 13:36 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.9.1  (2026-08-17 14:18 Europe/Brussels)
+     v0.9.1: Cashflow-sectie herwerkt naar "Netto-positie voor de klant" (energiefactuur − CREG-
+             vergoeding − vermeden diesel = netto) + een expliciete "Winst op het thuisladen"
+             (CREG-tarief vs werkelijke laadkost). Vervangt de circulaire pro-rata cashflow-tabel.
+             Negatieve netto toont als "€ X voordeel" (groen) i.p.v. verwarrend minteken.
+     ---------------------------------------------------------------------------
+     v0.9.0  (2026-08-17 13:36 Europe/Brussels)
      v0.9.0: UX — ENKEL server-cijfers tonen (geen browser-benadering meer als resultaat). States:
              idle (klik “Bereken heatmaps”) · rekenen (rekenscherm) · klaar (heatmaps) · fout (foutscherm).
              Niet meer rekenen bij openen; pas bij de knop. Per heatmap staat het getal rechts boven de
@@ -733,8 +739,8 @@ function renderReport(){
     '</tbody></table>'+
     // ── Factuurdetail referentie vs scenario ──
     _factuurDetailBlok(refF, scnF, ref)+
-    // ── Cashflow jaar 1 per wagen ──
-    _cashflowBlok(m, ref)+
+    // ── Netto-positie voor de klant + laadwinst ──
+    _nettoPositieBlok(m, ref)+
     // ── Energiebalans + pie charts ──
     _energieBlok(scnE)+
     // ── Meerjaren-cashflow ──
@@ -762,29 +768,33 @@ function _factuurDetailBlok(refF, scnF, refKost){
     '</tbody></table>';
 }
 
-// Cashflow jaar 1: kosten gebouw + kosten laden per wagen + CREG/diesel-bijdrage per wagen.
-function _cashflowBlok(m, refKost){
-  var gebouw=IN.jaarverbruik_mwh, evTot=evMwh(), totL=gebouw+evTot;
-  if(totL<=0) return '';
-  var eS = m.kostScenario/totL;                         // €/MWh scenario (uniform verdeeld)
-  var eR = (refKost!=null?refKost:m.kostScenario)/totL; // €/MWh referentie
-  var rows='', kostR=0, kostS=0, bij=0;
-  rows+='<tr><td>Kosten gebouw</td><td>'+fmtE(gebouw*eR)+'</td><td>'+fmtE(gebouw*eS)+'</td></tr>';
-  kostR+=gebouw*eR; kostS+=gebouw*eS;
-  IN.wagens.forEach(function(w,i){ var mwh=w.km*w.kwhkm/1000;
-    rows+='<tr><td>Kosten laden wagen '+(i+1)+'</td><td>'+fmtE(mwh*eR)+'</td><td>'+fmtE(mwh*eS)+'</td></tr>';
-    kostR+=mwh*eR; kostS+=mwh*eS;
-  });
-  IN.wagens.forEach(function(w,i){ var mwh=w.km*w.kwhkm/1000;
-    var b = w.creg ? mwh*cregTarief() : (w.km/100)*P.DIESEL_100KM;
-    var lbl = w.creg ? ('Bijdrage CREG wagen '+(i+1)) : ('Vermeden diesel wagen '+(i+1));
-    rows+='<tr><td>'+lbl+'</td><td class="pos">− '+fmtE(b)+'</td><td class="pos">− '+fmtE(b)+'</td></tr>';
-    bij+=b;
-  });
-  rows+='<tr style="font-weight:700"><td>Netto jaar 1 (kosten − bijdragen)</td><td>'+fmtE(kostR-bij)+'</td><td>'+fmtE(kostS-bij)+'</td></tr>';
-  return '<h3 style="border:none;margin-top:14px">Cashflow jaar 1 — referentie vs scenario</h3>'+
+// Netto-positie voor de klant (jaar) + expliciete winst op het thuisladen.
+// Energiefactuur (gebouw+laden) − werkgever-vergoeding (CREG) − vermeden diesel = netto out-of-pocket.
+// De laadwinst = CREG-vergoeding − werkelijke laadkost van de vergoede wagens (indicatief op de site-€/MWh).
+function _nettoPositieBlok(m, refKost){
+  var factScn=m.kostScenario, factRef=(refKost!=null?refKost:m.kostScenario);
+  var evCregMwh=0, creg=0, diesel=0;
+  IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000;
+    if(w.creg){ evCregMwh+=mwh; creg+=mwh*cregTarief(); } else { diesel+=(w.km/100)*P.DIESEL_100KM; } });
+  var nettoRef=factRef-creg-diesel, nettoScn=factScn-creg-diesel;
+  function nettoCel(v){ return v<0 ? ('<span class="pos">'+fmtE(-v)+' voordeel</span>') : (fmtE(v)+' kost'); }
+  var rows=''+
+    '<tr><td>Energiefactuur (gebouw + laden)</td><td>'+fmtE(factRef)+'</td><td>'+fmtE(factScn)+'</td></tr>'+
+    (creg>0?('<tr><td>− Werkgever-vergoeding thuisladen (CREG)</td><td class="pos">− '+fmtE(creg)+'</td><td class="pos">− '+fmtE(creg)+'</td></tr>'):'')+
+    (diesel>0?('<tr><td>− Vermeden dieselkost (niet-vergoede wagens)</td><td class="pos">− '+fmtE(diesel)+'</td><td class="pos">− '+fmtE(diesel)+'</td></tr>'):'')+
+    '<tr style="font-weight:700"><td>= Netto jaarpositie (energie − vergoeding − diesel)</td><td>'+nettoCel(nettoRef)+'</td><td>'+nettoCel(nettoScn)+'</td></tr>'+
+    '<tr style="font-weight:700"><td>Besparing door de installatie / jaar</td><td></td><td class="pos">'+fmtE(nettoRef-nettoScn)+'</td></tr>';
+  var laadBlok='';
+  if(evCregMwh>0 && m.eurMwh>0){
+    var laadkost=evCregMwh*m.eurMwh, winst=creg-laadkost;
+    laadBlok='<div style="margin-top:8px;padding:10px 12px;background:#F1F8F3;border:1px solid #05B05033;border-radius:8px">'+
+      '<div style="font-weight:800;color:#048443;margin-bottom:4px">Winst op het thuisladen — '+fmtE(winst)+'/jaar</div>'+
+      '<div style="font-size:12px;color:#3A4657">De werkgever vergoedt het laden aan '+fmtE(cregTarief())+'/MWh; in dit scenario laadt u aan ~'+fmtE1(m.eurMwh)+'/MWh (site-gemiddelde, indicatief). Op de '+fmtN(evCregMwh,2)+' MWh vergoed laden houdt u zo ~'+fmtE(winst)+'/jaar over — een voordeel dat groeit naarmate de installatie de laadkost verder drukt.</div></div>';
+  }
+  return '<h3 style="border:none;margin-top:14px">Netto-positie voor de klant (jaar 1)</h3>'+
     '<table><thead><tr><th>Post</th><th>Referentie</th><th>Scenario</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    '<div class="note">Kosten laden/gebouw verdeeld naar rato van verbruik (€/MWh × MWh). CREG/diesel-bijdragen zijn gelijk in beide kolommen; het netto-verschil = de jaarbesparing.</div>';
+    laadBlok+
+    '<div class="note">CREG-vergoeding en vermeden diesel zijn gelijk in beide kolommen (zelfde km) → de besparing door de installatie = het verschil in energiefactuur. De laadwinst is een aparte kijk (niet optellen bij de besparing — de goedkopere laadkost zit al in de besparing).</div>';
 }
 
 // Energiebalans jaar (scenario) + twee pie charts.
