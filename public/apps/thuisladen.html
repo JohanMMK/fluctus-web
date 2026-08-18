@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.9.5  (2026-08-18 09:57 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.9.6  (2026-08-18 14:13 Europe/Brussels)
+     v0.9.6: Batterij + extra PV zijn nu UITLEZINGEN (geen input): boven de heatmaps in KPI-formaat,
+             bewegen mee met de muis over de heatmaps (updateHvals → rd_batt/rd_pv) en blijven op de
+             aangeklikte/berekende pixel staan. Onder de heatmap verschijnen ze ook als de eerste twee
+             KPI-tegels van de gekozen opstelling. Dropdowns (pickBatt/pickPv) verwijderd.
+     ---------------------------------------------------------------------------
+     v0.9.5  (2026-08-18 09:57 Europe/Brussels)
      v0.9.5: Invoer-hints ingekort (factuur-zin + postcode-zin weg). Zoek-optimale-velden tonen nu
              PAS als de heatmaps berekend zijn. Batterij- en panelen-keuze als twee rechtsgelijnde
              selectors boven de heatmaps (batterij boven, panelen eronder) — kiezen = zelfde weg als
@@ -701,35 +707,40 @@ function renderCards(){
 function updateHvals(c){
   HM.forEach(function(h){ var el=document.getElementById('hval_'+h.f); if(!el) return;
     var v=(c && c[h.f]!=null && isFinite(c[h.f]))?h.fmt(c[h.f]):'—'; el.textContent=v; });
+  // Batterij + extra PV bewegen mee met de muis over de heatmaps (en blijven op de gekozen pixel staan).
+  var rb=document.getElementById('rd_batt'), rp=document.getElementById('rd_pv');
+  if(rb) rb.textContent=battReadout(c);
+  if(rp) rp.textContent=pvReadout(c);
   var hi=document.getElementById('hoverInfo');
   if(hi){ hi.innerHTML = c ? ('<b>Batterij '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · '+c.pv+' panelen'+(c.exact?'':' (interpolatie — klik voor de echte berekening)')+'</b>')
     : 'Beweeg over een heatmap voor de waarden; klik een cel om ze exact te (laten) berekenen.'; }
 }
 function renderConstraints(){
   var bar=document.getElementById('constraintsBar');
-  // De zoek-velden + de batterij/panelen-keuze tonen we PAS als de heatmaps berekend zijn.
+  // De zoek-velden + de batterij/PV-uitlezing tonen we PAS als de heatmaps berekend zijn.
   if(STATE.status!=='klaar'){ bar.innerHTML=''; return; }
-  var sel=STATE.sel||{}; var selB=(sel.b!=null?sel.b:0), selPv=(sel.pv!=null?sel.pv:0);
-  var battOpts=battAs().map(function(b){ return '<option value="'+b+'"'+(b===selB?' selected':'')+'>'+b+' kWh</option>'; }).join('');
-  var pvOpts=pvAs().map(function(pv){ return '<option value="'+pv+'"'+(pv===selPv?' selected':'')+'>'+pv+' panelen'+(pv>0?(' · '+fmtN(paneelKwp(pv),1)+' kWp'):'')+'</option>'; }).join('');
-  // Links: de zoek-optimale-velden. Rechts (uitgelijnd op de heatmap-KPIs): batterij bovenaan, panelen eronder.
+  var c=STATE.sel?selCell():null;
+  // Links: de zoek-optimale-velden. Rechts (zelfde KPI-formaat als boven de heatmaps): batterij
+  // bovenaan, extra PV eronder — GEEN input maar een uitlezing die met de muis meebeweegt over de
+  // heatmaps en op de aangeklikte/berekende pixel blijft staan (updateHvals stuurt rd_batt/rd_pv).
+  var rowCss='display:flex;justify-content:space-between;align-items:baseline;gap:10px;min-width:230px';
+  var lblCss='font-size:13px;font-weight:800;color:var(--blauw);letter-spacing:.03em';
+  var valCss='font-size:16px;font-weight:800;color:#1A1F2B';
   bar.innerHTML =
     '<div><label>Max PV (panelen)</label><input id="c_pan" style="width:110px" value="'+(IN.max_pv_pan!=null?IN.max_pv_pan:'')+'" placeholder="—"></div>'+
     '<div><label>Max budget (€)</label><input id="c_bud" style="width:120px" value="'+(IN.max_budget!=null?IN.max_budget:'')+'" placeholder="—"></div>'+
     '<div><label>Min rendement (%)</label><input id="c_rend" style="width:110px" value="'+(IN.min_rend!=null?IN.min_rend:'')+'" placeholder="'+P.RENDEMENT_MIN+'"></div>'+
     '<button class="btn o" onclick="applyConstraints()">Zoek optimale opstelling ▶</button>'+
-    '<div style="margin-left:auto;display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+
-      '<div style="display:flex;align-items:center;gap:8px"><label style="margin:0;font-size:11px;color:var(--grijs);font-weight:700">Batterij</label>'+
-        '<select id="pick_batt" onchange="pickBatt(this.value)" style="width:150px;margin:0">'+battOpts+'</select></div>'+
-      '<div style="display:flex;align-items:center;gap:8px"><label style="margin:0;font-size:11px;color:var(--grijs);font-weight:700">Extra PV</label>'+
-        '<select id="pick_pv" onchange="pickPv(this.value)" style="width:150px;margin:0">'+pvOpts+'</select></div>'+
+    '<div style="margin-left:auto;display:flex;flex-direction:column;gap:6px;align-items:stretch">'+
+      '<div style="'+rowCss+'"><span style="'+lblCss+'">Batterij</span><span class="hval" id="rd_batt" style="'+valCss+'">'+battReadout(c)+'</span></div>'+
+      '<div style="'+rowCss+'"><span style="'+lblCss+'">Extra PV</span><span class="hval" id="rd_pv" style="'+valCss+'">'+pvReadout(c)+'</span></div>'+
     '</div>'+
     (STATE.iterLog.length?'<div class="note" style="flex-basis:100%">'+STATE.iterLog.join('<br>')+'</div>':'');
 }
+// Uitlezing-teksten (batterij + extra PV) in hetzelfde formaat als de heatmap-KPIs.
+function battReadout(c){ return (c&&c.b!=null)?(fmtN(c.b,0)+' kWh'+(c.kva?(' · '+fmtN(c.kva,0)+' kVA'):'')):'—'; }
+function pvReadout(c){ return (c&&c.pv!=null)?(fmtN(c.pv,0)+' panelen'+(c.pv>0?(' · '+fmtN(paneelKwp(c.pv),1)+' kWp'):'')):'—'; }
 window.applyConstraints=function(){ IN.max_pv_pan=numOrNull('c_pan'); IN.max_budget=numOrNull('c_bud'); IN.min_rend=numOrNull('c_rend'); autoZoek(); };
-// Batterij-/panelen-keuze boven de heatmaps → dezelfde weg als een klik (anker = meteen, anders echte cel-dispatch).
-window.pickBatt=function(v){ var sel=STATE.sel||{}; simulateCell(+v, (sel.pv!=null?sel.pv:0)); };
-window.pickPv=function(v){ var sel=STATE.sel||{}; simulateCell((sel.b!=null?sel.b:0), +v); };
 function numOrNull(id){ var v=document.getElementById(id).value.replace(/[^0-9.]/g,''); return v===''?null:+v; }
 function renderSel(){
   var el=document.getElementById('selPanel');
@@ -745,6 +756,8 @@ function renderSel(){
   el.innerHTML='<div class="tt">Geselecteerde opstelling'+(c.exact?' · gesimuleerd':' · geïnterpoleerd')+'</div>'+
     '<div style="font-size:19px;font-weight:800;color:#1F3864;margin-bottom:10px;line-height:1.3">Batterij '+c.b+' kWh'+(c.kva?(' / '+c.kva+' kVA'):'')+' · extra PV '+c.pv+' panelen ('+fmtN(paneelKwp(c.pv),1)+' kWp) · investering '+fmtE(c.capex)+'</div>'+
     '<div class="kpis">'+
+     '<div class="kpi"><div class="l">Batterij</div><div class="v">'+fmtN(c.b,0)+' kWh</div><div class="s">'+(c.kva?fmtN(c.kva,0)+' kVA omvormer':'geen batterij')+'</div></div>'+
+     '<div class="kpi"><div class="l">Extra PV</div><div class="v">'+fmtN(c.pv,0)+' panelen</div><div class="s">'+fmtN(paneelKwp(c.pv),1)+' kWp</div></div>'+
      '<div class="kpi"><div class="l">Jaarkost scenario</div><div class="v">'+fmtE(c.kostScenario)+'</div><div class="s">gebouw + laden, met PV+batterij</div></div>'+
      '<div class="kpi g"><div class="l">Besparing/jaar</div><div class="v">'+fmtE(c.besparing)+'</div><div class="s">referentie'+(ref!=null?(' '+fmtE(ref)):'')+' − scenario</div></div>'+
      '<div class="kpi o"><div class="l">Terugverdientijd</div><div class="v">'+(c.besparing>0?fmtN(c.capex/c.besparing,1)+' jr':'—')+'</div><div class="s">capex ÷ besparing</div></div>'+
