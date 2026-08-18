@@ -1,4 +1,7 @@
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// 18-08: Thuisladen-tegel heeft rechtsboven een info-i die de productvideo (JACOPS/E+Drive) in een
+//        modal opent en start. Video-URL via jsDelivr uit repo JohanMMK/jacops-presentatie@main.
+//        Additief: ensureVideoUI()/openVideoModal()/closeVideoModal() + 'video'-veld in de catalog.
 // 16-08: Thuisladen-tegel toegevoegd aan APP_CATALOG (app_id 'thuisladen' → /apps/thuisladen.html),
 //        net na Simulator. Gewone grantbare app: managers zien ze meteen, sellers via user_app_access.
 // 26-07: Kamino-tegel toegevoegd aan APP_CATALOG (app_id 'kamino' → /apps/kamino.html).
@@ -29,7 +32,7 @@ const APP_CATALOG = [
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
-  { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html' },
+  { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen-JACOPS-EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
@@ -150,14 +153,76 @@ function renderLauncher(apps) {
     host.innerHTML = '<p class="notice">Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.</p>';
     return;
   }
+  ensureVideoUI();
   apps.forEach(a => {
     const t = document.createElement('a');
     t.className = 'app-tile';
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
+    // Info-i rechtsboven: opent de productvideo in een modal (navigeert niet naar de app).
+    if (a.video) {
+      t.style.position = 'relative';
+      const info = document.createElement('button');
+      info.className = 'tile-info';
+      info.type = 'button';
+      info.textContent = 'i';
+      info.title = 'Bekijk de video';
+      info.setAttribute('aria-label', 'Bekijk de video');
+      info.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openVideoModal(a.video, a.naam); });
+      t.appendChild(info);
+    }
     host.appendChild(t);
   });
+}
+
+// ── Productvideo-modal (info-i op de tegel) ──
+function ensureVideoUI() {
+  if (document.getElementById('tlvid-style')) return;
+  const st = document.createElement('style'); st.id = 'tlvid-style';
+  st.textContent = `
+    .app-tile .tile-info{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;
+      border:1.5px solid #1F3864;background:#fff;color:#1F3864;font-weight:800;font-style:italic;
+      font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;padding:0;z-index:3;transition:all .15s}
+    .app-tile .tile-info:hover{background:#1F3864;color:#fff;transform:scale(1.08)}
+    .tlvid-bg{position:fixed;inset:0;background:rgba(15,22,40,.82);display:none;align-items:center;
+      justify-content:center;z-index:9999;padding:24px}
+    .tlvid-bg.open{display:flex}
+    .tlvid-box{background:#0b1526;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);
+      width:min(960px,94vw);overflow:hidden}
+    .tlvid-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;color:#fff;
+      font-weight:700;font-size:14px}
+    .tlvid-close{background:none;border:none;color:#cfe0ff;font-size:22px;cursor:pointer;line-height:1;padding:2px 8px}
+    .tlvid-close:hover{color:#fff}
+    .tlvid-box video{display:block;width:100%;max-height:78vh;background:#000}
+  `;
+  document.head.appendChild(st);
+  const bg = document.createElement('div'); bg.className = 'tlvid-bg'; bg.id = 'tlvid-bg';
+  bg.innerHTML = `<div class="tlvid-box" role="dialog" aria-modal="true">
+      <div class="tlvid-head"><span id="tlvid-title">Video</span>
+        <button class="tlvid-close" id="tlvid-close" aria-label="Sluiten">&times;</button></div>
+      <video id="tlvid-el" controls playsinline preload="metadata"></video>
+    </div>`;
+  document.body.appendChild(bg);
+  const close = () => closeVideoModal();
+  bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+  document.getElementById('tlvid-close').addEventListener('click', close);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+function openVideoModal(url, naam) {
+  ensureVideoUI();
+  const bg = document.getElementById('tlvid-bg');
+  const vid = document.getElementById('tlvid-el');
+  document.getElementById('tlvid-title').textContent = (naam ? naam + ' — ' : '') + 'productvideo';
+  if (vid.getAttribute('src') !== url) vid.setAttribute('src', url);
+  bg.classList.add('open');
+  try { vid.currentTime = 0; const p = vid.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+}
+function closeVideoModal() {
+  const bg = document.getElementById('tlvid-bg'); const vid = document.getElementById('tlvid-el');
+  if (vid) { try { vid.pause(); } catch (e) {} }
+  if (bg) bg.classList.remove('open');
 }
 
 async function render() {
