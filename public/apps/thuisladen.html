@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.9.3  (2026-08-17 15:52 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.9.5  (2026-08-18 09:57 Europe/Brussels)
+     v0.9.5: Invoer-hints ingekort (factuur-zin + postcode-zin weg). Zoek-optimale-velden tonen nu
+             PAS als de heatmaps berekend zijn. Batterij- en panelen-keuze als twee rechtsgelijnde
+             selectors boven de heatmaps (batterij boven, panelen eronder) — kiezen = zelfde weg als
+             een klik op de heatmap (anker = meteen, geïnterpoleerd = echte cel-dispatch).
+     ---------------------------------------------------------------------------
+     v0.9.4  (2026-08-18 09:51 Europe/Brussels)
+     v0.9.4: Heatmap-koppen — titel/waarde niet meer geforceerd in hoofdletters (MWh houdt kleine h).
+             €/MWh-waarde toont nu heel getal + de omzetting in €c/kWh (v/10). €/MWh en Maximale piek
+             boven de heatmap zonder decimalen; laadfactor/rendement blijven op 1 decimaal.
+     ---------------------------------------------------------------------------
+     v0.9.3  (2026-08-17 15:52 Europe/Brussels)
      v0.9.3: Factuurdetail — GSC/WKK-certificaten als eigen (ingesprongen) lijn "waarvan GSC/WKK-
              certificaten"; "Energie (leverancier)" toont nu A minus die certificaten. Sub-lijnen
              sommeren nog steeds naar het A-subtotaal en het totaal. ⓘ-uitleg bij de certificaatlijn.
@@ -530,8 +541,8 @@ function buildGrid(){
 }
 
 // ============================ HEATMAPS ============================
-var HM=[ {f:'eurMwh',t:'€ / MWh',fmt:function(v){return fmtE1(v);},inv:true},
-         {f:'piek',t:'Maximale piek (kW)',fmt:function(v){return fmtN(v,1)+' kW';},inv:true},
+var HM=[ {f:'eurMwh',t:'€ / MWh',fmt:function(v){return '€ '+fmtN(v,0)+' · '+fmtN(v/10,1)+' €c/kWh';},inv:true},
+         {f:'piek',t:'Maximale piek (kW)',fmt:function(v){return fmtN(v,0)+' kW';},inv:true},
          {f:'laadfactor',t:'Laadfactor (%)',fmt:function(v){return fmtN(v,1)+' %';},inv:false},
          {f:'rendement',t:'Rendement %',fmt:function(v){return fmtN(v,1)+' %';},inv:false} ];
 // Wit → donkergroen (ColorBrewer Greens). Eén tint, enkel helderheid varieert →
@@ -670,7 +681,7 @@ function renderCards(){
   var xax='<div class="axis">'+px.map(function(v){return '<span>'+v+'</span>';}).join('')+'</div>';
   host.innerHTML = HM.map(function(h){
     return '<div class="hm-card"><div class="h" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'+
-        '<span>'+h.t+'</span><span class="hval" id="hval_'+h.f+'" style="font-size:16px;font-weight:800;color:#1A1F2B">—</span></div>'+
+        '<span style="text-transform:none">'+h.t+'</span><span class="hval" id="hval_'+h.f+'" style="font-size:16px;font-weight:800;color:#1A1F2B;text-transform:none">—</span></div>'+
       '<div style="display:flex;gap:7px;align-items:flex-start">'+yax+
         '<div style="flex:1">'+
           '<canvas class="hm" id="cv_'+h.f+'"></canvas>'+
@@ -695,14 +706,30 @@ function updateHvals(c){
     : 'Beweeg over een heatmap voor de waarden; klik een cel om ze exact te (laten) berekenen.'; }
 }
 function renderConstraints(){
-  document.getElementById('constraintsBar').innerHTML =
+  var bar=document.getElementById('constraintsBar');
+  // De zoek-velden + de batterij/panelen-keuze tonen we PAS als de heatmaps berekend zijn.
+  if(STATE.status!=='klaar'){ bar.innerHTML=''; return; }
+  var sel=STATE.sel||{}; var selB=(sel.b!=null?sel.b:0), selPv=(sel.pv!=null?sel.pv:0);
+  var battOpts=battAs().map(function(b){ return '<option value="'+b+'"'+(b===selB?' selected':'')+'>'+b+' kWh</option>'; }).join('');
+  var pvOpts=pvAs().map(function(pv){ return '<option value="'+pv+'"'+(pv===selPv?' selected':'')+'>'+pv+' panelen'+(pv>0?(' · '+fmtN(paneelKwp(pv),1)+' kWp'):'')+'</option>'; }).join('');
+  // Links: de zoek-optimale-velden. Rechts (uitgelijnd op de heatmap-KPIs): batterij bovenaan, panelen eronder.
+  bar.innerHTML =
     '<div><label>Max PV (panelen)</label><input id="c_pan" style="width:110px" value="'+(IN.max_pv_pan!=null?IN.max_pv_pan:'')+'" placeholder="—"></div>'+
     '<div><label>Max budget (€)</label><input id="c_bud" style="width:120px" value="'+(IN.max_budget!=null?IN.max_budget:'')+'" placeholder="—"></div>'+
     '<div><label>Min rendement (%)</label><input id="c_rend" style="width:110px" value="'+(IN.min_rend!=null?IN.min_rend:'')+'" placeholder="'+P.RENDEMENT_MIN+'"></div>'+
     '<button class="btn o" onclick="applyConstraints()">Zoek optimale opstelling ▶</button>'+
+    '<div style="margin-left:auto;display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+
+      '<div style="display:flex;align-items:center;gap:8px"><label style="margin:0;font-size:11px;color:var(--grijs);font-weight:700">Batterij</label>'+
+        '<select id="pick_batt" onchange="pickBatt(this.value)" style="width:150px;margin:0">'+battOpts+'</select></div>'+
+      '<div style="display:flex;align-items:center;gap:8px"><label style="margin:0;font-size:11px;color:var(--grijs);font-weight:700">Extra PV</label>'+
+        '<select id="pick_pv" onchange="pickPv(this.value)" style="width:150px;margin:0">'+pvOpts+'</select></div>'+
+    '</div>'+
     (STATE.iterLog.length?'<div class="note" style="flex-basis:100%">'+STATE.iterLog.join('<br>')+'</div>':'');
 }
 window.applyConstraints=function(){ IN.max_pv_pan=numOrNull('c_pan'); IN.max_budget=numOrNull('c_bud'); IN.min_rend=numOrNull('c_rend'); autoZoek(); };
+// Batterij-/panelen-keuze boven de heatmaps → dezelfde weg als een klik (anker = meteen, anders echte cel-dispatch).
+window.pickBatt=function(v){ var sel=STATE.sel||{}; simulateCell(+v, (sel.pv!=null?sel.pv:0)); };
+window.pickPv=function(v){ var sel=STATE.sel||{}; simulateCell((sel.b!=null?sel.b:0), +v); };
 function numOrNull(id){ var v=document.getElementById(id).value.replace(/[^0-9.]/g,''); return v===''?null:+v; }
 function renderSel(){
   var el=document.getElementById('selPanel');
@@ -908,7 +935,7 @@ function renderSide(){
     '</div>'; }).join('');
   document.getElementById('side').innerHTML=
     '<h3>Invoer</h3>'+
-    '<div class="hint">Bij voorkeur via factuur inlezen (zelfde weg als de simulator). Manueel kan ook hieronder.</div>'+
+    '<div class="hint">Bij voorkeur via factuur inlezen. Manueel kan ook hieronder.</div>'+
     '<button class="btn" style="width:100%;margin:2px 0 6px" onclick="document.getElementById(\'tlFactuurInput\').click()">📄 Factuur inlezen (PDF)</button>'+
     '<input type="file" id="tlFactuurInput" accept="application/pdf" multiple style="display:none" onchange="tlFactuurUpload(this)">'+
     '<div id="tlFactuurMsg" class="hint" style="margin:0 0 8px">'+(STATE.factuurMsg||'')+'</div>'+
@@ -921,7 +948,6 @@ function renderSide(){
       '<option value="VL"'+(IN.regio==='VL'?' selected':'')+'>Vlaanderen — '+fmtE(P.CREG_VL)+'/MWh</option>'+
       '<option value="BR"'+(IN.regio==='BR'?' selected':'')+'>Brussel — '+fmtE(P.CREG_BR)+'/MWh</option>'+
       '<option value="WA"'+(IN.regio==='WA'?' selected':'')+'>Wallonië — '+fmtE(P.CREG_WA)+'/MWh</option></select>'+
-    '<div class="hint">Wordt bij factuur-upload automatisch uit de postcode gehaald.</div>'+
     '<div class="row2"><div><label>Bestaande PV (kWp)</label><input value="'+IN.bestaand_pv_kwp+'" onchange="setIn(\'bestaand_pv_kwp\',this.value)"></div>'+
     '<div><label>Injectie (MWh/jr)</label><input value="'+IN.bestaand_inj_mwh+'" onchange="setIn(\'bestaand_inj_mwh\',this.value)"></div></div>'+
     '<label>Batterij C-rate (omvormer-kW = kWh ÷ C)</label><input value="'+P.BATT_CRATE+'" onchange="setCrate(this.value)">'+
