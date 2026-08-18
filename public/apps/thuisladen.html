@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.9.1  (2026-08-17 14:18 Europe/Brussels)
+     FLUCTUS THUISLADEN  v0.9.3  (2026-08-17 15:52 Europe/Brussels)
+     v0.9.3: Factuurdetail — GSC/WKK-certificaten als eigen (ingesprongen) lijn "waarvan GSC/WKK-
+             certificaten"; "Energie (leverancier)" toont nu A minus die certificaten. Sub-lijnen
+             sommeren nog steeds naar het A-subtotaal en het totaal. ⓘ-uitleg bij de certificaatlijn.
+     ---------------------------------------------------------------------------
+     v0.9.2  (2026-08-17 14:29 Europe/Brussels)
+     v0.9.2: Factuurdetail — per lijn een ⓘ die uitklapt wat eronder valt (A energie / B netkosten
+             afname / C injectie / D Elia-transport / E heffingen). Transport (Elia) = €0 uitgelegd
+             (zit in VL/BR in de distributiekost). Netbeheerder-noot: zonder postcode draait de
+             standaard tariefkaart Fluvius West|LS (Vlaanderen) — expliciet getoond i.p.v. stil.
+     ---------------------------------------------------------------------------
+     v0.9.1  (2026-08-17 14:18 Europe/Brussels)
      v0.9.1: Cashflow-sectie herwerkt naar "Netto-positie voor de klant" (energiefactuur − CREG-
              vergoeding − vermeden diesel = netto) + een expliciete "Winst op het thuisladen"
              (CREG-tarief vs werkelijke laadkost). Vervangt de circulaire pro-rata cashflow-tabel.
@@ -160,6 +171,8 @@
   .modal h2{color:var(--blauw);font-size:16px;margin-bottom:8px}
   .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px}
   .note{font-size:10.5px;color:var(--grijs);font-style:italic}
+  .fdi{cursor:pointer;color:var(--groen-d);font-weight:800;font-style:normal;margin-left:4px;user-select:none}
+  .fdi:hover{color:var(--blauw)}
   .badge{display:inline-block;font-size:9px;font-weight:800;background:#FFF3E0;color:var(--oranje);border:1px solid #9E480E44;border-radius:10px;padding:1px 7px;margin-left:6px}
   .tt{position:fixed;pointer-events:none;background:#1A1F2B;color:#fff;font-size:11px;padding:5px 8px;border-radius:5px;display:none;z-index:60;line-height:1.4}
 </style></head>
@@ -751,21 +764,60 @@ function renderReport(){
 }
 
 // Factuurdetail — referentie (0/0) naast het gekozen scenario.
+// Elke factuurlijn heeft een ⓘ waarop je klikt om te zien welke posten eronder vallen.
 function _factuurDetailBlok(refF, scnF, refKost){
   if(!scnF) return '';
-  function rij(lbl, key, klasse){
-    var r=refF?refF[key]:null, s=scnF[key];
-    return '<tr'+(klasse?(' style="font-weight:700"'):'')+'><td>'+lbl+'</td><td>'+(r!=null?fmtE(r):'—')+'</td><td>'+(s!=null?fmtE(s):'—')+'</td></tr>';
+  // Wat zit onder elke hoofding (Belgische energiefactuur, LS 2026):
+  var UITLEG = {
+    A_energie:  'De pure energieprijs van de leverancier: afgenomen kWh aan spot/day-ahead + markup + vaste leverkost, minus de opbrengst van geïnjecteerde PV (spot − eventuele markdown). Dit is het deel dat de leverancier bepaalt; de rest is gereguleerd. De GSC/WKK-certificaten staan als aparte lijn hieronder.',
+    A_certificaten:'Groenestroom- (GSC) en warmtekracht-certificaten (WKK): een wettelijke opslag die de leverancier op elke afgenomen MWh doorrekent (standaard € 11,00 + € 4,20 /MWh). Ze schalen met de netafname → PV+batterij drukt ze mee omlaag.',
+    B_afname:   'Distributienetkosten voor AFNAME (uw netbeheerder, bv. Fluvius): capaciteitstarief op de maandpiek (€/kW), toegangsvermogen, eventuele overschrijdingspenalty, het proportionele kWh-tarief, databeheer en reactief vermogen. Hier grijpt de batterij aan: piek shaven verlaagt het capaciteitstarief.',
+    C_injectie: 'Netkosten voor INJECTIE van PV-overschot: proportioneel injectietarief (€/MWh), capaciteitstarief injectie (€/kVA), databeheer en de vaste injectievergoeding.',
+    D_transport:'Elia-transportkost (systeembeheer, reserves, marktintegratie, transport-maandpiek). In Vlaanderen en Brussel is dit ALLEMAAL al in de distributiekost (post B) verrekend → hier €0. Enkel in Wallonië staat Elia apart op de factuur en is deze post > 0.',
+    E_heffingen:'Overheidsheffingen en toeslagen: openbare-dienstverplichtingen (ODV), federale/regionale toeslagen, soldes regulatoires, de energiebijdrage/accijnzen (staffel per jaarverbruik) en het vaste Energiefonds Vlaanderen. Grotendeels €/MWh, dus daalt mee met het verbruik.',
+  };
+  // v0.9.3: "Energie (leverancier)" = A_energie − GSC/WKK; de certificaten krijgen een eigen lijn.
+  // (Sommeert nog steeds naar het A-subtotaal en dus naar het totaal.)
+  function val(F,key){
+    if(!F) return null;
+    if(key==='A_energie_excl') return (F.A_energie!=null)?(F.A_energie-(F.A_certificaten||0)):null;
+    return F[key];
+  }
+  function rij(lbl, key, uitlegKey, klasse, indent){
+    var r=val(refF,key), s=val(scnF,key);
+    var ik = uitlegKey||key;
+    var info = UITLEG[ik] ? (' <span class="fdi" title="klik voor uitleg" onclick="tlFdInfo(\''+ik+'\',event)">ⓘ</span>') : '';
+    var pad = indent ? ' style="padding-left:22px;color:#5A6577"' : '';
+    return '<tr'+(klasse?(' style="font-weight:700"'):'')+'><td'+pad+'>'+lbl+info+'</td><td>'+(r!=null?fmtE(r):'—')+'</td><td>'+(s!=null?fmtE(s):'—')+'</td></tr>'+
+      (UITLEG[ik] ? ('<tr id="fdrow_'+ik+'" style="display:none"><td colspan="3" style="background:#F5F8FC;color:#3A4657;font-size:12px;line-height:1.5;font-weight:400;padding:8px 12px">'+UITLEG[ik]+'</td></tr>') : '');
   }
   return '<h3 style="border:none;margin-top:14px">Factuurdetail — referentie vs scenario</h3>'+
+    '<div class="note">Klik op de <b>ⓘ</b> bij een lijn om te zien welke posten eronder vallen.</div>'+
     '<table><thead><tr><th>Component (excl. btw)</th><th>Referentie</th><th>Scenario</th></tr></thead><tbody>'+
-     rij('Energie (leverancier)','A_energie')+
+     rij('Energie (leverancier)','A_energie_excl','A_energie')+
+     rij('waarvan GSC/WKK-certificaten','A_certificaten','A_certificaten',false,true)+
      rij('Netkosten afname','B_afname')+
      rij('Netkosten injectie','C_injectie')+
-     rij('Transport','D_transport')+
+     rij('Transport (Elia)','D_transport')+
      rij('Heffingen','E_heffingen')+
-     rij('Totaal excl. btw','subtotaal',true)+
-    '</tbody></table>';
+     rij('Totaal excl. btw','subtotaal',null,true)+
+    '</tbody></table>'+
+    _netbeheerNoot();
+}
+// Toont/verbergt de uitleg-rij onder een factuurlijn.
+window.tlFdInfo=function(key,ev){ if(ev){ev.stopPropagation();} var r=document.getElementById('fdrow_'+key); if(r){ r.style.display = (r.style.display==='none'?'table-row':'none'); } };
+// Welke netbeheerder/tariefkaart is verondersteld? Zonder postcode valt de server terug op Fluvius West|LS (Vlaanderen).
+function _netbeheerNoot(){
+  var n=STATE.netbeheer; if(!n) return '';
+  var regio=n.regio||'Vlaanderen', grd=n.grd||'Fluvius West';
+  var kern='Tariefkaart: <b>'+grd+'</b> · laagspanning · regio '+regio+'. '+
+    'Transport (Elia) staat op €0 omdat dat in '+regio+' in de distributiekost zit.';
+  if(n.default){
+    return '<div class="note" style="background:#FFF7E6;border:1px solid #F0B24955;border-radius:8px;padding:8px 12px;color:#8A5A00">'+
+      '⚠ Geen postcode ingegeven → we rekenen op de <b>standaard</b> tariefkaart '+grd+' (laagspanning, Vlaanderen). '+
+      'Van zodra de postcode uit de factuur gekend is, nemen we de juiste netbeheerder — in Wallonië verschuift dan een deel naar de aparte Elia-transportlijn.</div>';
+  }
+  return '<div class="note">'+kern+'</div>';
 }
 
 // Netto-positie voor de klant (jaar) + expliciete winst op het thuisladen.
@@ -1013,6 +1065,7 @@ function fetchServerGrid(){
           piek_kw:a.piek_kw, factuur:a.factuur, energie:a.energie };
       });
       STATE.serverAnchors = map; STATE.serverMode = true; STATE.gemeten = {}; STATE.status='klaar';
+      STATE.netbeheer = res.j.netbeheer || null;   // {grd,spanning,regio,default} — welke tariefkaart draaide er
       if(badge){ badge.textContent='server-dispatch'; badge.style.background='#05B05022'; badge.style.color='#048443'; badge.style.borderColor='#05B05066'; }
       try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','grid_gedraaid',{ runs:res.j.runs, ev_mwh:res.j.ev_mwh }); }catch(e){}
       render(); renderSide();
