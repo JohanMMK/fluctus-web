@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.64.2  (2026-08-20 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.64.3  (2026-08-20 Europe/Brussels)
+     v1.64.3 (Johan 20-08): bezoekers-scenariotabel VERPLAATST van de invoerkaart naar de RESULTATEN (onder
+              het bezoekers-plein-blok, stap 11). Tarief komt uit het invoerveld op stap 5.
      v1.64.2 (Johan 20-08): BEZOEKERS — opbrengst-tarief-veld (€/MWh, default 500) + knop
               "Bereken bezoekers-scenario’s" → tabel met 6 scenario’s (geen batt / batt / batt+plein @
               50/100/150/200% sessies): energieprijs, km gevraagd/geleverd, opbrengst (geleverd × tarief),
@@ -1201,7 +1203,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.64.2';
+var SIM_VERSIE = 'v1.64.3';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4221,9 +4223,9 @@ function _bezPaalKw(lp){ return (lp.paaltype==='DC160')?160:22; }
 function _bezSessiesDag(lp){ return (lp.vensters||[]).reduce(function(s,v){return s+(+v.sessies||0);},0); }
 function _bezGevraagdMwh(lp){ return _bezSessiesDag(lp)*_bezPaalKw(lp)*((+lp.duur_min||0)/60)*(lp.dagen_per_week||7)*52/1000; }
 // Bezoekers-scenario's: 6 varianten op de server (geen batt / batt / batt+plein @ 50/100/150/200% sessies).
-function berekenBezoekersScenarios(lp, out, btn){
+function berekenBezoekersScenarios(tarief, out, btn){
   if(!STATE.lastSimInput){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Draai eerst <b>Simuleer ▶</b> (of een gewone simulatie) — dan gebruik ik díé installatie (aansluiting + batterij) als basis voor de scenario’s.</div>'; return; }
-  var tarief=+lp.opbrengst_eur_mwh||500, _t=btn.textContent; btn.disabled=true; btn.textContent='Rekenen… (6 scenario’s)';
+  tarief=+tarief||500; var _t=btn.textContent; btn.disabled=true; btn.textContent='Rekenen… (6 scenario’s)';
   out.innerHTML='<div class="fdsim-hint">De server rekent 6 scenario’s door…</div>';
   apiPost('/api/bezoekers-scenarios',{ input:STATE.lastSimInput, tarief_eur_mwh:tarief, kwh_km:0.16, percentages:[50,100,150,200] })
     .then(function(r){ btn.disabled=false; btn.textContent=_t;
@@ -4473,12 +4475,7 @@ function _renderLaadpleinKaart(lp, idx){
     });
     info.innerHTML=_bezInfoHtml();
     card.appendChild(info);
-    // ── Scenario-tabel (geen batt / batt / batt+plein @ 50/100/150/200% sessies) ──
-    var scWrap=el('div',{style:'margin-top:10px'});
-    var scBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'Bereken bezoekers-scenario’s ▶');
-    var scOut=el('div',{style:'margin-top:8px'});
-    scBtn.onclick=function(){ berekenBezoekersScenarios(lp, scOut, scBtn); };
-    scWrap.appendChild(scBtn); scWrap.appendChild(scOut); card.appendChild(scWrap);
+    card.appendChild(el('div',{class:'fdsim-hint',style:'margin-top:6px;font-size:11.5px'},'De scenariotabel (geen batt / batt / batt+plein @ 50/100/150/200% sessies) verschijnt bij de resultaten, onder dit plein.'));
     return card;
   }
 
@@ -6409,6 +6406,16 @@ function _renderLaadpleinResultaat(lp){
         '</div>';
       sec.appendChild(b);
     });
+    // ── Bezoekers-scenario's: geen batt / batt / batt+plein @ 50/100/150/200% sessies ──
+    (function(){
+      var _inP=(STATE.laadpleinen||[]).filter(function(x){return String(x.type_plein||'').toLowerCase()==='bezoekers';})[0];
+      var _tar=(_inP&&+_inP.opbrengst_eur_mwh)||500;
+      var scWrap=el('div',{style:'margin:2px 0 8px'});
+      var scBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'Bereken bezoekers-scenario’s ▶');
+      var scOut=el('div',{style:'margin-top:8px'});
+      scBtn.onclick=function(){ berekenBezoekersScenarios(_tar, scOut, scBtn); };
+      scWrap.appendChild(scBtn); scWrap.appendChild(scOut); sec.appendChild(scWrap);
+    })();
     // Alleen bezoekers → het km/CREG-verhaal (voor wagenparken) overslaan.
     if((lp.pleinen||[]).length && _bezP.length===(lp.pleinen||[]).length) return sec;
   }
