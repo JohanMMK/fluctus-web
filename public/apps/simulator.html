@@ -1,5 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.64.0  (2026-08-20 17:36 Europe/Brussels)
+     v1.64.0 (Johan 20-08): NIEUW LAADPLEIN-TYPE "Betalende bezoekers". Per plein een type-keuze
+              (Wagenpark km-gebaseerd / Betalende bezoekers). Bij bezoekers: paaltype (AC 22 / DC 160 kW),
+              duur/sessie, dagen/week en TWEE vensters met sessies/dag (random over de dag). De vraag wordt
+              bediend uit de vrije aansluitruimte + batterij (aansluiting nooit verzwaard) → geleverd vs
+              gemist (throttling). Resultaat toont per bezoekersplein gevraagd/geleverd/gemist/piek. Mee in de
+              gebouwfactuur. Vereist simulator.py v1.14.0 (engine).
+     FLUCTUS SIMULATOR  v1.63.83  (2026-08-16 Europe/Brussels)
+     v1.63.83 (Johan 16-08): CREG-forfait (tegel 4 / mobiliteit-ijklijn) geactualiseerd Q1→Q3 2026
+              (VL 0,3222 · BR 0,3719 · WA 0,3783 €/kWh), gelijk met de Thuisladen-tegel. Enkel de
+              CREG_PER_REGIO-tabel; regio-detectie (netbeheerder) en alle KPI-logica ongewijzigd.
      FLUCTUS SIMULATOR  v1.63.82  (2026-08-16 17:30 Europe/Brussels)
      v1.63.82 (Johan 16-08): KAMINO-HANG FIX (tegel 4). De autopilot bleef op "Groeistap 1 vastleggen…" hangen
               (zandloper, tot 20 min) en faalde daarna de HELE studie. Oorzaak: _apGroeistap1 wachtte via _apWait op
@@ -4125,9 +4136,12 @@ function updateProfielPreview(){
 // laadt, worden fiscaal terugbetaald aan het CREG-forfait per kWh — het valabele, werkbare
 // alternatief waartegen de eigen bedrijfsparking zich meet (beslist Johan). Niet diesel.
 // De €/km hangt dus niet van een brandstofprijs af maar van WAAR geladen wordt.
-// v1.26.0: CREG-forfait PER GEWEST (Q1 2026, uit Laadkosten_Belgie_2026_v2.pdf). Regio volgt
-// uit de netbeheerder van de klant. Brussel/Wallonië liggen hoger dan Vlaanderen.
-var CREG_PER_REGIO = { Vlaanderen: 0.3132, Brussel: 0.3426, Wallonie: 0.3523 };
+// v1.26.0: CREG-forfait PER GEWEST. Regio volgt uit de netbeheerder van de klant.
+// Brussel/Wallonië liggen hoger dan Vlaanderen.
+// v1.63.83 (16-08): geactualiseerd naar Q3 2026 (32,22 / 37,19 / 37,83 c/kWh) — gelijk
+// getrokken met de Thuisladen-tegel. Was Q1 2026 (31,32 / 34,26 / 35,23) uit
+// Laadkosten_Belgie_2026_v2.pdf. NB: kwartaal-tarief, herzien elke 3 maanden.
+var CREG_PER_REGIO = { Vlaanderen: 0.3222, Brussel: 0.3719, Wallonie: 0.3783 };
 var GRD_WALLONIE = ['ORES','RESA','AIEG','REW','IECBW'];
 function _klantRegio(){
   var grd=(STATE.grd||'')+'';
@@ -4185,14 +4199,23 @@ var LAADPUNT_LABEL = {AC22:'AC 22 kW (stuks)', DC160:'DC 160 kW (stuks)', DC300:
 var _LP_GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px';
 
 function _laadpleinNieuw(){
-  return { naam:'Laadplein '+((STATE.laadpleinen||[]).length+1), voertuigtype:'Personenwagen',
+  return { naam:'Laadplein '+((STATE.laadpleinen||[]).length+1), type_plein:'wagenpark', voertuigtype:'Personenwagen',
     aantal:10, km_per_jaar:15000, kwh_per_km:0.16,
     venster_start:8, venster_eind:18, dagen_per_week:5,
     laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
+    // v1.14: betalende bezoekers (random sessies, 2 vensters)
+    paaltype:'AC22', duur_min:30,
+    vensters:[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}],
     bestaand:false };
 }
-function _lpEnergieMwh(lp){ return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000; }
-function _lpVermogenKw(lp){ return (lp.laadpunten||[]).reduce(function(s,x){return s+(x.aantal||0)*(LAADPUNT_KW[x.type]||0);},0); }
+function _bezPaalKw(lp){ return (lp.paaltype==='DC160')?160:22; }
+function _bezSessiesDag(lp){ return (lp.vensters||[]).reduce(function(s,v){return s+(+v.sessies||0);},0); }
+function _bezGevraagdMwh(lp){ return _bezSessiesDag(lp)*_bezPaalKw(lp)*((+lp.duur_min||0)/60)*(lp.dagen_per_week||7)*52/1000; }
+function _lpEnergieMwh(lp){
+  if(lp.type_plein==='bezoekers') return _bezGevraagdMwh(lp);
+  return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000;
+}
+function _lpVermogenKw(lp){ if(lp.type_plein==='bezoekers') return 0; return (lp.laadpunten||[]).reduce(function(s,x){return s+(x.aantal||0)*(LAADPUNT_KW[x.type]||0);},0); }
 
 // ─── v1.22: PIEKVERMOGEN uit de FACTUUR ──────────────────────────────────────
 // De grootste van de drie werkelijk gefactureerde vermogens:
@@ -4334,6 +4357,7 @@ function _lpEnergiePerLaaddagKwh(lp){
   return (_lpEnergieMwh(lp)*1000)/(52*dpw);
 }
 function _lpMinVermogenKw(lp){
+  if(lp.type_plein==='bezoekers') return 0;   // dynamisch bediend uit aansluiting+batterij, geen vaste ondergrens
   var u=_lpVensterUren(lp);
   return (_lpEnergiePerLaaddagKwh(lp)/u)*LP_MARGE;
 }
@@ -4355,6 +4379,52 @@ function _renderLaadpleinKaart(lp, idx){
     STATE.laadpleinen.splice(idx,1); _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting();
   }},'Verwijderen'));
   card.appendChild(top);
+
+  // v1.14: type-keuze — wagenpark (km-gebaseerd) of betalende bezoekers (sessies).
+  var tg=el('div',{style:_LP_GRID});
+  var tc=el('div',{class:'fdsim-row col'});
+  tc.appendChild(el('label',{class:'fdsim-label'},'Type laadplein'));
+  var tsel=el('select',{class:'fdsim-select'});
+  [{v:'wagenpark',t:'Wagenpark (km-gebaseerd)'},{v:'bezoekers',t:'Betalende bezoekers (sessies)'}].forEach(function(o){
+    var op=el('option',{value:o.v},o.t); if((lp.type_plein||'wagenpark')===o.v)op.selected=true; tsel.appendChild(op); });
+  tsel.onchange=function(){ lp.type_plein=tsel.value; _vulLaadpleinen($('fdsim-lp-host')); _updateLaadpleinSamenvatting(); };
+  tc.appendChild(tsel); tg.appendChild(tc);
+  card.appendChild(tg);
+
+  // ── Betalende bezoekers: paaltype + duur + dagen/week + twee vensters ──
+  if(lp.type_plein==='bezoekers'){
+    if(!Array.isArray(lp.vensters)||!lp.vensters.length) lp.vensters=[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}];
+    var gb=el('div',{style:_LP_GRID+';margin-top:8px'});
+    var pc=el('div',{class:'fdsim-row col'});
+    pc.appendChild(el('label',{class:'fdsim-label'},'Paaltype'));
+    var psel=el('select',{class:'fdsim-select'});
+    [{v:'AC22',t:'AC 22 kW'},{v:'DC160',t:'DC 160 kW'}].forEach(function(o){ var op=el('option',{value:o.v},o.t); if((lp.paaltype||'AC22')===o.v)op.selected=true; psel.appendChild(op); });
+    psel.onchange=function(){ lp.paaltype=psel.value; _updateLaadpleinSamenvatting(); _vulLaadpleinen($('fdsim-lp-host')); };
+    pc.appendChild(psel); gb.appendChild(pc);
+    gb.appendChild(_lpNum('Duur/sessie (min)', lp.duur_min, '5', function(x){ lp.duur_min=x||0; _updateLaadpleinSamenvatting(); }));
+    var dwb=el('div',{class:'fdsim-row col'});
+    dwb.appendChild(el('label',{class:'fdsim-label'},'Dagen/week'));
+    var dselb=el('select',{class:'fdsim-select'});
+    [{v:5,t:'5 (ma-vr)'},{v:6,t:'6 (+za)'},{v:7,t:'7 (+zo)'}].forEach(function(o){ var op=el('option',{value:String(o.v)},o.t); if(o.v===(lp.dagen_per_week||7))op.selected=true; dselb.appendChild(op); });
+    dselb.onchange=function(){ lp.dagen_per_week=parseInt(dselb.value,10); _updateLaadpleinSamenvatting(); };
+    dwb.appendChild(dselb); gb.appendChild(dwb);
+    card.appendChild(gb);
+    card.appendChild(el('div',{class:'fdsim-hint',style:'margin:10px 0 4px'},'Sessies per venster (vallen random over de dag):'));
+    lp.vensters.slice(0,2).forEach(function(v, vi){
+      var gv=el('div',{style:_LP_GRID+';margin-bottom:6px'});
+      gv.appendChild(_lpNum('Venster '+(vi+1)+' — start (u)', v.start, '1', function(x){ v.start=x||0; }));
+      gv.appendChild(_lpNum('eind (u)', v.eind, '1', function(x){ v.eind=x||0; }));
+      gv.appendChild(_lpNum('sessies/dag', v.sessies, '1', function(x){ v.sessies=x||0; _updateLaadpleinSamenvatting(); }));
+      card.appendChild(gv);
+    });
+    var info=el('div',{style:'margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;background:#05B0500f;border:1px solid #05B05040'});
+    info.innerHTML='<b>Gevraagd: '+fmtNum(_bezGevraagdMwh(lp),1)+' MWh/jaar</b> '+
+      '<span style="color:#5A6577">('+_bezSessiesDag(lp)+' sessies/dag × '+_bezPaalKw(lp)+' kW × '+fmtNum((+lp.duur_min||0)/60,2)+' u)</span>'+
+      '<div style="margin-top:5px;color:#5A6577;font-size:11.5px">Vermogen komt uit de vrije aansluitruimte + batterij — het toegangsvermogen wordt nooit verhoogd. '+
+      'Geleverd vs gemist (throttling) komt uit de simulatie.</div>';
+    card.appendChild(info);
+    return card;
+  }
 
   var g1=el('div',{style:_LP_GRID});
   var vt=el('div',{class:'fdsim-row col'});
@@ -6267,6 +6337,25 @@ function _renderLaadpleinResultaat(lp){
   sec.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:10px'},
     lp.aantal_pleinen+' laadplein(en) · EV-laadvraag '+fmtNum(lp.ev_last_mwh,1)+' MWh in deze periode · totaal laadvermogen '+fmtNum(lp.totaal_laadvermogen_kw,0)+' kW (= ondergrens batterij)'
     + (lp.bestaand_afgetrokken_mwh>0 ? (' · '+fmtNum(lp.bestaand_afgetrokken_mwh,1)+' MWh bestaand uit basisverbruik gehaald') : '')));
+  // v1.14: betalende-bezoekers-pleinen — gevraagd / geleverd / gemist (throttling) / piek.
+  var _bezP=(lp.pleinen||[]).filter(function(p){return p.modus==='bezoekers';});
+  if(_bezP.length){
+    _bezP.forEach(function(p){
+      var gev=+p.gevraagd_mwh||0, gel=+p.geladen_mwh||0, gem=+p.tekort_mwh||0;
+      var pct=gev>0?(100*gem/gev):0;
+      var b=el('div',{style:'background:#F5F8FC;border:1px solid #D5DBE3;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px'});
+      b.innerHTML='<b>'+(p.naam||'Bezoekersplein')+'</b> <span style="color:#5A6577">— betalende bezoekers</span>'+
+        '<div style="margin-top:6px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'+
+        '<div><span style="color:#5A6577">Gevraagd</span><br><b>'+fmtNum(gev,1)+' MWh</b></div>'+
+        '<div><span style="color:#5A6577">Geleverd</span><br><b style="color:#05B050">'+fmtNum(gel,1)+' MWh</b></div>'+
+        '<div><span style="color:#5A6577">Gemist (throttling)</span><br><b style="color:'+(pct>5?'#9E480E':'#5A6577')+'">'+fmtNum(gem,1)+' MWh ('+fmtNum(pct,1)+'%)</b></div>'+
+        '<div><span style="color:#5A6577">Piek plein</span><br><b>'+fmtNum(p.piek_kw,0)+' kW</b></div>'+
+        '</div>';
+      sec.appendChild(b);
+    });
+    // Alleen bezoekers → het km/CREG-verhaal (voor wagenparken) overslaan.
+    if((lp.pleinen||[]).length && _bezP.length===(lp.pleinen||[]).length) return sec;
+  }
   var cap=lp.capaciteit;
   // v1.63.75: bij Simuleer (geforceerde installatie, incl. batterij) → km-framing centraal i.p.v. de verhoog-opties.
   // Bron = per-plein tekort_mwh uit de HOOFDsim (battery-bewust: wat déze installatie effectief niet levert),
