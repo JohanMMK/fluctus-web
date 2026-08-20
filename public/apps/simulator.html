@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.64.0  (2026-08-20 17:36 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.64.1  (2026-08-20 Europe/Brussels)
+     v1.64.1 (Johan 20-08): BEZOEKERS-plein — nieuw veld "Aantal palen (stuks)" (begrenst de gelijktijdige
+              sessies = fysieke palen; max piek = palen × paalvermogen). Sessies/venster expliciet gelabeld
+              "per laadplein". Per-plein "Gevraagd MWh" werkt nu dynamisch (live bij elke wijziging). SIM_VERSIE
+              gebumpt (badge liep achter op v1.63.58). Vereist simulator.py v1.14.1.
      v1.64.0 (Johan 20-08): NIEUW LAADPLEIN-TYPE "Betalende bezoekers". Per plein een type-keuze
               (Wagenpark km-gebaseerd / Betalende bezoekers). Bij bezoekers: paaltype (AC 22 / DC 160 kW),
               duur/sessie, dagen/week en TWEE vensters met sessies/dag (random over de dag). De vraag wordt
@@ -1192,7 +1196,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.63.58';
+var SIM_VERSIE = 'v1.64.1';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4204,7 +4208,7 @@ function _laadpleinNieuw(){
     venster_start:8, venster_eind:18, dagen_per_week:5,
     laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
     // v1.14: betalende bezoekers (random sessies, 2 vensters)
-    paaltype:'AC22', duur_min:30,
+    paaltype:'AC22', duur_min:30, aantal_palen:1,
     vensters:[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}],
     bestaand:false };
 }
@@ -4394,34 +4398,42 @@ function _renderLaadpleinKaart(lp, idx){
   // ── Betalende bezoekers: paaltype + duur + dagen/week + twee vensters ──
   if(lp.type_plein==='bezoekers'){
     if(!Array.isArray(lp.vensters)||!lp.vensters.length) lp.vensters=[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}];
+    if(lp.aantal_palen==null) lp.aantal_palen=1;
+    // Dynamische samenvatting: infoDiv wordt live bijgewerkt bij elke wijziging (geen re-render → geen focusverlies).
+    var info=el('div',{style:'margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;background:#05B0500f;border:1px solid #05B05040'});
+    function _bezInfoHtml(){
+      var palen=Math.max(1,(+lp.aantal_palen||1)), pkw=_bezPaalKw(lp), maxKw=palen*pkw;
+      return '<b>Gevraagd: '+fmtNum(_bezGevraagdMwh(lp),1)+' MWh/jaar</b> '+
+        '<span style="color:#5A6577">('+_bezSessiesDag(lp)+' sessies/dag × '+pkw+' kW × '+fmtNum((+lp.duur_min||0)/60,2)+' u, over '+(lp.dagen_per_week||7)+' d/week)</span>'+
+        '<div style="margin-top:5px;color:#5A6577;font-size:11.5px">'+palen+' paal'+(palen>1?'en':'')+' × '+pkw+' kW → max <b>'+maxKw+' kW</b> gelijktijdig. '+
+        'Vermogen komt uit de vrije aansluitruimte + batterij — het toegangsvermogen wordt nooit verhoogd; overvraag = gemist (throttling).</div>';
+    }
+    var _bezRefresh=function(){ info.innerHTML=_bezInfoHtml(); _updateLaadpleinSamenvatting(); };
     var gb=el('div',{style:_LP_GRID+';margin-top:8px'});
     var pc=el('div',{class:'fdsim-row col'});
     pc.appendChild(el('label',{class:'fdsim-label'},'Paaltype'));
     var psel=el('select',{class:'fdsim-select'});
     [{v:'AC22',t:'AC 22 kW'},{v:'DC160',t:'DC 160 kW'}].forEach(function(o){ var op=el('option',{value:o.v},o.t); if((lp.paaltype||'AC22')===o.v)op.selected=true; psel.appendChild(op); });
-    psel.onchange=function(){ lp.paaltype=psel.value; _updateLaadpleinSamenvatting(); _vulLaadpleinen($('fdsim-lp-host')); };
+    psel.onchange=function(){ lp.paaltype=psel.value; _bezRefresh(); };
     pc.appendChild(psel); gb.appendChild(pc);
-    gb.appendChild(_lpNum('Duur/sessie (min)', lp.duur_min, '5', function(x){ lp.duur_min=x||0; _updateLaadpleinSamenvatting(); }));
+    gb.appendChild(_lpNum('Aantal palen (stuks)', lp.aantal_palen, '1', function(x){ lp.aantal_palen=Math.max(1,x||1); _bezRefresh(); }));
+    gb.appendChild(_lpNum('Duur/sessie (min)', lp.duur_min, '5', function(x){ lp.duur_min=x||0; _bezRefresh(); }));
     var dwb=el('div',{class:'fdsim-row col'});
     dwb.appendChild(el('label',{class:'fdsim-label'},'Dagen/week'));
     var dselb=el('select',{class:'fdsim-select'});
     [{v:5,t:'5 (ma-vr)'},{v:6,t:'6 (+za)'},{v:7,t:'7 (+zo)'}].forEach(function(o){ var op=el('option',{value:String(o.v)},o.t); if(o.v===(lp.dagen_per_week||7))op.selected=true; dselb.appendChild(op); });
-    dselb.onchange=function(){ lp.dagen_per_week=parseInt(dselb.value,10); _updateLaadpleinSamenvatting(); };
+    dselb.onchange=function(){ lp.dagen_per_week=parseInt(dselb.value,10); _bezRefresh(); };
     dwb.appendChild(dselb); gb.appendChild(dwb);
     card.appendChild(gb);
-    card.appendChild(el('div',{class:'fdsim-hint',style:'margin:10px 0 4px'},'Sessies per venster (vallen random over de dag):'));
+    card.appendChild(el('div',{class:'fdsim-hint',style:'margin:10px 0 4px'},'Sessies per venster — geldt PER LAADPLEIN (niet per paal). Ze vallen random over de dag:'));
     lp.vensters.slice(0,2).forEach(function(v, vi){
       var gv=el('div',{style:_LP_GRID+';margin-bottom:6px'});
-      gv.appendChild(_lpNum('Venster '+(vi+1)+' — start (u)', v.start, '1', function(x){ v.start=x||0; }));
-      gv.appendChild(_lpNum('eind (u)', v.eind, '1', function(x){ v.eind=x||0; }));
-      gv.appendChild(_lpNum('sessies/dag', v.sessies, '1', function(x){ v.sessies=x||0; _updateLaadpleinSamenvatting(); }));
+      gv.appendChild(_lpNum('Venster '+(vi+1)+' — start (u)', v.start, '1', function(x){ v.start=x||0; _bezRefresh(); }));
+      gv.appendChild(_lpNum('eind (u)', v.eind, '1', function(x){ v.eind=x||0; _bezRefresh(); }));
+      gv.appendChild(_lpNum('sessies/dag (dit plein)', v.sessies, '1', function(x){ v.sessies=x||0; _bezRefresh(); }));
       card.appendChild(gv);
     });
-    var info=el('div',{style:'margin-top:8px;padding:8px 10px;border-radius:6px;font-size:12.5px;background:#05B0500f;border:1px solid #05B05040'});
-    info.innerHTML='<b>Gevraagd: '+fmtNum(_bezGevraagdMwh(lp),1)+' MWh/jaar</b> '+
-      '<span style="color:#5A6577">('+_bezSessiesDag(lp)+' sessies/dag × '+_bezPaalKw(lp)+' kW × '+fmtNum((+lp.duur_min||0)/60,2)+' u)</span>'+
-      '<div style="margin-top:5px;color:#5A6577;font-size:11.5px">Vermogen komt uit de vrije aansluitruimte + batterij — het toegangsvermogen wordt nooit verhoogd. '+
-      'Geleverd vs gemist (throttling) komt uit de simulatie.</div>';
+    info.innerHTML=_bezInfoHtml();
     card.appendChild(info);
     return card;
   }
