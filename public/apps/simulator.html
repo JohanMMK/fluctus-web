@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.64.2  (2026-08-20 Europe/Brussels)
+     v1.64.2 (Johan 20-08): BEZOEKERS — opbrengst-tarief-veld (€/MWh, default 500) + knop
+              "Bereken bezoekers-scenario’s" → tabel met 6 scenario’s (geen batt / batt / batt+plein @
+              50/100/150/200% sessies): energieprijs, km gevraagd/geleverd, opbrengst (geleverd × tarief),
+              winst (opbrengst − factuur + factuur_basis). Via POST /api/bezoekers-scenarios (server v15.81).
      FLUCTUS SIMULATOR  v1.64.1  (2026-08-20 Europe/Brussels)
      v1.64.1 (Johan 20-08): BEZOEKERS-plein — nieuw veld "Aantal palen (stuks)" (begrenst de gelijktijdige
               sessies = fysieke palen; max piek = palen × paalvermogen). Sessies/venster expliciet gelabeld
@@ -1196,7 +1201,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.64.1';
+var SIM_VERSIE = 'v1.64.2';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4208,13 +4213,45 @@ function _laadpleinNieuw(){
     venster_start:8, venster_eind:18, dagen_per_week:5,
     laadpunten:[{type:'AC22',aantal:0},{type:'DC160',aantal:0},{type:'DC300',aantal:0}],
     // v1.14: betalende bezoekers (random sessies, 2 vensters)
-    paaltype:'AC22', duur_min:30, aantal_palen:1,
+    paaltype:'AC22', duur_min:30, aantal_palen:1, opbrengst_eur_mwh:500,
     vensters:[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}],
     bestaand:false };
 }
 function _bezPaalKw(lp){ return (lp.paaltype==='DC160')?160:22; }
 function _bezSessiesDag(lp){ return (lp.vensters||[]).reduce(function(s,v){return s+(+v.sessies||0);},0); }
 function _bezGevraagdMwh(lp){ return _bezSessiesDag(lp)*_bezPaalKw(lp)*((+lp.duur_min||0)/60)*(lp.dagen_per_week||7)*52/1000; }
+// Bezoekers-scenario's: 6 varianten op de server (geen batt / batt / batt+plein @ 50/100/150/200% sessies).
+function berekenBezoekersScenarios(lp, out, btn){
+  if(!STATE.lastSimInput){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Draai eerst <b>Simuleer ▶</b> (of een gewone simulatie) — dan gebruik ik díé installatie (aansluiting + batterij) als basis voor de scenario’s.</div>'; return; }
+  var tarief=+lp.opbrengst_eur_mwh||500, _t=btn.textContent; btn.disabled=true; btn.textContent='Rekenen… (6 scenario’s)';
+  out.innerHTML='<div class="fdsim-hint">De server rekent 6 scenario’s door…</div>';
+  apiPost('/api/bezoekers-scenarios',{ input:STATE.lastSimInput, tarief_eur_mwh:tarief, kwh_km:0.16, percentages:[50,100,150,200] })
+    .then(function(r){ btn.disabled=false; btn.textContent=_t;
+      if(!r||!r.ok||!Array.isArray(r.rows)){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Kon de scenario’s niet berekenen'+((r&&r.error)?': '+r.error:'')+'.</div>'; return; }
+      out.innerHTML=_renderBezTabelHtml(r); })
+    .catch(function(e){ btn.disabled=false; btn.textContent=_t; out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Serverfout: '+((e&&e.message)||'onbekend')+'</div>'; });
+}
+function _renderBezTabelHtml(r){
+  function eur(v){ return (v==null)?'—':('€ '+Math.round(v).toLocaleString('nl-BE')); }
+  function km(v){ return (v==null)?'—':(Math.round(v).toLocaleString('nl-BE')+' km'); }
+  var h='<div class="fdsim-hint" style="margin:6px 0">Opbrengst-tarief € '+Math.round(r.tarief_eur_mwh)+'/MWh · '+r.kwh_km+' kWh/km · <b>winst = opbrengst − factuur(scenario) + factuur(basis)</b>. Aansluiting blijft vast (nooit verzwaard).</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+    '<thead><tr style="text-align:right;border-bottom:2px solid #1F3864">'+
+    '<th style="text-align:left;padding:5px 8px">Scenario</th><th style="padding:5px 8px">Energieprijs</th>'+
+    '<th style="padding:5px 8px">km gevraagd</th><th style="padding:5px 8px">km geleverd</th>'+
+    '<th style="padding:5px 8px">Opbrengst</th><th style="padding:5px 8px">Winst</th></tr></thead><tbody>';
+  (r.rows||[]).forEach(function(row){
+    var win=(row.winst_eur!=null)?('<b style="color:'+(row.winst_eur>=0?'#048443':'#C0392B')+'">'+eur(row.winst_eur)+'</b>'):'—';
+    h+='<tr style="text-align:right;border-bottom:1px solid #E5E9F0">'+
+      '<td style="text-align:left;padding:5px 8px">'+row.label+'</td>'+
+      '<td style="padding:5px 8px">€ '+row.energieprijs_eur_mwh+'/MWh</td>'+
+      '<td style="padding:5px 8px">'+(row.heeftPlein?km(row.km_gevraagd):'—')+'</td>'+
+      '<td style="padding:5px 8px">'+(row.heeftPlein?km(row.km_geleverd):'—')+'</td>'+
+      '<td style="padding:5px 8px">'+(row.heeftPlein?eur(row.opbrengst_eur):'—')+'</td>'+
+      '<td style="padding:5px 8px">'+win+'</td></tr>';
+  });
+  return h+'</tbody></table>';
+}
 function _lpEnergieMwh(lp){
   if(lp.type_plein==='bezoekers') return _bezGevraagdMwh(lp);
   return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000;
@@ -4424,6 +4461,7 @@ function _renderLaadpleinKaart(lp, idx){
     [{v:5,t:'5 (ma-vr)'},{v:6,t:'6 (+za)'},{v:7,t:'7 (+zo)'}].forEach(function(o){ var op=el('option',{value:String(o.v)},o.t); if(o.v===(lp.dagen_per_week||7))op.selected=true; dselb.appendChild(op); });
     dselb.onchange=function(){ lp.dagen_per_week=parseInt(dselb.value,10); _bezRefresh(); };
     dwb.appendChild(dselb); gb.appendChild(dwb);
+    gb.appendChild(_lpNum('Opbrengst-tarief (€/MWh)', lp.opbrengst_eur_mwh, '10', function(x){ lp.opbrengst_eur_mwh=x||0; }));
     card.appendChild(gb);
     card.appendChild(el('div',{class:'fdsim-hint',style:'margin:10px 0 4px'},'Sessies per venster — geldt PER LAADPLEIN (niet per paal). Ze vallen random over de dag:'));
     lp.vensters.slice(0,2).forEach(function(v, vi){
@@ -4435,6 +4473,12 @@ function _renderLaadpleinKaart(lp, idx){
     });
     info.innerHTML=_bezInfoHtml();
     card.appendChild(info);
+    // ── Scenario-tabel (geen batt / batt / batt+plein @ 50/100/150/200% sessies) ──
+    var scWrap=el('div',{style:'margin-top:10px'});
+    var scBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'Bereken bezoekers-scenario’s ▶');
+    var scOut=el('div',{style:'margin-top:8px'});
+    scBtn.onclick=function(){ berekenBezoekersScenarios(lp, scOut, scBtn); };
+    scWrap.appendChild(scBtn); scWrap.appendChild(scOut); card.appendChild(scWrap);
     return card;
   }
 
