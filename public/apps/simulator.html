@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.64.6  (2026-08-20 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.64.7  (2026-08-20 Europe/Brussels)
+     v1.64.7 (Johan 20-08): KM-CONVENTIE BEZOEKERS-PLEIN. De top-KPI "effectief geladen km/jaar" (en km-tekort,
+              quickscan, vergelijk-controle) rekende km = aantal × km_per_jaar — een FANTOOM-getal voor een
+              bezoekers-plein (dat is gedefinieerd door sessies × vermogen × duur = energie). Nieuwe helper
+              _lpKmJaar() leidt de km van een bezoekers-plein af uit de sessie-energie ÷ 0,16 kWh/km — exact
+              dezelfde conventie als de bezoekers-scenariotabel. Nu komt de top-km overeen met de tabel-km
+              (top = geladen km = tabel “km gevraagd” × % geleverd).
      v1.64.6 (Johan 20-08): bezoekers-scenariotabel — kolom "Energieprijs" hernoemd naar "€/MWh all-in"
               (= jaarfactuur ÷ totale afname) + NIEUWE kolom "Laadprijs marg." (= (jaarfactuur − jaarfactuur
               batterij) ÷ geladen MWh, de kost van énkel de laadenergie; marge = tarief − deze). Server v15.84.
@@ -1213,7 +1219,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.64.6';
+var SIM_VERSIE = 'v1.64.7';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4202,7 +4208,15 @@ function _lpCregEurJaar(lp){ return _lpEnergieMwh(lp)*1000*_cregTarief(); }
 // Totale CREG-jaarkost van de vloot (= totale EV-energie × forfait) — de ijklijn voor opstelling 0.
 function _cregKostJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+_lpCregEurJaar(lp);},0); }
 // Totale km/jaar van de vloot (voor €/km).
-function _vlootKmJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*((lp.km_per_jaar!=null?+lp.km_per_jaar:0)||0);},0); }
+// v1.64.7: km/jaar van ÉÉN plein. Een bezoekers-plein heeft GEEN km_per_jaar (het is gedefinieerd door
+//   sessies × vermogen × duur = energie); zijn km-equivalent = gevraagde energie ÷ 0,16 kWh/km — exact dezelfde
+//   conventie als de bezoekers-scenariotabel, zodat de top-KPI "effectief geladen km/jaar" en de tabel-km
+//   overeenkomen. Klassieke pleinen (voertuigtype): aantal × km_per_jaar.
+function _lpKmJaar(lp){
+  if(lp && lp.type_plein==='bezoekers') return (typeof _bezGevraagdMwh==='function' ? _bezGevraagdMwh(lp)*1000/0.16 : 0);
+  return (+lp.aantal||0)*((lp.km_per_jaar!=null?+lp.km_per_jaar:0)||0);
+}
+function _vlootKmJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){ return s+_lpKmJaar(lp); },0); }
 // v1.63.23: totale DIESELKOST/jaar van de vloot = Σ aantal × km/jaar × diesel_eur_km (per voertuigtype uit de Kamino-invoer;
 // terugval €0,116/km = personenwagen uit Laadkosten_Belgie_2026_v2.pdf). Dít is de referentie voor de laadpalen-terugverdien.
 function _vlootDieselJaar(){ return (STATE.laadpleinen||[]).reduce(function(s,lp){return s+(+lp.aantal||0)*(+lp.km_per_jaar||0)*((lp.diesel_eur_km!=null?+lp.diesel_eur_km:0.116));},0); }
@@ -4608,7 +4622,7 @@ function _updateLaadpleinSamenvatting(){
 function _quickscanData(){
   if(!(STATE.laadpleinen && STATE.laadpleinen.length)) return null;
   var evMwh=0, kmTot=0;
-  (STATE.laadpleinen||[]).forEach(function(p){ evMwh+=_lpEnergieMwh(p); kmTot+=(p.aantal||0)*(p.km_per_jaar||0); });
+  (STATE.laadpleinen||[]).forEach(function(p){ evMwh+=_lpEnergieMwh(p); kmTot+=(typeof _lpKmJaar==='function'?_lpKmJaar(p):(p.aantal||0)*(p.km_per_jaar||0)); });
   var bestaandMwh=+STATE.jaarverbruik||0;
   var E=bestaandMwh+evMwh;
   var spanning=STATE.spanning||'LS';
@@ -6355,7 +6369,7 @@ function _kmTekortBlok(lp, cap){
   // per plein: proportioneel op de gevraagde energie (cap.tekort is een vloot-cijfer)
   var rows=[];
   for(var i=0;i<stl.length;i++){
-    var s=stl[i]||{}; var gevraagd_km=(+s.aantal||0)*(+s.km_per_jaar||0);
+    var s=stl[i]||{}; var gevraagd_km=(typeof _lpKmJaar==='function'?_lpKmJaar(s):(+s.aantal||0)*(+s.km_per_jaar||0));
     if(gevraagd_km<=0) continue;
     rows.push({naam:(s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gevraagd_km*(1-frac), tekort:gevraagd_km*frac});
   }
@@ -9013,7 +9027,7 @@ function _renderBasisVsActief(){
     var w=el('div',{style:'margin-bottom:10px;padding:10px 12px;background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;font-size:12.5px;line-height:1.6'});
     w.innerHTML='<b>⚠ Je ontwerp draait op je factuurperiode van '+_dg+' dagen, niet op een vol jaar.</b><br>'+
       'Daardoor lees je hier '+fmtNum((((STATE.resultaat||{}).laadplein||{}).ev_last_mwh)||0,1)+' MWh laadvraag in plaats van '+
-      fmtNum(((STATE.laadpleinen||[]).reduce(function(a,p){return a+(p.aantal||0)*(p.km_per_jaar||0)*(p.kwh_per_km||0);},0))/1000,1)+' MWh per jaar. '+
+      fmtNum(((STATE.laadpleinen||[]).reduce(function(a,p){return a+(typeof _lpEnergieMwh==='function'?_lpEnergieMwh(p):(p.aantal||0)*(p.km_per_jaar||0)*(p.kwh_per_km||0)/1000);},0)),1)+' MWh per jaar. '+
       'Rendement en terugverdientijd zijn hieronder naar jaarbasis gebracht (×'+fmtNum(_annFactor(),2)+'), maar de factuurbedragen zelf zijn periodebedragen.<br>'+
       'Ga terug naar <b>stap 4 · Factuuranalyse</b> en klik <b>"Bewaar facturen en ga verder"</b>. Die knop sluit de factuurfase af en zet de simulatie op 12 rollende maanden — dan klopt alles zonder omrekening.';
     sec.appendChild(w);
@@ -9037,7 +9051,7 @@ function _renderBasisVsActief(){
   var evA=(A.laadplein&&+A.laadplein.ev_last_mwh)||0;
   var kmTot=0, evVraagMwh=0;
   (STATE.laadpleinen||[]).forEach(function(p){
-    kmTot += (p.aantal||0)*(p.km_per_jaar||0);
+    kmTot += (typeof _lpKmJaar==='function'?_lpKmJaar(p):(p.aantal||0)*(p.km_per_jaar||0));
     evVraagMwh += _lpEnergieMwh(p);
   });
   var gebB=Math.max(0,((b.resultaat.kpi&&+b.resultaat.kpi.totaal_afname_mwh)||0)-evB);
