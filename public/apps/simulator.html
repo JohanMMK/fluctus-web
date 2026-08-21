@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.64.7  (2026-08-20 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.65.0  (2026-08-20 Europe/Brussels)
+     v1.65.0 (Johan 20-08): KABELTRACÉ-KOPPELING + FINANCIEEL RENDEMENT bezoekers-scenario's. De tabel krijgt
+              3 kolommen: Investering (volledige installatie = batterij + palen + kabeltracé), Terugverdientijd
+              (investering ÷ winst) en Rendement/jr (winst ÷ investering). Palen uit paaltype × aantal_palen
+              (AC22 €2.500 / DC160 €40.000), batterij €350/kWh. Kabeltracé komt uit _kabeltrace(): EXACT zodra
+              de kabelplanner terugkwam (STATE.kabeltraceOverride), anders een schatting — met een nieuwe knop
+              "🗺 Intekenen op kaart" (bezoekers-aware seed _kblIntekenenBez: paaltype × aantal_palen → laadpunten).
+              De tabel wordt bewaard (STATE._bezLaatste) en herrekent de capex vanzelf zodra de exacte prijs
+              binnenkomt. capex is gelijk voor 50–200% (palen fysiek); enkel de winst schaalt.
      v1.64.7 (Johan 20-08): KM-CONVENTIE BEZOEKERS-PLEIN. De top-KPI "effectief geladen km/jaar" (en km-tekort,
               quickscan, vergelijk-controle) rekende km = aantal × km_per_jaar — een FANTOOM-getal voor een
               bezoekers-plein (dat is gedefinieerd door sessies × vermogen × duur = energie). Nieuwe helper
@@ -1219,7 +1227,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.64.7';
+var SIM_VERSIE = 'v1.65.0';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -2293,7 +2301,7 @@ function _resetOntwerpState(){
   STATE.groeistap1 = null; STATE.groeistap1Loading = false; STATE.groeistap1Fout = null;
   STATE.opstellingen = null; STATE.resultaat = null; STATE.resultaatVarianten = null;
   STATE.kpiSturing = null; STATE.capaciteit = null; STATE.vergelijkingOpstellingen = null;
-  STATE.lastSimInput = null;
+  STATE.lastSimInput = null; STATE._bezLaatste = null;
   STATE.factuurSim = null; STATE.factuurSimJaar = null; STATE._factuurSimSig = null;
   // De kabelplanner-handoff in localStorage óók wissen — anders pikt een nieuw project een oud
   // resultaat op (bv. de kabelplanner van het vorige project stond nog open).
@@ -4254,28 +4262,72 @@ function berekenBezoekersScenarios(tarief, out, btn){
   apiPost('/api/bezoekers-scenarios',{ input:STATE.lastSimInput, tarief_eur_mwh:tarief, kwh_km:0.16, percentages:[50,100,150,200] })
     .then(function(r){ btn.disabled=false; btn.textContent=_t;
       if(!r||!r.ok||!Array.isArray(r.rows)){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Kon de scenario’s niet berekenen'+((r&&r.error)?': '+r.error:'')+'.</div>'; return; }
+      STATE._bezLaatste=r;   // v1.65.0: bewaar → tabel overleeft re-render + herrekent capex zodra de kabeltracé terugkomt
       out.innerHTML=_renderBezTabelHtml(r); })
     .catch(function(e){ btn.disabled=false; btn.textContent=_t; out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Serverfout: '+((e&&e.message)||'onbekend')+'</div>'; });
+}
+// v1.65.0: CAPEX-bouwstenen voor de bezoekers-installatie ("volledige installatie": batterij + palen +
+//   kabeltracé). Palen uit de bezoekers-pleinen (paaltype × aantal_palen), batterij uit de gekozen BESS
+//   (€350/kWh, zelfde basis als het financieel rapport), kabeltracé uit _kabeltrace() → EXACT zodra de
+//   kabelplanner terugkwam (STATE.kabeltraceOverride), anders een schatting. aantal_palen (niet de sessie-%)
+//   bepaalt de palen-capex → capex is gelijk voor 50/100/150/200%; enkel de winst schaalt.
+function _bezCapex(){
+  var bt=_frBatterij(); var battKwh=+bt.kwh||0;
+  var battCapex=battKwh*INV_BATT_EUR_PER_KWH;
+  var palen=0, lbl=[];
+  (STATE.laadpleinen||[]).forEach(function(p){
+    if(String(p.type_plein||'').toLowerCase()!=='bezoekers') return;
+    var n=Math.max(1,(+p.aantal_palen||1));
+    var isDc=(p.paaltype==='DC160');
+    palen+=n*(isDc?INV_LAADPAAL_EUR.dc160:INV_LAADPAAL_EUR.ac);
+    lbl.push(n+'× '+(isDc?'DC 160':'AC 22'));
+  });
+  var exact=(STATE.kabeltraceOverride!=null && isFinite(+STATE.kabeltraceOverride));
+  return { battKwh:battKwh, battCapex:battCapex, palen:palen, palenLabel:lbl.join(' + '),
+           battTrace:_kabelBattTrace(),
+           kabelPlein:_kabeltrace(battKwh>0),   // override (exact, incl. palen+batt) of schatting
+           exact:exact };
 }
 function _renderBezTabelHtml(r){
   function eur(v){ return (v==null)?'—':('€ '+Math.round(v).toLocaleString('nl-BE')); }
   function km(v){ return (v==null)?'—':(Math.round(v).toLocaleString('nl-BE')+' km'); }
   function pct(v){ return (v==null)?'—':(fmtNum(v,1)+' %'); }
   function eurMwh(v){ return (v==null)?'—':('€ '+Math.round(v)+'/MWh'); }
+  function jr(v){ return (v==null)?'—':(fmtNum(v,1)+' j'); }
+  var cx=_bezCapex();
+  // capex per rij (volledige installatie t.o.v. "geen batterij"): batt-only = batterij + batt-tracé;
+  //   batt+plein = batterij + palen + kabeltracé (exact of schatting). geen_batt = referentie (0).
+  function rowCapex(row){
+    if(row.is_basis) return 0;
+    if(!row.heeftPlein) return cx.battCapex + cx.battTrace;
+    return cx.battCapex + cx.palen + cx.kabelPlein;
+  }
+  var kblLine = cx.exact
+    ? '<b style="color:#048443">Kabeltracé EXACT: '+eur(cx.kabelPlein)+'</b> (uit de kabelplanner).'
+    : '<b style="color:#9E480E">Kabeltracé: schatting '+eur(cx.kabelPlein)+'</b> — teken in op de kaart voor de exacte prijs (knop hierboven).';
   var h='<div class="fdsim-hint" style="margin:6px 0">Opbrengst-tarief € '+Math.round(r.tarief_eur_mwh)+'/MWh · '+r.kwh_km+' kWh/km · <b>winst = opbrengst − jaarfactuur(scenario) + jaarfactuur(basis)</b>. '+
     'De batterij-rij (zonder sessies) toont zo het verbruiksvoordeel (piek + spot-arbitrage). Aansluiting blijft vast (nooit verzwaard). '+
     'Alle rijen draaien de sturing <b>excl. onbalans</b> — zelfde dispatch als de tegel “factuur sturing zonder onbalans”; de 100%-rij komt dus overeen met de hoofdsim-factuur.<br>'+
-    '<b>€/MWh all-in</b> = jaarfactuur ÷ tot. afname (gebouw + laden, incl. net + heffingen). <b>Laadprijs marg.</b> = (jaarfactuur − jaarfactuur batterij) ÷ geladen MWh = wat énkel de laadenergie kost; marge = tarief − laadprijs marg.</div>'+
-    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+    '<b>€/MWh all-in</b> = jaarfactuur ÷ tot. afname (gebouw + laden, incl. net + heffingen). <b>Laadprijs marg.</b> = (jaarfactuur − jaarfactuur batterij) ÷ geladen MWh = wat énkel de laadenergie kost; marge = tarief − laadprijs marg.<br>'+
+    '<b>Investering</b> = volledige installatie (batterij '+eur(cx.battCapex)+(cx.palen>0?' + palen '+eur(cx.palen)+(cx.palenLabel?' ('+cx.palenLabel+')':''):'')+' + kabeltracé). <b>Rendement</b> = winst ÷ investering · <b>Terugverdientijd</b> = investering ÷ winst. '+kblLine+'</div>'+
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:920px">'+
     '<thead><tr style="text-align:right;border-bottom:2px solid #1F3864">'+
     '<th style="text-align:left;padding:5px 8px">Scenario</th><th style="padding:5px 8px">€/MWh all-in</th>'+
     '<th style="padding:5px 8px">km gevraagd</th><th style="padding:5px 8px">% geleverd</th>'+
     '<th style="padding:5px 8px">Laadprijs marg.</th><th style="padding:5px 8px">Opbrengst</th>'+
     '<th style="padding:5px 8px">Jaarfactuur</th>'+
-    '<th style="padding:5px 8px">Winst</th></tr></thead><tbody>';
+    '<th style="padding:5px 8px">Winst</th>'+
+    '<th style="padding:5px 8px">Investering</th><th style="padding:5px 8px">Terugverdientijd</th>'+
+    '<th style="padding:5px 8px">Rendement/jr</th></tr></thead><tbody>';
   (r.rows||[]).forEach(function(row){
     var win = row.is_basis ? '<span style="color:#5A6577">referentie</span>'
       : ('<b style="color:'+(row.winst_eur>=0?'#048443':'#C0392B')+'">'+eur(row.winst_eur)+'</b>');
+    var capex=rowCapex(row);
+    var tvt=(capex>0 && row.winst_eur>0)?(capex/row.winst_eur):null;
+    var rend=(capex>0 && row.winst_eur>0)?(row.winst_eur/capex*100):null;
+    var invCell = row.is_basis ? '<span style="color:#5A6577">referentie</span>' : eur(capex);
+    var tvtCell = row.is_basis ? '—' : ((tvt==null)?'<span style="color:#C0392B">geen terugverdien</span>':jr(tvt));
+    var rendCell = row.is_basis ? '—' : ((rend==null)?'—':'<b style="color:'+(rend>=8?'#048443':'#1F3864')+'">'+pct(rend)+'</b>');
     h+='<tr style="text-align:right;border-bottom:1px solid #E5E9F0">'+
       '<td style="text-align:left;padding:5px 8px">'+row.label+'</td>'+
       '<td style="padding:5px 8px">'+eurMwh(row.energieprijs_eur_mwh)+'</td>'+
@@ -4284,9 +4336,12 @@ function _renderBezTabelHtml(r){
       '<td style="padding:5px 8px">'+(row.heeftPlein?eurMwh(row.laadprijs_marg_eur_mwh):'—')+'</td>'+
       '<td style="padding:5px 8px">'+(row.heeftPlein?eur(row.opbrengst_eur):'—')+'</td>'+
       '<td style="padding:5px 8px">'+eur(row.jaarfactuur_eur)+'</td>'+
-      '<td style="padding:5px 8px">'+win+'</td></tr>';
+      '<td style="padding:5px 8px">'+win+'</td>'+
+      '<td style="padding:5px 8px">'+invCell+'</td>'+
+      '<td style="padding:5px 8px">'+tvtCell+'</td>'+
+      '<td style="padding:5px 8px">'+rendCell+'</td></tr>';
   });
-  return h+'</tbody></table>';
+  return h+'</tbody></table></div>';
 }
 function _lpEnergieMwh(lp){
   if(lp.type_plein==='bezoekers') return _bezGevraagdMwh(lp);
@@ -6445,10 +6500,24 @@ function _renderLaadpleinResultaat(lp){
       var _inP=(STATE.laadpleinen||[]).filter(function(x){return String(x.type_plein||'').toLowerCase()==='bezoekers';})[0];
       var _tar=(_inP&&+_inP.opbrengst_eur_mwh)||500;
       var scWrap=el('div',{style:'margin:2px 0 8px'});
+      var scRow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center'});
       var scBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'Bereken bezoekers-scenario’s ▶');
       var scOut=el('div',{style:'margin-top:8px'});
       scBtn.onclick=function(){ berekenBezoekersScenarios(_tar, scOut, scBtn); };
-      scWrap.appendChild(scBtn); scWrap.appendChild(scOut); sec.appendChild(scWrap);
+      scRow.appendChild(scBtn);
+      // v1.65.0: kabeltracé intekenen (exacte investering & rendement). Bij terugkeer herrekent de tabel vanzelf.
+      var kblBtn=el('button',{class:'fdsim-btn',style:'background:#fff;color:#1F3864;border:1px solid #1F3864'},
+        (STATE.kabeltraceOverride!=null?'🗺 Kabeltracé opnieuw intekenen':'🗺 Intekenen op kaart (exacte kabelprijs)'));
+      kblBtn.onclick=_kblIntekenenBez;
+      scRow.appendChild(kblBtn);
+      if(STATE.kabeltraceOverride!=null){
+        var _sch=el('button',{class:'fdsim-btn',style:'background:#fff;color:#5A6577;border:1px solid #B7C0CC;font-size:11px;padding:4px 10px'},'schatting terug');
+        _sch.onclick=function(){ STATE.kabeltraceOverride=null; if(STATE._bezLaatste) scOut.innerHTML=_renderBezTabelHtml(STATE._bezLaatste); };
+        scRow.appendChild(_sch);
+      }
+      scWrap.appendChild(scRow); scWrap.appendChild(scOut); sec.appendChild(scWrap);
+      // v1.65.0: bewaarde tabel opnieuw tonen (overleeft renderStage + kabeltracé-terugkeer)
+      if(STATE._bezLaatste) scOut.innerHTML=_renderBezTabelHtml(STATE._bezLaatste);
     })();
     // Alleen bezoekers → het km/CREG-verhaal (voor wagenparken) overslaan.
     if((lp.pleinen||[]).length && _bezP.length===(lp.pleinen||[]).length) return sec;
@@ -7106,6 +7175,31 @@ function _kblIntekenen(){
   // herstelt en de klant verder werkt op zijn laatste versie (i.p.v. opnieuw te beginnen).
   var _prev=(STATE.kabeltraceResult&&STATE.kabeltraceResult.state)||null;
   if(_prev) seed.restore=_prev;
+  try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
+  STATE._kblSeedTs=seed.ts;
+  try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){}
+}
+// v1.65.0: kabelplanner-seed vanuit de Simuleer/bezoekers-flow (die heeft GEEN _kpiEngine/opstellingen).
+//   Mapt de bezoekers-palen (paaltype × aantal_palen) én klassieke laadpunten naar de planner, seedt de
+//   gekozen batterij + PV. Bij terugkeer zet _kblCheckResult STATE.kabeltraceOverride → de bezoekers-tabel
+//   herrekent de investering met de EXACTE kabelprijs.
+function _kblIntekenenBez(){
+  var bc=STATE.baseCase||{};
+  var adres=bc.leveringsadres||bc.klantAdres||(((STATE.postcode||'')+' '+(STATE.gemeente||'')).trim());
+  var lp={};
+  (STATE.laadpleinen||[]).forEach(function(p){
+    if(String(p.type_plein||'').toLowerCase()==='bezoekers'){
+      var t=(p.paaltype==='DC160')?'DC160':'AC22', n=Math.max(1,(+p.aantal_palen||1));
+      lp[t]=(lp[t]||0)+n;
+    } else {
+      (p.laadpunten||[]).forEach(function(x){ var a=+x.aantal||0; if(a>0) lp[x.type]=(lp[x.type]||0)+a; });
+    }
+  });
+  var laadpunten=Object.keys(lp).map(function(t){ return {type:t, aantal:lp[t]}; });
+  var bt=_frBatterij(), mod=Math.max(0,Math.round((+bt.kwh||0)/BATT_UNIT_KWH));
+  var seed={ ts:Date.now(), opstelling:'Bezoekersplein', adres:adres, laadpunten:laadpunten,
+             batterij:{kwh:BATT_UNIT_KWH, aantal:mod}, pv:{kwp:(+STATE.pvKwp||0)} };
+  var _prev=(STATE.kabeltraceResult&&STATE.kabeltraceResult.state)||null; if(_prev) seed.restore=_prev;
   try{ localStorage.setItem(KBL_SEED_KEY, JSON.stringify(seed)); }catch(e){}
   STATE._kblSeedTs=seed.ts;
   try{ window.open(KABELPLANNER_URL,'fluctus_kabelplanner'); }catch(e){}
@@ -10895,6 +10989,7 @@ function runSimulatie(){
   STATE.simLog = []; STATE.simLogStart = Date.now();
   // v1.26.0: bewaar de sim-input zodat het groeipad (blok 10) dezelfde payload kan hergebruiken.
   try { STATE.lastSimInput = JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput = null; }
+  STATE._bezLaatste=null;
   _sim3Async(input).then(function(r){
     // v1.20.8: twee response-modi.
     //  - 'enkel': r.varianten {geen,sturing,onbalans} + r.kpi_sturing (detailfactuur = sturing).
@@ -11097,6 +11192,7 @@ function simuleerVasteInstallatie(){
   input.geen_aansluiting_verhoging=true;
   STATE.simLog=[]; STATE.simLogStart=Date.now();
   try { STATE.lastSimInput=JSON.parse(JSON.stringify(input)); } catch(e){ STATE.lastSimInput=null; }
+  STATE._bezLaatste=null;
   _sim3Async(input).then(function(r){
     var varianten=(r&&r.varianten)||{};
     var sim=varianten.sturing||r.result||r.resultaat||r;
