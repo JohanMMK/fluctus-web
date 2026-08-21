@@ -1,4 +1,8 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.9  (Johan 21-08): (1) ADRES-MODAL bij openen zonder seed-adres → adres vragen,
+           Esri-luchtfoto tonen, bevestigen (zit ín de planner → geldt voor élk instappunt). (2) "Oriënteer
+           luchtfoto": teken één lijn langs een gebouwrand → kaart draait (leaflet-rotate, map.setBearing)
+           zodat die lijn verticaal staat, zodat horizontale/verticale tracés parallel lopen met het gebouw.
      FLUCTUS KABELPLANNER  v1.8  (simulator-koppeling)
      Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
      Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
@@ -91,6 +95,16 @@
   .fk-tlabel{ background:var(--navy); color:#fff; border:0; border-radius:5px; font-size:10.5px; font-weight:600;
               padding:1px 6px; box-shadow:0 1px 3px rgba(0,0,0,.35); white-space:nowrap; }
   .fk-tlabel:before{ display:none !important; }
+  /* v1.9: adres-modal */
+  .fk-modal-ov{position:fixed;inset:0;background:rgba(20,26,38,.62);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px}
+  .fk-modal{background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.35);width:min(680px,96vw);max-height:94vh;overflow:auto;padding:20px 22px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif}
+  .fk-modal-h{font-size:19px;font-weight:800;color:#1F3864}
+  .fk-modal-sub{font-size:12.5px;color:#5A6577;margin:4px 0 12px;line-height:1.45}
+  .fk-m-in{width:100%;padding:10px 12px;border:1px solid #cfd6e0;border-radius:8px;font-size:14px;font-family:inherit}
+  .fk-m-tool{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .fk-m-foto{margin:8px 0 4px;min-height:150px;border:1px solid #E3E8EF;border-radius:8px;background:#F5F7FA;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .fk-m-ph{color:#8A93A0;font-size:12.5px;padding:24px;text-align:center}
+  .fk-m-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
 </style>
 
 <div class="fk-wrap">
@@ -110,6 +124,11 @@
 
     <div class="fk-h">Beeld</div>
     <button class="fk-btn o" id="fk-freeze">&#128274; Bevries beeld</button>
+    <div class="fk-tool" style="margin-top:6px">
+      <button class="fk-btn sm ghost" id="fk-orient">&#129517; Ori&#235;nteer luchtfoto</button>
+      <button class="fk-btn sm ghost" id="fk-orient0">&#8634; Recht</button>
+    </div>
+    <div class="fk-note">Teken &#233;&#233;n lijn langs een gebouwrand &#8594; de luchtfoto draait zodat die lijn verticaal staat. Zo lopen je horizontale/verticale trac&#233;s parallel met het gebouw.</div>
 
     <div class="fk-h">Elementen plaatsen</div>
     <div class="fk-palette" id="fk-palette"></div>
@@ -195,6 +214,8 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- v1.9: kaartrotatie (Oriënteer luchtfoto). Moet ná leaflet.js en vóór het aanmaken van de map. -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
 <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -242,7 +263,9 @@ const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZ
 const geopunt=L.tileLayer("https://geo.api.vlaanderen.be/OMWRGBMRVL/wmts?layer=omwrgbmrvl&style=default&tilematrixset=GoogleMapsVL&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng&TileMatrix={z}&TileCol={x}&TileRow={y}",{maxZoom:21,crossOrigin:true,attribution:"Orthofoto © Digitaal Vlaanderen"});
 // v1.8 (Johan 04-08): preferCanvas → vectoren (tracés/zones) op een canvas-renderer i.p.v. SVG. Dat lost de
 // html2canvas-offset op waarbij het tracé in de teruggestuurde luchtfoto verschoven stond t.o.v. het satellietbeeld.
-map=L.map("fk-map",{center:[50.45,4.61],zoom:13,layers:[esri],preferCanvas:true});
+// v1.9: rotate:true activeert leaflet-rotate (map.setBearing/getBearing). rotateControl uit (eigen knop).
+map=L.map("fk-map",{center:[50.45,4.61],zoom:13,layers:[esri],preferCanvas:true,
+  rotate:true, rotateControl:false, bearing:0, touchRotate:false, shiftKeyRotate:false});
 L.control.layers({"Satelliet (Esri)":esri,"Orthofoto Vlaanderen":geopunt,"Wegenkaart (OSM)":osm},{},{position:"topright"}).addTo(map);
 map.pm.setGlobalOptions({snappable:true,templineStyle:{color:NAVY},hintlineStyle:{color:NAVY,dashArray:"4,4"}});
 
@@ -293,8 +316,36 @@ function _bindZoneEdit(layer){
   var _t=null;
   layer.on("pm:markerdrag", function(){ if(_t) return; _t=setTimeout(function(){ _t=null; try{_liveZoneKwp();}catch(e){} }, 120); });
 }
+// v1.9: ORIËNTEER LUCHTFOTO — teken één lijn langs een gebouwrand; de kaart (luchtfoto + tracés + zones)
+//   draait zodat die lijn verticaal komt te staan. Gebruikt leaflet-rotate (map.setBearing). ROT_SIGN=+1;
+//   staat de foto na oriënteren 90° verkeerd of gespiegeld, zet ROT_SIGN op -1 (één teken).
+var ROT_SIGN=1;
+window._fkOrient=false;
+function _canRotate(){ return typeof map.setBearing==='function'; }
+document.getElementById("fk-orient").onclick=function(){
+  if(!_canRotate()){ toast('Rotatie niet beschikbaar (plugin niet geladen)'); return; }
+  clearPlacing(); window._fkOrient=true; map.pm.enableDraw("Line",{});
+  toast('Teken één lijn langs een gebouwrand (klik 2 punten, dubbelklik om te eindigen)');
+};
+document.getElementById("fk-orient0").onclick=function(){ if(_canRotate()){ map.setBearing(0); toast('Luchtfoto recht gezet'); } };
+function _orienteerOpLijn(layer){
+  try{
+    var ll=layer.getLatLngs(); if(ll.length<2){ map.removeLayer(layer); window._fkOrient=false; return; }
+    var A=ll[0], B=ll[ll.length-1];
+    var pa=map.latLngToContainerPoint(A), pb=map.latLngToContainerPoint(B);
+    var angDeg=Math.atan2(pb.y-pa.y, pb.x-pa.x)*180/Math.PI;      // schermhoek (0=rechts, 90=onder)
+    var target=(Math.abs(angDeg-(-90))<=Math.abs(angDeg-90))?-90:90; // dichtstbijzijnde verticaal
+    var cur=(typeof map.getBearing==='function')?map.getBearing():0;
+    map.setBearing(cur + ROT_SIGN*(target-angDeg));
+    toast('Luchtfoto georiënteerd — teken nu je tracés horizontaal/verticaal');
+  }catch(err){ toast('Oriënteren mislukt'); }
+  try{ map.removeLayer(layer); }catch(e){}
+  window._fkOrient=false;
+}
 map.on("pm:create",e=>{
-  const layer=e.layer, shape=e.shape; snapshot();
+  const layer=e.layer, shape=e.shape;
+  if(window._fkOrient && shape==="Line"){ _orienteerOpLijn(layer); return; }  // v1.9: oriëntatie-lijn, geen tracé
+  snapshot();
   if(shape==="Line"){ const tr={tid:"t"+Date.now(),layer,pw:50,auto:false};
     layer.setStyle({color:ORANGE,weight:4}); layer.on("pm:edit",recalc); layer.on("contextmenu",()=>removeTrace(tr)); traces.push(tr);
   } else if(shape==="Polygon" && zoneMode==="SUB"){ const s={sid:"s"+Date.now(),layer,ground:"klinkers"};
@@ -710,10 +761,48 @@ function _fkVerstuur(payload, nComp, nTrace){
     } else { capture(); }
   }catch(e){ capture(); }
 }
+// v1.9: ADRES-MODAL — bij openen zonder (seed-)adres eerst het exacte adres vragen, de luchtfoto tonen en
+//   laten bevestigen. Zit ín de kabelplanner → élk instappunt (simulator, Kamino, rapport, of rechtstreeks)
+//   krijgt deze stap automatisch wanneer er geen adres meekomt. onConfirm(geo|null) loopt door na sluiten.
+function _fkAdresModal(onConfirm){
+  var geo=null, done=false;
+  var ov=document.createElement('div'); ov.className='fk-modal-ov';
+  ov.innerHTML='<div class="fk-modal">'+
+    '<div class="fk-modal-h">Locatie van het project</div>'+
+    '<div class="fk-modal-sub">Geef het exacte adres van de site. We tonen de luchtfoto zodat u kunt bevestigen dat het de juiste locatie is, vóór u het kabeltracé intekent.</div>'+
+    '<input id="fk-m-addr" class="fk-m-in" placeholder="Straat en nummer, gemeente"/>'+
+    '<div class="fk-m-tool"><button class="fk-btn sm" id="fk-m-show">Toon luchtfoto</button><span id="fk-m-msg" class="fk-modal-sub" style="margin:0"></span></div>'+
+    '<div id="fk-m-foto" class="fk-m-foto"><div class="fk-m-ph">Nog geen luchtfoto — geef een adres en klik &laquo;Toon luchtfoto&raquo;.</div></div>'+
+    '<div class="fk-m-actions"><button class="fk-btn ghost sm" id="fk-m-skip">Overslaan</button><button class="fk-btn g" id="fk-m-ok" disabled>Bevestig adres</button></div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var inp=ov.querySelector('#fk-m-addr'), fotoBox=ov.querySelector('#fk-m-foto'), okBtn=ov.querySelector('#fk-m-ok'), msg=ov.querySelector('#fk-m-msg');
+  inp.value=(($('fk-addr')&&$('fk-addr').value)||'').trim();
+  function toon(){
+    var q=inp.value.trim(); if(!q){ msg.textContent='Geef eerst een adres in.'; return; }
+    msg.textContent='Zoeken…'; okBtn.disabled=true;
+    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
+      .then(function(r){return r.json();}).then(function(j){
+        if(!j||!j[0]){ msg.textContent='Adres niet gevonden — verfijn het.'; fotoBox.innerHTML='<div class="fk-m-ph">Adres niet gevonden.</div>'; return; }
+        geo={lat:+j[0].lat, lon:+j[0].lon, label:j[0].display_name||q};
+        var d=0.0016, bbox=(geo.lon-d)+','+(geo.lat-d)+','+(geo.lon+d)+','+(geo.lat+d);
+        var url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox="+bbox+"&bboxSR=4326&imageSR=4326&size=620,380&format=jpg&transparent=false&f=image";
+        fotoBox.innerHTML='<img src="'+url+'" alt="luchtfoto" style="width:100%;display:block" onerror="this.parentNode.innerHTML=\'<div class=&quot;fk-m-ph&quot;>Luchtfoto kon niet laden — u kunt toch bevestigen.</div>\'">';
+        msg.textContent=geo.label; okBtn.disabled=false;
+      }).catch(function(){ msg.textContent='Zoeken mislukt (internetverbinding?).'; });
+  }
+  function sluit(g){ if(done) return; done=true; try{ document.body.removeChild(ov); }catch(e){} if(typeof onConfirm==='function') onConfirm(g); }
+  ov.querySelector('#fk-m-show').onclick=toon;
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter') toon(); });
+  okBtn.onclick=function(){ if(geo){ if($('fk-addr'))$('fk-addr').value=inp.value.trim(); try{ map.setView([geo.lat,geo.lon],19); }catch(e){} } sluit(geo); };
+  ov.querySelector('#fk-m-skip').onclick=function(){ sluit(null); };
+  if(inp.value) toon();
+  setTimeout(function(){ try{ inp.focus(); }catch(e){} },60);
+}
 (function(){
-  var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ return; }
-  if(!raw) return;
-  var seed; try{ seed=JSON.parse(raw); }catch(e){ return; }
+  var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ _fkAdresModal(null); return; }
+  if(!raw){ _fkAdresModal(null); return; }
+  var seed; try{ seed=JSON.parse(raw); }catch(e){ _fkAdresModal(null); return; }
   try{ localStorage.removeItem(KBL_SEED_KEY); }catch(e){}
   if(!seed) return;
   var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
@@ -744,7 +833,7 @@ function _fkVerstuur(payload, nComp, nTrace){
   if(q){ fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
       .then(function(r){return r.json();}).then(function(j){ if(j&&j[0]) map.setView([+j[0].lat,+j[0].lon],19); setTimeout(plaats,350); })
       .catch(function(){ plaats(); }); }
-  else plaats();
+  else { _fkAdresModal(function(){ setTimeout(plaats,350); }); }   // v1.9: geen adres in de seed → eerst adres-modal, dán plaatsen op de bevestigde locatie
 })();
 
 recalc();
