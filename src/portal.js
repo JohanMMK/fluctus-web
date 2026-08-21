@@ -1,4 +1,9 @@
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// 21-08: Nieuwe tegel "Betalend laadplein" (id 'betaalplein') na Simulator → opent
+//        /apps/simulator.html?flow=betaalplein (gefocuste flow: enkel betaalplein-rapport + kabeltracé).
+//        Nieuw vlag gatedBy:'simulator' → de tegel volgt exact de toegang van de Simulator (managers altijd,
+//        sellers zodra Simulator-toegang), zonder aparte app_id/proxy-grant. echte-filter sluit gatedBy-tegels
+//        uit van de app-access/check; toegankelijkeApps() honoreert gatedBy.
 // 18-08: Thuisladen-tegel heeft rechtsboven een info-i die de productvideo (JACOPS/E+Drive) in een
 //        modal opent en start. Video-URL via jsDelivr uit repo JohanMMK/jacops-presentatie@main.
 //        Additief: ensureVideoUI()/openVideoModal()/closeVideoModal() + 'video'-veld in de catalog.
