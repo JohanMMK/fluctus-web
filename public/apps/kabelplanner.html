@@ -1,8 +1,11 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.10 (Johan 21-08): LOCATIE-FLOW herwerkt. Nu ALTIJD bij openen: adres vragen
+           (prefilled met wat we weten — postcode/gemeente is geen exacte locatie), luchtfoto op de kaart tonen,
+           gebruiker zoomt in en klikt een PIN op het bedoelde gebouw; de assets uit de simulatie komen bij die
+           pin. Vervangt de v1.9-modal die niet triggerde zodra postcode/gemeente al gekend was.
      FLUCTUS KABELPLANNER  v1.9  (Johan 21-08): (1) ADRES-MODAL bij openen zonder seed-adres → adres vragen,
-           Esri-luchtfoto tonen, bevestigen (zit ín de planner → geldt voor élk instappunt). (2) "Oriënteer
-           luchtfoto": teken één lijn langs een gebouwrand → kaart draait (leaflet-rotate, map.setBearing)
-           zodat die lijn verticaal staat, zodat horizontale/verticale tracés parallel lopen met het gebouw.
+           Esri-luchtfoto tonen, bevestigen. (2) "Oriënteer luchtfoto": teken één lijn langs een gebouwrand →
+           kaart draait (leaflet-rotate, map.setBearing) zodat die lijn verticaal staat.
      FLUCTUS KABELPLANNER  v1.8  (simulator-koppeling)
      Odoo HTML-snippet  -  Leaflet + Geoman + Turf + Supabase
      Nieuw: auto-tracering naar ontkoppelbord (Manhattan-lengte),
@@ -105,6 +108,10 @@
   .fk-m-foto{margin:8px 0 4px;min-height:150px;border:1px solid #E3E8EF;border-radius:8px;background:#F5F7FA;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .fk-m-ph{color:#8A93A0;font-size:12.5px;padding:24px;text-align:center}
   .fk-m-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+  /* v1.10: pin-plaatsingsbalk over de kaart */
+  .fk-pinbar{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:9998;display:flex;align-items:center;gap:12px;
+    background:#1F3864;color:#fff;padding:9px 14px;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.3);font-size:12.5px;max-width:94vw}
+  .fk-pinbar b{color:#80C539}
 </style>
 
 <div class="fk-wrap">
@@ -761,48 +768,65 @@ function _fkVerstuur(payload, nComp, nTrace){
     } else { capture(); }
   }catch(e){ capture(); }
 }
-// v1.9: ADRES-MODAL — bij openen zonder (seed-)adres eerst het exacte adres vragen, de luchtfoto tonen en
-//   laten bevestigen. Zit ín de kabelplanner → élk instappunt (simulator, Kamino, rapport, of rechtstreeks)
-//   krijgt deze stap automatisch wanneer er geen adres meekomt. onConfirm(geo|null) loopt door na sluiten.
-function _fkAdresModal(onConfirm){
-  var geo=null, done=false;
+// v1.10: LOCATIE-FLOW — ALTIJD bij openen: vraag het adres (prefilled met wat we weten: postcode/gemeente),
+//   ga naar de luchtfoto op de kaart, laat de gebruiker in-/uitzoomen en een PIN op het bedoelde gebouw
+//   klikken, en plaats de assets bij die pin. Postcode+gemeente is geen exacte locatie → daarom altijd de pin.
+//   Zit ín de kabelplanner → élk instappunt krijgt deze stap. onPlaced(latlng|null) loopt door na de pin.
+function _pinMode(onPlaced){
+  var pin=null, done=false;
+  var bar=document.createElement('div'); bar.className='fk-pinbar';
+  bar.innerHTML='<span>📍 Zoom in op de luchtfoto en <b>klik op het bedoelde gebouw</b> om de pin te plaatsen. Sleep de pin om te verfijnen.</span>'+
+    '<button class="fk-btn ghost sm" id="fk-pin-cancel">Overslaan</button>'+
+    '<button class="fk-btn g sm" id="fk-pin-ok" disabled>Bevestig locatie</button>';
+  document.body.appendChild(bar);
+  var okB=bar.querySelector('#fk-pin-ok');
+  function onClick(e){
+    if(map.pm && (map.pm.globalDrawModeEnabled&&map.pm.globalDrawModeEnabled())) return;
+    if(placing) return;                              // niet tijdens element-plaatsen
+    if(!pin){ var _ic=L.divIcon({className:'fk-loc-pin',html:'<div style="font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))">📍</div>',iconSize:[26,26],iconAnchor:[13,24]});
+      pin=L.marker(e.latlng,{draggable:true,zIndexOffset:1000,icon:_ic}).addTo(map); pin.bindTooltip('Projectlocatie',{direction:'top',offset:[0,-22]}); okB.disabled=false; }
+    else pin.setLatLng(e.latlng);
+  }
+  map.on('click', onClick);
+  function eind(latlng){ if(done) return; done=true; map.off('click', onClick);
+    if(pin){ try{ map.removeLayer(pin); }catch(e){} }
+    try{ document.body.removeChild(bar); }catch(e){}
+    if(typeof onPlaced==='function') onPlaced(latlng); }
+  okB.onclick=function(){ eind(pin?pin.getLatLng():map.getCenter()); };
+  bar.querySelector('#fk-pin-cancel').onclick=function(){ eind(map.getCenter()); };
+}
+function _fkLocatieFlow(onPlaced){
   var ov=document.createElement('div'); ov.className='fk-modal-ov';
   ov.innerHTML='<div class="fk-modal">'+
     '<div class="fk-modal-h">Locatie van het project</div>'+
-    '<div class="fk-modal-sub">Geef het exacte adres van de site. We tonen de luchtfoto zodat u kunt bevestigen dat het de juiste locatie is, vóór u het kabeltracé intekent.</div>'+
+    '<div class="fk-modal-sub">Geef het adres van de site (we vullen in wat we al weten). We tonen daarna de luchtfoto op de kaart; u zoomt in en klikt het juiste gebouw aan om de pin te plaatsen. De elementen uit de simulatie komen dan bij dat gebouw te staan.</div>'+
     '<input id="fk-m-addr" class="fk-m-in" placeholder="Straat en nummer, gemeente"/>'+
-    '<div class="fk-m-tool"><button class="fk-btn sm" id="fk-m-show">Toon luchtfoto</button><span id="fk-m-msg" class="fk-modal-sub" style="margin:0"></span></div>'+
-    '<div id="fk-m-foto" class="fk-m-foto"><div class="fk-m-ph">Nog geen luchtfoto — geef een adres en klik &laquo;Toon luchtfoto&raquo;.</div></div>'+
-    '<div class="fk-m-actions"><button class="fk-btn ghost sm" id="fk-m-skip">Overslaan</button><button class="fk-btn g" id="fk-m-ok" disabled>Bevestig adres</button></div>'+
+    '<div id="fk-m-msg" class="fk-modal-sub" style="margin:8px 0 0"></div>'+
+    '<div class="fk-m-actions"><button class="fk-btn ghost sm" id="fk-m-skip">Overslaan</button><button class="fk-btn g" id="fk-m-ok">Toon op kaart &amp; plaats pin</button></div>'+
     '</div>';
   document.body.appendChild(ov);
-  var inp=ov.querySelector('#fk-m-addr'), fotoBox=ov.querySelector('#fk-m-foto'), okBtn=ov.querySelector('#fk-m-ok'), msg=ov.querySelector('#fk-m-msg');
+  var inp=ov.querySelector('#fk-m-addr'), msg=ov.querySelector('#fk-m-msg');
   inp.value=(($('fk-addr')&&$('fk-addr').value)||'').trim();
-  function toon(){
-    var q=inp.value.trim(); if(!q){ msg.textContent='Geef eerst een adres in.'; return; }
-    msg.textContent='Zoeken…'; okBtn.disabled=true;
-    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
-      .then(function(r){return r.json();}).then(function(j){
-        if(!j||!j[0]){ msg.textContent='Adres niet gevonden — verfijn het.'; fotoBox.innerHTML='<div class="fk-m-ph">Adres niet gevonden.</div>'; return; }
-        geo={lat:+j[0].lat, lon:+j[0].lon, label:j[0].display_name||q};
-        var d=0.0016, bbox=(geo.lon-d)+','+(geo.lat-d)+','+(geo.lon+d)+','+(geo.lat+d);
-        var url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox="+bbox+"&bboxSR=4326&imageSR=4326&size=620,380&format=jpg&transparent=false&f=image";
-        fotoBox.innerHTML='<img src="'+url+'" alt="luchtfoto" style="width:100%;display:block" onerror="this.parentNode.innerHTML=\'<div class=&quot;fk-m-ph&quot;>Luchtfoto kon niet laden — u kunt toch bevestigen.</div>\'">';
-        msg.textContent=geo.label; okBtn.disabled=false;
-      }).catch(function(){ msg.textContent='Zoeken mislukt (internetverbinding?).'; });
+  var gesloten=false;
+  function sluit(){ if(gesloten) return; gesloten=true; try{ document.body.removeChild(ov); }catch(e){} }
+  function naarKaart(){
+    var q=inp.value.trim(); if($('fk-addr')) $('fk-addr').value=q; sluit();
+    if(q){ toast('Adres zoeken…');
+      fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
+        .then(function(r){return r.json();})
+        .then(function(j){ if(j&&j[0]) map.setView([+j[0].lat,+j[0].lon],19); else toast('Adres niet gevonden — zoom zelf naar het gebouw'); _pinMode(onPlaced); })
+        .catch(function(){ toast('Zoeken mislukt — zoom zelf naar het gebouw'); _pinMode(onPlaced); });
+    } else { _pinMode(onPlaced); }
   }
-  function sluit(g){ if(done) return; done=true; try{ document.body.removeChild(ov); }catch(e){} if(typeof onConfirm==='function') onConfirm(g); }
-  ov.querySelector('#fk-m-show').onclick=toon;
-  inp.addEventListener('keydown',function(e){ if(e.key==='Enter') toon(); });
-  okBtn.onclick=function(){ if(geo){ if($('fk-addr'))$('fk-addr').value=inp.value.trim(); try{ map.setView([geo.lat,geo.lon],19); }catch(e){} } sluit(geo); };
-  ov.querySelector('#fk-m-skip').onclick=function(){ sluit(null); };
-  if(inp.value) toon();
-  setTimeout(function(){ try{ inp.focus(); }catch(e){} },60);
+  ov.querySelector('#fk-m-ok').onclick=naarKaart;
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter') naarKaart(); });
+  ov.querySelector('#fk-m-skip').onclick=function(){ sluit(); if(typeof onPlaced==='function') onPlaced(null); };
+  setTimeout(function(){ try{ inp.focus(); inp.select(); }catch(e){} },60);
 }
 (function(){
-  var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ _fkAdresModal(null); return; }
-  if(!raw){ _fkAdresModal(null); return; }
-  var seed; try{ seed=JSON.parse(raw); }catch(e){ _fkAdresModal(null); return; }
+  var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ _fkLocatieFlow(function(){}); return; }
+  if(!raw){ _fkLocatieFlow(function(){}); return; }
+  var seed; try{ seed=JSON.parse(raw); }catch(e){ _fkLocatieFlow(function(){}); return; }
   try{ localStorage.removeItem(KBL_SEED_KEY); }catch(e){}
   if(!seed) return;
   var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
@@ -820,8 +844,8 @@ function _fkAdresModal(onConfirm){
     try{ var _t=$('fk-kpi-pv'); if(_t){ var _c=_t.closest('.c'); var _l=_c&&_c.querySelector('.l'); if(_l) _l.textContent='PV getekend / doel '+Math.round(+seed.pv.kwp)+' kWp'; } }catch(e){}
     setTimeout(function(){ toast('Doel-PV uit de simulator: '+Math.round(+seed.pv.kwp)+' kWp — teken PV-zones tot je dat haalt'); }, 900);
   }
-  function plaats(){
-    var c=map.getCenter(), i=0;
+  function plaats(center){
+    var c=center||map.getCenter(), i=0;
     function pos(){ var row=Math.floor(i/6), col=i%6; i++; return L.latLng(c.lat+0.00012-row*0.00006, c.lng-0.00018+col*0.00006); }
     addObject('ontk', L.latLng(c.lat, c.lng));
     (seed.laadpunten||[]).forEach(function(l){ var t=TMAP[l.type]||'dc'; for(var q=0;q<(+l.aantal||0);q++) addObject(t, pos()); });
@@ -829,11 +853,9 @@ function _fkAdresModal(onConfirm){
     recalc(); try{ autoTrace(); }catch(e){}
     toast('Ontwerp geladen uit de simulator — sleep de elementen juist en stuur de prijs terug');
   }
-  var q=(seed.adres||'').trim();
-  if(q){ fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))
-      .then(function(r){return r.json();}).then(function(j){ if(j&&j[0]) map.setView([+j[0].lat,+j[0].lon],19); setTimeout(plaats,350); })
-      .catch(function(){ plaats(); }); }
-  else { _fkAdresModal(function(){ setTimeout(plaats,350); }); }   // v1.9: geen adres in de seed → eerst adres-modal, dán plaatsen op de bevestigde locatie
+  // v1.10: ALTIJD de locatie-flow (adres bevestigen + pin op het gebouw). De assets komen bij de gekozen pin;
+  //   valt de gebruiker de pin over (Overslaan), dan plaatsen we op het kaartcentrum (huidige view).
+  _fkLocatieFlow(function(latlng){ setTimeout(function(){ plaats(latlng); }, 300); });
 })();
 
 recalc();
