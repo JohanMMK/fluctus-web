@@ -32,6 +32,10 @@ const APP_CATALOG = [
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
+  // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
+  // Simulator (gatedBy:'simulator') → geen aparte app_id/proxy-grant nodig. Eindigt in het ontwerpscherm met
+  // enkel het betaalplein-rapport + kabeltracé.
+  { id: 'betaalplein', naam: 'Betalend laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → betalend laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', gatedBy: 'simulator' },
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen_JACOPS_EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
@@ -122,7 +126,7 @@ async function logout() { await sb.auth.signOut(); }
 // enkel voor managers. De rol lezen we uit het antwoord van app-access/check.
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.gatedBy);
   const verleend = new Set();
   let role = 'seller';
   await Promise.all(echte.map(async (app) => {
@@ -143,6 +147,7 @@ async function toegankelijkeApps(token) {
   return APP_CATALOG.filter((a) => {
     if (a.altijd) return true;
     if (a.managerOnly) return role === 'manager';
+    if (a.gatedBy) return role === 'manager' || verleend.has(a.gatedBy);   // zelfde toegang als de gating-app
     return verleend.has(a.id);
   });
 }
