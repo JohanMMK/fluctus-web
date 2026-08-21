@@ -1,4 +1,7 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.11 (Johan 21-08): AUTO-TRACÉ volgt de georiënteerde luchtfoto (scherm-assen i.p.v.
+           geografische N-Z/O-W): drawAuto berekent de L-knik in container-point-ruimte bij rotatie. Herleggen na
+           oriënteren = de gebruiker klikt zelf "Trek tracés". De teruggestuurde luchtfoto = de eind-oriëntatie.
      FLUCTUS KABELPLANNER  v1.10 (Johan 21-08): LOCATIE-FLOW herwerkt. Nu ALTIJD bij openen: adres vragen
            (prefilled met wat we weten — postcode/gemeente is geen exacte locatie), luchtfoto op de kaart tonen,
            gebruiker zoomt in en klikt een PIN op het bedoelde gebouw; de assets uit de simulatie komen bij die
@@ -344,7 +347,7 @@ function _orienteerOpLijn(layer){
     var target=(Math.abs(angDeg-(-90))<=Math.abs(angDeg-90))?-90:90; // dichtstbijzijnde verticaal
     var cur=(typeof map.getBearing==='function')?map.getBearing():0;
     map.setBearing(cur + ROT_SIGN*(target-angDeg));
-    toast('Luchtfoto georiënteerd — teken nu je tracés horizontaal/verticaal');
+    toast('Luchtfoto georiënteerd — klik "Trek tracés" om ze horizontaal/verticaal te (her)leggen');
   }catch(err){ toast('Oriënteren mislukt'); }
   try{ map.removeLayer(layer); }catch(e){}
   window._fkOrient=false;
@@ -440,7 +443,16 @@ document.getElementById("fk-auto").onclick=autoTrace;
 const dist=(a,b)=>turf.distance([a.lng,a.lat],[b.lng,b.lat]); // km, alleen voor 'dichtste'
 function nearest(from,list){ let best=list[0],bd=Infinity; list.forEach(n=>{ const d=dist(from,n.marker.getLatLng()); if(d<bd){bd=d;best=n;} }); return best; }
 function drawAuto(p,q,pw,srcType){
-  const corner=L.latLng(p.lat,q.lng);              // L-vorm: eerst breedte (O-W), dan lengte (N-Z)
+  // v1.11: L-vorm volgt de SCHERM-assen (dus de georiënteerde luchtfoto), niet de geografische N-Z/O-W.
+  //   Bij rotatie berekenen we de knik in container-point-ruimte (die roteert mee via leaflet-rotate):
+  //   eerst scherm-horizontaal, dan scherm-verticaal. Zonder rotatie = de klassieke geografische L.
+  var corner;
+  try{
+    if(typeof map.getBearing==='function' && Math.abs(map.getBearing()||0)>0.01){
+      var pp=map.latLngToContainerPoint(p), pq=map.latLngToContainerPoint(q);
+      corner=map.containerPointToLatLng(L.point(pq.x, pp.y));
+    } else { corner=L.latLng(p.lat,q.lng); }
+  }catch(e){ corner=L.latLng(p.lat,q.lng); }
   const layer=L.polyline([p,corner,q],{color:ORANGE,weight:4,opacity:.9}).addTo(map);
   const tr={tid:"t"+Date.now()+Math.random(),layer,pw,auto:true,srcType};
   layer.on("contextmenu",()=>removeTrace(tr)); traces.push(tr);
