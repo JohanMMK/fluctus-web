@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.71.0  (2026-08-21 Europe/Brussels)
+     v1.71.0 (Johan 21-08): KM-COHERENTIE. Het km-tekortblok gebruikte cap.tekort_mwh (aansluiting-alléén-check,
+              zonder batterij/auto-verhoging) met één globale frac → 46% km-tekort naast 5% MWh-tekort. Nu spiegelt
+              de km-levering EXACT de MWh-levering: geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) PER PLEIN
+              uit de HOOFDsim. Blok wisselt van toon: echt tekort (oranje) vs volledige levering via toegangsvermogen-
+              overschrijding (blauw, kost in factuur).
      FLUCTUS SIMULATOR  v1.70.0  (2026-08-21 Europe/Brussels)
      v1.70.0 (Johan 21-08): MIX-COHERENTIE. Bezoekers-scenariotabel toont bij een mix per rij de levering (MWh + km)
               en CREG-besparing van de GEWONE (wagenpark) pleinen; km-toelichting maakt duidelijk dat "km gevraagd"
@@ -1254,7 +1260,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.70.0';   // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
+var SIM_VERSIE = 'v1.71.0';   // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -6524,29 +6530,42 @@ function _renderAssetTegels(R){
 // v1.63.75 (Johan 16-08): KM-TEKORT-BLOK. Bij een geforceerde installatie (Simuleer) leveren we max wat kan
 // en geven we het jaarlijkse km-tekort aan — totaal over alle laadpleinen + een tabel per plein. De km-fractie
 // per plein = tekort_mwh/gevraagd_mwh (dimensieloos), toegepast op gevraagd_km = aantal × km/jaar (uit STATE).
+// v1.71: km-levering nu EXACT gelijk aan de MWh-levering per plein. Bron = per-plein HOOFDsim
+//   (geladen_mwh / gevraagd_mwh), NIET meer cap.tekort_mwh met één globale frac. Dat oude cijfer was de
+//   aansluiting-alléén-check (zonder batterij/auto-verhoging) en sprak de getoonde MWh-levering tegen
+//   (5% MWh-tekort ↔ 46% km-tekort). Nu: geladen km = gevraagd km × (geladen_mwh/gevraagd_mwh) per plein.
+//   Wat de sim wél levert door het toegangsvermogen te overschrijden, telt dus als geleverd (kost zit in de
+//   factuur; de melding hieronder verwijst daar naar).
+function _normNaam(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,''); }
 function _kmTekortBlok(lp, cap){
   var stl=STATE.laadpleinen || [];
-  // Vraag-energie van de vloot (aantal × km/jaar × kWh/km); terugval op de sim-gevraagde energie.
-  var demandMwh=stl.reduce(function(s,p){ return s+((typeof _lpEnergieMwh==='function'?_lpEnergieMwh(p):0)||0); },0);
-  if(demandMwh<=0) demandMwh=((lp&&lp.pleinen)||[]).reduce(function(s,p){ return s+(+p.gevraagd_mwh||0); },0);
-  // TEKORT = cap.tekort_mwh: de EERLIJKE onhaalbaarheid onder de OPGEGEVEN aansluiting + batterij,
-  // ZONDER de stille auto-verhoging van het toegangsvermogen die de hoofdsim doet (die maakt het per-plein-
-  // tekort kunstmatig 0). Zo klopt het km-tekort met de "CAPACITEIT ONTOEREIKEND"-vaststelling.
-  var tekortMwh=(cap && +cap.tekort_mwh) || 0;
-  var totKm=(typeof _vlootKmJaar==='function'?_vlootKmJaar():0);
-  var frac=(demandMwh>0)?Math.max(0,Math.min(1, tekortMwh/demandMwh)):0;
-  var tekTot=totKm*frac, gelTot=Math.max(0, totKm-tekTot), pct=frac*100;
-  var P=(cap && +cap.huidig_toegangsvermogen_kw) || (+STATE.aansluitingKva||0);
-  // per plein: proportioneel op de gevraagde energie (cap.tekort is een vloot-cijfer)
-  var rows=[];
+  var simPl=(lp && lp.pleinen) || [];
+  // sim-pleinen indexeerbaar op genormaliseerde naam; terugval op positie.
+  var byName={}; simPl.forEach(function(p,idx){ var n=_normNaam(p.naam); if(n && !(n in byName)) byName[n]=p; p.__idx=idx; });
+  var rows=[]; var totKm=0, gelTot=0, tekTot=0;
   for(var i=0;i<stl.length;i++){
     var s=stl[i]||{}; var gevraagd_km=(typeof _lpKmJaar==='function'?_lpKmJaar(s):(+s.aantal||0)*(+s.km_per_jaar||0));
     if(gevraagd_km<=0) continue;
-    rows.push({naam:(s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gevraagd_km*(1-frac), tekort:gevraagd_km*frac});
+    var sp=byName[_normNaam(s.naam)] || simPl[i] || null;   // match op naam, anders positie
+    var gv=sp?(+sp.gevraagd_mwh||0):0, gl=sp?(+sp.geladen_mwh||0):0;
+    var deliv=(gv>1e-9)?Math.max(0,Math.min(1, gl/gv)):1;    // per-plein leverfractie uit de HOOFDsim
+    var gelKm=gevraagd_km*deliv, tekKm=gevraagd_km-gelKm;
+    rows.push({naam:(s.naam||('Laadplein '+(i+1))), gevraagd:gevraagd_km, geleverd:gelKm, tekort:tekKm});
+    totKm+=gevraagd_km; gelTot+=gelKm; tekTot+=tekKm;
   }
-  var box=el('div',{style:'background:#FFF3E0;border:1px solid #9E480E;border-radius:6px;padding:12px 14px;font-size:13px;color:#7A3608;line-height:1.55'});
-  box.innerHTML='<b>⚠ Onder je toegangsvermogen ('+fmtNum(P,0)+' kW) raakt niet alle laadvraag geladen.</b>'+
-    '<div style="margin-top:8px;font-size:14px;color:#1F3864"><b>Binnen de aansluiting: '+fmtNum(gelTot,0)+' km/jaar</b> · <b style="color:#9E480E">Tekort: '+fmtNum(tekTot,0)+' km/jaar ('+fmtNum(pct,0)+'%)</b> — over alle laadpleinen samen (van '+fmtNum(totKm,0)+' km/jaar gevraagd).</div>';
+  if(!totKm){ totKm=(typeof _vlootKmJaar==='function'?_vlootKmJaar():0); gelTot=totKm; }
+  var pct=(totKm>0)?(tekTot/totKm*100):0;
+  var P=(cap && +cap.huidig_toegangsvermogen_kw) || (+STATE.aansluitingKva||0);
+  var _verh=(+((lp&&lp.toegangsvermogen_verhoogd_kw))||0);
+  var materieel=(pct>0.5);   // is er een ECHT leveringstekort, of levert de sim (nagenoeg) alles?
+  var box=el('div',{style:'background:'+(materieel?'#FFF3E0':'#EAF2FF')+';border:1px solid '+(materieel?'#9E480E':'#1F3864')+';border-radius:6px;padding:12px 14px;font-size:13px;color:'+(materieel?'#7A3608':'#1F3864')+';line-height:1.55'});
+  if(materieel){
+    box.innerHTML='<b>⚠ Niet alle laadvraag raakt geladen.</b>'+
+      '<div style="margin-top:8px;font-size:14px;color:#1F3864"><b>Geleverd: '+fmtNum(gelTot,0)+' km/jaar</b> · <b style="color:#9E480E">Tekort: '+fmtNum(tekTot,0)+' km/jaar ('+fmtNum(pct,1)+'%)</b> — over alle laadpleinen samen (van '+fmtNum(totKm,0)+' km/jaar gevraagd). Deze km-levering spiegelt exact de geleverde MWh hierboven.</div>';
+  } else {
+    box.innerHTML='<b>✓ De installatie levert (nagenoeg) de volledige laadvraag: '+fmtNum(gelTot,0)+' km/jaar</b> (van '+fmtNum(totKm,0)+' km/jaar gevraagd'+(pct>1e-6?' — throttling '+fmtNum(tekTot,0)+' km, '+fmtNum(pct,1)+'%':'')+').'+
+      (_verh>0?'<div style="margin-top:6px;font-size:12.5px">Let op: dit gebeurt door het toegangsvermogen te overschrijden (piek ~'+fmtNum(P+_verh,0)+' kW i.p.v. '+fmtNum(P,0)+' kW) — de overschrijdingskost zit in de factuur.</div>':'');
+  }
   if(rows.length>1){
     var t='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;color:#1F3864">'+
       '<tr style="color:#7A3608"><th style="text-align:left;padding:3px 6px">Laadplein</th><th style="text-align:right;padding:3px 6px">Gevraagd km/jr</th><th style="text-align:right;padding:3px 6px">Geleverd km/jr</th><th style="text-align:right;padding:3px 6px">Tekort km/jr</th></tr>';
@@ -6559,11 +6578,12 @@ function _kmTekortBlok(lp, cap){
     t+='</table>';
     var td=el('div'); td.innerHTML=t; box.appendChild(td);
   }
-  var _verh=(+((lp&&lp.toegangsvermogen_verhoogd_kw))||0);
-  var _note=(_verh>0)
-    ? 'Let op: de simulatie lévert deze km wél, maar door het toegangsvermogen te overschrijden (piek ~'+fmtNum(P+_verh,0)+' kW i.p.v. '+fmtNum(P,0)+' kW) — de overschrijdingskost zit in de factuur. Om binnen '+fmtNum(P,0)+' kW te blijven: grotere batterij of hoger toegangsvermogen (zie Ontwerp).'
-    : 'Wil je alles binnen de aansluiting laden? Kies Ontwerp — die berekent hoeveel toegangsvermogen of batterij daarvoor nodig is.';
-  box.appendChild(el('div',{style:'margin-top:8px;font-size:11.5px;color:#7A3608'}, _note));
+  if(materieel){
+    var _note=(_verh>0)
+      ? 'Let op: de simulatie lévert deze km wél, maar door het toegangsvermogen te overschrijden (piek ~'+fmtNum(P+_verh,0)+' kW i.p.v. '+fmtNum(P,0)+' kW) — de overschrijdingskost zit in de factuur. Om binnen '+fmtNum(P,0)+' kW te blijven: grotere batterij of hoger toegangsvermogen (zie Ontwerp).'
+      : 'Wil je alles binnen de aansluiting laden? Kies Ontwerp — die berekent hoeveel toegangsvermogen of batterij daarvoor nodig is.';
+    box.appendChild(el('div',{style:'margin-top:8px;font-size:11.5px;color:#7A3608'}, _note));
+  }
   return box;
 }
 
