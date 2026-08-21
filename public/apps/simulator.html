@@ -1,5 +1,14 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.73.0  (2026-08-21 Europe/Brussels)
+     v1.73.0 (Johan 21-08): CREG-BESPARING COHERENT. Het groene detailblok toonde BRUTO (geleverd × CREG-forfait
+              €3101) terwijl de scenariokolom NETTO toonde (€1036–1416, per rij variërend). Nu overal ÉÉN NETTO
+              CONSTANTE: geleverd × (CREG-forfait − eigen laadkost van de basis). Groen blok, scenariokolom én rapport
+              tonen hetzelfde bedrag; vóór de scenario-berekening toont het groene blok enkel de levering + verwijzing.
+     FLUCTUS SIMULATOR  v1.72.0  (2026-08-21 Europe/Brussels)
+     v1.72.0 (Johan 21-08): RAPPORT toont niet-betalende pleinen. _laadpleinRapportData() draagt nu gewone_pleinen
+              mee (naam, laadpunten, geladen MWh + km, CREG-besparing per plein + totaal) → eigen sectie in het
+              betalend-laadplein rapport (v1.4.0). Voorheen enkel in de BOM/scenariokolommen, niet als eigen blok.
      FLUCTUS SIMULATOR  v1.71.0  (2026-08-21 Europe/Brussels)
      v1.71.0 (Johan 21-08): KM-COHERENTIE. Het km-tekortblok gebruikte cap.tekort_mwh (aansluiting-alléén-check,
               zonder batterij/auto-verhoging) met één globale frac → 46% km-tekort naast 5% MWh-tekort. Nu spiegelt
@@ -1260,7 +1269,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.71.0';   // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
+var SIM_VERSIE = 'v1.73.0';   // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -6639,13 +6648,28 @@ function _renderLaadpleinResultaat(lp){
     //   Dit totaal komt ook mee in de winst van de 6 scenario's hieronder.
     var _gewP=(lp.pleinen||[]).filter(function(p){return String(p.modus||'').toLowerCase()!=='bezoekers';});
     if(_gewP.length){
+      // v1.73: NETTO CREG-besparing (t.o.v. je eigen laadkost), niet bruto. Eigen laadkost = all-in afnameprijs
+      //   van de BASIS uit de berekende scenario's → exact gelijk aan de scenariokolom. Vóór de scenario-berekening
+      //   tonen we enkel de levering + een verwijzing (geen mogelijk-verkeerd brutobedrag).
       var _cregMwh=(typeof _cregTarief==='function'?_cregTarief()*1000:0);
+      var _bl=STATE._bezLaatste;
+      var _ownCost=(_bl && _bl.basis_energieprijs_eur_mwh!=null)?(+_bl.basis_energieprijs_eur_mwh):null;
+      var _haveNet=(_ownCost!=null && _cregMwh>0);
       var _rows='', _tot=0;
-      _gewP.forEach(function(p){ var gel=+p.geladen_mwh||0, besp=gel*_cregMwh; _tot+=besp;
-        _rows+='<div style="margin-top:4px"><b>'+(p.naam||'Laadplein')+'</b> — geladen '+fmtNum(gel,1)+' MWh · <b style="color:#048443">besparing ± €'+fmtNum(besp,0)+'/jaar</b> (t.o.v. CREG-forfait €'+fmtNum(_cregMwh,0)+'/MWh)</div>'; });
+      _gewP.forEach(function(p){ var gel=+p.geladen_mwh||0;
+        if(_haveNet){ var besp=Math.max(0, gel*(_cregMwh-_ownCost)); _tot+=besp;
+          _rows+='<div style="margin-top:4px"><b>'+(p.naam||'Laadplein')+'</b> — geladen '+fmtNum(gel,1)+' MWh · <b style="color:#048443">netto besparing ± €'+fmtNum(besp,0)+'/jaar</b></div>';
+        } else {
+          _rows+='<div style="margin-top:4px"><b>'+(p.naam||'Laadplein')+'</b> — geladen '+fmtNum(gel,1)+' MWh</div>';
+        }
+      });
+      var _totBedrag=(_bl && _bl.besparing_wag_const_eur!=null)?(+_bl.besparing_wag_const_eur):_tot;
+      var _totLine=_haveNet
+        ? '<b>Totaal ± €'+fmtNum(_totBedrag,0)+'/jaar</b> (netto, t.o.v. CREG-forfait €'+fmtNum(_cregMwh,0)+'/MWh mín uw eigen laadkost ± €'+fmtNum(_ownCost,0)+'/MWh) — zit mee in de winst van de scenario’s hieronder.'
+        : 'De <b>netto CREG-besparing</b> (t.o.v. het CREG-forfait €'+fmtNum(_cregMwh,0)+'/MWh, mín uw eigen laadkost) verschijnt zodra u de scenario’s hieronder berekent.';
       var gb=el('div',{style:'background:#EAF7EE;border:1px solid #05B05055;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px'});
       gb.innerHTML='<b>Gewone laadpleinen — besparing t.o.v. CREG</b>'+_rows+
-        '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #C7E7D2"><b>Totaal ± €'+fmtNum(_tot,0)+'/jaar</b> — zit mee in de winst van de scenario’s hieronder (netto, na uw eigen laadkost).</div>';
+        '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #C7E7D2">'+_totLine+'</div>';
       sec.appendChild(gb);
     }
     // ── Bezoekers-scenario's: geen batt / batt / batt+plein @ 50/100/150/200% sessies ──
@@ -9926,6 +9950,29 @@ function _laadpleinRapportData(){
       gevraagd_mwh:gev, geleverd_mwh:gel, tekort_mwh:tek, gemist_pct:gev>0?(100*tek/gev):0, piek_kw:+sp.piek_kw||0,
       heat:_laadpleinHeat(sp.load_kw) };
   });
+  // v1.4: GEWONE (niet-betalende / wagenpark) pleinen — apart in het rapport, met levering + CREG-besparing.
+  //   Spiegelt het groene blok op het scherm (_renderLaadpleinResultaat): besparing = geladen × CREG-forfait.
+  var cregMwh=(typeof _cregTarief==='function'?_cregTarief()*1000:cregEurMwh);
+  // v1.4: eigen laadkost = all-in afnameprijs van de BASIS uit de scenario's → NETTO besparing (t.o.v. CREG mín eigen kost),
+  //   exact gelijk aan de scenariokolom. Terugval op 0 (bruto) als de scenario's nog niet berekend zijn.
+  var ownCostMwh=(bez && bez.basis_energieprijs_eur_mwh!=null)?(+bez.basis_energieprijs_eur_mwh):0;
+  var simGew=((res.laadplein&&res.laadplein.pleinen)||[]).filter(function(p){return String(p.modus||'').toLowerCase()!=='bezoekers';});
+  var inGew=(STATE.laadpleinen||[]).filter(function(p){return String(p.type_plein||'').toLowerCase()!=='bezoekers';});
+  function _palenSamenvatting(p){ var o={}; (p.laadpunten||[]).forEach(function(x){ var t=(x.type||'').toUpperCase(),n=+x.aantal||0; if(n<=0)return;
+    var lab=(t==='DC160')?'DC 160 kW':(t==='DC300'||t==='DC400')?'DC 300 kW':'AC 22 kW'; o[lab]=(o[lab]||0)+n; });
+    return Object.keys(o).map(function(k){return o[k]+'× '+k;}).join(' · '); }
+  var gewonePleinen=inGew.map(function(p,i){
+    var sp=simGew[i]||{}; var gev=+sp.gevraagd_mwh||(_lpEnergieMwh?_lpEnergieMwh(p):0), gel=+sp.geladen_mwh||0;
+    var gevKm=(typeof _lpKmJaar==='function')?_lpKmJaar(p):((+p.aantal||0)*(+p.km_per_jaar||0));
+    var deliv=(gev>1e-9)?Math.max(0,Math.min(1,gel/gev)):1;
+    return { naam:p.naam||('Laadplein '+(i+1)), voertuigtype:p.voertuigtype||'',
+      laadpunten:_palenSamenvatting(p), aantal:+p.aantal||0, km_per_jaar:+p.km_per_jaar||0,
+      gevraagd_mwh:gev, geleverd_mwh:gel, gevraagd_km:Math.round(gevKm), geleverd_km:Math.round(gevKm*deliv),
+      besparing_eur:Math.round(Math.max(0, gel*(cregMwh-ownCostMwh))) };   // NETTO
+  });
+  // totaal exact uit de scenario-berekening (constante), anders som van de per-plein netto's.
+  var gewoneTotBesparing=(bez && bez.besparing_wag_const_eur!=null)?(+bez.besparing_wag_const_eur)
+    :gewonePleinen.reduce(function(s,p){return s+(+p.besparing_eur||0);},0);
   // batterij / aansluiting / verbruik
   var bt=(typeof _frBatterij==='function')?_frBatterij():{kw:0,kwh:0};
   var battObj=(bt&&(+bt.kwh>0))?{kw:+bt.kw||0,kwh:+bt.kwh||0,
@@ -9968,6 +10015,7 @@ function _laadpleinRapportData(){
       verbruik:{ mwh:mwhGebouw, label:STATE.profielNaam||STATE.profielBeschrijving||'' },
       pv:((+STATE.pvKwp||0)>0)?{kwp:+STATE.pvKwp}:null, batterij:battObj },
     pleinen:pleinen,
+    gewone_pleinen:gewonePleinen, gewone_besparing_eur:Math.round(gewoneTotBesparing), creg_forfait_eur_mwh:Math.round(cregMwh),
     sturingen:{ geen:{kost:kg}, sturing:{kost:ks}, onbalans:{kost:ko},
       meerwaarde_eur:Math.round(mSt), meerwaarde_pct:kg>0?(mSt/kg*100):0,
       windfall_eur:Math.round(mOn), windfall_pct:ks>0?(mOn/ks*100):0 },
