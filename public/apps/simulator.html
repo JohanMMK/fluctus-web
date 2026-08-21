@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.70.0  (2026-08-21 Europe/Brussels)
+     v1.70.0 (Johan 21-08): MIX-COHERENTIE. Bezoekers-scenariotabel toont bij een mix per rij de levering (MWh + km)
+              en CREG-besparing van de GEWONE (wagenpark) pleinen; km-toelichting maakt duidelijk dat "km gevraagd"
+              enkel de betalende pleinen zijn en dat het totaal-km bovenaan beide types telt. Omzet betalend plein =
+              GELEVERD MWh × verkoopprijs per plein (server v15.86). Rapport-data draagt km_geleverd + wagenpark-velden
+              + creg_eur_mwh mee.
      FLUCTUS SIMULATOR  v1.69.0  (2026-08-21 Europe/Brussels)
      v1.69.0 (Johan 21-08): BETALEND-LAADPLEIN afgeslankt invoerscherm (flow-modus: één scherm i.p.v. wizard, reuse
               van de stap-renders) + MIX betalend / gewoon plein. Gewoon plein: winst = CREG-besparing (server v15.85,
@@ -1248,7 +1254,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.69.0';
+var SIM_VERSIE = 'v1.70.0';   // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4404,12 +4410,21 @@ function _renderBezTabelHtml(r){
     'De batterij-rij (zonder sessies) toont zo het verbruiksvoordeel (piek + spot-arbitrage). Aansluiting blijft vast (nooit verzwaard). '+
     'Alle rijen draaien de sturing <b>excl. onbalans</b> — zelfde dispatch als de tegel “factuur sturing zonder onbalans”; de 100%-rij komt dus overeen met de hoofdsim-factuur.<br>'+
     '<b>€/MWh all-in</b> = jaarfactuur ÷ tot. afname (gebouw + laden, incl. net + heffingen). <b>Laadprijs marg.</b> = (jaarfactuur − jaarfactuur batterij) ÷ geladen MWh = wat énkel de laadenergie kost; marge = tarief − laadprijs marg.<br>'+
-    '<b>Investering</b> = de volledige installatie hierboven (incl. extra kosten &amp; werken). <b>Rendement</b> = winst ÷ investering · <b>Terugverdientijd</b> = investering ÷ winst. '+kblLine+'</div>'+
-    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:920px">'+
+    '<b>Investering</b> = de volledige installatie hierboven (incl. extra kosten &amp; werken). <b>Rendement</b> = winst ÷ investering · <b>Terugverdientijd</b> = investering ÷ winst. '+kblLine+'</div>';
+  // v1.70: is er een MIX (gewone/wagenpark pleinen erbij)? Dan tonen we hun levering + CREG-besparing in ELKE rij.
+  var heeftWag = (r.rows||[]).some(function(x){ return x.geleverd_wag_mwh!=null; });
+  var cregMwh = Math.round(+r.creg_eur_mwh||0);
+  function mwh(v){ return (v==null)?'—':(fmtNum(v,1)+' MWh'); }
+  if(heeftWag){ h+='<div class="fdsim-hint" style="margin:2px 0 6px;color:#5A6577">'+
+    '<b>km gevraagd</b> en <b>% geleverd</b> gaan enkel over de <b>betalende</b> pleinen (daar bepalen we de sensitiviteit). '+
+    'De <b>gewone pleinen</b> (wagenpark) draaien in élk scenario mee — hun levering en <b>CREG-besparing</b> (@ € '+cregMwh+'/MWh) staan apart; die besparing zit al in de winst. '+
+    'Het totale km-getal bovenaan telt beide pleintypes samen, vandaar dat het hoger ligt dan “km gevraagd” hier.</div>'; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:'+(heeftWag?1120:920)+'px">'+
     '<thead><tr style="text-align:right;border-bottom:2px solid #1F3864">'+
     '<th style="text-align:left;padding:5px 8px">Scenario</th><th style="padding:5px 8px">€/MWh all-in</th>'+
     '<th style="padding:5px 8px">km gevraagd</th><th style="padding:5px 8px">% geleverd</th>'+
     '<th style="padding:5px 8px">Laadprijs marg.</th><th style="padding:5px 8px">Opbrengst</th>'+
+    (heeftWag?'<th style="padding:5px 8px">Gewone pleinen levering</th><th style="padding:5px 8px">CREG-besparing</th>':'')+
     '<th style="padding:5px 8px">Jaarfactuur</th>'+
     '<th style="padding:5px 8px">Winst</th>'+
     '<th style="padding:5px 8px">Investering</th><th style="padding:5px 8px">Terugverdientijd</th>'+
@@ -4430,6 +4445,8 @@ function _renderBezTabelHtml(r){
       '<td style="padding:5px 8px">'+(row.heeftPlein?pct(row.pct_geleverd):'—')+'</td>'+
       '<td style="padding:5px 8px">'+(row.heeftPlein?eurMwh(row.laadprijs_marg_eur_mwh):'—')+'</td>'+
       '<td style="padding:5px 8px">'+(row.heeftPlein?eur(row.opbrengst_eur):'—')+'</td>'+
+      (heeftWag?('<td style="padding:5px 8px">'+(row.geleverd_wag_mwh!=null?(mwh(row.geleverd_wag_mwh)+(row.km_wag!=null?' <span style="color:#5A6577">('+Math.round(row.km_wag).toLocaleString("nl-BE")+' km)</span>':'')):'—')+'</td>'+
+        '<td style="padding:5px 8px">'+(row.besparing_wag_eur!=null?'<b style="color:#048443">'+eur(row.besparing_wag_eur)+'</b>':'—')+'</td>'):'')+
       '<td style="padding:5px 8px">'+eur(row.jaarfactuur_eur)+'</td>'+
       '<td style="padding:5px 8px">'+win+'</td>'+
       '<td style="padding:5px 8px">'+invCell+'</td>'+
@@ -9868,10 +9885,13 @@ function _laadpleinRapportData(){
     var tvt=(capex>0 && r.winst_eur>0)?(capex/r.winst_eur):null;
     var rend=(capex>0 && r.winst_eur>0)?(r.winst_eur/capex*100):null;
     return { label:r.label, pct:r.pct, is_basis:r.is_basis, heeftPlein:r.heeftPlein,
-      energieprijs_eur_mwh:r.energieprijs_eur_mwh, km_gevraagd:r.km_gevraagd, pct_geleverd:r.pct_geleverd,
+      energieprijs_eur_mwh:r.energieprijs_eur_mwh, km_gevraagd:r.km_gevraagd, km_geleverd:r.km_geleverd, pct_geleverd:r.pct_geleverd,
       laadprijs_marg_eur_mwh:r.laadprijs_marg_eur_mwh, opbrengst_eur:r.opbrengst_eur, jaarfactuur_eur:r.jaarfactuur_eur,
+      // v1.70: mix — levering + CREG-besparing van de gewone pleinen, per scenario mee in het rapport.
+      geleverd_wag_mwh:r.geleverd_wag_mwh, km_wag:r.km_wag, besparing_wag_eur:r.besparing_wag_eur,
       winst_eur:r.winst_eur, investering_eur:(r.is_basis?null:Math.round(capex)), tvt_jaar:tvt, rendement_pct:rend };
   });
+  var cregEurMwh=(bez&&+bez.creg_eur_mwh)||0;
   var r100=scenarios.filter(function(s){return s.heeftPlein && +s.pct===100;})[0] || scenarios.filter(function(s){return s.heeftPlein;}).slice(-1)[0] || {};
   var tarief=(bez&&+bez.tarief_eur_mwh)||500;
   // pleinen (input + sim-output + heatmap)
@@ -9932,7 +9952,7 @@ function _laadpleinRapportData(){
       meerwaarde_eur:Math.round(mSt), meerwaarde_pct:kg>0?(mSt/kg*100):0,
       windfall_eur:Math.round(mOn), windfall_pct:ks>0?(mOn/ks*100):0 },
     factuur3:(typeof _simFactuur3Data==='function')?_simFactuur3Data():null,
-    scenarios:scenarios,
+    scenarios:scenarios, creg_eur_mwh:Math.round(cregEurMwh),
     kabel:{ exact:!!cx.exact, kabeltrace_eur:Math.round(cx.kabelPlein),
       foto_dataurl:(STATE.kabeltraceResult&&STATE.kabeltraceResult.foto_dataurl)||null,
       bom:bom, totaal_capex:Math.round(totCapex),
