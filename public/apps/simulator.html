@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.67.0  (2026-08-21 Europe/Brussels)
+     v1.67.0 (Johan 21-08): INVESTERINGSKAART boven de bezoekers-scenario's (componenten + prijzen), met een
+              lump sum "extra kosten & werken" + omschrijving die meetelt in de investering/rendement en mee gaat
+              naar het rapport (nieuw hoofdstuk Investering). STATE.bezExtraKosten/bezExtraComment; _bezCapex +extra.
      FLUCTUS SIMULATOR  v1.66.0  (2026-08-21 Europe/Brussels)
+     v1.66.1 (Johan 21-08): laadplein-rapport — verkoopprijs stroom (€/MWh + €c/kWh) per plein bij de definitie.
      v1.66.0 (Johan 21-08): BETALEND-LAADPLEIN KLANTRAPPORT. Nieuwe knop "📄 Betalend-laadplein rapport" bij de
               bezoekers-scenario's → _laadpleinRapportData() naar sessionStorage['FLUCTUS_LAADPLEIN_RAPPORT'] +
               window.open('/apps/laadplein-rapport.html'). Spiegelt het scherm: 3 sturingen (kpiSturing),
@@ -1233,7 +1238,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.66.0';
+var SIM_VERSIE = 'v1.67.0';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -2307,7 +2312,7 @@ function _resetOntwerpState(){
   STATE.groeistap1 = null; STATE.groeistap1Loading = false; STATE.groeistap1Fout = null;
   STATE.opstellingen = null; STATE.resultaat = null; STATE.resultaatVarianten = null;
   STATE.kpiSturing = null; STATE.capaciteit = null; STATE.vergelijkingOpstellingen = null;
-  STATE.lastSimInput = null; STATE._bezLaatste = null;
+  STATE.lastSimInput = null; STATE._bezLaatste = null; STATE.bezExtraKosten = 0; STATE.bezExtraComment = '';
   STATE.factuurSim = null; STATE.factuurSimJaar = null; STATE._factuurSimSig = null;
   // De kabelplanner-handoff in localStorage óók wissen — anders pikt een nieuw project een oud
   // resultaat op (bv. de kabelplanner van het vorige project stond nog open).
@@ -4292,7 +4297,9 @@ function _bezCapex(){
   return { battKwh:battKwh, battCapex:battCapex, palen:palen, palenLabel:lbl.join(' + '),
            battTrace:_kabelBattTrace(),
            kabelPlein:_kabeltrace(battKwh>0),   // override (exact, incl. palen+batt) of schatting
-           exact:exact };
+           exact:exact,
+           extra:(+STATE.bezExtraKosten||0),    // v1.67: lump sum extra kosten & werken (bij plein-rijen)
+           comment:(STATE.bezExtraComment||'') };
 }
 function _renderBezTabelHtml(r){
   function eur(v){ return (v==null)?'—':('€ '+Math.round(v).toLocaleString('nl-BE')); }
@@ -4306,16 +4313,37 @@ function _renderBezTabelHtml(r){
   function rowCapex(row){
     if(row.is_basis) return 0;
     if(!row.heeftPlein) return cx.battCapex + cx.battTrace;
-    return cx.battCapex + cx.palen + cx.kabelPlein;
+    return cx.battCapex + cx.palen + cx.kabelPlein + (+cx.extra||0);   // v1.67: + lump sum extra kosten & werken
   }
+  // v1.67: prominente INVESTERINGSKAART boven de tabel (componenten + prijzen + lump sum extra kosten/werken + totaal).
+  var invTot = cx.battCapex + cx.palen + cx.kabelPlein + (+cx.extra||0);
+  function invRij(lbl,val,sub){ return '<tr style="border-bottom:1px solid #E5E9F0">'+
+    '<td style="padding:5px 8px">'+lbl+(sub?' <span style="color:#5A6577;font-size:11px">'+sub+'</span>':'')+'</td>'+
+    '<td style="padding:5px 8px;text-align:right;font-weight:600">'+eur(val)+'</td></tr>'; }
+  var invCard='<div style="border:1px solid #1F386440;border-radius:8px;padding:12px 14px;margin:8px 0 12px;background:#1F386408">'+
+    '<div style="font-weight:800;color:#1F3864;font-size:14px;margin-bottom:6px">Investering — volledige installatie</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+    (cx.battKwh>0?invRij('Batterij '+fmtNum(cx.battKwh,0)+' kWh', cx.battCapex):'')+
+    (cx.palen>0?invRij('Laadpalen', cx.palen, cx.palenLabel):'')+
+    invRij('Kabeltracé', cx.kabelPlein, (cx.exact?'exact (kabelplanner)':'schatting'))+
+    '<tr style="border-bottom:1px solid #E5E9F0"><td style="padding:5px 8px">Extra kosten &amp; werken '+
+      '<input type="number" value="'+(+cx.extra||0)+'" min="0" step="100" oninput="_bezSetExtra(this.value)" onchange="_bezRerenderTabel()" '+
+      'style="width:120px;padding:3px 6px;margin-left:6px;border:1px solid #C7CED8;border-radius:4px;font-size:12px" placeholder="lump sum"></td>'+
+      '<td style="padding:5px 8px;text-align:right;font-weight:600">'+eur(+cx.extra||0)+'</td></tr>'+
+    '<tr><td colspan="2" style="padding:6px 8px 2px"><textarea rows="2" oninput="_bezSetComment(this.value)" '+
+      'style="width:100%;border:1px solid #C7CED8;border-radius:4px;font-size:12px;padding:5px 7px;resize:vertical;font-family:inherit" '+
+      'placeholder="Omschrijving extra kosten &amp; werken (verschijnt in het rapport)">'+escapeHtml(cx.comment||'')+'</textarea></td></tr>'+
+    '<tr style="border-top:2px solid #1F3864"><td style="padding:7px 8px;font-weight:800;color:#1F3864">Totaal investering</td>'+
+      '<td style="padding:7px 8px;text-align:right;font-weight:800;color:#1F3864">'+eur(invTot)+'</td></tr>'+
+    '</table></div>';
   var kblLine = cx.exact
     ? '<b style="color:#048443">Kabeltracé EXACT: '+eur(cx.kabelPlein)+'</b> (uit de kabelplanner).'
     : '<b style="color:#9E480E">Kabeltracé: schatting '+eur(cx.kabelPlein)+'</b> — teken in op de kaart voor de exacte prijs (knop hierboven).';
-  var h='<div class="fdsim-hint" style="margin:6px 0">Opbrengst-tarief € '+Math.round(r.tarief_eur_mwh)+'/MWh · '+r.kwh_km+' kWh/km · <b>winst = opbrengst − jaarfactuur(scenario) + jaarfactuur(basis)</b>. '+
+  var h=invCard+'<div class="fdsim-hint" style="margin:6px 0">Opbrengst-tarief € '+Math.round(r.tarief_eur_mwh)+'/MWh · '+r.kwh_km+' kWh/km · <b>winst = opbrengst − jaarfactuur(scenario) + jaarfactuur(basis)</b>. '+
     'De batterij-rij (zonder sessies) toont zo het verbruiksvoordeel (piek + spot-arbitrage). Aansluiting blijft vast (nooit verzwaard). '+
     'Alle rijen draaien de sturing <b>excl. onbalans</b> — zelfde dispatch als de tegel “factuur sturing zonder onbalans”; de 100%-rij komt dus overeen met de hoofdsim-factuur.<br>'+
     '<b>€/MWh all-in</b> = jaarfactuur ÷ tot. afname (gebouw + laden, incl. net + heffingen). <b>Laadprijs marg.</b> = (jaarfactuur − jaarfactuur batterij) ÷ geladen MWh = wat énkel de laadenergie kost; marge = tarief − laadprijs marg.<br>'+
-    '<b>Investering</b> = volledige installatie (batterij '+eur(cx.battCapex)+(cx.palen>0?' + palen '+eur(cx.palen)+(cx.palenLabel?' ('+cx.palenLabel+')':''):'')+' + kabeltracé). <b>Rendement</b> = winst ÷ investering · <b>Terugverdientijd</b> = investering ÷ winst. '+kblLine+'</div>'+
+    '<b>Investering</b> = de volledige installatie hierboven (incl. extra kosten &amp; werken). <b>Rendement</b> = winst ÷ investering · <b>Terugverdientijd</b> = investering ÷ winst. '+kblLine+'</div>'+
     '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:920px">'+
     '<thead><tr style="text-align:right;border-bottom:2px solid #1F3864">'+
     '<th style="text-align:left;padding:5px 8px">Scenario</th><th style="padding:5px 8px">€/MWh all-in</th>'+
@@ -4349,6 +4377,10 @@ function _renderBezTabelHtml(r){
   });
   return h+'</tbody></table></div>';
 }
+// v1.67: lump sum extra kosten & werken + omschrijving (live in STATE; her-render bij blur zodat totalen kloppen).
+function _bezSetExtra(v){ STATE.bezExtraKosten = Math.max(0, (parseFloat(String(v).replace(',','.'))||0)); }
+function _bezSetComment(v){ STATE.bezExtraComment = String(v||''); }
+function _bezRerenderTabel(){ var o=document.getElementById('fdsim-bez-out'); if(o && STATE._bezLaatste){ o.innerHTML=_renderBezTabelHtml(STATE._bezLaatste); } }
 function _lpEnergieMwh(lp){
   if(lp.type_plein==='bezoekers') return _bezGevraagdMwh(lp);
   return (lp.aantal||0)*(lp.km_per_jaar||0)*(lp.kwh_per_km||0)/1000;
@@ -6508,7 +6540,7 @@ function _renderLaadpleinResultaat(lp){
       var scWrap=el('div',{style:'margin:2px 0 8px'});
       var scRow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center'});
       var scBtn=el('button',{class:'fdsim-btn',style:'background:#1F3864;color:#fff'},'Bereken bezoekers-scenario’s ▶');
-      var scOut=el('div',{style:'margin-top:8px'});
+      var scOut=el('div',{id:'fdsim-bez-out',style:'margin-top:8px'});
       scBtn.onclick=function(){ berekenBezoekersScenarios(_tar, scOut, scBtn); };
       scRow.appendChild(scBtn);
       // v1.65.0: kabeltracé intekenen (exacte investering & rendement). Bij terugkeer herrekent de tabel vanzelf.
@@ -9732,7 +9764,7 @@ function _laadpleinHeat(load){
 function _laadpleinRapportData(){
   var res=STATE.resultaat||{}, k=STATE.kpiSturing||{}, bez=STATE._bezLaatste||null;
   var cx=(typeof _bezCapex==='function')?_bezCapex():{battCapex:0,palen:0,battTrace:0,kabelPlein:0,exact:false,palenLabel:''};
-  function rowCapex(row){ if(row.is_basis) return 0; if(!row.heeftPlein) return cx.battCapex+cx.battTrace; return cx.battCapex+cx.palen+cx.kabelPlein; }
+  function rowCapex(row){ if(row.is_basis) return 0; if(!row.heeftPlein) return cx.battCapex+cx.battTrace; return cx.battCapex+cx.palen+cx.kabelPlein+(+cx.extra||0); }
   // scenarios (met capex/rendement, identiek aan de tabel)
   var scenarios=((bez&&bez.rows)||[]).map(function(r){
     var capex=rowCapex(r);
@@ -9752,6 +9784,7 @@ function _laadpleinRapportData(){
     var sp=simPleinen[i]||{}; var gev=+sp.gevraagd_mwh||_bezGevraagdMwh(p), gel=+sp.geladen_mwh||0, tek=+sp.tekort_mwh||Math.max(0,gev-gel);
     return { naam:p.naam||('Laadplein '+(i+1)), paaltype:p.paaltype||'AC22', paal_kw:_bezPaalKw(p),
       aantal_palen:Math.max(1,+p.aantal_palen||1), duur_min:+p.duur_min||0, dagen_per_week:+p.dagen_per_week||7,
+      verkoopprijs_eur_mwh:(+p.opbrengst_eur_mwh||tarief),
       vensters:(p.vensters||[]).map(function(w){return {start:+w.start||0,eind:+w.eind||0,sessies:+w.sessies||0};}),
       gevraagd_mwh:gev, geleverd_mwh:gel, tekort_mwh:tek, gemist_pct:gev>0?(100*tek/gev):0, piek_kw:+sp.piek_kw||0,
       heat:_laadpleinHeat(sp.load_kw) };
@@ -9771,6 +9804,7 @@ function _laadpleinRapportData(){
   inPleinen.forEach(function(p){ var n=Math.max(1,+p.aantal_palen||1), dc=(p.paaltype==='DC160');
     bom.push({item:(dc?'DC-laadpaal 160 kW':'AC-laadpaal 22 kW'),aantal:n,eenheidsprijs:(dc?40000:2500),totaal:n*(dc?40000:2500)}); });
   bom.push({item:'Kabeltracé'+(cx.exact?' (exact)':' (schatting)'),aantal:1,eenheidsprijs:Math.round(cx.kabelPlein),totaal:Math.round(cx.kabelPlein)});
+  if((+cx.extra||0)>0) bom.push({item:'Extra kosten & werken',aantal:1,eenheidsprijs:Math.round(+cx.extra),totaal:Math.round(+cx.extra),comment:(cx.comment||'')});
   var totCapex=rowCapex(r100.heeftPlein?r100:{is_basis:false,heeftPlein:true});
   var bc=STATE.baseCase||{};
   var pid=''; try{ pid=(typeof _projectIdLokaal==='function' && STATE.project)?_projectIdLokaal(STATE.project):(STATE.projectId||''); }catch(e){}
@@ -9795,7 +9829,8 @@ function _laadpleinRapportData(){
     scenarios:scenarios,
     kabel:{ exact:!!cx.exact, kabeltrace_eur:Math.round(cx.kabelPlein),
       foto_dataurl:(STATE.kabeltraceResult&&STATE.kabeltraceResult.foto_dataurl)||null,
-      bom:bom, totaal_capex:Math.round(totCapex) }
+      bom:bom, totaal_capex:Math.round(totCapex),
+      extra_kosten:Math.round(+cx.extra||0), extra_comment:(cx.comment||'') }
   };
 }
 function _num0(x){ return (+x||0).toLocaleString('nl-BE'); }
