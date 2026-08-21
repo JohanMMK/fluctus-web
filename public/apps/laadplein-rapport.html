@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     FLUCTUS · BETALEND-LAADPLEIN RAPPORT  v1.0.0  (2026-08-21 Europe/Brussels)
+     Klantrapport voor een gebouw dat er een BETALEND laadplein aan koppelt.
+     - E+Drive/Jacops-design (hergebruikt uit simuleer-rapport.html v1.2.2).
+     - DATA: window.FLUCTUS_LAADPLEIN_RAPPORT of sessionStorage['FLUCTUS_LAADPLEIN_RAPPORT'].
+       Gebouwd door _laadpleinRapportData() in simulator.html (spiegelt het scherm; rekent
+       enkel de financieringsmodellen door uit capex + jaarwinst).
+     - Zonder data → window._LP_DEMO=true → voorbeeldweergave met _demo().
+     - Opbouw: voorblad (kerncijfers investering) · samenvatting · inhoudstafel ·
+       ingegeven installatie · laadplein-definitie + heatmaps · simulatiemethode + sturing
+       (3 facturen) + windfall · 6 scenario's · kabeltracé (foto + BOM) · financiële analyse
+       (eigen middelen / 75%@5% / leasing 10% + 50/50) · slotpagina (CTA + services-matrix).
+     ============================================================ -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluctus · Betalend-laadplein rapport</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --blauw:#1F3864; --blauw-l:#2d4f8e; --groen:#05B050; --groen-d:#048443;
+    --oranje:#9E480E; --oranje-l:#E8A33D; --grijs:#5A6577; --lijn:#D5DBE3; --bg:#F5F7FA; --zwart:#1A1F2B;
+    --rood:#C0392B; --jacops:#E8352A; --edrive:#80C539;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);background:#e9edf2;font-size:14px;line-height:1.55}
+  .a4{background:#fff;width:210mm;min-height:297mm;margin:14px auto;padding:16mm 18mm 12mm;box-shadow:0 2px 14px rgba(0,0,0,.12);display:flex;flex-direction:column;position:relative}
+  .a4 > .a4-content{flex:1}
+  .a4-foot{margin-top:auto;padding-top:8px;font-size:9px;color:var(--grijs);border-top:1px solid var(--lijn);display:flex;justify-content:space-between}
+  .eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--grijs);font-weight:700}
+  h1{font-size:32px;color:var(--blauw);line-height:1.1;margin:6px 0 10px;font-weight:800}
+  h2{font-size:22px;color:var(--blauw);margin:0 0 4px;font-weight:800}
+  h3{font-size:15px;color:var(--blauw);margin:16px 0 6px;font-weight:700}
+  .lead{font-size:15px;color:var(--grijs);margin-bottom:14px}
+  p{margin:8px 0}
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .kpi-row.k3{grid-template-columns:repeat(3,1fr)}
+  .kpi-row.k2{grid-template-columns:repeat(2,1fr)}
+  .kpi{border:1px solid var(--lijn);border-left:4px solid var(--blauw);border-radius:4px;padding:12px}
+  .kpi.groen{border-left-color:var(--groen)} .kpi.oranje{border-left-color:var(--oranje)} .kpi.rood{border-left-color:var(--jacops)}
+  .kpi .l{font-size:10px;color:var(--grijs);text-transform:uppercase;letter-spacing:.05em;line-height:1.25;min-height:2.5em;display:block}
+  .kpi .v{font-size:24px;font-weight:800;color:var(--zwart);margin-top:3px}
+  .kpi .s{font-size:10px;color:var(--grijs);margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--lijn)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--blauw);color:#fff;font-weight:700;border-bottom:none}
+  tbody tr:nth-child(even){background:var(--bg)}
+  tfoot td{font-weight:800;border-top:2px solid var(--blauw);background:#eef2f8}
+  tr.grp td{background:#eaf0f8;font-weight:700;color:var(--blauw)}
+  tr.item td:first-child{padding-left:20px;color:#3A424C}
+  table.fact3{font-size:10.5px;margin:8px 0}
+  table.fact3 th,table.fact3 td{padding:2.5px 8px}
+  table.fact3 tr.item td:first-child{padding-left:18px}
+  table.fact3 thead th{font-size:10.5px}
+  table.scn{font-size:10.5px}
+  table.scn th,table.scn td{padding:3.5px 6px}
+  .pos{color:var(--groen-d);font-weight:700} .neg{color:var(--rood);font-weight:700}
+  .box{border:1px solid var(--lijn);border-radius:6px;padding:14px;margin:12px 0;background:var(--bg)}
+  .box.blauw{background:#1F386408;border-color:#1F386430}
+  .box.groen{background:#05B0500f;border-color:#05B05040}
+  .box.oranje{background:#FFF3E0;border-color:#9E480E55}
+  .note{font-size:11px;color:var(--grijs);font-style:italic}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .stap-band{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+  .stap-band .nr{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:var(--blauw);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .merk{display:flex;align-items:center;justify-content:space-between;gap:8mm;margin-bottom:8px}
+  .merk .fl{font-weight:800;font-size:20px;color:var(--blauw);letter-spacing:-.4px}
+  .merk .fl span{color:var(--jacops)}
+  .merk .jc{background:var(--jacops);color:#fff;font-family:Arial;font-weight:900;font-size:15px;letter-spacing:-.5px;padding:2.2mm 3mm;border-radius:1.4mm;display:inline-block}
+  .merk .jc .sub{display:block;font-size:7px;font-weight:700;letter-spacing:.18em;opacity:.9;margin-bottom:1px}
+  .titel-accent{height:4px;width:64px;background:var(--jacops);border-radius:3px;margin:2px 0 10px}
+  .inbox{display:grid;grid-template-columns:170px 1fr;gap:2px 12px;font-size:12.5px;padding:2px 0}
+  .inbox .k{color:var(--grijs);font-weight:700} .inbox .v{color:var(--zwart)}
+  .toc{font-size:13px} .toc div{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dotted var(--lijn)}
+  .toc .t{color:var(--zwart)} .toc .pg{color:var(--grijs);font-weight:700}
+  /* heatmap */
+  .heat-wrap{margin:8px 0 4px}
+  .heat-svg{display:block;width:100%;height:auto;border:1px solid var(--lijn);border-radius:4px}
+  .heat-leg{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--grijs);margin-top:4px}
+  .heat-leg .bar{height:9px;width:120px;border-radius:2px;background:linear-gradient(90deg,#EAF7EE,#9AD4A6,#05B050,#048443,#0B3D24)}
+  /* E+Drive-voorblad */
+  .a4.cover{padding:0;overflow:hidden;background:#3B4049}
+  .cover-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .cover-free{position:absolute;left:8.5%;right:8.5%;top:60%;color:#fff;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif}
+  .cf-title{color:#80C539;font-weight:800;font-size:14px;letter-spacing:.02em;margin-bottom:9px}
+  .cf-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px 16px}
+  .cf{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-left:3px solid #80C539;border-radius:6px;padding:9px 14px}
+  .cf-l{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#B9C0BE;font-weight:700;margin-bottom:3px}
+  .cf-v{font-size:19px;font-weight:800;color:#fff;line-height:1.15;word-break:break-word}
+  .cf-v .u{font-size:12px;font-weight:600;color:#B9C0BE}
+  /* cover-fallback (charcoal gradient met logo-tekst) als /apps/-asset ontbreekt */
+  .cover-fb{position:absolute;inset:0;background:linear-gradient(135deg,#2b3038,#3B4049 55%,#333842);display:flex;flex-direction:column;justify-content:flex-start;padding:16mm 14mm}
+  .cover-fb .ed{color:#80C539;font-weight:800;font-size:30px;letter-spacing:-.5px}
+  .cover-fb .ed b{color:#fff} .cover-fb .cl{color:#fff;font-size:20px;font-weight:800;margin-top:14px;max-width:70%}
+  .cover-fb .jc{position:absolute;top:16mm;right:14mm;background:#E8352A;color:#fff;font-family:Arial;font-weight:900;font-size:15px;padding:2mm 3mm;border-radius:1.4mm}
+  /* slotpagina */
+  .a4.slot{padding:15mm 15mm 12mm;background:#3B4049;color:#fff}
+  .slot-eyebrow{color:#80C539;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  .slot-h{font-size:27px;font-weight:800;line-height:1.15;margin:8px 0 6px;color:#fff}
+  .slot-h .g{color:#80C539}
+  .slot-sub{font-size:14px;color:#C7CCD1;margin-bottom:14px;line-height:1.5}
+  .svc-card{background:#fff;border-radius:8px;padding:10px 12px;color:#1A1F2B}
+  .svc-cap{font-size:11px;font-weight:800;color:#1F3864;margin-bottom:5px}
+  table.svc{width:100%;border-collapse:collapse;font-size:8.6px}
+  table.svc th,table.svc td{padding:1.6px 5px}
+  table.svc thead th{color:#6AA22E;font-weight:800;text-align:center;font-size:9px}
+  table.svc thead th.sub{font-size:8px;font-weight:700;padding-top:0;border-bottom:1.5px solid #E3E8EF}
+  table.svc td.r{text-align:left;color:#2A2F36}
+  table.svc td.c{text-align:center}
+  table.svc tr.sec td{background:#868C95;color:#EAF6DD;font-weight:800;text-transform:uppercase;font-size:8.5px;letter-spacing:.04em;padding:2.5px 6px}
+  table.svc tbody tr:not(.sec):nth-child(even){background:#F5F7FA}
+  .svc-chk{display:inline-block;width:12px;height:12px;line-height:12px;text-align:center;background:#2E333A;color:#fff;border-radius:2px;font-size:9px}
+  .svc-un{display:inline-block;width:11px;height:11px;border:1.4px solid #AEB4BD;border-radius:2px;vertical-align:middle}
+  .svc-txt{font-size:8.6px;color:#3A424C}
+  .slot-foto{display:block;width:100%;height:auto;border-radius:8px;margin-top:12px}
+  .slot-foot{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:10.5px;color:#C7CCD1}
+  .slot-jc{background:#E8352A;color:#fff;font-family:Arial;font-weight:900;font-size:12px;letter-spacing:-.5px;padding:2px 7px;border-radius:2px}
+  #fdpdf-bar{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;gap:8px}
+  #fdpdf-bar button{font-family:inherit;font-size:12px;font-weight:700;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
+  #fdpdf-save{background:var(--groen);color:#fff}
+  #fdpdf-print{background:#fff;color:var(--blauw);border:1px solid var(--lijn)!important}
+  @page{size:A4;margin:0}
+  @media print{ body{background:#fff} .a4{box-shadow:none;margin:0;min-height:297mm;page-break-after:always;break-after:page} .a4:last-child{page-break-after:auto;break-after:auto} table,.box,.kpi-row,.heat-wrap{break-inside:avoid} #fdpdf-bar{display:none} }
+</style>
+</head>
+<body>
+<div id="rapport"></div>
+<div id="fdpdf-bar">
+  <button id="fdpdf-print" onclick="window.print()">🖨️ Print</button>
+  <button id="fdpdf-save">⬇ PDF opslaan</button>
+</div>
+<script>
+// ============================================================================
+//  FLUCTUS · BETALEND-LAADPLEIN RAPPORT — renderer
+// ============================================================================
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _num(x,d){ x=+x||0; return x.toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+function eur(x){ return '€ '+_num(x,0); }
+function eur1(x){ return '€ '+_num(x,1); }
+function pct(x,d){ return _num(x,d==null?0:d)+' %'; }
+function jaar(x){ return _num(x,1)+' j'; }
+
+function _uitSessie(){ try{ return JSON.parse(sessionStorage.getItem('FLUCTUS_LAADPLEIN_RAPPORT')||'null'); }catch(e){ return null; } }
+var _echt = window.FLUCTUS_LAADPLEIN_RAPPORT || _uitSessie();
+window._LP_DEMO = !_echt;
+var D = _echt || _demo();
+
+var R=document.getElementById('rapport'), _pg=0;
+var PID=D.project_id||'';
+function pagina(inner){
+  var p=document.createElement('div'); p.className='a4'; _pg++;
+  p.innerHTML='<div class="a4-content">'+inner+'</div>'+
+    '<div class="a4-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies</span>'+
+    '<span>'+(PID?'Projectnr. '+esc(PID)+' · ':'')+'Betalend-laadplein rapport · p. '+_pg+'</span></div>';
+  R.appendChild(p); return p;
+}
+function merkband(){
+  return '<div class="merk"><div class="fl">Fluctus<span>.</span></div>'+
+    '<div class="jc"><span class="sub">ENERGIE-INTEGRATOR</span>JACOPS.</div></div>';
+}
+function heatKleur(t){ // t in 0..1 → E+Drive-groen ladder
+  if(t<=0) return '#F2F5F8';
+  var stops=[[234,247,238],[154,212,166],[5,176,80],[4,132,67],[11,61,36]];
+  var x=Math.min(1,t)*(stops.length-1), i=Math.floor(x), f=x-i, a=stops[i], b=stops[Math.min(stops.length-1,i+1)];
+  var r=Math.round(a[0]+(b[0]-a[0])*f), g=Math.round(a[1]+(b[1]-a[1])*f), bl=Math.round(a[2]+(b[2]-a[2])*f);
+  return 'rgb('+r+','+g+','+bl+')';
+}
+// Heatmap: verticaal 24 uur (0 boven → 23 onder), horizontaal 365 dagen. mat = [24][365] kW-gemiddelden.
+function heatmapSvg(mat, piek){
+  if(!mat||!mat.length) return '<div class="note">Geen sessie-profiel beschikbaar.</div>';
+  var DAYS=mat[0].length, HRS=mat.length, W=728, H=200, padL=26, padB=16;
+  var cw=(W-padL)/DAYS, ch=(H-padB)/HRS, mx=piek||1;
+  mat.forEach(function(row){ row.forEach(function(v){ if(v>mx) mx=v; }); });
+  var s='<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+  for(var h=0;h<HRS;h++){ for(var d=0;d<DAYS;d++){ var v=mat[h][d]||0; if(v<=0) continue;
+    s+='<rect x="'+(padL+d*cw).toFixed(1)+'" y="'+(h*ch).toFixed(1)+'" width="'+(cw+0.6).toFixed(1)+'" height="'+(ch+0.4).toFixed(1)+'" fill="'+heatKleur(v/mx)+'"/>'; } }
+  // uur-assen (0,6,12,18)
+  [0,6,12,18].forEach(function(h){ s+='<text x="2" y="'+(h*ch+ch*0.5+3).toFixed(1)+'" font-size="8" fill="#5A6577">'+h+'u</text>'; });
+  // maand-ticks
+  var mnd=['J','F','M','A','M','J','J','A','S','O','N','D'], cum=[0,31,59,90,120,151,181,212,243,273,304,334];
+  cum.forEach(function(c,i){ var x=padL+c*cw; s+='<line x1="'+x.toFixed(1)+'" y1="0" x2="'+x.toFixed(1)+'" y2="'+(H-padB)+'" stroke="#ffffff" stroke-width="0.4" opacity="0.5"/>';
+    s+='<text x="'+(x+2).toFixed(1)+'" y="'+(H-4)+'" font-size="8" fill="#5A6577">'+mnd[i]+'</text>'; });
+  s+='</svg>';
+  return s;
+}
+
+// ---------- financieringsmodellen (rekent uit capex + jaarwinst) ----------
+function _financiering(capex, jaarwinst){
+  var A={ looptijd:10, lening_pct:75, lening_rente:5, leasing_rente:10, split:50 };
+  function annu(pv,r,n){ r=r/100; return (r<=0)?pv/n:(pv*r/(1-Math.pow(1+r,-n))); }
+  var eigen={ investering:capex, jaarwinst:jaarwinst, tvt:jaarwinst>0?capex/jaarwinst:null, rendement:capex>0?jaarwinst/capex*100:null };
+  var L=capex*A.lening_pct/100, E=capex-L, an=annu(L,A.lening_rente,A.looptijd);
+  var lening={ lening:L, eigen_inbreng:E, rente:A.lening_rente, looptijd:A.looptijd, annuiteit:an,
+    netto_jr:jaarwinst-an, rendement_ei:E>0?(jaarwinst-an)/E*100:null, tvt_ei:(jaarwinst-an)>0?E/(jaarwinst-an):null };
+  var lease=annu(capex,A.leasing_rente,A.looptijd);
+  var extra=jaarwinst-lease, klant=extra*A.split/100, partner=extra*(100-A.split)/100+lease;
+  var leasing={ leasetermijn:lease, extra_winst:extra, klant_netto:klant, partner_netto:partner, rente:A.leasing_rente, split:A.split, looptijd:A.looptijd };
+  return { aannames:A, eigen:eigen, lening:lening, leasing:leasing };
+}
+
+var K=D.kern||{}, IN=D.input||{}, PLN=D.pleinen||[], ST=D.sturingen||{}, F3=D.factuur3||{}, SC=D.scenarios||[], KB=D.kabel||{};
+var FIN=_financiering(+K.investering||0, +K.jaarwinst||0);
+var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC.filter(function(r){return r.heeftPlein;}).slice(-1)[0] || {};
+
+// ===========================================================================
+// PAGINA 1 — VOORBLAD met kerncijfers voor de investeringsbeoordeling
+// ===========================================================================
+(function(){
+  function veld(l,v){ return '<div class="cf"><div class="cf-l">'+esc(l)+'</div><div class="cf-v">'+v+'</div></div>'; }
+  var p=document.createElement('div'); p.className='a4 cover'; _pg++;
+  p.innerHTML =
+    '<img class="cover-bg" src="/apps/voorblad-simuleer.jpg" onerror="this.style.display=\'none\';var fb=this.parentNode.querySelector(\'.cover-fb\'); if(fb) fb.style.display=\'flex\';" alt="E+Drive · een filiaal van Jacops">'+
+    '<div class="cover-fb" style="display:none"><div class="ed">E+<b>DRIVE</b></div>'+
+      '<div class="cl">Betalend laadplein aan uw gebouw — de investering in cijfers.</div><div class="jc">JACOPS.</div></div>'+
+    '<div class="cover-free">'+
+      '<div class="cf-title">Betalend-laadplein rapport'+(window._LP_DEMO?' · voorbeeldweergave':'')+'</div>'+
+      '<div class="cf-grid">'+
+        veld('Investering', eur(K.investering)+' <span class="u">excl. btw</span>')+
+        veld('Winst / jaar', eur(K.jaarwinst)+' <span class="u">netto</span>')+
+        veld('Terugverdientijd', (K.tvt!=null?jaar(K.tvt):'—'))+
+        veld('Rendement', (K.rendement!=null?pct(K.rendement,1)+' <span class="u">/ jaar</span>':'—'))+
+      '</div>'+
+    '</div>';
+  R.appendChild(p);
+})();
+
+// ===========================================================================
+// PAGINA 2 — SAMENVATTING (conclusie in klare taal)
+// ===========================================================================
+(function(){
+  var h='';
+  h+=merkband();
+  h+='<div class="eyebrow">Samenvatting</div><h1>Uw gebouw wordt ook een laadplein — en dat rendeert.</h1>';
+  h+='<div class="titel-accent"></div>';
+  h+='<p class="lead">U koppelt aan uw bestaande gebouw een <b>betalend laadplein</b>. Bezoekers laden hun wagen; u rekent hen een tarief aan. '+
+    'De laadenergie halen we <b>uit uw bestaande aansluiting en een batterij</b> — zonder uw aansluitvermogen te verzwaren. '+
+    'De simulatie hieronder toont wat dat concreet oplevert.</p>';
+  h+='<div class="kpi-row">'+
+    '<div class="kpi groen"><span class="l">Winst per jaar</span><div class="v">'+eur(K.jaarwinst)+'</div><div class="s">netto, na energie- en netkosten</div></div>'+
+    '<div class="kpi"><span class="l">Investering</span><div class="v">'+eur(K.investering)+'</div><div class="s">batterij + palen + kabeltracé</div></div>'+
+    '<div class="kpi oranje"><span class="l">Terugverdiend na</span><div class="v">'+(K.tvt!=null?jaar(K.tvt):'—')+'</div><div class="s">op eigen middelen</div></div>'+
+    '<div class="kpi groen"><span class="l">Rendement / jaar</span><div class="v">'+(K.rendement!=null?pct(K.rendement,1):'—')+'</div><div class="s">winst ÷ investering</div></div>'+
+  '</div>';
+  h+='<div class="box groen"><b>Waarom dit werkt.</b> Een batterij vlakt uw piek af en koopt energie op de goedkope uren (arbitrage). '+
+    'Diezelfde batterij levert samen met uw aansluiting het vermogen voor de laadsessies — u verkoopt die energie door aan '+eur(K.tarief)+'/MWh. '+
+    'De marginale kostprijs van de geladen energie is slechts <b>'+eur(K.laadprijs_marg)+'/MWh</b>, dus de marge per MWh is ruim.</div>';
+  h+='<div class="box"><b>Drie manieren om te financieren</b> (details achteraan):'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px;font-size:12px">'+
+      '<div><b>1. Eigen middelen</b><br>Rendement '+(FIN.eigen.rendement!=null?pct(FIN.eigen.rendement,1):'—')+'/jaar, terugverdiend na '+(FIN.eigen.tvt!=null?jaar(FIN.eigen.tvt):'—')+'.</div>'+
+      '<div><b>2. Lening 75% @ 5%</b><br>Netto '+eur(FIN.lening.netto_jr)+'/jaar over, rendement op eigen inbreng '+(FIN.lening.rendement_ei!=null?pct(FIN.lening.rendement_ei,0):'—')+'/jaar.</div>'+
+      '<div><b>3. Leasing @ 10% (50/50)</b><br>Geen investering; u houdt '+eur(FIN.leasing.klant_netto)+'/jaar over vanaf jaar 1.</div>'+
+    '</div></div>';
+  h+='<p class="note">De cijfers gelden voor het gesimuleerde scenario (100% van de verwachte laadsessies) en zijn exclusief btw. '+
+    'Ze zijn gebouwd op de sturing <b>zonder onbalans</b>; onbalans is een extra opportuniteit (zie verder).</p>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 3 — INHOUDSTAFEL
+// ===========================================================================
+(function(){
+  var items=[
+    ['1. De ingegeven installatie','4'],
+    ['2. Het laadplein — sessies, vensters en profiel','5'],
+    ['3. Zo rekent de simulatie — en wat sturing oplevert','6'],
+    ['4. De zes scenario’s naast elkaar','7'],
+    ['5. Kabeltracé — plan, materiaal en kosten','8'],
+    ['6. Financiële analyse','9']
+  ];
+  var h=merkband()+'<div class="eyebrow">Inhoud</div><h1>Wat u in dit rapport vindt</h1><div class="titel-accent"></div>';
+  h+='<p class="lead">De eerste bladzijden geven u de conclusie. Daarna bouwen we die stap voor stap op — van de ingegeven installatie tot de financiële analyse.</p>';
+  h+='<div class="toc" style="margin-top:10px">';
+  items.forEach(function(it){ h+='<div><span class="t">'+esc(it[0])+'</span><span class="pg">p. '+it[1]+'</span></div>'; });
+  h+='</div>';
+  h+='<div class="box blauw" style="margin-top:18px"><b>Voor wie dit rapport is.</b> U hoeft geen ingenieur of energie-expert te zijn. '+
+    'Elke term die we gebruiken, leggen we uit op de plek waar hij voorkomt. Twijfelt u ergens over? Uw Fluctus-contact loodst u er graag door.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 4 — DE INGEGEVEN INSTALLATIE
+// ===========================================================================
+(function(){
+  var a=IN.aansluiting||{}, v=IN.verbruik||{}, b=IN.batterij||null;
+  function rij(k,val){ return '<div class="inbox"><div class="k">'+esc(k)+'</div><div class="v">'+val+'</div></div>'; }
+  var h=merkband()+'<div class="stap-band"><div class="nr">1</div><div><h2>De ingegeven installatie</h2><div class="note">Waarop de simulatie zich baseert.</div></div></div>';
+  h+='<h3>Aansluiting</h3>'+rij('Toegangsvermogen', _num(a.kva)+' kVA'+(a.spanning?' · '+esc(a.spanning):''))+
+    (a.max_injectie_kw!=null?rij('Max. injectie', _num(a.max_injectie_kw)+' kW'):'');
+  h+='<h3>Verbruik gebouw</h3>'+rij('Jaarverbruik', _num(v.mwh,1)+' MWh'+(v.label?' · '+esc(v.label):''));
+  h+='<h3>Productie & opslag</h3>'+
+    rij('Zonnepanelen (PV)', IN.pv?_num(IN.pv.kwp)+' kWp':'—')+
+    rij('Batterij (opslag)', b?(_num(b.kw)+' kW / '+_num(b.kwh)+' kWh'+((b.dod_pct||b.rte_pct)?' · DoD '+_num(b.dod_pct)+'% · RTE '+_num(b.rte_pct)+'%':'')+(b.levensduur_jaar?' · levensduur ± '+_num(b.levensduur_jaar,1)+' j':'')):'—');
+  h+='<div class="box blauw" style="margin-top:16px"><b>De kern van de aanpak.</b> Het toegangsvermogen (<b>'+_num(a.kva)+' kVA</b>) wordt '+
+    '<b>nooit verzwaard</b>. Het laadplein wordt bediend uit de vrije ruimte onder dat vermogen én uit de batterij. '+
+    'Wat op een piekmoment niet past, wordt netjes uitgesteld (throttling) — zo blijft uw netfactuur onder controle.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 5 — HET LAADPLEIN: sessies, vensters, profiel (heatmaps)
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">2</div><div><h2>Het laadplein — sessies, vensters en profiel</h2><div class="note">Hoe we een betalend laadplein definiëren.</div></div></div>';
+  h+='<div class="box"><b>Begrippen.</b> Een <b>sessie</b> is één laadbeurt van een bezoeker: een wagen laadt gedurende een vaste <b>duur</b> aan het vermogen van de paal. '+
+    'De sessies vallen willekeurig binnen één of twee <b>vensters</b> (bv. voormiddag en namiddag). '+
+    'Het <b>aantal palen</b> begrenst hoeveel sessies tegelijk kunnen laden.</div>';
+  PLN.forEach(function(p,i){
+    h+='<h3>'+esc(p.naam||('Laadplein '+(i+1)))+'</h3>';
+    h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 8px">'+
+      '<div><span style="color:#5A6577">Paaltype</span><br><b>'+esc(p.paaltype||'—')+' · '+_num(p.paal_kw)+' kW</b></div>'+
+      '<div><span style="color:#5A6577">Aantal palen</span><br><b>'+_num(p.aantal_palen)+'</b></div>'+
+      '<div><span style="color:#5A6577">Duur / sessie</span><br><b>'+_num(p.duur_min)+' min</b></div>'+
+      '<div><span style="color:#5A6577">Dagen / week</span><br><b>'+_num(p.dagen_per_week)+'</b></div>'+
+    '</div>';
+    if(p.vensters&&p.vensters.length){ h+='<div style="font-size:11.5px;color:#5A6577;margin-bottom:4px">Vensters (sessies/dag): '+
+      p.vensters.map(function(w){ return '<b style="color:#1A1F2B">'+_num(w.start)+'–'+_num(w.eind)+'u: '+_num(w.sessies)+'</b>'; }).join(' · ')+'</div>'; }
+    h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 6px">'+
+      '<div><span style="color:#5A6577">Gevraagd</span><br><b>'+_num(p.gevraagd_mwh,1)+' MWh</b></div>'+
+      '<div><span style="color:#5A6577">Geleverd</span><br><b style="color:#05B050">'+_num(p.geleverd_mwh,1)+' MWh</b></div>'+
+      '<div><span style="color:#5A6577">Gemist</span><br><b style="color:'+((p.gemist_pct||0)>5?'#9E480E':'#5A6577')+'">'+_num(p.tekort_mwh,1)+' MWh ('+_num(p.gemist_pct,1)+'%)</b></div>'+
+      '<div><span style="color:#5A6577">Piek plein</span><br><b>'+_num(p.piek_kw,0)+' kW</b></div>'+
+    '</div>';
+    h+='<div class="heat-wrap">'+heatmapSvg(p.heat,p.piek_kw)+
+      '<div class="heat-leg"><span>weinig</span><span class="bar"></span><span>veel geladen vermogen</span><span style="margin-left:auto">verticaal = uur van de dag · horizontaal = dag van het jaar</span></div></div>';
+  });
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 6 — SIMULATIEMETHODE + IMPACT VAN STURING + WINDFALL
+// ===========================================================================
+(function(){
+  var g=ST.geen||{}, s=ST.sturing||{}, o=ST.onbalans||{};
+  var h=merkband()+'<div class="stap-band"><div class="nr">3</div><div><h2>Zo rekent de simulatie — en wat sturing oplevert</h2><div class="note">Van ruwe kost naar slimme kost.</div></div></div>';
+  h+='<p>De simulatie draait een volledig jaar in stappen van 15 minuten. Voor élk kwartier bepaalt ze wat het gebouw verbruikt, '+
+    'wat de laadsessies vragen, en hoe de batterij het best laadt of ontlaadt. Dat gebeurt in drie niveaus van «sturing»:</p>';
+  h+='<div class="kpi-row k3">'+
+    '<div class="kpi rood"><span class="l">1 · Geen sturing</span><div class="v">'+eur(g.kost)+'</div><div class="s">alles laadt meteen — duurste geval</div></div>'+
+    '<div class="kpi groen"><span class="l">2 · Sturing zonder onbalans</span><div class="v">'+eur(s.kost)+'</div><div class="s">de business case</div></div>'+
+    '<div class="kpi"><span class="l">3 · Sturing met onbalans</span><div class="v">'+eur(o.kost)+'</div><div class="s">extra opportuniteit</div></div>'+
+  '</div>';
+  h+='<div class="split">'+
+    '<div class="box groen"><b>Meerwaarde van sturing</b><div style="font-size:22px;font-weight:800;color:#048443;margin:4px 0">+ '+eur(ST.meerwaarde_eur)+'</div>'+
+      '<div class="note" style="font-style:normal">'+pct(ST.meerwaarde_pct,1)+' goedkoper dan «geen sturing» — enkel door slim te laden en de piek af te vlakken.</div></div>'+
+    '<div class="box blauw"><b>Windfall onbalans</b><div style="font-size:22px;font-weight:800;color:#1F3864;margin:4px 0">+ '+eur(ST.windfall_eur)+'</div>'+
+      '<div class="note" style="font-style:normal">'+pct(ST.windfall_pct,1)+' extra bovenop niveau 2 — als bonus, niet als basis.</div></div>'+
+  '</div>';
+  h+='<div class="box oranje"><b>Wat is «windfall profit»?</b> Naast de spotmarkt bestaat er een <b>onbalansmarkt</b>: het net beloont (of bestraft) '+
+    'wie op het juiste moment méér of minder afneemt. Door de batterij passief te laten meebewegen met die prijzen valt er soms extra winst te rapen — '+
+    'een <b>meevaller</b> («windfall»). Ze is echter <b>onzeker en niet gegarandeerd</b>. <b>Daarom bouwen we de business case bewust op niveau 2 '+
+    '(sturing zonder onbalans).</b> De onbalanswinst nemen we <b>niet</b> mee in de terugverdientijd; ze is een aspect dat u later samen met uw '+
+    'energieleverancier kunt bekijken en dat, wanneer het meezit, bovenop het rendement komt.</div>';
+  // compacte 3-kolommenfactuur
+  if(F3.rows&&F3.rows.length){
+    var hh=F3.headers||['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'];
+    var body='';
+    F3.rows.forEach(function(r){ var cls=r.groep?'grp':(r.item?'item':'');
+      body+='<tr class="'+cls+'"><td>'+esc(r.label)+'</td><td>'+eur(r.geen)+'</td><td>'+eur(r.sturing)+'</td><td>'+eur(r.onbalans)+'</td></tr>'; });
+    var st=F3.subtotaal||{}, bt=F3.btw||{}, tt=F3.totaal||{};
+    var foot='<tfoot><tr><td>Subtotaal excl. btw</td><td>'+eur(st.geen)+'</td><td>'+eur(st.sturing)+'</td><td>'+eur(st.onbalans)+'</td></tr>'+
+      (bt.geen!=null?'<tr><td>Btw (21%)</td><td>'+eur(bt.geen)+'</td><td>'+eur(bt.sturing)+'</td><td>'+eur(bt.onbalans)+'</td></tr>':'')+
+      (tt.geen!=null?'<tr><td>Totaal incl. btw</td><td>'+eur(tt.geen)+'</td><td>'+eur(tt.sturing)+'</td><td>'+eur(tt.onbalans)+'</td></tr>':'')+'</tfoot>';
+    h+='<h3>Factuurdetails — de drie sturingen</h3><table class="fact3"><thead><tr><th>'+esc(hh[0])+'</th><th>'+esc(hh[1])+'</th><th>'+esc(hh[2])+'</th><th>'+esc(hh[3])+'</th></tr></thead><tbody>'+body+'</tbody>'+foot+'</table>';
+  }
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 7 — DE ZES SCENARIO'S
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">4</div><div><h2>De zes scenario’s naast elkaar</h2><div class="note">Van geen batterij tot een druk bezet laadplein.</div></div></div>';
+  h+='<p>We vergelijken zes gevallen op <b>dezelfde aansluiting</b> (nooit verzwaard) en sturing <b>zonder onbalans</b>. '+
+    'De sessies schalen van 50% tot 200% van de verwachte drukte — zo ziet u meteen hoe gevoelig het rendement is aan bezetting.</p>';
+  var head='<tr><th>Scenario</th><th>€/MWh</th><th>km gevraagd</th><th>% gel.</th><th>Laadprijs marg.</th><th>Opbrengst</th><th>Jaarfactuur</th><th>Winst</th><th>Investering</th><th>Terugv.</th><th>Rend./jr</th></tr>';
+  var body='';
+  SC.forEach(function(r){
+    var win=r.is_basis?'<span style="color:#5A6577">ref.</span>':'<b class="'+((r.winst_eur||0)>=0?'pos':'neg')+'">'+eur(r.winst_eur)+'</b>';
+    var inv=r.is_basis?'<span style="color:#5A6577">ref.</span>':eur(r.investering_eur);
+    var tvt=r.is_basis?'—':((r.tvt_jaar==null)?'<span style="color:#C0392B">—</span>':jaar(r.tvt_jaar));
+    var rnd=r.is_basis?'—':((r.rendement_pct==null)?'—':'<b class="pos">'+pct(r.rendement_pct,1)+'</b>');
+    body+='<tr><td>'+esc(r.label)+'</td><td>'+eur(r.energieprijs_eur_mwh)+'/MWh</td>'+
+      '<td>'+(r.heeftPlein?_num(r.km_gevraagd)+' km':'—')+'</td>'+
+      '<td>'+(r.heeftPlein?pct(r.pct_geleverd,1):'—')+'</td>'+
+      '<td>'+(r.heeftPlein?eur(r.laadprijs_marg_eur_mwh)+'/MWh':'—')+'</td>'+
+      '<td>'+(r.heeftPlein?eur(r.opbrengst_eur):'—')+'</td>'+
+      '<td>'+eur(r.jaarfactuur_eur)+'</td><td>'+win+'</td><td>'+inv+'</td><td>'+tvt+'</td><td>'+rnd+'</td></tr>';
+  });
+  h+='<table class="scn"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+  h+='<div class="box"><b>Hoe u de tabel leest.</b> «Winst» = laadplein-opbrengst − jaarfactuur van dat scenario + jaarfactuur zonder batterij. '+
+    'De batterij-rij (zonder sessies) toont zo het verbruiksvoordeel op zich (piek + arbitrage). «Laadprijs marg.» is de kost van énkel de '+
+    'geladen energie; het verschil met uw tarief van '+eur(K.tarief)+'/MWh is uw marge. De investering is gelijk voor 50–200% (de palen zijn fysiek); '+
+    'enkel de bezetting — en dus de winst — verandert.</div>';
+  h+='<div class="box groen"><b>Conclusie.</b> Zelfs op halve bezetting is de installatie rendabel; op de verwachte bezetting (100%) verdient u '+
+    'de volledige investering terug in <b>'+(_100.tvt_jaar!=null?jaar(_100.tvt_jaar):'—')+'</b> aan <b>'+(_100.rendement_pct!=null?pct(_100.rendement_pct,1):'—')+' rendement per jaar</b>.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 8 — KABELTRACÉ: foto + bill of material + kosten
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">5</div><div><h2>Kabeltracé — plan, materiaal en kosten</h2><div class="note">De exacte aansluitkost van het laadplein.</div></div></div>';
+  h+='<p>Het kabeltracé bepaalt hoe de palen en de batterij op uw aansluiting worden aangesloten. '+(KB.exact
+      ? 'De onderstaande prijs is <b>exact ingetekend</b> op het terrein via de kabelplanner.'
+      : 'De onderstaande prijs is een <b>eerste schatting</b>; met de kabelplanner tekenen we het tracé exact in en verfijnen we de kost.')+'</p>';
+  if(KB.foto_dataurl){ h+='<img src="'+KB.foto_dataurl+'" style="display:block;width:100%;border-radius:6px;margin:8px 0;border:1px solid #D5DBE3" alt="Kabeltracé">'; }
+  else { h+='<div class="box" style="text-align:center;color:#5A6577;padding:26px">📍 Nog geen luchtfoto ingetekend — teken het tracé in via de kabelplanner voor het exacte plan en de foto.</div>'; }
+  if(KB.bom&&KB.bom.length){
+    var body='';
+    KB.bom.forEach(function(it){ body+='<tr><td>'+esc(it.item)+'</td><td>'+_num(it.aantal)+'</td><td>'+eur(it.eenheidsprijs)+'</td><td>'+eur(it.totaal)+'</td></tr>'; });
+    h+='<h3>Materiaal & kosten (bill of material)</h3><table><thead><tr><th>Onderdeel</th><th>Aantal</th><th>Eenheidsprijs</th><th>Totaal</th></tr></thead><tbody>'+body+'</tbody>'+
+      '<tfoot><tr><td>Totale investering</td><td></td><td></td><td>'+eur(KB.totaal_capex!=null?KB.totaal_capex:K.investering)+'</td></tr></tfoot></table>';
+  }
+  h+='<div class="box blauw"><b>Kabeltracé: '+(KB.exact?'<span style="color:#048443">EXACT</span>':'<span style="color:#9E480E">schatting</span>')+' '+eur(KB.kabeltrace_eur)+'.</b> '+
+    'Deze post zit in de investering hierboven. Zodra het tracé exact is ingetekend, herrekenen investering, terugverdientijd en rendement automatisch mee.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 9 — FINANCIËLE ANALYSE (eigen middelen / lening 75%@5% / leasing 10% + 50/50)
+// ===========================================================================
+(function(){
+  var A=FIN.aannames, e=FIN.eigen, l=FIN.lening, le=FIN.leasing;
+  var h=merkband()+'<div class="stap-band"><div class="nr">6</div><div><h2>Financiële analyse</h2><div class="note">Drie manieren om de installatie te bekostigen.</div></div></div>';
+  h+='<p>De winst van <b>'+eur(K.jaarwinst)+'/jaar</b> (scenario 100%, zonder onbalans) is het vertrekpunt. '+
+    'Hieronder ziet u wat u overhoudt naargelang u de investering van <b>'+eur(K.investering)+'</b> zelf betaalt, leent of least. '+
+    'Aannames: looptijd '+_num(A.looptijd)+' jaar.</p>';
+
+  // 1. eigen middelen
+  h+='<h3>1 · Eigen middelen</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Investering</div><div class="v">'+eur(e.investering)+'</div></div>'+
+    '<div class="inbox"><div class="k">Winst / jaar</div><div class="v">'+eur(e.jaarwinst)+'</div></div>'+
+    '<div class="inbox"><div class="k">Terugverdientijd</div><div class="v">'+(e.tvt!=null?jaar(e.tvt):'—')+'</div></div>'+
+    '<div class="inbox"><div class="k">Rendement / jaar</div><div class="v"><b class="pos">'+(e.rendement!=null?pct(e.rendement,1):'—')+'</b></div></div>'+
+  '</div><div class="box groen" style="align-self:stretch"><b>U betaalt alles zelf.</b> Het eenvoudigste geval: na '+(e.tvt!=null?jaar(e.tvt):'—')+' '+
+    'heeft de installatie zichzelf terugbetaald; daarna is de winst zuivere opbrengst. Ideaal als u over de middelen beschikt en het maximale rendement wil.</div></div>';
+
+  // 2. lening
+  h+='<h3>2 · Financiering op eigen conto — 75% geleend aan 5%</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Eigen inbreng (25%)</div><div class="v">'+eur(l.eigen_inbreng)+'</div></div>'+
+    '<div class="inbox"><div class="k">Lening (75% @ '+_num(l.rente)+'%)</div><div class="v">'+eur(l.lening)+'</div></div>'+
+    '<div class="inbox"><div class="k">Aflossing / jaar</div><div class="v">'+eur(l.annuiteit)+' <span style="font-size:11px;color:#5A6577">('+_num(l.looptijd)+' j)</span></div></div>'+
+    '<div class="inbox"><div class="k">Netto over / jaar</div><div class="v"><b class="'+(l.netto_jr>=0?'pos':'neg')+'">'+eur(l.netto_jr)+'</b></div></div>'+
+    '<div class="inbox"><div class="k">Rendement op eigen inbreng</div><div class="v"><b class="pos">'+(l.rendement_ei!=null?pct(l.rendement_ei,0):'—')+'</b></div></div>'+
+  '</div><div class="box blauw" style="align-self:stretch"><b>Het hefboomeffect.</b> U legt maar '+eur(l.eigen_inbreng)+' zelf in. '+
+    'De winst (35% op de installatie) ligt véél hoger dan de leenrente (5%), dus op uw eigen inbreng loopt het rendement op tot '+
+    '<b>'+(l.rendement_ei!=null?pct(l.rendement_ei,0):'—')+' per jaar</b>. Na '+_num(l.looptijd)+' jaar is de lening afbetaald en houdt u de volle '+eur(K.jaarwinst)+'/jaar over.</div></div>';
+
+  // 3. leasing
+  h+='<h3>3 · Leasing aan 10% — met winstdeling 50/50</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Uw investering</div><div class="v"><b class="pos">€ 0</b></div></div>'+
+    '<div class="inbox"><div class="k">Leasetermijn / jaar (@ '+_num(le.rente)+'%)</div><div class="v">'+eur(le.leasetermijn)+'</div></div>'+
+    '<div class="inbox"><div class="k">Extra winst (na leasing)</div><div class="v">'+eur(le.extra_winst)+'</div></div>'+
+    '<div class="inbox"><div class="k">Uw deel (50%)</div><div class="v"><b class="pos">'+eur(le.klant_netto)+'</b></div></div>'+
+    '<div class="inbox"><div class="k">Deel partner (50%)</div><div class="v">'+eur(le.extra_winst*0.5)+'</div></div>'+
+  '</div><div class="box groen" style="align-self:stretch"><b>Geen investering, wél winst.</b> De partner financiert en leaset de installatie (aan '+_num(le.rente)+'%). '+
+    'U betaalt niets vooraf en draagt geen risico. De winst boven de leasingkost wordt <b>50/50</b> gedeeld: u houdt '+
+    '<b>'+eur(le.klant_netto)+'/jaar</b> over vanaf het eerste jaar. Ideaal als u uw kapitaal liever voor uw kernactiviteit bewaart.</div></div>';
+
+  h+='<div class="box"><b>Samengevat.</b> '+
+    'Eigen middelen geven het hoogste absolute rendement; een lening geeft de hoogste hefboom op uw eigen inbreng; leasing geeft u winst zónder te investeren. '+
+    'Alle drie vertrekken van dezelfde jaarwinst van '+eur(K.jaarwinst)+' — en houden geen rekening met de onbalans-windfall, die er bovenop kan komen.</div>';
+  h+='<p class="note">Indicatieve berekening, exclusief btw en fiscaliteit (investeringsaftrek, afschrijvingen). Rentes en looptijd zijn aannames en worden per dossier bevestigd.</p>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// SLOTPAGINA — CTA + E+Drive services-matrix
+// ===========================================================================
+(function(){
+  var SVC=[
+   {sec:'Management'},
+   {r:'Central monitoring using platform', v:[1,1,1,1]},{r:'Firmware updates', v:[1,1,1,1]},
+   {r:'Central whitelisting', v:[1,1,1,1]},{r:'Split billing (employer-employee)', v:[1,0,0,0]},
+   {r:'Invoicing public sessions', v:[0,1,1,1]},{r:'Allow all charge cards (roaming)', v:[0,1,1,1]},
+   {r:'Helpdesk (Office hours / Free)', v:[1,0,0,0]},{r:'Helpdesk (24/7 / Free)', v:[0,1,1,1]},
+   {r:'SIM card (mobile data – backup)', v:['option',1,1,1]},{r:'Charging pass', v:['option','option','option','option']},
+   {sec:'Preventive Maintenance'},
+   {r:'Maintenance frequency / year — AC', v:['none','none','1','1']},{r:'Maintenance frequency / year — DC', v:['none','none','2','2']},
+   {r:'Cleaning of the charger', v:[0,0,1,1]},{r:'Stability inspection', v:[0,0,1,1]},
+   {r:'Site inspection (collision protection, signs, …)', v:[0,0,1,1]},{r:'Inspection of electrical connection', v:[0,0,1,1]},
+   {r:'Inspection of labels / stickers', v:[0,0,1,1]},{r:'Cleaning/Swap of air filters (DC only)', v:[0,0,1,1]},
+   {r:'Test of charger', v:[0,0,1,1]},{r:'Inspection report', v:[0,0,1,1]},
+   {sec:'Curative Maintenance'},
+   {r:'Incident management', v:['ad-hoc','ad-hoc',1,1]},{r:'Response time (SLA — working days)', v:['5','3','2','2']},
+   {r:'On site interventions', v:['Paid','Paid','Paid',1]},{r:'Spare parts (in warranty period)', v:[1,1,1,1]},
+   {r:'Spare parts (after warranty period)', v:['Paid','Paid','Paid',1]},
+   {r:'Repair of site assets (collision protection, signs, …)', v:['Paid','Paid','Paid',1]},
+   {r:'Damage (improper use, vandalism, collision)', v:['Paid','Paid','Paid','Paid']}
+  ];
+  function cell(x){ if(x===1) return '<span class="svc-chk">✓</span>'; if(x===0) return '<span class="svc-un"></span>'; return '<span class="svc-txt">'+esc(x)+'</span>'; }
+  var rows='';
+  SVC.forEach(function(r){ if(r.sec){ rows+='<tr class="sec"><td colspan="5">'+esc(r.sec)+'</td></tr>'; }
+    else { rows+='<tr><td class="r">'+esc(r.r)+'</td><td class="c">'+cell(r.v[0])+'</td><td class="c">'+cell(r.v[1])+'</td><td class="c">'+cell(r.v[2])+'</td><td class="c">'+cell(r.v[3])+'</td></tr>'; } });
+  var p=document.createElement('div'); p.className='a4 slot'; _pg++;
+  p.innerHTML=
+    '<div class="slot-eyebrow">E+Drive — een filiaal van Jacops</div>'+
+    '<div class="slot-h">Klaar om van uw parking een <span class="g">rendabel laadplein</span> te maken?</div>'+
+    '<div class="slot-sub">Wij plaatsen, verbinden en beheren de laadpalen; Fluctus stuurt de energie zo dat uw investering maximaal rendeert. '+
+      'Contacteer ons — de services hieronder komen als bonus op uw opbrengst.</div>'+
+    '<div class="svc-card"><div class="svc-cap">E+Drive services — kies het pakket dat bij u past</div>'+
+      '<table class="svc"><thead><tr><th></th>'+
+        '<th>E+Manage<span class="sub" style="display:block">Home</span></th><th>E+Manage<span class="sub" style="display:block">B2B</span></th>'+
+        '<th>E+Care<span class="sub" style="display:block">B2B</span></th><th>E+Omnium<span class="sub" style="display:block">B2B</span></th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>'+
+    '<img class="slot-foto" src="/apps/voertuig-personenwagen-ms.jpg" onerror="this.style.display=\'none\'" alt="Laadplein">'+
+    '<div class="slot-foot"><span>Fluctus.net CVSO · BE 0757.494.180 · Onafhankelijk energieadvies · energie-integrator</span><span class="slot-jc">JACOPS.</span></div>';
+  R.appendChild(p);
+})();
+
+// ---------------------------------------------------------------------------
+// PDF / print
+// ---------------------------------------------------------------------------
+(function(){
+  var btn=document.getElementById('fdpdf-save');
+  async function genPdf(){
+    if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internetverbinding?)');
+    var pages=document.querySelectorAll('.a4');
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+    for(var i=0;i<pages.length;i++){
+      var canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var img=canvas.toDataURL('image/jpeg',0.92);
+      var hh=canvas.height*210/canvas.width;
+      if(i>0) pdf.addPage();
+      pdf.addImage(img,'JPEG',0,0,210,hh>297?297:hh);
+    }
+    return pdf;
+  }
+  btn.onclick=async function(){
+    btn.disabled=true; var orig=btn.textContent; btn.textContent='⏳ PDF…';
+    try{ var pdf=await genPdf(); pdf.save('Fluctus_laadplein_rapport'+(PID?'_'+PID:'')+'.pdf'); }
+    catch(e){ alert('PDF maken lukte niet: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent=orig; }
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// DEMO-data (standalone preview, geen echte sim)
+// ---------------------------------------------------------------------------
+function _demo(){
+  // Heatmap-demo: 2 vensters (8-12u, 13-18u), 6 dagen/week, hogere intensiteit rond middag.
+  function demoHeat(seed){ var m=[]; for(var hh=0;hh<24;hh++){ var row=[]; for(var d=0;d<365;d++){
+      var wd=(d%7)<6, inW=(hh>=8&&hh<12)||(hh>=13&&hh<18);
+      var v=(wd&&inW)?(0.35+0.5*Math.abs(Math.sin((hh+seed+d*0.3))))*((hh>=13&&hh<18)?1:0.8):0; row.push(+v.toFixed(2)); } m.push(row);} return m; }
+  return {
+    klant:'Kantoorgebouw (voorbeeld)', project:'Betalend laadplein', scenario:'2 pleinen · 45 kVA · batterij 120/260',
+    locatie:'Fluvius · LS', datum:'augustus 2026', project_id:'FLX-LP-DEMO',
+    kern:{ investering:141906, jaarwinst:50445, tvt:2.8, rendement:35.5, opbrengst:62503, laadprijs_marg:131, tarief:500, geleverd_mwh:125 },
+    input:{ aansluiting:{kva:45,spanning:'LS',max_injectie_kw:0}, verbruik:{mwh:100,label:'Kantoor (kwartier)'},
+      pv:null, batterij:{kw:120,kwh:260,dod_pct:90,rte_pct:92,cycli:384,levensduur_jaar:20.8} },
+    pleinen:[
+      { naam:'Laadplein 1', paaltype:'DC160', paal_kw:160, aantal_palen:1, duur_min:30, dagen_per_week:6,
+        vensters:[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}], gevraagd_mwh:57, geleverd_mwh:54, tekort_mwh:3, gemist_pct:5.3, piek_kw:160, heat:demoHeat(0) },
+      { naam:'Laadplein 2', paaltype:'AC22', paal_kw:22, aantal_palen:3, duur_min:30, dagen_per_week:7,
+        vensters:[{start:8,eind:12,sessies:16},{start:13,eind:18,sessies:16}], gevraagd_mwh:71, geleverd_mwh:71, tekort_mwh:0, gemist_pct:0, piek_kw:66, heat:demoHeat(1.7) }
+    ],
+    sturingen:{ geen:{kost:56219,eur_mwh:249.9}, sturing:{kost:32481,eur_mwh:144.4}, onbalans:{kost:14957,eur_mwh:66.5},
+      meerwaarde_eur:23739, meerwaarde_pct:42.2, windfall_eur:17523, windfall_pct:53.9 },
+    factuur3:{ headers:['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'],
+      rows:[
+        {label:'Groep A — Energiekost',groep:true,geen:27134,sturing:22680,onbalans:4590},
+        {label:'Afname energie spot',item:true,geen:20013,sturing:17718,onbalans:10026},
+        {label:'Groep B — Netgebruik afname',groep:true,geen:23059,sturing:3627,onbalans:3627},
+        {label:'Maandpiek',item:true,geen:12257,sturing:2201,onbalans:2201},
+        {label:'Toegangsvermogen',item:true,geen:1368,sturing:1368,onbalans:1368},
+        {label:'Groep E — Heffingen',groep:true,geen:6027,sturing:6174,onbalans:6741}
+      ],
+      subtotaal:{geen:56219,sturing:32481,onbalans:14957}, btw:{geen:11322,sturing:6337,onbalans:2657}, totaal:{geen:67541,sturing:38817,onbalans:17614} },
+    scenarios:[
+      {label:'Geen batterij',pct:0,is_basis:true,heeftPlein:false,energieprijs_eur_mwh:204,jaarfactuur_eur:20423,winst_eur:0},
+      {label:'Batterij',pct:0,is_basis:false,heeftPlein:false,energieprijs_eur_mwh:161,jaarfactuur_eur:16088,winst_eur:4335,investering_eur:106000,tvt_jaar:24.5,rendement_pct:4.1},
+      {label:'Batterij + laadplein · 50% sessies',pct:50,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:407969,pct_geleverd:97.6,laadprijs_marg_eur_mwh:134,opbrengst_eur:31865,jaarfactuur_eur:24630,winst_eur:27658,investering_eur:141906,tvt_jaar:5.1,rendement_pct:19.5},
+      {label:'Batterij + laadplein · 100% sessies',pct:100,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:800019,pct_geleverd:97.7,laadprijs_marg_eur_mwh:131,opbrengst_eur:62503,jaarfactuur_eur:32481,winst_eur:50445,investering_eur:141906,tvt_jaar:2.8,rendement_pct:35.5},
+      {label:'Batterij + laadplein · 150% sessies',pct:150,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:144,km_gevraagd:1163925,pct_geleverd:86.0,laadprijs_marg_eur_mwh:133,opbrengst_eur:80051,jaarfactuur_eur:37436,winst_eur:63038,investering_eur:141906,tvt_jaar:2.3,rendement_pct:44.4},
+      {label:'Batterij + laadplein · 200% sessies',pct:200,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:1488981,pct_geleverd:72.4,laadprijs_marg_eur_mwh:144,opbrengst_eur:86241,jaarfactuur_eur:40907,winst_eur:65757,investering_eur:141906,tvt_jaar:2.2,rendement_pct:46.3}
+    ],
+    kabel:{ exact:false, kabeltrace_eur:30000, foto_dataurl:null, totaal_capex:141906,
+      bom:[
+        {item:'Batterij 120 kW / 260 kWh',aantal:1,eenheidsprijs:91000,totaal:91000},
+        {item:'DC-laadpaal 160 kW',aantal:1,eenheidsprijs:40000,totaal:40000},
+        {item:'AC-laadpaal 22 kW',aantal:3,eenheidsprijs:2500,totaal:7500},
+        {item:'Kabeltracé (schatting)',aantal:1,eenheidsprijs:30000,totaal:30000}
+      ] }
+  };
+}
+</script>
+</body>
+</html>

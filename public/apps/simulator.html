@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.65.0  (2026-08-20 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.66.0  (2026-08-21 Europe/Brussels)
+     v1.66.0 (Johan 21-08): BETALEND-LAADPLEIN KLANTRAPPORT. Nieuwe knop "📄 Betalend-laadplein rapport" bij de
+              bezoekers-scenario's → _laadpleinRapportData() naar sessionStorage['FLUCTUS_LAADPLEIN_RAPPORT'] +
+              window.open('/apps/laadplein-rapport.html'). Spiegelt het scherm: 3 sturingen (kpiSturing),
+              6 scenario's + capex/rendement (_bezCapex), heatmaps (uur×dag) uit laadplein.pleinen[].load_kw,
+              kabeltracé-BOM. Het rapport zelf rekent de financieringsmodellen (eigen / 75%@5% / leasing 10% +
+              50/50). E+Drive/Jacops-design. VEREIST laadplein-rapport.html op /apps/ (fluctus-web).
      v1.65.0 (Johan 20-08): KABELTRACÉ-KOPPELING + FINANCIEEL RENDEMENT bezoekers-scenario's. De tabel krijgt
               3 kolommen: Investering (volledige installatie = batterij + palen + kabeltracé), Terugverdientijd
               (investering ÷ winst) en Rendement/jr (winst ÷ investering). Palen uit paaltype × aantal_palen
@@ -1227,7 +1233,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.65.0';
+var SIM_VERSIE = 'v1.66.0';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -6515,6 +6521,10 @@ function _renderLaadpleinResultaat(lp){
         _sch.onclick=function(){ STATE.kabeltraceOverride=null; if(STATE._bezLaatste) scOut.innerHTML=_renderBezTabelHtml(STATE._bezLaatste); };
         scRow.appendChild(_sch);
       }
+      // v1.66.0: betalend-laadplein klantrapport (E+Drive/Jacops) — vereist berekende scenario's.
+      var rapBtn=el('button',{class:'fdsim-btn',style:'background:#048443;color:#fff'},'📄 Betalend-laadplein rapport');
+      rapBtn.onclick=_openLaadpleinRapport;
+      scRow.appendChild(rapBtn);
       scWrap.appendChild(scRow); scWrap.appendChild(scOut); sec.appendChild(scWrap);
       // v1.65.0: bewaarde tabel opnieuw tonen (overleeft renderStage + kabeltracé-terugkeer)
       if(STATE._bezLaatste) scOut.innerHTML=_renderBezTabelHtml(STATE._bezLaatste);
@@ -9705,6 +9715,94 @@ function _simuleerRapportData(){
 function _openSimuleerRapport(){
   try{ sessionStorage.setItem('FLUCTUS_SIMULEER_RAPPORT', JSON.stringify(_simuleerRapportData())); }catch(e){ console.error('[simrapport]',e); }
   window.open('/apps/simuleer-rapport.html','_blank');
+}
+
+// ═══ v1.66.0 — BETALEND-LAADPLEIN RAPPORT ═══════════════════════════════════
+// Bouwt het weergaveklare data-object voor laadplein-rapport.html. Spiegelt het scherm:
+// 3 sturingen (STATE.kpiSturing), 6 scenario's + capex/rendement (STATE._bezLaatste + _bezCapex),
+// heatmaps uit STATE.resultaat.laadplein.pleinen[].load_kw. Rekent niets opnieuw (behalve de
+// financieringsmodellen, die het rapport zelf doet uit capex + jaarwinst).
+function _laadpleinHeat(load){
+  if(!load||!load.length) return null;
+  var heat=[]; for(var h=0;h<24;h++){ heat.push(new Array(365).fill(0)); }
+  for(var i=0;i<load.length;i++){ var day=Math.floor(i/96); if(day>=365) break; var hr=Math.floor((i%96)/4); heat[hr][day]+=(+load[i]||0); }
+  for(var hh=0;hh<24;hh++){ for(var d=0;d<365;d++){ heat[hh][d]=Math.round(heat[hh][d]/4*10)/10; } }
+  return heat;
+}
+function _laadpleinRapportData(){
+  var res=STATE.resultaat||{}, k=STATE.kpiSturing||{}, bez=STATE._bezLaatste||null;
+  var cx=(typeof _bezCapex==='function')?_bezCapex():{battCapex:0,palen:0,battTrace:0,kabelPlein:0,exact:false,palenLabel:''};
+  function rowCapex(row){ if(row.is_basis) return 0; if(!row.heeftPlein) return cx.battCapex+cx.battTrace; return cx.battCapex+cx.palen+cx.kabelPlein; }
+  // scenarios (met capex/rendement, identiek aan de tabel)
+  var scenarios=((bez&&bez.rows)||[]).map(function(r){
+    var capex=rowCapex(r);
+    var tvt=(capex>0 && r.winst_eur>0)?(capex/r.winst_eur):null;
+    var rend=(capex>0 && r.winst_eur>0)?(r.winst_eur/capex*100):null;
+    return { label:r.label, pct:r.pct, is_basis:r.is_basis, heeftPlein:r.heeftPlein,
+      energieprijs_eur_mwh:r.energieprijs_eur_mwh, km_gevraagd:r.km_gevraagd, pct_geleverd:r.pct_geleverd,
+      laadprijs_marg_eur_mwh:r.laadprijs_marg_eur_mwh, opbrengst_eur:r.opbrengst_eur, jaarfactuur_eur:r.jaarfactuur_eur,
+      winst_eur:r.winst_eur, investering_eur:(r.is_basis?null:Math.round(capex)), tvt_jaar:tvt, rendement_pct:rend };
+  });
+  var r100=scenarios.filter(function(s){return s.heeftPlein && +s.pct===100;})[0] || scenarios.filter(function(s){return s.heeftPlein;}).slice(-1)[0] || {};
+  var tarief=(bez&&+bez.tarief_eur_mwh)||500;
+  // pleinen (input + sim-output + heatmap)
+  var simPleinen=((res.laadplein&&res.laadplein.pleinen)||[]).filter(function(p){return p.modus==='bezoekers';});
+  var inPleinen=(STATE.laadpleinen||[]).filter(function(p){return String(p.type_plein||'').toLowerCase()==='bezoekers';});
+  var pleinen=inPleinen.map(function(p,i){
+    var sp=simPleinen[i]||{}; var gev=+sp.gevraagd_mwh||_bezGevraagdMwh(p), gel=+sp.geladen_mwh||0, tek=+sp.tekort_mwh||Math.max(0,gev-gel);
+    return { naam:p.naam||('Laadplein '+(i+1)), paaltype:p.paaltype||'AC22', paal_kw:_bezPaalKw(p),
+      aantal_palen:Math.max(1,+p.aantal_palen||1), duur_min:+p.duur_min||0, dagen_per_week:+p.dagen_per_week||7,
+      vensters:(p.vensters||[]).map(function(w){return {start:+w.start||0,eind:+w.eind||0,sessies:+w.sessies||0};}),
+      gevraagd_mwh:gev, geleverd_mwh:gel, tekort_mwh:tek, gemist_pct:gev>0?(100*tek/gev):0, piek_kw:+sp.piek_kw||0,
+      heat:_laadpleinHeat(sp.load_kw) };
+  });
+  // batterij / aansluiting / verbruik
+  var bt=(typeof _frBatterij==='function')?_frBatterij():{kw:0,kwh:0};
+  var battObj=(bt&&(+bt.kwh>0))?{kw:+bt.kw||0,kwh:+bt.kwh||0,
+    cycli:(res.batterij&&+res.batterij.cycli)||null, levensduur_jaar:(res.batterij&&+res.batterij.levensduur_jaar)||null}:null;
+  if(battObj && STATE.batterijId==='CUSTOM' && STATE.batterijCustom){ battObj.dod_pct=+STATE.batterijCustom.dod_pct||0; battObj.rte_pct=+STATE.batterijCustom.rte_pct||0; }
+  var mwhGebouw=(STATE.jaar==='specifiek' && STATE.periodeVolumeMwh>0)?STATE.periodeVolumeMwh:(+STATE.jaarverbruik||0);
+  // sturingen
+  var kg=+k.kost_geen_excl_btw||0, ks=+k.kost_sturing_excl_btw||0, ko=+k.kost_onbalans_excl_btw||0;
+  var mSt=(k.meerwaarde_sturing_excl_btw!=null)?+k.meerwaarde_sturing_excl_btw:(kg-ks);
+  var mOn=(k.meerwaarde_onbalans_excl_btw!=null)?+k.meerwaarde_onbalans_excl_btw:(ks-ko);
+  // kabel-BOM
+  var bom=[]; if(battObj) bom.push({item:'Batterij '+_num0(battObj.kw)+' kW / '+_num0(battObj.kwh)+' kWh',aantal:1,eenheidsprijs:Math.round(cx.battCapex),totaal:Math.round(cx.battCapex)});
+  inPleinen.forEach(function(p){ var n=Math.max(1,+p.aantal_palen||1), dc=(p.paaltype==='DC160');
+    bom.push({item:(dc?'DC-laadpaal 160 kW':'AC-laadpaal 22 kW'),aantal:n,eenheidsprijs:(dc?40000:2500),totaal:n*(dc?40000:2500)}); });
+  bom.push({item:'Kabeltracé'+(cx.exact?' (exact)':' (schatting)'),aantal:1,eenheidsprijs:Math.round(cx.kabelPlein),totaal:Math.round(cx.kabelPlein)});
+  var totCapex=rowCapex(r100.heeftPlein?r100:{is_basis:false,heeftPlein:true});
+  var bc=STATE.baseCase||{};
+  var pid=''; try{ pid=(typeof _projectIdLokaal==='function' && STATE.project)?_projectIdLokaal(STATE.project):(STATE.projectId||''); }catch(e){}
+  var locatie=[(STATE.postcode||''),(bc.dnb||STATE.grd||''),(STATE.spanning||'LS')].filter(function(x){return x;}).join(' · ');
+  var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
+  return {
+    klant:bc.klantNaam||STATE.klantNaam||'', project:STATE.project||'', scenario:STATE.scenario||'',
+    locatie:locatie, datum:datum, project_id:pid,
+    kern:{ investering:Math.round(totCapex), jaarwinst:Math.round(+r100.winst_eur||0),
+      tvt:r100.tvt_jaar!=null?r100.tvt_jaar:null, rendement:r100.rendement_pct!=null?r100.rendement_pct:null,
+      opbrengst:Math.round(+r100.opbrengst_eur||0), laadprijs_marg:Math.round(+r100.laadprijs_marg_eur_mwh||0),
+      tarief:Math.round(tarief), geleverd_mwh:(res.laadplein&&+res.laadplein.ev_last_mwh)||0 },
+    input:{
+      aansluiting:{ kva:+STATE.aansluitingKva||0, spanning:STATE.spanning||'', max_injectie_kw:(STATE.maxInjectieKw!=null?+STATE.maxInjectieKw:null) },
+      verbruik:{ mwh:mwhGebouw, label:STATE.profielNaam||STATE.profielBeschrijving||'' },
+      pv:((+STATE.pvKwp||0)>0)?{kwp:+STATE.pvKwp}:null, batterij:battObj },
+    pleinen:pleinen,
+    sturingen:{ geen:{kost:kg}, sturing:{kost:ks}, onbalans:{kost:ko},
+      meerwaarde_eur:Math.round(mSt), meerwaarde_pct:kg>0?(mSt/kg*100):0,
+      windfall_eur:Math.round(mOn), windfall_pct:ks>0?(mOn/ks*100):0 },
+    factuur3:(typeof _simFactuur3Data==='function')?_simFactuur3Data():null,
+    scenarios:scenarios,
+    kabel:{ exact:!!cx.exact, kabeltrace_eur:Math.round(cx.kabelPlein),
+      foto_dataurl:(STATE.kabeltraceResult&&STATE.kabeltraceResult.foto_dataurl)||null,
+      bom:bom, totaal_capex:Math.round(totCapex) }
+  };
+}
+function _num0(x){ return (+x||0).toLocaleString('nl-BE'); }
+function _openLaadpleinRapport(){
+  if(!STATE._bezLaatste){ alert('Bereken eerst de bezoekers-scenario’s (knop hierboven) — dan heb ik de winst en het rendement voor het rapport.'); return; }
+  try{ sessionStorage.setItem('FLUCTUS_LAADPLEIN_RAPPORT', JSON.stringify(_laadpleinRapportData())); }catch(e){ console.error('[lprapport]',e); }
+  window.open('/apps/laadplein-rapport.html','_blank');
 }
 
 // ═══ v1.59.0 — ONTWERP-navigatie: de vier logische stappen bovenaan het ontwerpscherm ═══
