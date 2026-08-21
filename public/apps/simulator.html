@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.69.0  (2026-08-21 Europe/Brussels)
+     v1.69.0 (Johan 21-08): BETALEND-LAADPLEIN afgeslankt invoerscherm (flow-modus: één scherm i.p.v. wizard, reuse
+              van de stap-renders) + MIX betalend / gewoon plein. Gewoon plein: winst = CREG-besparing (server v15.85,
+              creg_eur_mwh = _cregTarief*1000). _bezCapex + wagenpark-laadpunten in de BOM.
      FLUCTUS SIMULATOR  v1.68.0  (2026-08-21 Europe/Brussels)
      v1.68.0 (Johan 21-08): BETALEND-LAADPLEIN FLOW (portal-tegel &rarr; ?flow=betaalplein). Ontwerpscherm toont dan
               enkel de betaalplein-rapportknop + kabeltrace + "terug naar standaard"; focus-banner bovenaan.
@@ -1244,7 +1248,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.68.0';
+var SIM_VERSIE = 'v1.69.0';
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -2638,6 +2642,12 @@ function renderStage(){
   if(!s)return;  // defensive: niet crashen als DOM nog niet klaar
   _LOGBOXEN=[];   // v1.62.10: register van live-log-boxen resetten bij elke echte render
   s.innerHTML='';
+  // v1.69: BETALEND-LAADPLEIN FLOW → één afgeslankt invoerscherm i.p.v. de 11-staps wizard, zolang er
+  //   nog geen resultaat is. Zodra gesimuleerd (currentStep 10) valt hij terug op het gewone resultaatscherm
+  //   (dat in flow-modus enkel de betaalplein-rapport + kabeltracé toont). Reuse van de bestaande stap-renders.
+  if(STATE.flowBetaalplein && STATE.currentStep<10){
+    try{ s.appendChild(_renderBetaalpleinInvoer()); return; }catch(e){ console.warn('betaalplein-invoer:',e); }
+  }
   switch(STATE.currentStep){
     case 0:s.appendChild(renderStep1Project());break;
     case 1:s.appendChild(renderStep2Locatie());break;
@@ -2651,6 +2661,42 @@ function renderStage(){
     case 9:s.appendChild(renderStep8Periode());break;
     case 10:s.appendChild(renderStep9Resultaat());break;
   }
+}
+// v1.69: BETALEND-LAADPLEIN — één afgeslankt invoerscherm. Hergebruikt de bestaande stap-renders (dus de
+//   bewezen motor eronder), maar toont enkel wat relevant is voor deze case. De laadplein-editor kent al
+//   zowel BETALENDE bezoekerspleinen als GEWONE (wagenpark) pleinen → de mix komt vanzelf mee.
+function _bpSafe(fn){ try{ return fn(); }catch(e){ console.warn('[betaalplein-sectie]',e); return el('div',{class:'fdsim-hint',style:'color:#C0392B'},'Dit onderdeel kon niet laden — gebruik “Terug naar standaard”.'); } }
+function _renderBetaalpleinInvoer(){
+  var wrap=el('div');
+  var band=el('div',{style:'background:#04844310;border:1px solid #04844355;border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap'});
+  band.appendChild(el('div',{style:'font-size:13px;color:#1F3864'},[
+    el('b',null,'🔌 Betalend laadplein'),
+    el('span',null,' — vul enkel in wat nodig is. Onderaan “Bereken laadplein” → u ziet meteen de 6 scenario’s, de investering (BOM) en kan het klantrapport vragen.')
+  ]));
+  var terug=el('button',{class:'fdsim-btn',style:'background:#fff;color:#5A6577;border:1px solid #B7C0CC;font-size:11px;padding:4px 10px'},'← Terug naar standaard');
+  terug.onclick=function(){ STATE.flowBetaalplein=false; try{ renderAll(); }catch(e){ try{renderStage();}catch(_e){} } };
+  band.appendChild(terug);
+  wrap.appendChild(band);
+  function sec(nr,titel,uitleg,node){
+    var c=el('div',{class:'fdsim-section',style:'margin-bottom:14px'});
+    c.appendChild(el('div',{style:'font-weight:800;color:#1F3864;font-size:14px;margin-bottom:'+(uitleg?'2px':'8px')},nr+'. '+titel));
+    if(uitleg) c.appendChild(el('div',{class:'fdsim-hint',style:'margin-bottom:8px'},uitleg));
+    if(node) c.appendChild(node);
+    return c;
+  }
+  wrap.appendChild(sec(1,'Aansluiting — factuur of manueel','Laad de energiefactuur op (we lezen ze automatisch uit), of geef manueel de aansluiting in.', _bpSafe(renderStepFactuuranalyse)));
+  wrap.appendChild(sec(2,'Locatie','', _bpSafe(renderStep2Locatie)));
+  wrap.appendChild(sec(3,'Verbruik van het gebouw','', _bpSafe(renderStep3Profiel)));
+  wrap.appendChild(sec(4,'Zonnepanelen — bestaand & nieuw','', _bpSafe(renderStep4PV)));
+  wrap.appendChild(sec(5,'Batterij','', _bpSafe(renderStep5Batterij)));
+  wrap.appendChild(sec(6,'Laadpleinen — betalend en/of gewoon','Voeg één of meer laadpleinen toe. Een <b>betalend</b> plein verdient met de verkoopprijs aan de bezoeker; een <b>gewoon</b> (wagenpark) plein verdient de besparing t.o.v. de CREG/diesel-kost. U kunt ze mixen.', _bpSafe(renderStepLaadplein)));
+  wrap.appendChild(sec(7,'Toegangsvermogen','', _bpSafe(renderStep7Aansluiting)));
+  var brow=el('div',{style:'display:flex;gap:10px;justify-content:flex-end;margin:6px 0 20px'});
+  var bb=el('button',{class:'fdsim-btn',style:'background:#048443;color:#fff;font-size:15px;padding:11px 20px'}, STATE.isRunning?'⏳ Rekenen…':'🔌 Bereken laadplein');
+  bb.disabled=!!STATE.isRunning;
+  bb.onclick=function(){ try{ if(typeof simuleerVasteInstallatie==='function') simuleerVasteInstallatie(); else runSimulatie(); }catch(e){ alert('Berekenen mislukt: '+(e&&e.message||e)); } };
+  brow.appendChild(bb); wrap.appendChild(brow);
+  return wrap;
 }
 
 // ---------- STAP 1: PROJECT & SCENARIO ----------
@@ -4276,7 +4322,8 @@ function berekenBezoekersScenarios(tarief, out, btn){
   if(!STATE.lastSimInput){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Draai eerst <b>Simuleer ▶</b> (of een gewone simulatie) — dan gebruik ik díé installatie (aansluiting + batterij) als basis voor de scenario’s.</div>'; return; }
   tarief=+tarief||500; var _t=btn.textContent; btn.disabled=true; btn.textContent='Rekenen… (6 scenario’s)';
   out.innerHTML='<div class="fdsim-hint">De server rekent 6 scenario’s door…</div>';
-  apiPost('/api/bezoekers-scenarios',{ input:STATE.lastSimInput, tarief_eur_mwh:tarief, kwh_km:0.16, percentages:[50,100,150,200] })
+  apiPost('/api/bezoekers-scenarios',{ input:STATE.lastSimInput, tarief_eur_mwh:tarief, kwh_km:0.16, percentages:[50,100,150,200],
+    creg_eur_mwh:(typeof _cregTarief==='function'?_cregTarief()*1000:0) })   // v1.69: CREG-forfait → wagenpark-besparing in de mix
     .then(function(r){ btn.disabled=false; btn.textContent=_t;
       if(!r||!r.ok||!Array.isArray(r.rows)){ out.innerHTML='<div class="fdsim-hint" style="color:#C0392B">Kon de scenario’s niet berekenen'+((r&&r.error)?': '+r.error:'')+'.</div>'; return; }
       STATE._bezLaatste=r;   // v1.65.0: bewaar → tabel overleeft re-render + herrekent capex zodra de kabeltracé terugkomt
@@ -4293,11 +4340,19 @@ function _bezCapex(){
   var battCapex=battKwh*INV_BATT_EUR_PER_KWH;
   var palen=0, lbl=[];
   (STATE.laadpleinen||[]).forEach(function(p){
-    if(String(p.type_plein||'').toLowerCase()!=='bezoekers') return;
-    var n=Math.max(1,(+p.aantal_palen||1));
-    var isDc=(p.paaltype==='DC160');
-    palen+=n*(isDc?INV_LAADPAAL_EUR.dc160:INV_LAADPAAL_EUR.ac);
-    lbl.push(n+'× '+(isDc?'DC 160':'AC 22'));
+    if(String(p.type_plein||'').toLowerCase()==='bezoekers'){
+      var n=Math.max(1,(+p.aantal_palen||1));
+      var isDc=(p.paaltype==='DC160');
+      palen+=n*(isDc?INV_LAADPAAL_EUR.dc160:INV_LAADPAAL_EUR.ac);
+      lbl.push(n+'× '+(isDc?'DC 160':'AC 22'));
+    } else {
+      // v1.69: GEWOON (wagenpark) plein → laadpunten uit de laadpunten-array (AC22/DC160/DC300).
+      (p.laadpunten||[]).forEach(function(x){ var a=+x.aantal||0; if(a<=0) return;
+        var t=(x.type||'').toUpperCase();
+        var pr=(t==='DC160')?INV_LAADPAAL_EUR.dc160:(t==='DC300'||t==='DC400')?INV_LAADPAAL_EUR.dc300:INV_LAADPAAL_EUR.ac;
+        palen+=a*pr; lbl.push(a+'× '+(t==='DC160'?'DC 160':(t==='DC300'||t==='DC400')?'DC 300':'AC 22'));
+      });
+    }
   });
   var exact=(STATE.kabeltraceOverride!=null && isFinite(+STATE.kabeltraceOverride));
   return { battKwh:battKwh, battCapex:battCapex, palen:palen, palenLabel:lbl.join(' + '),
@@ -6526,9 +6581,12 @@ function _renderLaadpleinResultaat(lp){
   // v1.14: betalende-bezoekers-pleinen — gevraagd / geleverd / gemist (throttling) / piek.
   var _bezP=(lp.pleinen||[]).filter(function(p){return p.modus==='bezoekers';});
   if(_bezP.length){
-    _bezP.forEach(function(p){
+    var _inBez=(STATE.laadpleinen||[]).filter(function(x){return String(x.type_plein||'').toLowerCase()==='bezoekers';});
+    _bezP.forEach(function(p,i){
       var gev=+p.gevraagd_mwh||0, gel=+p.geladen_mwh||0, gem=+p.tekort_mwh||0;
       var pct=gev>0?(100*gem/gev):0;
+      var _vp=(_inBez[i]&&+_inBez[i].opbrengst_eur_mwh)||500;   // verkoopprijs €/MWh van dit plein
+      var opbr=gel*_vp;                                          // v1.69: opbrengst @ geleverd × verkoopprijs (100%)
       var b=el('div',{style:'background:#F5F8FC;border:1px solid #D5DBE3;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px'});
       b.innerHTML='<b>'+(p.naam||'Bezoekersplein')+'</b> <span style="color:#5A6577">— betalende bezoekers</span>'+
         '<div style="margin-top:6px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'+
@@ -6536,9 +6594,23 @@ function _renderLaadpleinResultaat(lp){
         '<div><span style="color:#5A6577">Geleverd</span><br><b style="color:#05B050">'+fmtNum(gel,1)+' MWh</b></div>'+
         '<div><span style="color:#5A6577">Gemist (throttling)</span><br><b style="color:'+(pct>5?'#9E480E':'#5A6577')+'">'+fmtNum(gem,1)+' MWh ('+fmtNum(pct,1)+'%)</b></div>'+
         '<div><span style="color:#5A6577">Piek plein</span><br><b>'+fmtNum(p.piek_kw,0)+' kW</b></div>'+
-        '</div>';
+        '</div>'+
+        '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #E5E9F0"><span style="color:#5A6577">Opbrengst @ €'+fmtNum(_vp,0)+'/MWh (100%)</span> <b style="color:#048443">± €'+fmtNum(opbr,0)+'/jaar</b></div>';
       sec.appendChild(b);
     });
+    // v1.69: GEWONE (wagenpark) pleinen in de mix → besparing t.o.v. de CREG-kost, per plein en als totaal.
+    //   Dit totaal komt ook mee in de winst van de 6 scenario's hieronder.
+    var _gewP=(lp.pleinen||[]).filter(function(p){return String(p.modus||'').toLowerCase()!=='bezoekers';});
+    if(_gewP.length){
+      var _cregMwh=(typeof _cregTarief==='function'?_cregTarief()*1000:0);
+      var _rows='', _tot=0;
+      _gewP.forEach(function(p){ var gel=+p.geladen_mwh||0, besp=gel*_cregMwh; _tot+=besp;
+        _rows+='<div style="margin-top:4px"><b>'+(p.naam||'Laadplein')+'</b> — geladen '+fmtNum(gel,1)+' MWh · <b style="color:#048443">besparing ± €'+fmtNum(besp,0)+'/jaar</b> (t.o.v. CREG-forfait €'+fmtNum(_cregMwh,0)+'/MWh)</div>'; });
+      var gb=el('div',{style:'background:#EAF7EE;border:1px solid #05B05055;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px'});
+      gb.innerHTML='<b>Gewone laadpleinen — besparing t.o.v. CREG</b>'+_rows+
+        '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #C7E7D2"><b>Totaal ± €'+fmtNum(_tot,0)+'/jaar</b> — zit mee in de winst van de scenario’s hieronder (netto, na uw eigen laadkost).</div>';
+      sec.appendChild(gb);
+    }
     // ── Bezoekers-scenario's: geen batt / batt / batt+plein @ 50/100/150/200% sessies ──
     (function(){
       var _inP=(STATE.laadpleinen||[]).filter(function(x){return String(x.type_plein||'').toLowerCase()==='bezoekers';})[0];
@@ -9826,8 +9898,17 @@ function _laadpleinRapportData(){
   var mOn=(k.meerwaarde_onbalans_excl_btw!=null)?+k.meerwaarde_onbalans_excl_btw:(ks-ko);
   // kabel-BOM
   var bom=[]; if(battObj) bom.push({item:'Batterij '+_num0(battObj.kw)+' kW / '+_num0(battObj.kwh)+' kWh',aantal:1,eenheidsprijs:Math.round(cx.battCapex),totaal:Math.round(cx.battCapex)});
-  inPleinen.forEach(function(p){ var n=Math.max(1,+p.aantal_palen||1), dc=(p.paaltype==='DC160');
-    bom.push({item:(dc?'DC-laadpaal 160 kW':'AC-laadpaal 22 kW'),aantal:n,eenheidsprijs:(dc?40000:2500),totaal:n*(dc?40000:2500)}); });
+  // v1.69: BOM over ALLE pleinen — betalend (paaltype × aantal_palen) én gewoon (laadpunten-array).
+  (STATE.laadpleinen||[]).forEach(function(p){
+    if(String(p.type_plein||'').toLowerCase()==='bezoekers'){
+      var n=Math.max(1,+p.aantal_palen||1), dc=(p.paaltype==='DC160');
+      bom.push({item:(dc?'DC-laadpaal 160 kW':'AC-laadpaal 22 kW'),aantal:n,eenheidsprijs:(dc?40000:2500),totaal:n*(dc?40000:2500)});
+    } else {
+      (p.laadpunten||[]).forEach(function(x){ var a=+x.aantal||0; if(a<=0) return; var t=(x.type||'').toUpperCase();
+        var pr=(t==='DC160')?40000:(t==='DC300'||t==='DC400')?70000:2500, lab=(t==='DC160')?'DC-laadpaal 160 kW':(t==='DC300'||t==='DC400')?'DC-laadpaal 300 kW':'AC-laadpaal 22 kW';
+        bom.push({item:lab,aantal:a,eenheidsprijs:pr,totaal:a*pr}); });
+    }
+  });
   bom.push({item:'Kabeltracé'+(cx.exact?' (exact)':' (schatting)'),aantal:1,eenheidsprijs:Math.round(cx.kabelPlein),totaal:Math.round(cx.kabelPlein)});
   if((+cx.extra||0)>0) bom.push({item:'Extra kosten & werken',aantal:1,eenheidsprijs:Math.round(+cx.extra),totaal:Math.round(+cx.extra),comment:(cx.comment||'')});
   var totCapex=rowCapex(r100.heeftPlein?r100:{is_basis:false,heeftPlein:true});
