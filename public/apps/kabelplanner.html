@@ -1,4 +1,8 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.12 (Johan 22-08): POINTER-OFFSET FIX. Na een rotatie stond de muis ~3 cm naast het
+           object (klikken én slepen) doordat leaflet-rotate rond een VEROUDERDE container-pivot (getSize()/2)
+           roteerde. Nu _fkRefresh()=invalidateSize() na init, bij resize/ResizeObserver, na fonts.ready en
+           vóór/na elke setBearing → pivot altijd correct, offset weg.
      FLUCTUS KABELPLANNER  v1.11 (Johan 21-08): AUTO-TRACÉ volgt de georiënteerde luchtfoto (scherm-assen i.p.v.
            geografische N-Z/O-W): drawAuto berekent de L-knik in container-point-ruimte bij rotatie. Herleggen na
            oriënteren = de gebruiker klikt zelf "Trek tracés". De teruggestuurde luchtfoto = de eind-oriëntatie.
@@ -278,6 +282,21 @@ map=L.map("fk-map",{center:[50.45,4.61],zoom:13,layers:[esri],preferCanvas:true,
   rotate:true, rotateControl:false, bearing:0, touchRotate:false, shiftKeyRotate:false});
 L.control.layers({"Satelliet (Esri)":esri,"Orthofoto Vlaanderen":geopunt,"Wegenkaart (OSM)":osm},{},{position:"topright"}).addTo(map);
 map.pm.setGlobalOptions({snappable:true,templineStyle:{color:NAVY},hintlineStyle:{color:NAVY,dashArray:"4,4"}});
+
+// v1.12 (Johan 22-08): POINTER-OFFSET FIX. leaflet-rotate roteert container↔layer rond de container-PIVOT
+//   (= getSize()/2). Als de containergrootte verouderd is (layout schuift na init: webfont Barlow, 3-koloms
+//   grid, tab die zichtbaar wordt), zit de pivot ernaast → NA een rotatie een CONSTANTE offset op klikken en
+//   op het slepen van objecten (de "3 cm rechts van de muis"). invalidateSize() ververst getSize() → juiste
+//   pivot. We doen dat na init, bij resize, bij elke layout-relevante verandering en telkens vóór/na setBearing.
+function _fkRefresh(){ try{ map.invalidateSize({animate:false}); }catch(e){} }
+// na init laten uitrenderen (rAF + korte timeouts vangen webfont/layout-shift)
+requestAnimationFrame(_fkRefresh); setTimeout(_fkRefresh,150); setTimeout(_fkRefresh,600);
+window.addEventListener('load', _fkRefresh);
+window.addEventListener('resize', _fkRefresh);
+if(document.fonts && document.fonts.ready){ document.fonts.ready.then(_fkRefresh).catch(function(){}); }
+try{ if(window.ResizeObserver){ var _ro=new ResizeObserver(_fkRefresh); _ro.observe(map.getContainer()); } }catch(e){}
+// setBearing altijd met een verse pivot uitvoeren → geen offset na oriënteren/auto-tracé.
+(function(){ var _sb=map.setBearing; if(typeof _sb==='function'){ map.setBearing=function(b){ _fkRefresh(); var r=_sb.call(this,b); _fkRefresh(); return r; }; } })();
 
 /* ---- palette ---- */
 const pal=document.getElementById("fk-palette");
