@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.9.0  (2026-08-22 Europe/Brussels)
+     v1.9.0 (Johan 22-08): FINANCIERING herwerkt. (1) Leasing zonder 50/50-winstdeling: de klant houdt de volle
+              marge boven de leasetermijn, en na aflossing van de leasing de volledige marge. (2) Drie nieuwe
+              pagina's — één per financieringsmodel — met de VOLLEDIGE 15 jaar in hoofde van de klant:
+              kosten-inflatie 2%/j, met +4% extra op de netkosten (netkosten dus +6%/j), opbrengst constant.
+              Per model: rendement (IRR op eigen inleg), totale absolute meerwaarde en NPV op de inleg (disconto 5%).
+              Deze drie pagina's staan vóór de slotpagina (Wattkraft-productfeatures). Aannames in _financiering.A.
+     v1.8.0 (Johan 22-08): heatmap (laadprofiel) nu OOK voor de niet-betalende (wagenpark) pleinen, onder de tabel.
+     v1.7.0 (Johan 22-08): titel "Betalend-laadplein rapport" → "Laadplein-rapport" (title-tag, cover, footer,
+              PDF-bestandsnaam). De inhoudelijke uitleg betalend vs niet-betalend (wagenpark) blijft behouden.
+     v1.6.0 (Johan 22-08): ECHT Wattkraft-logo (uit EDRIVE_logo_green.pdf, ingebed als PNG data-URI) i.p.v. de
+              zelfgemaakte "Wattkraft"-tekst — in de merkband op elke pagina en op de cover-fallback.
+     v1.5.0 (Johan 22-08): footer toont nu projectnaam · scenario · PROJECTCODE (FLX) — zodat de klant zijn
+              project kan heropvragen. Code komt uit D.project_id (_projectIdLokaal, zelfde als de invoer/server).
+     v1.4.0 (Johan 21-08): NIET-BETALENDE pleinen zichtbaar. Eigen sectie op de laadplein-definitiepagina
+              (wagens, geladen MWh/km, CREG-besparing per plein + totaal). Data: D.gewone_pleinen.
+     v1.3.0 (Johan 21-08): MIX — bij gewone (wagenpark) pleinen tonen de 6 scenario's per rij hun levering
+              (MWh + km) en CREG-besparing; toelichting dat "km gevraagd" enkel de betalende pleinen betreft.
+     Klantrapport voor een gebouw dat er een BETALEND laadplein aan koppelt.
+     - Wattkraft/Wattkraft-design (hergebruikt uit simuleer-rapport.html v1.2.2).
+     - DATA: window.FLUCTUS_LAADPLEIN_RAPPORT of sessionStorage['FLUCTUS_LAADPLEIN_RAPPORT'].
+       Gebouwd door _laadpleinRapportData() in simulator.html (spiegelt het scherm; rekent
+       enkel de financieringsmodellen door uit capex + jaarwinst).
+     - Zonder data → window._LP_DEMO=true → voorbeeldweergave met _demo().
+     - Opbouw: voorblad (kerncijfers investering) · samenvatting · inhoudstafel ·
+       ingegeven installatie · laadplein-definitie + heatmaps · simulatiemethode + sturing
+       (3 facturen) + windfall · 6 scenario's · kabeltracé (foto + BOM) · financiële analyse
+       (eigen middelen / 75%@5% / leasing 10% + 50/50) · slotpagina (CTA + services-matrix).
+     ============================================================ -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laadplein-rapport</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --blauw:#12315E; --blauw-l:#2d4f8e; --groen:#05B050; --groen-d:#048443;
+    --oranje:#9E480E; --oranje-l:#E8A33D; --grijs:#5A6577; --lijn:#D5DBE3; --bg:#F5F7FA; --zwart:#1A1F2B;
+    --rood:#C0392B; --jacops:#B8201C; --edrive:#B8201C;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);background:#e9edf2;font-size:14px;line-height:1.55}
+  .a4{background:#fff;width:210mm;min-height:297mm;margin:14px auto;padding:16mm 18mm 12mm;box-shadow:0 2px 14px rgba(0,0,0,.12);display:flex;flex-direction:column;position:relative}
+  .a4 > .a4-content{flex:1}
+  .a4-foot{margin-top:auto;padding-top:8px;font-size:9px;color:var(--grijs);border-top:1px solid var(--lijn);display:flex;justify-content:space-between}
+  .eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--grijs);font-weight:700}
+  h1{font-size:32px;color:var(--jacops);line-height:1.1;margin:6px 0 10px;font-weight:800}
+  h2{font-size:22px;color:var(--jacops);margin:0 0 4px;font-weight:800}
+  h3{font-size:15px;color:var(--blauw);margin:16px 0 6px;font-weight:700}
+  .lead{font-size:15px;color:var(--grijs);margin-bottom:14px}
+  p{margin:8px 0}
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .kpi-row.k3{grid-template-columns:repeat(3,1fr)}
+  .kpi-row.k2{grid-template-columns:repeat(2,1fr)}
+  .kpi{border:1px solid var(--lijn);border-left:4px solid var(--blauw);border-radius:4px;padding:12px}
+  .kpi.groen{border-left-color:var(--groen)} .kpi.oranje{border-left-color:var(--oranje)} .kpi.rood{border-left-color:var(--jacops)}
+  .kpi .l{font-size:10px;color:var(--grijs);text-transform:uppercase;letter-spacing:.05em;line-height:1.25;min-height:2.5em;display:block}
+  .kpi .v{font-size:24px;font-weight:800;color:var(--zwart);margin-top:3px}
+  .kpi .s{font-size:10px;color:var(--grijs);margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--lijn)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--blauw);color:#fff;font-weight:700;border-bottom:none}
+  tbody tr:nth-child(even){background:var(--bg)}
+  tfoot td{font-weight:800;border-top:2px solid var(--blauw);background:#eef2f8}
+  tr.grp td{background:#eaf0f8;font-weight:700;color:var(--blauw)}
+  tr.item td:first-child{padding-left:20px;color:#3A424C}
+  table.fact3{font-size:10.5px;margin:8px 0}
+  table.fact3 th,table.fact3 td{padding:2.5px 8px}
+  table.fact3 tr.item td:first-child{padding-left:18px}
+  table.fact3 thead th{font-size:10.5px}
+  table.scn{font-size:10.5px}
+  table.scn th,table.scn td{padding:3.5px 6px}
+  table.fin15{font-size:10px;margin:8px 0}
+  table.fin15 th,table.fin15 td{padding:3px 6px}
+  table.fin15 thead th{font-size:9.5px}
+  table.fin15 tfoot td{background:#eef2f8}
+  .pos{color:var(--groen-d);font-weight:700} .neg{color:var(--rood);font-weight:700}
+  .box{border:1px solid var(--lijn);border-radius:6px;padding:14px;margin:12px 0;background:var(--bg)}
+  .box.blauw{background:#1F386408;border-color:#1F386430}
+  .box.groen{background:#05B0500f;border-color:#05B05040}
+  .box.oranje{background:#FFF3E0;border-color:#9E480E55}
+  .note{font-size:11px;color:var(--grijs);font-style:italic}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .stap-band{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+  .stap-band .nr{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:var(--blauw);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .merk{display:flex;align-items:center;justify-content:space-between;gap:8mm;margin-bottom:8px}
+  .merk .fl{font-weight:800;font-size:22px;color:#1A1F2B;letter-spacing:-.4px}
+  .merk .fl-logo{height:26px;width:auto;display:block}
+  .merk .fl .ed-e{color:var(--edrive)}
+  .merk .jc{background:var(--jacops);color:#fff;font-family:Arial;font-weight:900;font-size:15px;letter-spacing:-.5px;padding:2.2mm 3mm;border-radius:1.4mm;display:inline-block}
+  .titel-accent{height:4px;width:64px;background:var(--jacops);border-radius:3px;margin:2px 0 10px}
+  .inbox{display:grid;grid-template-columns:170px 1fr;gap:2px 12px;font-size:12.5px;padding:2px 0}
+  .inbox .k{color:var(--grijs);font-weight:700} .inbox .v{color:var(--zwart)}
+  .toc{font-size:13px} .toc div{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dotted var(--lijn)}
+  .toc .t{color:var(--zwart)} .toc .pg{color:var(--grijs);font-weight:700}
+  /* heatmap */
+  .heat-wrap{margin:8px 0 4px}
+  .heat-svg{display:block;width:100%;height:auto;border:1px solid var(--lijn);border-radius:4px}
+  .heat-leg{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--grijs);margin-top:4px}
+  .heat-leg .bar{height:9px;width:120px;border-radius:2px;background:linear-gradient(90deg,#EAF7EE,#9AD4A6,#05B050,#048443,#0B3D24)}
+  /* Wattkraft-voorblad */
+  .a4.cover{padding:0;overflow:hidden;background:#3B4049}
+  .cover-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .cover-free{position:absolute;left:8.5%;right:8.5%;top:60%;color:#fff;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif}
+  .cf-title{color:#B8201C;font-weight:800;font-size:14px;letter-spacing:.02em;margin-bottom:9px}
+  .cf-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px 16px}
+  .cf{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-left:3px solid #B8201C;border-radius:6px;padding:9px 14px}
+  .cf-l{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#B9C0BE;font-weight:700;margin-bottom:3px}
+  .cf-v{font-size:19px;font-weight:800;color:#fff;line-height:1.15;word-break:break-word}
+  .cf-v .u{font-size:12px;font-weight:600;color:#B9C0BE}
+  /* cover-fallback (charcoal gradient met logo-tekst) als /apps/-asset ontbreekt */
+  .cover-fb{position:absolute;inset:0;background:linear-gradient(135deg,#2b3038,#3B4049 55%,#333842);display:flex;flex-direction:column;justify-content:flex-start;padding:16mm 14mm}
+  .cover-fb .ed{color:#B8201C;font-weight:800;font-size:30px;letter-spacing:-.5px}
+  .cover-fb .ed b{color:#fff} .cover-fb .cl{color:#fff;font-size:20px;font-weight:800;margin-top:14px;max-width:70%}
+  .cover-fb .jc{position:absolute;top:16mm;right:14mm;background:#E8352A;color:#fff;font-family:Arial;font-weight:900;font-size:15px;padding:2mm 3mm;border-radius:1.4mm}
+  /* slotpagina */
+  .a4.slot{padding:15mm 15mm 12mm;background:#3B4049;color:#fff}
+  .slot-eyebrow{color:#B8201C;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  .slot-h{font-size:27px;font-weight:800;line-height:1.15;margin:8px 0 6px;color:#fff}
+  .slot-h .g{color:#B8201C}
+  .slot-sub{font-size:14px;color:#C7CCD1;margin-bottom:14px;line-height:1.5}
+  .svc-card{background:#fff;border-radius:8px;padding:10px 12px;color:#1A1F2B}
+  .svc-cap{font-size:11px;font-weight:800;color:#1F3864;margin-bottom:5px}
+  table.svc{width:100%;border-collapse:collapse;font-size:8.6px}
+  table.svc th,table.svc td{padding:1.6px 5px}
+  table.svc thead th{color:#6AA22E;font-weight:800;text-align:center;font-size:9px}
+  table.svc thead th.sub{font-size:8px;font-weight:700;padding-top:0;border-bottom:1.5px solid #E3E8EF}
+  table.svc td.r{text-align:left;color:#2A2F36}
+  table.svc td.c{text-align:center}
+  table.svc tr.sec td{background:#868C95;color:#EAF6DD;font-weight:800;text-transform:uppercase;font-size:8.5px;letter-spacing:.04em;padding:2.5px 6px}
+  table.svc tbody tr:not(.sec):nth-child(even){background:#F5F7FA}
+  .svc-chk{display:inline-block;width:12px;height:12px;line-height:12px;text-align:center;background:#2E333A;color:#fff;border-radius:2px;font-size:9px}
+  .svc-un{display:inline-block;width:11px;height:11px;border:1.4px solid #AEB4BD;border-radius:2px;vertical-align:middle}
+  .svc-txt{font-size:8.6px;color:#3A424C}
+  .slot-foto{display:block;width:100%;height:auto;border-radius:8px;margin-top:12px}
+  .slot-foot{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:10.5px;color:#C7CCD1}
+  .slot-jc{background:#E8352A;color:#fff;font-family:Arial;font-weight:900;font-size:12px;letter-spacing:-.5px;padding:2px 7px;border-radius:2px}
+  #fdpdf-bar{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;gap:8px}
+  #fdpdf-bar button{font-family:inherit;font-size:12px;font-weight:700;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.22)}
+  #fdpdf-save{background:var(--groen);color:#fff}
+  #fdpdf-print{background:#fff;color:var(--blauw);border:1px solid var(--lijn)!important}
+  @page{size:A4;margin:0}
+  @media print{ body{background:#fff} .a4{box-shadow:none;margin:0;min-height:297mm;page-break-after:always;break-after:page} .a4:last-child{page-break-after:auto;break-after:auto} table,.box,.kpi-row,.heat-wrap{break-inside:avoid} #fdpdf-bar{display:none} }
+</style>
+</head>
+<body>
+<div id="rapport"></div>
+<div id="fdpdf-bar">
+  <button id="fdpdf-print" onclick="window.print()">🖨️ Print</button>
+  <button id="fdpdf-save">⬇ PDF opslaan</button>
+</div>
+<script>
+// ============================================================================
+//  FLUCTUS · BETALEND-LAADPLEIN RAPPORT — renderer
+// ============================================================================
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _num(x,d){ x=+x||0; return x.toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+function eur(x){ return '€ '+_num(x,0); }
+function eur1(x){ return '€ '+_num(x,1); }
+function pct(x,d){ return _num(x,d==null?0:d)+' %'; }
+function jaar(x){ return _num(x,1)+' j'; }
+
+function _uitSessie(){ try{ return JSON.parse(sessionStorage.getItem('FLUCTUS_LAADPLEIN_RAPPORT')||'null'); }catch(e){ return null; } }
+var _echt = window.FLUCTUS_LAADPLEIN_RAPPORT || _uitSessie();
+window._LP_DEMO = !_echt;
+var D = _echt || _demo();
+
+var R=document.getElementById('rapport'), _pg=0;
+var PID=D.project_id||'';
+// v1.5: footer = projectnaam · scenario · projectcode (FLX) — zodat de klant zijn project kan heropvragen.
+var FOOT_L=[D.project, D.scenario, PID].filter(function(x){return x;}).map(esc).join(' · ') || 'Laadplein-rapport';
+function pagina(inner){
+  var p=document.createElement('div'); p.className='a4'; _pg++;
+  p.innerHTML='<div class="a4-content">'+inner+'</div>'+
+    '<div class="a4-foot"><span>'+FOOT_L+'</span>'+
+    '<span>'+(PID?'Projectnr. '+esc(PID)+' · ':'')+'p. '+_pg+'</span></div>';
+  R.appendChild(p); return p;
+}
+var EDRIVE_LOGO='data:image/png;base64,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xz/+sajnxrIsTj/9dG699VaOP/74rDHZPUH36uy5t8ueh3vnzp08/fTTBS079Rzv3btXnn766V4xdvfu3ct9992XpKmdm6b+sUvufZO/fdjde7Mn7+msR5iqo52+o7M8LgxceO57CGvLyR6IOOEJabEnuTSlcAZ5SIWy6GiDF5OcKrXstcNrud0Wy5glsi/E42lv8aO4r/28EBBlsCyFZWVfANrejqBVx7rZJY6FFdc7VwhaoEyH3Eye+dPRNXDw4EHuu+8+NmzY0K2ynUlsx52fOXOp893GjRt57LHH2LJlS9aD7Wj/o4OuqU7ksni0lPqn87bkNp52plfdE2RKnuNv18aNG+WnP/0pf/7znwuSrj0bSilOO+00vv71r3PCCSf0+skuZoa9zuUIO8dr365du3jmmWfybpOf1PbV19fzz3/+M54noKcRkfhaG0jIr5Yqvd223KUQ85sY5nOcPTnehbL/5By8+COWvVgRkgfD/nXVjB41gnWb9yFK4y0pdNDxXZPxbmaT8m9h8MfHaq0TnaoMlrQztH+Y2778H9RWp6puKGygFfj8177DwcYWoDxj2V55zpelFUZhI1gojCgUTqZLC4MlLXzj1i8ycmitY3OmhANFgdu+8wu2vbPXSTnfl2ft4l6LdgxLt/LZT9/I9KkTih42snr1annzzTc5fPhwxt87G4RyicXO5pFWStHc3MyePXt67aHUm+Q6wHdHlaWU7oVCtKVUdYH95yIajbJ+/XpWrFgRv5+K1eb58+dz0003cdJJJ3V4MWRyvvQUgwYNYu7cuZSVlXWypfM8ikajbN++PUliFArbh8Xui7a2NrZt28b+/ft77XrdsGEDn/70p3niiSd6pf6ukml866m+68lzVOi6itVPHRjabvxxUiuSGwRgYZg8rk5dct675Se//D1taIyyUNiIAaUMmWfJPft6K444benMS63I8SSWmIHtYZG8Stxpp3GMZ+VGwWQYHwVQSnfoTSnFh3NWlAWWOAtdMz4QMi0I7T4iwn333ZeUDr03eO2111i1ahVjxoyhoqKi0+2LaTz09CBfqPr63LXeRfrCsf3rX/+S73znO7z00ksFLTf13NbV1XH88cczY8aMnPbtLY4//njuvvtuRo0alVMjjhxpZdWqVfK73/2OBx54gD179rjHnm2Prj+Xi30d1dfXyz/+8Y8uLUjMdu929562bZtt27bx5JNPyrnnnlu6ruwUQqEQ06dP57rrrnOv2+LbXaFQiJkzZ/a6V707FOta7tSj3aECoLguUQVlEU0oZIjaCiUG8cIWMhi1PYL3wM3yc2V5GUql25peiu6f3fmY7K1vJ4aVW0RyiXq2lXZ0sEUURgwVZSFClnLWMkLS2wqj4G9Pvi6vrXqbtqgBrLTjSRXv7yxmuHdx2q4Fzj7tJE6cP5eaCq2SD7yw5ysajRKLxZK+Sx3cO7uZ/dvnEkaSad+1a9eyYcMGWltbpaKiotMC/Pdooe5Xry3dGbw6eiD6f0vdrrsP0lzihPOto5QptYeibdu8+OKLcvvttxfcyIbkc1tWVsZll13G7bffzuDBgzN2RG96sf0Yk7uhJCJUVpazaNECNWvWDK655ir5wx/+wJ133kk0ahekPUop2tvbef311/nNb34jH/nIRwrSSUlvmG2bI0eOdGt/r4xUBaiuYoxh9+7dvPTSS5x77rndKqM3sCyLSZMm8fnPf7ZHLt5c7pOOJ3r5kevY3NNjeKcebQ+vSf4u9GZICsXHPnSmWrx4sby4fCNR0Y6mNI4X1REC7FnSutBnCFvSzndv+yKDq0hbFKeU0/IdO/fQFrUdMyeXk1JiBrbX9472t0EELGJ85hMfYvr4QYQVvnOEIyQC1Dc20XSkhZhxlz26/eZJ/Hl9UQoPnY5w2kg8Rrt/TQ39qitIC01PubAzXedd4e6775Znn302p9fc2a4rZ7LnbtPNQHmlFG+99RZ79+6lf//+Oe83cuRIzj77bCZNmtStetNDwjTr1q3j7bff7tJCpo76TWvNvHnzmDBhQobtOrsPTbx87xqORCJMmDAhvkX//v059dRTqaqqAro6KCcfv4gzfuzYsYM1a9bQ1NSUYzmdM2XKFGbMmEEoFHLrEjK9rUvGp8Dk6wOlFPPmzYuXlT/df1PU3t7Os88+K9/85jfzMLI7rt87p/369eOaa67hy1/+cpKRnTrGdX9hYvfJdN11pR3+bauqqjjxxBPVyJEjpby8nF/84hdZQ9u6gtc+L1ytUHhtb2lpYfHixfzyl7/sYgmJ85+vQeWdh2g0ytatW3nnnXdkxIgRpf0AJGGf9aT0ckfXp9aa6dOncvnllxakLmMM69atY/Xq1fHvEue64/s/k6PGi7s/5ZRTGDp0aDdblbm+nEfVpDjtpC8SBVuWRhnjaeGhtP+ge9YQjZ9wlUgiI6JQ2kah0FbH94lRBqMN2PnfqL2Ds2jI2M7D15toaJwLS8c1Y1LRrmKM+5cX364SHlbHKC/tPvEGGUfU0AYtSNJCSPdGTJlq5Tt6igjGmJw82Nm8suK63EW63suex0tEeOihh7j44ouZOnVqWr3ZBsQFCxaoE044Ie+JlL+OO+64Q37605+ye7fjlcrHo+EsYtZ8/OMf54YbbkgyjLzf82krwPjx49VXvvKVnLfPhQcffFC++c1vFlSP96KLLuJrX/uaqq6uznvyW7zJc9cf8v/617/k29/+doE82ZnrF3HCRa688kq+8IUvMHLkyOQoySxvOLreR903dIrx3Bk9erS68MIL5aGHHmLz5s0l/2zbuXOn/PnPf86jnfkbmf7JxAsvvMCyZcu46KKL8i63uBh3jC3UxDk/RISysjIuueQSdckllxSkzNbWVn70ox/JLbfc0sFWHZ//1Od0OBzmv//7vzn77LMLOhh23fp1Y3v9DdQCYYFvffWzhC0b7XrkpBfl/eIJVeLpty20sglLCx++6kKmThhFyPVuekcigA088Y/XZcmrK4lGFSIK7VthXDIJaXJBxAmhMTZhMZxxygLOPHkB/Sp12uPCBtZuqJcH//os+5raEfctRD4eld7FTSqEYcKoEVxy/hmMGlLhM6sLf12+9tpr8tBDD3U5RXBqH1dWVBKJRNCZZXGSVrx3dD4OHz7MXXfdxWuvvZZUQS6v9vLFKyPTK9t8Hu7ZYrDzUQHo6n7dracYRk0u10FXyukNw8tfZ2trK6tWrWLFihVFrbO8vJzLL7+cb33rW4wbN66vDGoFIRKJUFNTU/JGNsD+/ftZsmRJ/O/uXOdKKcrKyqipqen2/t5+tm3T2NjY7ZC4o5nO3t52tk1XyXYuS9FG6baOdvJrNdAKhg6uUloLQjsiNr2ZLdIWhbgGtlIacLNAmhhDBvSjLOSkqfHWBIrbWhtoPNxKY3MLtko3NrWAMqV/g9nYiDKIiqG0QUyUqrIw1TWVaJ35gm9tbaWpqQnbduP3MuiQ95XBRcTLgBkjUqboV1tBpICT+9R+iMViLF26lM2bNyfJQHW5XOCqa67m7LPPprq6OmvducQcigj19fVdjm8sJKU46AVkJ//z1TUPrt9L3NTUxG9/+1v58Y9/TGNjY9Hq79+/Px/72Mf4xje+kTUmOxN96VruaFyYP3+++uIXv1jQtRhdpbPniIjQ1NTEypUrk8avzp8/6ec/Eokwf/58PvOZz3Tr+eUfb3fs2MEdd9zB7t27Jdtx9+4zsmdCRbItNM32W+o2xcO4tmdp0XUdbSElADr5pIrgeI91CNCuZ7vnsVAoI4jYGGPj+NdjTJ8ylpMXzCMcSd7eO/179tvy5FPP09rm3VyuPGHK4opSx3IXMioBjWFgbTnnnf0u+lWXOYIjvmPwPPmP/PVpDjQeBgn1aQ1tcK5BJYYwMS4+90xGDhvcZWX3jstPLunIkSM88sgjbN26Ne+yRYTLLruMKVOm5F3Wpk2bWLx4MXv27OkbM6SAYwrvPmpra+Ovf/2rfO9732Pjxo0FL9+jurqayy+/nM9//vNp4SKlSD5vabIZPBs2bJBHHnkkL4Mw6flRoMXHqb/v2rVL/vKXvxR0XUMh2Lt3L/fee2/acecTvtbX6MioPhaOv6t04NHO8odrrZh4lG6iiLAFd9z2FSpCxlEeUc4iut7odoUBsVESRUmbM8uRGMMHD2Di2KGEshz5weYjrHlrI7FYjALlNulVlLLA2FRVhpgxdSzlcUnwxMzXAEbg9RVrOHS4pc8b2Q4GpQWt2pk5Ywp1/UIFParUAWb//v3S2tqatzdj3rx5XH311Vx00UUMGTIkr7LcdrFhw4YgJXtASeF/GLe0tPD73/9evvrVr7Jp06aC1uO/HysrK7n66qv59re/zdixY/vEKFcoY9jPvn37WL58edbtczGU/O0Kh8MsWrSIT37ykwXr01gsRlNTE4cPH87bcJs0aRK//OUvufLKKzn99NPzbtuhQ4eSwlk8jiUD81iaVBSCrC/TVdY/HLKZz/3r+qX91jtyWBriGSrBW33VmfGslCDSeyEvhUbQoC0s5agR+JY5+raBJa9vkYOHW9yEQ4l+6ttzDcESQSuDdtYX5i8r4u2eMsD8+Mc/LshCt0gkQmVlJeFwWClfGst87qG33nqLLVu2MGbMGCKRSOc7BAQUGe9abmpq4v777+fAgQNs2bKlaPX179+fa665hptuuonBgwerTIZCX1BTygcR4cCBA7Jy5cokL3GqDGeu44xfgcqLgfb276wfM23j/66+vl4effRRXnzxxbxth0gkwoABA2htbc0pp0BnxGIxdu3axfLly+X4448/ei+YDjia75Ni0KFHu6uXtwJmThrB2afNJ6yNq6MNphdmPwKgLESFERUGDOURxYc++D6qy3GiryV9n3t/9xCHWkAIufHdffOC8gYnrUNohKuuuIgh/auynvDHnniW+sYjmLgkY99HY3jfuaczbsQgtHcas8WPdOeCTy2iADJS3qeyspKLLrqIiRMn5tco4OWXX2blypVdktcLCOgJ9u3bx6uvvsqGDRvi3xV6zK2qquKyyy7jpptuYvTo0cqrI7WevjrW50pTUxMPP/wwd9xxB/v37wfym8AX2tvufReLxXjrrbd4+OGH865j6NChXHHFFQwcOFANGzZMXXXVVfEJQXexbZvNmzfz+OOP51VOwLFDbh7tTnDk35w9Bg201KTxI0Q/vwyxjVODpMc5Fx/tzpA1SgQjUcpCirmzplLmaSkr8Ost2sBrK1bSYscwlDlygF5PZFgYWMo4A6hCbIMSYdb0iVSWZT6tziJQha0sNyOmhbiJbvqyS1sRY9qU8fSrLetcXySPZ+x9990nTz/9dN66tGVlZXzhC19g/vz5KhQKMWPGDAYOHMjGjRuzqm3kyo9+9COmTZsm559//tFtTQT0ObLFuhaK888/n9tvv51hw4b1qWu/UG+C29raeOedd+TRRx/ly1/+ctKEuxDlV1ZWMmLEiPjfuU5Ysnm+jTHU19ezdu3avNolIlRVVTFz5sy4J3v27NmUlZXlHUoXi8Wor6/n0KFDeRvuxUREaGxs5I033ijqk7ysrIzp06f3qfurJ8lbhyH+Co6Ee3zevBkMGfwi2/cejuvl9pq9ZgQtNmFinHXqyZSFtUoOIXBabQNLXnlbmo5EMUQQS4EojCQndegrqhtKnAmGkijHz5nO0IH9CVvp9qQNrNu4R3bu3Ed7DCc+u48Hp7t+ESaMGcXY0UOpKHNE04vxanj37t3y6quvsm/fvi5lbctGeXl5PGnIyJEjmTFjBmvXruXQoUNdvvb81+uRI0fyUkMJCOir7Nixg9WrVzNs2LDebkqXyOdZ09DQIEuWLGHt2rXs3buXJ598suCSid74MmPGDD7zmc90a/9M7Nu3T5577rk8W+eMpdOmTUt6KzhgwADOPPNM/vznP+dV9sGDB/nLX/7CeeedJ+9973tL1sCMRqM8++yzHHfccUBhbRj/+Zs4cSJvv/12Qco9GslqaOcaypok84djbJ9+8gw1fPAA2bmnGduRuHD0nJXCGNNDr+iM42QXQMWwTCuXX3IBFWW+xroIEAOeeOZF6g8eccJGsFBaJxlPfcbIdv/VxLCkjXefdgJDh/TDSnHretESb6xaz7pNO2lt97TP+zoGC5sZU8YzY/J4qsrc9xIFvu5EhO3bt7NkyRIOHDiQV1lKKa699lpmzJgR/278+PFq0aJF8vzzz3fLA+P3gjc3N/PII48wdepUmTZtWsk+GAICColSirVr1/L8889z1llnZdym1GOz/QoPy5cv57rrrqO8vLzDh9Hhw4fZuHEjO3bsSCsrkwZ9dyfxo0aN4vLLL2fo0KEF68Bdu3bx17/+NW9lk6qqKo4//nhmzZoVL2jIkCHqiiuukHwNbXDUR37zm99wyimnxLPIljqFtmH8906p30e9SUFCR1L3U8Ck8aNYuXYzR2xX+YKUE+FLiV4MBBuFBcogRhBlJUUe+40QoxQHG40caGh0svoRw2jH/NZaI72RoSaP/hHA6BhgCImjEO4lwozfZm64z+Eo7Np7gKgdc7zZ3ga9nFLeeJksvXak9EfaTa2cbIwKC4WhvAyGD6mjrCzsL5Vck9T4r49sWeIAtm/fTnNzc5eOLRuTJk2Kp0v36h0yZAj9+vXDsqyEvnkX8NrZ3t7OG2+8wfr16xk7dmzaoqBgwAw4GvFenf/lL39h5syZ8oEPfCDt7VapX+t+42j//v08++yzBSmro+9yKSccDjN+/HgWLlzY5UWG2RZDtrW1sW3bNlpaWrK2K9eJQbaFrv6FsNnk6XIp/8iRI6xevfqYfVPYd5PZ9TxFsaYs4Ctf/ChltGOJZE6l6KZFLxaKsBM+oRQhDIuOn87IwbXxRXFJ4SDAc/9awYuvrKLNFlAWFiph5PUGefaPdjW0x44dzOTJo4lE3CMXG+WlZwc2b62Xv/79WQ42HnF0tymc1nQ+aNHJ/Z/SH2k3tWhnYgVYyjBySH/ed96ZDB9c6dvS358dC/t39hBWStHe3s6dd97JW2+9ldtBdcDs2bOZNm0a5eXl8cVaAJdddpk68cQTKU/oMuZEpnavWLGCJ554gt27d6c9RZITUJXCFRAQkD+e0bR7925ee+21+LWfTQe4r7y1LAX69+/PmWeeyamnntrlASPbYsjt27fL/fffz969e7Pum8s50lozfPhwzjjjjKT6QqEQo0eP5qSTTspaTleM+IaGBv7+978HF01AhxTT0kWUQWkb0bFMPxfZoHN0lCEGqp1FC2YxckSdcrJaZ8h4iMaIQhmF2IKJgdhgSi/JUI5olBGmjBvDnKmTKS9LfO8tFAUnJtvxZLvfU5rrH41Kn69lXEijwBZBlMS94pnJPwV7IR/Kc+fOZfr06Vk9Q101fgODISAgcR/s27ePu+++m5/97Ge0tbV16C0N6JxQKMSsWbP4t3/7t4KVefDgQZ555hkWL17cpf2yGe0jR47krLPOSvoxHA4zYcIETj755Lza6l0/Bw4c4NFHH82rrICjn6IZ2hGNmj5lPBqVtrbO8yI7rgVTNEUPERutoK66ghFDBhLR3gEnH3ZrFDZv2U7MVq68HXgez1Lx8HYVRYyykGH82GFUlidyfKZ68jds2kZLW8w1Ynsqfr7raHE+fvyvAL3zpMU5u5NHj6aurNJ37gqfmvYrX/mKvPrqq3n3WXV1NaNGjcoYziEifP3rX+eUU07Jqw6vjXfeeSd///vfezUte0BAb3DgwAHeeOMNNm/eLP6wsGBS2jUqKyu5/PLLuffeexk3blxBHhgiQnt7u+zduzcuPdiVfVOpra1l6tSpGbePRCKMHj06HqaXz/ht2zYNDQ1s2bIluIgCslIUQ1sDNWXwHzd8iHBEpy2wS7oxihRCEjcoxWb61IlccM7pVERcQQ1/9cC+/Ufkdw88xqE2MMoC7ekZC07OkD4g7eebsCgMCkNddTlXXXo+g+pc1Y2UXQxwz+8fYVd9C4gn7dc3xov4BMgoxFMiFEEBlsT44BXnMX50jUpcWR17sDvz5Kf2y/Lly2Xt2rUUIhvkxIkTueCCCxg1alTSiJ9J67crZFpM1FfOb0BAofDfB6+88goPPPBA0vel6lwoRSorKzn33HP5+te/Htckz2ds8e+7Y8cOnnnmmYzbdfUcjRkzhk9+8pMZ6+rfv78677zzmDNnTtL33SEajbJixQoefPDBvMsKOHopiqHt3RJhC0IIWjryWuf/Cj8TjlqIQSmhrDyEl+xRkDQXtbeYQURcWTztk7grbSPbM6oTf7tNN+2UR7QbPoOj+pKybzQKtmgMFqLSJ0SljGcYe6Ev8cUu0k4krLFU6mk2iGSPA+rszUXqQL9q1SrWr19PS0tLQR7UnZURCoXQOvfz05Gn7t5772XZsmXBEyHgmMB/Hxw8eJB//OMfPPXUU1IIOc5jCcuyOPnkk/nJT36CX7konwmLt48xhp07d/LCCy9k3K4rC7SVUoTD4bTx0r+/1jqeJTff8buhoYGHHnqI5cuXSzBpC8hE0SwrC0fm7+rLz6FctYIdc5QuvE+cwr/SB+fm0RKjXLfyg9u/SG21p/CWWARjA23AZ2/5Dg2HWpIMTTHaSfgirsGS+ult4h7s9P7T2IRNC1//yucZNayf8qTt4oIiQBT43k/uk01bdjmqKkqllVOKeLHaNgob5SYkcn7TJkrEtPLx6z/A3JkTU3TDdVz9Jl8aGxvZtGlTPPwi3+xl06ZNi7/GzMSQIUPUZz/72bgWai501KZNmzbxxhtvcPDgwa40NSCgzxOLxXjhhRf40Y9+xJo1a3wiTCUwppcgSikikQgTJ07kv/7rv7jrrrvinuxC0tjYKKtXr+5wm1zP0ZgxY/jCF77AhAkTkjzu/v+fOHGi+va3v011dXXe5z4Wi7F37968k+AEHL0U1YUZV/LL9ApcbMjgYcz3dXlSWVgoIxnzr2RSrQAQUSS87Bm6xwt1yWJwF7L9+eC1w2ui32Mr4hjbtiiMzyPs7VfKeLHajiqM96UXfqRAKyydiNv2U6iH6bZt2+TJJ59k165dBemvq666qsOsWoU2AhoaGnjsscdYv359YF0EHFN49+u6dev45z//Gc+TUOrjXm8hIkyfPp277rqLH/zgB6qjmOx8xqktW7Zw9913x//uive6K9v4ve/5xuf7y6qvr+fBBx88ZqX+AjqmaIa2iI0CPnrtlUwaPZgQJsXgTTZkPUPQWwCWLzY2RseoralGpYUREB9gm1sRW7wbJqH3na2dnS3eLFT7M6lsJNVjFIhGiCBEQEIgIUdDW0FZZQgrQiJpjw8b+Mfza2XxK6s5dCSG+OTUS8WzY5TpUDXEeZXoqqeIBuWEVpx0wmxOP/l46mrCKh+dz4764dChQ7S2thZkIVVVVVX8FWa2+pVSLFq0SF144YUMHTo0r/o8WltbaW1tTdPmLpXzHxBQDLzre8uWLfzsZz/jnnvuOeou+HyMVK011dXVjB07lhtvvJFVq1bxl7/8hTPOOKPTQrs7vm7fvl3uuecetmzZkvH3jupL3a62tpZzzz2Xc845p8PGiAjjx4/n1ltvzbnNmcrw/m1sbOS5554jFktXWOstgslj6VA0Q9szWocNtlSkTCPKdGw4UlgVEoswYWP4zm1fYEAlKvVAtXYMzp/+4s+s27yXdrFKysjIpLLhJ22hm3E/OIsBP/ah9zN/2gQiYdJmGUrBocNtNDUfKYkomExYJoRlsuZTQilBxKeS4s5MaqorqKmtdmK0C7SQ0I+IcPvtt7Nq1aq83wIopbj55ptZsGBBxt/812N1dTX9+vXLaJR3h8WLF/PQQw+xc+dOgb7zRiMgoFDs3buX119/Pe0e6OvkehyZths4cCA33ngjy5Yt41e/+pWaNWuWGjdunCr0uOAvLxqNsn//fmKxWN7OEMuyqK2tpV+/fp3WX1ZWpoYPH55zfZ3R3NxcUmtfUp01Ab1HUUNHNE7qyWs/eBkRnf4qPwl/5j/JbmDljIq5oSsdLcJ0/xWNY+aXYoxyZs+/twhSEUMrG6XFWfgogjLihuWkvkVI4HneNTZa2Wnl9za2Ntjadz7SJmBOqIiIgDIoHUOIosRGSyJsCQqblOLRRx+VzZs3419I1d0BrbMFPqm/nXnmmcyYMYNwOJxlj8JwtBgcAQEd0djYyL/+9S9effVVoPSNkWIaux779u3jvvvu4z//8z/505/+VPSB4PDhw7z22mu8+uqrBXsbnAvFMEL37NnDr3/965IcP4vVplK/Z0qFAli0HSBgKTjjtBMJWb8COz0Ftkps6hhSosnX4FXECJl2rrzkPZwwexplKUfpmdSLX1kvTzz7MofbFYKV1rZSxLtdvDAbhdNnYhkwgiU2x8+ZzMXnnEH/aq20St9/287Dct8fH2NPQxQjYSdIO/67X0e89/C8+Ym48sznRolGGYOlY4wcVM017z+fscOr428wsqXY7S6vvPIK+/bty/p7rgOaUorzzz+fc889lwEDBuTUoDlz5qhRo0ZJKBQqSCzgfffdx4IFC3j/+9+f5CkPBs+AUqHYOtdr167lt7/9LePHj5e5c+eW3IXvP34Roby8nIEDB2LbNgcPHswrhC2bjvj+/ft58MEHWbFiBYcPH5Zrr71WRSKRLil/5EpbW5ts2bKFTZs25V2W1pqZM2dy0003dbqtUoqKigpOOeUUrr32Wu677768629paeHFF1/k/vvvlw9/+MNJHVWMvssFpRTl5eUMHjy4qHWMHDmyaOUfDRTV0FbKMeyU+4pfid+mcww5cdNmF1JL21HZMPSrraWs3IrX6L/YBWg+fIRDTYddr2hyeu/SmZV25JF3VjWKKMRYaDEo2qguj1BVXUY2NbhYLMbB5sPEjEG00/9eWI+W0vLqd34WDCjBmHa0DlFXXUXEd1UXcnDbvHmzbNmyhba2toy/d+W6ERH27t3L//3f/7Fq1ar4q+vOPNxvv/12weIADx48yJIlSzj11FOlUIknAgIKgXcviQgDBgxgzpw5RKNRlixZQqFk+ZRStLa28uijjzJo0CDuuuuuXjOIspE6npx22mncfffd2LbNgw8+yNKlS1m1ahXr1q0rSPkexhjWrVvH7bffzu7du+W9730vCxYsKHjH7N+/P/5GIV9EhPr6ev72t79BlkdH6vltaGhg586d3aovdbwXEQ4fPkxjY2PGbXuDsrIyzj33XB566CHlT9IU0LMU1dD2TmpNtVYfuORcuf/PT9IqClSoqLHBGpuJIwdx9rtOSPJme9kQDdDUijz86FO0tLUBya/iS8LI9ofSdLapUggGVIzKiObii89hYF1V2u0kQDvw50eeoP5AI0pZSaORcwN62V9617sfN/zpqB8EUGhihGjn4vMvZvSwQUULfXnllVdYtmwZzc3NGX/v6nXz6quvsmzZsoz79lTmuscee4wLLriAcePGFa2OgICu4l3ztbW1XHnlldxyyy088cQTLFu2jGg0WtA6AFauXMmTTz4pnS2i62ky3f9KKcaNG6e+8IUv0NzczJo1a+SBBx7gl7/8JYcPHy5IHR5btmzhG9/4Bk8//TS33367nHrqqapQxpoxhi1btsSTveSLiLB27Vquv/76bpfRVWdJKk1NTTz55JNccMEF4skL9gZ+GWP/34GR3Tv0iDVVHoHj500npNvRph0xMZTgfDIlXClAnQPqKpkyaRQhz2HuXXDuIsMjLbB85VtEYybuZS+pizA1Y2ZKjLITaqOcRDPKkyuCcMgwe9Y0ysrSi/QUt5e/uZ7m1nZsEoOKJaCNpNfbS8QXg+bYHm1izJ4xldra8oKeRK9/otEo9fX1BXvIQ7LXLlu9xTSylVLEYjEaGhpobW0tWj0BAd2hqqqKD33oQ3zzm99k9OjR6pxzzuGGG24oSNmpi8m3bt3K0qVL49r4pUJn9391dTULFy5UX/7yl/nWt77FgAEDci471RjLRjQaZfHixXzxi1/k+eefL1hSljVr1shtt93W7f0zyfZ1tE0uv+c73ra2tvLWW291OY18oenJePeAzimyjnYiScr40cOYPHYklhK0aDejn5ONMClRDLmEC+Raf3JbnPIlrh0NjqEK2qnXZ4yXHK7BmZiIuIsklYXSIZRSWCg3UU+WIoDXVu6UhqbDGBzljkS/uOehQKovhaeTFOpaIUWYKHn9s3nzZrn//vvZunVrzvt0Rm8rfYgI77zzDr/73e9YvXp1KV71AccoAwcO5KMf/Shf+tKXGDx4sHJDSNS8efMYP3583uWnGiF79uzhnnvu4Re/+IU0NTXlXX4xyTReDBgwQF199dXccsstDBkyJKdyumKI2bbN0qVL+d73vpfzPp0RjUaTkrx0dRxMDdvIlMMi06LHNMWubpJal/d3Y2Mjzz77bLfLLSQl5Tw8himaoW2w3Rf7TpbI2dOGqPlzp6FVCEPI8cJ2kKivcx1lhdN8CxHt+xsU7Vz/b1dQWZEu6+cZ/3fd8ycOtylEhdx93N9zvO8KOSHISBaD16s37vFUGoNCRKOVcN0HL2Vw/4h7PCaxk8tTz77Ezn0NGENK+a6/u0Q82gkdcc/ATs6AmTSAYnPO2acwacIwwgUKhkodgO+//342bNjQrX0LvX2h8Xs/erstAcceqcZARUUFl112GV/84hfjWQiVUtTU1HD88cczZ86cDvfvLlu3buXFF1+kvr6+pG+CbN7KwYMHq5NPPjk+EclmCOZT7/r16/nd734nnY0TmcYT///v3r1b/v73v7Nt27aMv3e3fR2VUegxLpuaVX19PX/4wx8KUke+BON5aVA0i0pjJYWAaGDE8MGURSwsZaNEd5iRRYtGd2DwKeVFWzump1JuZkCcrIEL5sylQpNscLoYYMXq9RyJZXhlH/d2Z6boBna8oo4MXu0OmipuhioBZYRZ0yZTXa7dCYa7v0oorSQGI7dPStJ77Sc9xTyAVoJWAspGS4xJ40cxqLaaQk3gU2P13nzzTRoaGgpTeAngf+g+88wzPPzww+zatatgr4UDAnLFf5/V1tZy44038q1vfYtRo0alXYzz5s1TH/rQh5g8eXLG/fPlmWee4Wc/+1nByisW2e7TBQsWqNtuu40JEyYUTNbUX9fGjRu54447ePTRRzssLJP32D+mtrS0sGHDhpJaOFhItm7dyqc+9anAyg0AeihG2/Nq3/iRC9XI4XUoHUN56hYiecVkOzrSgsJGi01I2nn3qYsoD/tjvROHaQOvvbFZ6vc3YWyFGPd1k1IorRPBwe53qR+V8ukdUjy7xqBUK7NmjmXE0H5Y7uGm3uVbtjXIxs3v0NqmEBNyJjtpxnzHIRo9RWcJe5yfDErZjBo1hMkTRlFZbqW9wegu/gU/L7/8srzzzjtHlXfAfyzt7e289NJLbNq06ag6xoC+x8KFC/ngBz/I4MGDMw6ulmUxY8aMjEmeCkE0GmX16tW8/vrrffJGsCyLhQsX8vGPfzynGOZcSPVK7969m8WLF9PQ0NDlPlJK0dbWxoYNG1i9enWn9fVVjDEZ170cDccW0HV6xKIS15hWkKzZ7L+Bteowc2TaIkk3tEKIATFExUC1Y8kRLr7gTKorUxWkHePMBl546XV27T3gyOL5TDOR0lkMmEo8lCLugTaIN1lRMSyiLJw/izEjhxHRyf0lgC2wdv1W1qzbSmubq2duMt30mT3IJYdy2mnRzsRxw5k9bQI1lZ0kRepK8b4H01NPPcW2bdsKJitWirzwwgusX78+LSV7QEBPMXr0aM4880ymTZvW4W08Y8YMdeqppxalDbFYjBdffJHbb7+d5cuX90mrqLq6Wp144om8+93vjn9XSAOvvr6el156ib1792b8vbO6WlpaWL16Na+99lrB2lRqtLS0sHTpUp544omkzjgavPUBXadoFmWmRQga+NVPvkNt2I0/VpajnIET9uD3YKYa1mkhG27oiSIExgKJoAihUahs2qDAwWYj7+zfjy3imJOduU5LhCQVDhflefKNjZIYlmt4i6QPdq02bN+1l/b2FrRypAD7hEGdDXdhaNgKMXr4MMrLC5OaPJX6+nrZt29fktrI0TpYbt++ncbGxtK/GQKOOsaMGcNNN93EzTffrDpLnw1w4YUX8qlPfaoobWlpaWHdunW8+eabBVUZ6inC4TDjxo3jhBNOoKqqqih1LFu2jK985SsZf8s0PvqfR2+88YbcfPPNRWlXqWDbNvv27WPHjh293ZSAEqBohnY2YyQcdlZAap2IqXZ2SJev6+iJr73yTSIWTGMzd9ZExo8ZEg+f8GOA5SvX8cxz/6I1JqAtDBrb52UvlLxg0VEGwXYHMGH00IHMnTmVijJLKZ3c/wbYt79NHnjob+xrbCYpp6DYKcdbGqEjuaBFGFgX4fKLzmXk0OqCm78iwosvvsizzz6bFJ99tL7+u//+++O63gEBPcW4ceP47Gc/y/XXX690tixbKdTV1ak5c+YwadKkvOrO9pxas2YN3//+9/nrX/9asjd7R+PQ6NGj1cUXX5x3/2TDGMPWrVt57rnnJLUtnWXjNcYcE2/OmpubWbx4MXv27CnZayigZ+hRi8oChg+21PXXXEIZNsr/Kr4T3ehUEqobBnE9tEpFmTNzEpPGDlaZxmsFiCojZlS8LiU2GpMojx5a7JgvolFuVk2FYdTQgRw3axoV5e6CRwzi81gbFLYolCpHq3IQTdKCSd+WfcXTLdpZXNNRyFE+7N69W/74xz/GV8YfrZ5sj450vQMCisHIkSO58cYbuf7661Wq9zXbdSgi1NbWMmfOHKZMmZJX/R1d6xs2bODFF1/s1IjsLTobj2bNmqU+8pGPFGXcMsawbds2nn322S5lG9ywYYPceeedx5Sh3d3MkwFHDz3uuiwPwbgxIxzFCIgb1Gme5E5ipQXiQtnOTW6oqChn/JgRhHTmA7NtWPf2FtrtEMYNWdESRplQQQejQpSVppedhqvaIhYWignjx1IW0fH6FdrVJHHYsHErbVHb+U0LaC9NkCmph0eXMDEmjBtJTUVxEpy2tbWxffv2eBKLPttPOeCld7/zzjtZuXLl0XugASVFeXk5Q4YMoa6uLu23zpKQLFy4UN1www0F0dXOREtLC3/729/43//937icXSlNtjsbj2pra5k3bx6TJk0qSrv37dvHAw88kKZA0lFdhw4dYvPmzUnflVKfFpotW7bwiU98orebEdDLFFVH26/jnBSzrX3i8q5BHfdM49x4netoewOfoDBILMa4YYO47H3voTKCE1aR4pk9EkXuuvcBmlqcBC2Oh9t0KOeXlQ487oUwyOx4fyRnznTQbh0KEMJa+OiHL2PogFBcmty4xy8i2MDdv3uY3Q1txOK/xRLHXoIDnWBn7N9Egh0bS9tcc/l5jB9Z5x537p74zhY2igiPP/74MRNj512zb775JitWrEhKJBEQUGp41+u0adM47bTTilZPfX09r7/+Ops3b44P6qXy1icXA3XGjBlcd911RWvD3r17ee6559IUSDJJCx44cECWLFnC9u3b0347mimV6yWg9yiqjrZfx9nxsjrhI+8+dSGnnTSPkIqilUIpK8mDLSJxHe1E4pJkUgeZEEJFWXk84Yyj4518eK0tJkUn26T8Wzox2trfHxl+d45fUFooK0/3yGucPlVKEY1CuyhsNwsmokFp0FbJehOU2/5UvAFLo4hYIULaOcuOok3ug1lnsaBKKZ5//nl2797dhVb3Dt05h9n22bBhA+vWrePIkSPBkyGgZPGu38mTJ6tFixZRVlZWlHqampr4wx/+wI9+9KO45nPvSrt2jX79+qmzzjqL888/H8tKzhBXiGNoaGhgyZIlaQokmZLlHDx4kFdeeaUoY2qpng8vlv173/teMJ4ew/RY6EjcAw0MrNOqrroayxjEjiF2du9i56IgGo1NRA7xw+98mZrqlAgU16PbCnzu1jtoPNySvLvnmfbkAuMx3yke65TtehfX062iRGjitls+zYhhda7pTSJzpIIY8Mu7H5J1b28lZjuefBGFmAhiQojxTYhKkEwDqKVsQrRw3Qfex8LjZlIR9jbuINVoF1m/fr3U19fHPd8FCQfKkMShEHTHW9JRXOW6deuySncFBJQSlmVxwQUX8NGPfrQo5YsIzc3NrFy5kjVr1vQ5YykUCnHiiSeqm2++OSnJDxTGkywiLF++nK997WsdbtfU1MT//d//ce+99+ZdZ7Z2FHpcLVR5hw4dYunSpWzfvr3PXT8BhaE4wa0ZSL1oL7nwLJ5/aSl7m2xsFNKNJYjO4i3HQ2tUysAhiW3A9VTH5fE0mf3EmSrpbaM6M94bAiChp43PG+/GoNvgBIqI8YWbJJfjx3t70PuKh97bjeQMlgaNEklMDZR4ETSORztdPr1bPPTQQ6xevZpYLOa2I/8Oue6665g3bx5a64I+FJ588kleeOGFLod7eA+n1GN75JFHuPTSS5k9e3batgEBpYRSigEDBqgTTjhBpkyZwttvv12U1/RvvPEGjzzyCCeddFLG30v9/pgwYQIXXnghb731Vtpv8XC8bvabbdts2LCBp556St773vdm7YRCnpeysjJOOOEEPvjBD+ZVTup5ExG2bt3KD3/4w6ztzTRmdoSnqf3cc89x7bXX5tXegL5JjxnafhRwyqKxqrYqJPsPtWN3U+XCuUksFDb9qvsR0uGs2za3IVGxizII9wZeEqCq8jDlZeGM8wEDvLxsozz9z1c41NwGROIhJyh31benvuLu0/sGtkfKAYlzqWqchbPl4TAVZZFECEgeseapg+2LL74ojz32GPv37+9WeZm44YYb+NKXvsSECRNUoR/IBw8elGXLlnUrrjrT/WCMobm5mba2tvgr+VI2IgKObWpqapg9ezZTp05lw4YNRRnjDx8+zFNPPcW8efPkyiuvVOFw8rOm1O+P4cOHq9NOO01++ctfcvjw4aTf8u0v27ZZsWIFX/va16ioqJDTTjstrTPWrl0r3//+9/Oqx09ZWRmzZs3ik5/8ZHpiui5MejItct23b59EIhG+853vdLhPV7Btm+bmZmzbTgvhCTj66bHMkH7ZOM+nvOj4OVhIPK66aziliICYdr78hRsZPkSp+MzBF2wtwG/uf5w3Vm2lvbOsj6WSGbKTEBWlFJbEuPKi93LK8dOpKE/fRoCWI+00Nh2Oh0B4iwz9JftDTkqJuNdexNX79q4fmxPmTOLCc09jcP8yZxMS7e/qQJg6KB86dIjGxsa4N7sQDBo0iMrKyqI9kAttXPz85z9n8eLFpXZJBATE8V/zJ5xwgvrwhz/MiBEjilKXMYYVK1Zw55138tprr/W5+0JrzcKFC/nc5z5XsDL9Y5lt22zfvp2lS5fS0tKStm1LS0tBw9E6Mqa7MsZmirePRCJq+PDhBR2r9+zZw49//GM2btzY566dgPzpEYvSuWC9hXjO2/4w8NF/+wDhsMTVRpK278zQJAbSDnY72rRjicGKX8J+/WhHe8QYn7qIlkR70srNpPLRC0gIJBRvT1qmzPhDpuP71pEMV4iy3C3d1OXueUgtoVQWg4qIc86Mii+MdP7foMT41Eecj7/d+QyQjY2NPP7447zzzjv5HkKc2bNns2jRIurq6orStRdeeCHTpk3r8gOmI3bu3Mnzzz/Pzp075Wh5CxRwdJF6Dc+ZM4ezzz67KGV7rF+/nqeffprW1taC1NOT1NXVqYULF3LccccVxIhMHRd27tzJo48+mqZAsmPHDnn00Udpa2vLu06PUaNG5R02ko2KigqOO+64rGFC3SVQHzl2KaqhnfGi8llEoZCmX79qlBKfUe0s1sMXe52qOuLpS1sCEaJccPapvPu0+ZSFxKc97W2rWPHmTnnwsX9yKGphXIWTbB7cZFWS3sMzsAXtfhLtdaYtMaZPGscHLj+f/rXaWQaYEqJ+oMmWX9z7Z945EHWOGx034I22XBWSZErHs+1OhNwMmEopxxsPVFWGuOFDlzF5tCPrV8jTdeTIEVmxYgUHDx4sWJmjRo1i4sSJVFZWFqxMP3PnzlXDhw+P/53LQzSbR8j7rqGhgbfffpuGhoaSfy0eEAAwZswYtXDhQmpqavIuK5tBtHv3bl599VX2798v2bYtFWMqNdFORUUFU6ZMYe7cuQVfJ+LVtWrVKr773e/Gv4/FYmzdupXFixd3KqnaFfr378+iRYuKMjBFIhHGjRvHxIkTC1Ke1887duzgS1/6UkHKDOhbFM3QFkzHMbNiM2F0rfrE9R+kSsfQ4mWKMigl2NgYZRKqIz4PtxHBiON3NgoqKysoL48kxb46WtGO/7atNUpT8yFnMPDFJDsxByUSKpJCDBuTJWBaKUHEECnT1FWVE9IJlREPG7AFGg8exo5HQBg8A1YZKaF47EwYtCb+QBAdc/42MSJAv9oKInmsMMj2MHzllVcKGpsNxYnfTNKlV4rjjz8ez9jO9UGfaTv/dxs2bGDjxo3d8t511IZ8+qOvGP29aWwVSk2ilMnUvvLycq644gq++tWvMnTo0IIqBfn//sc//sHNN9/Mhg0bJNs2xei/rhyPfyLtb8uUKVPURz7yEcaMGZN3GzO1p6WlhdWrV8eTXu3atUv++Mc/smzZsozx0F0tH6Bfv34sXLiwqLHOhTx/XlnRaJT169ezdOlSSZ0EFavuo5W+1kdFszCVmxAm6+9+KbaUEBERwcJytKTjXyYMYi+uyvE8G0RLmk2vsTBAVODePz7C4VYbn1ZFwnPbXbm+IhvoFhYqo4C4QcTGUoIyiTS2SSuncUzq/+/BJzjQcMjpp3hbs6VYz5aBsndIpAN3Eh854iI2FlEued97GTF0UFxwpLvlZ+LBBx9k69at3W53Kv379+fCCy9k9OjRBbUQU9t/4YUX5p2OOpXXXnuNFStW0Nzc3OVRLbV9hUpj3VcG2N6cEBTDwCy1fs92jIMGDVKLFi1iypQpRZlwiAgtLS28/vrrLFmypMvty5VM+3flePz7x5+X7v4TJ07kAx/4QF7ty9aeaDTK2rVrefrpp7u0X67bKaUYMWIEV155JakLUgvJwIED1SWXXMLIkSMLdi8bY9i5cycPPPBA2vnxU8yxo9Tu4+7SVxwuHj1uWUk8atqhX10VNdXlaM9oytnwNYRUjIkj+/G5//gwlZHMW8WAZctXdb6wzQtVwfnEDelsnx4iLWZaNAohJC3ccvOnGD64Mkk/GxxPtgCr3lzD4Zy9kV4WytKI0fYQUe7H8cCLGGZMm0pNTWVyt5B/yMuvfvUrWbx4cUHjLysrK5k+fTr9+vUrWJmZKJbXfM+ePTQ3N+dVBvS9gbFQBA+23OlKX3UkvXbiiSeq66+/noEDBxaqaWls2LCBX//61zz33HNdWsPQVTWM7u6fbV8RYciQIerkk09m8ODBeZWVjd27d/OnP/2Jp556Sp577jnuvvvunPftjJ66n7xxu6ampqB12rZNQ0NDPPlRT3O0jMP+ePeenKh0lx43tB1PdyJ846L3HqdOOWEmljaJ0I4kQzbZ05rk5DWC1lBZaYFyFj6meSBMehnJGyTX13mCnJ5BiUb5Ysnjx6XcqYAS6qqqSVK38/ZVTuhILP53F145Uiox2glPTGIxrSJkKbcPSJoRFGKCcPjwYaLRaEEH1pNOOolhw4YVrLxs9O/fn9mzZzNgwICClOddM/fccw9LliwpWJ8UahAsxcE0E8VsZ1/pg1wp1GLeSCTCjBkzmD9/ftGut1gsxvPPP8+dd96ZdZFfZ6FZ3am7EOEeoVCI008/XX33u99l7Nix3Sonm7dZKYUxhh07dsS1/VNVSPKZmFRVVTF79uyiqcv46d+/P2eeeWa398907TU3N/Pkk0/y1FNPlcpjtk/iV4vJ955K/b4Yk7leiBVwQxckuXLthQe4RpVRBqNMYnvX0+0Zwd6CwE985GpqIrhL/ZKlegS4697H5VCrwZRQWEQuxDNUuijtLhgVDcbmQx94H4P6hTMalwI88Y8VsmHzbtpiGlMKqzu7gYiAthOzH2VzxinzmTllDBHvrWF8ZpAtJCY3Vq5cKc8++ywHDhzIv+E+LrzwQsaNG1fwE5A6GAwbNkydeuqpBTPq/XGFjzzyCKtXr+7W6FOsEIS+6CkudJsLZcjlWlcpGfadHefMmTPVGWecUfTrbcWKFTz88MMZf4xr/Bep7nyora3lhBNOYMaMGQUr0+9l3LVrFz//+c/5xS9+Ef+9O9dP6rH369ePk08+uShjaiqDBw9WV155ZV5llIK3tS+OlfmQy/Fm26ZY41wvWJ+emoRjLEeA733j02pATRmaGLgdoEUnx2inINIOymb27MmEsiyKs4E3Vr1F1NZIiklaaiESHZHk6VcGbQkzJ0+kpiKUQTfEYdOWnRxsasMYoZRir7uKf+aqxDBm9FAG9a9OnPP4iUy8tejOwLJv3z62bdtWFNmunloYNWDAAPr3708o2w3RDbysb91dIFqM0JGOBsNSfqgUyvDKRLFDdPyenkLGgHe3rM72q6qq4qKLLuKaa64peJ/4y9u1axdLly7lwIEDAulrETIZWt1ZDOjvr3yvcW//mTNnqs985jPxRdSF7qfGxkZWr16dVm9X8LdJa01dXR3Dhg3rkftcKUVVVRWjR4/udt9kivHftWsX3/zmN9mxY0ePDFbF8tKWCoVcXF+svipeZkivrTn0QSSMI/HnLuNLGqBSNbZxDC4tNqefdAIDamvIJPFmA6tW75Cde+qxjcYYcdQ64mErmcsvGZQX+JEItUEESxlmTB7HuNHDsBw5lriOtLix2dt3N8vadRtpaWsHpVyVkl45irwxtne+DMOGDGTmlPHUVkbiV0umy6s78nbjxo3jox/9KHv27ClMw11mz55dlEU7mR7iZ599thIRWbJkCUeOHClYXSNGjGDMmDHd2lcpxUknnYSI0NTUVJD2WJbFnDlzstZXSt5Xry1Tp07l+uuvZ8+ePQVr32mnnRa/tnrieLXWnHzyydx88815l+X1wYABA5g7d27Sd4VAKcWQIUO4+OKLGT16dEHKzMawYcPYuXMnAwYMSLr+hg8fzvvf//6s12p3mDx5MrW1tXl1ktfHWmsmT57Mpz/96aLFDGebbHTHmIlEIsyePZsrrrgi6/EX8hrSWjNr1iz1u9/9Tp544omClOkxcOBAqqqq0r4fMGAAn//85wvm8LEsq8s5FvoKoVAo43jUnWvA28eyLMaNG1fAVjqoUpjpxID7H1kq3/jurzhsWxhCiHgzf9cQdg1iJRpt2glxhNu+/CmuufhkVeHaMV5nGXFiue+6/2n5/i8foKktBEjmG9xKSUWeR9xPQfGOF1f/GlDGRssRrr74Pdz0yQ8wrH8kPl+IL4QEXnhlvdz0jV+xdU8TojQGUMaNdyZ5+5JHbLQSwGbhnAl879b/ZNq4AUqp4ryRKNRAXUrGXnfI1v6ePq7O2tHX+/lY5Wg7fz11HD1RT3frKOQbj9Q2HG3XS08Q9FXpUDSPtqcs4nljUx3cqTflrGmTCOuYYykSwkZQorAIO9sqg1Kuaol2vLdaKxICd/7Xa66OdCIpd9JiQucrt11Gpd3QOR1fkS9i251oWGiU0r7226CiKGdtYByF08e2gW3b3+HwkVbAyaaofVap6SM3X0zZTsy9ex2FEMaMGEFFeYRiGdlw7C3Wy0ZHi0VKqR19vZ+PVY6289dTx9ET9RQrnCefso6266UnCPqqdCiyjrY/Q2OyceTFqnlm7bDB/Thp4VzClrOV5e4t2CgtGCVxxRElNtOnjGP6lDEZk5YYYO/emCxb9iZR28TrA9JURtJuaIpnxHWFEApLQMRGxACC0M6QfrUsWnA8VeURlTonMEBzK/Lb3z9Mg/uaPnWA6is3X0gcHXUlzkLZcsvmqisuYvTw6qQjKCWVlICAgICAgIAAP0XMDJlqAGVWhVAYLGD4IEudOH8uEe0ZugalDErHQLUTwsYSL3zEMGXcSKZNHInlC51I+K9h++79vLJ8Ne2xTmKwRZI+8ZXTnXx6wiAXsVHSDqYVpB1LbAYPqOGEeTMpLwOVIb7cKMcbjgqDLylQIdPf9iTO60IbjcFSGSSlSD0P+amPBAQEBAQEBAQUiiJ6tFMNoGxa1glNbe0zpOKeV2ODsRHlpGZH2ikPaaZOGEOZRUJ1Q5J1Rd5cv4GokSTdbZVVo6N08UJGnH8N06dOpLI8jIorbSSzbt07tLY5sd3ik/UrpuJBMTFioZTFxAnjqK4qy2FyU1oZLgMCAgICAgKOXUrCIvGMpwXz5zB2zDAsbSc8x6LRWCARjIGQ2AzqV8Z1V11EZcRnzPvCUAzwy7v+SFNrCCGMZ2+KdO7pVGJQOWxXbIyI45HWEUSFUcrCEsP111zKkJrElMHvybeBe/7wKHsa2rFV2J1YOJ9eX9zZTZSy0AjXXHEBY4fV9cGpUkBAQEBAQMCxSq/bLZ4BaAGzpg9TY0YMJKTa0cpZ5ihKI4ScxYcCqBhVFWVpcRt+D/qRFmc/tAVunG/O7VHa2bcLbS8GSnkeaQvlJqmprIgQ0pI1JjkahXa7HSwDSh0VARQKQ9hyZHeUciZRfXPKEBAQEBAQEHCs0euGtl9OTwPHz51GiCga2/lNtKvwIWjVRkiO8L1v30JVRbo0oQ20Al+67f9JfVOz4xV2aunJQyosRlAmStgc5qb/+ijjRw1VIStxRN6/MeC+Pz0uy1as5XBru6O4otJT0vcdNAoISRuXv+89nHbSHGoqyaiZHhAQEBAQEBBQivS6oe3haTzfeN0FqqrMgEQBgyhQOoyIQqsQSoVcbenMChoJnWiDwqC0oHw+UCUKVcCU5MVbFOnGpCvb/ddJ5JPNo5tYAmjcwHVnfycRUIrySh9BxEZU4MEOCAgICAgI6JsUVXUk8x/uV5KIqBax47HGGhhQ1w+0QhRoHNFsMRoRTU1NFeGIRSKMOlll4nArEo1FHZUN7aqIuL8ppRAlSFdiSXI4zmIYgrarEO6VXVVRSWV5OSHtZYG0SZjWsHzNLnnk7/+k8XAraMdAF9pROjklsIdRBpNBtaRU5A2d4zeELU11eTl9dC1nQEBAQEBAwDFM8VRH/BaoSjdIE55WjVIWSsASKAO+940vUx0JoQ2OYYzn8bb51A0fZsq4/ipieYaju9gPgw089NgLvLDkTWzRvuySDn0pjCIkYXCTzSjaOe/MEzn7tPlUlDu/K5XIGClAtM1wqOkIdsygRGOh0T698NRj15L8e3w7SsODbKEIKcOsScN5/6VnMnxQhXImGJ21LpD3CwgICAgICCgNipYZMp6B0Sff5yfVCMbN9mfjGFPOokTvB4NGUNKG+HJB+vdXju8bEVdpI4arRCIZai99xMuEKTZaAHGVWDIcS4oJjbE9c1niWtp9LWzEOV7bTdiTkDiMx/S7m6UfVeD6DggICAgICCgNimiVZNYzjntMlcroOdXA7Jnj1DVXXkBVKIYyUZSJYckRTls0h0vOO50KK4PhDry96YD8+t4HONSiMH3NsMyIQWEzamR/PvZvVzC4n84o69cegzt+9mt2HmjDuIsI417dFH3xvoDCmRhYYvOZT3yYKWP7Oxnn/RMroUtqMgEBAQEBAQEBPU3xPNpZ6MzoU0BFBGqrKl05P+M4Zo1NRVmYyvKw0hkKMYAthqbDBx0jVHmr6IrotM8yWShk+RohrBU11ZVOnLIIuAtH/TQ2NtNuJ94ExI1tL7xGkZR6vvQxoAz9a6oo853CRLx96hc92LSAgICAgICAgBzocUM7V7vICxPQgiNxh3HiuDPsKDiRInf99k+0tgmKkKvUAU78iUrE9irjGMgmP8usJ0IxPFlDT0XEqTexbFRwQm1+/+DTcqCxCRNfTgreElAnm6aJe3+lT4RWxAhJO5de+F6GDe0PpMsZxol/kRyqFBAQEBAQEBDQ2/S4VdK5qoVBAR+79nw1f/Z4QpZjLPavLeNrX/ks5RXuZq4B7hmbNvDairdoswVbKcSJ6kaUSfrEQ1a0cj6qax+lVI8Y2UaBECMkLfz3lz/LsME1bq1uSI54vQUrV62ntcVGGcsXUuFOMFBurLsXK2+SPqWIAjQ2s6ZNpqa6Kvl6ybpaM0i9HhAQEBAQEFBa9LhHO1fKyyAUCuGlD1fYVFW7RqRnrbshFMmGmKNiIp6iSVqsgUf3jMyeCgvW4qZsEaGyoiKrJ9dTZAEvlKUwx9nbeOfNQiknWibwWAcEBAQEBAT0LUrQanHUQ0LAp/79GspDQogY//nv11AZQXmhI36ZNwF++/89J/sb27BVyPHgigGJ9UL7C4ONjaXaufLicxg7rNbJJu/73Ute88yLa2TVW5tpjdkk5+FxZO6UaCeFexZ6SzfbrySSisbmxIUzOH7ORMorlDtHCjzWAQEBAQEBAX2LkrRcFI6hPWvaaBXSFkoL86ZPJeK21u/FBcekfGvdBlrbYo5HV7QTmy1WL7S+MIRQaCNMnjiG6qpyQiQbxN5CzG0797Dv4CFMiuO6MwO7t/F74f3/OhhGDh3E4IH9CKeewlLJqBMQEBAQEBAQ0AklGzoCUBaC885awN69+xk2tBaNf+2bONkjgbfe3ivrNu0iaofcjIk2iUPre1aZFz89cdwopo0fS1Uo/SAE2FPfKivefJvDbTbGWwTp05rOhVJRyPN7tvvV1TB39jRqq8OlORMMCAgICAgICMiBkja0LQ2XnHsKmzdvZvjgfsrSJCxD18i2gTfXbmLDxh3ETAi/6djnkrT40NhMnjiWadMmEI6kTxcMsHtPA8uWr6GlRRw5w26QqpLXkyilMoaODBk4kPnzZjKgOqSg65OHgICAgICAgIBS4P8HeK7iVtSJNvIAAAAASUVORK5CYII=';
+// v1.6: ECHT Wattkraft-logo (data-URI) i.p.v. de zelfgemaakte tekst.
+// Merkband: Wattkraft linksboven, WATTKRAFT-badge rechts (zonder "energie-integrator").
+function merkband(){
+  return '<div class="merk"><img class="fl-logo" src="'+EDRIVE_LOGO+'" alt="Wattkraft">'+
+    '</div>';
+}
+function heatKleur(t){ // t in 0..1 → Wattkraft-groen ladder
+  if(t<=0) return '#F2F5F8';
+  var stops=[[234,247,238],[154,212,166],[5,176,80],[4,132,67],[11,61,36]];
+  var x=Math.min(1,t)*(stops.length-1), i=Math.floor(x), f=x-i, a=stops[i], b=stops[Math.min(stops.length-1,i+1)];
+  var r=Math.round(a[0]+(b[0]-a[0])*f), g=Math.round(a[1]+(b[1]-a[1])*f), bl=Math.round(a[2]+(b[2]-a[2])*f);
+  return 'rgb('+r+','+g+','+bl+')';
+}
+// Heatmap: verticaal 24 uur (0 boven → 23 onder), horizontaal 365 dagen. mat = [24][365] kW-gemiddelden.
+function heatmapSvg(mat, piek){
+  if(!mat||!mat.length) return '<div class="note">Geen sessie-profiel beschikbaar.</div>';
+  var DAYS=mat[0].length, HRS=mat.length, W=728, H=200, padL=26, padB=16;
+  var cw=(W-padL)/DAYS, ch=(H-padB)/HRS, mx=piek||1;
+  mat.forEach(function(row){ row.forEach(function(v){ if(v>mx) mx=v; }); });
+  var s='<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+  for(var h=0;h<HRS;h++){ for(var d=0;d<DAYS;d++){ var v=mat[h][d]||0; if(v<=0) continue;
+    s+='<rect x="'+(padL+d*cw).toFixed(1)+'" y="'+(h*ch).toFixed(1)+'" width="'+(cw+0.6).toFixed(1)+'" height="'+(ch+0.4).toFixed(1)+'" fill="'+heatKleur(v/mx)+'"/>'; } }
+  // uur-assen (0,6,12,18)
+  [0,6,12,18].forEach(function(h){ s+='<text x="2" y="'+(h*ch+ch*0.5+3).toFixed(1)+'" font-size="8" fill="#5A6577">'+h+'u</text>'; });
+  // maand-ticks
+  var mnd=['J','F','M','A','M','J','J','A','S','O','N','D'], cum=[0,31,59,90,120,151,181,212,243,273,304,334];
+  cum.forEach(function(c,i){ var x=padL+c*cw; s+='<line x1="'+x.toFixed(1)+'" y1="0" x2="'+x.toFixed(1)+'" y2="'+(H-padB)+'" stroke="#ffffff" stroke-width="0.4" opacity="0.5"/>';
+    s+='<text x="'+(x+2).toFixed(1)+'" y="'+(H-4)+'" font-size="8" fill="#5A6577">'+mnd[i]+'</text>'; });
+  s+='</svg>';
+  return s;
+}
+
+// ---------- financieringsmodellen (15-jaar, in hoofde van de klant) ----------
+// v1.9: leasing zonder winstdeling (klant houdt alles; na aflossing de volle marge) + drie modellen
+//   volledig over de horizon (15 j) uitgewerkt. Kosten inflateren 2%/j; netkosten krijgen daarbovenop
+//   +4% (dus +6%/j). Opbrengst blijft constant (conservatief; enkel kosten inflateren). Jaar 1 valt
+//   exact samen met de gerapporteerde jaarwinst. Baten: rendement (IRR op inleg), totale absolute
+//   meerwaarde en NPV op de inleg (disconto). Alle aannames staan in A en zijn per dossier bij te sturen.
+function _financiering(capex, jaarwinst, opbrengst){
+  var A={ horizon:15, looptijd:10, lening_pct:75, lening_rente:5, leasing_rente:10,
+          infl_kost:2, infl_net_extra:4, net_aandeel:50, disconto:5 };
+  function annu(pv,r,n){ r=r/100; return (r<=0)?pv/n:(pv*r/(1-Math.pow(1+r,-n))); }
+  var O=+opbrengst||0, kost1=Math.max(0, O-jaarwinst);
+  var net1=kost1*A.net_aandeel/100, ov1=kost1-net1;
+  var gNet=1+(A.infl_kost+A.infl_net_extra)/100, gOv=1+A.infl_kost/100;
+  function margeJaar(t){ var net=net1*Math.pow(gNet,t-1), ov=ov1*Math.pow(gOv,t-1);
+    return { opbrengst:O, netkost:net, overige:ov, marge:O-net-ov }; }
+  function irr(inleg, cfs){
+    if(!(inleg>0)) return null;
+    function npvAt(r){ var s=-inleg; for(var t=0;t<cfs.length;t++) s+=cfs[t]/Math.pow(1+r,t+1); return s; }
+    var lo=-0.9, hi=2, flo=npvAt(lo), fhi=npvAt(hi); if(flo*fhi>0) return null;
+    for(var i=0;i<100;i++){ var mid=(lo+hi)/2, fm=npvAt(mid);
+      if(Math.abs(fm)<1e-4) return mid*100; if(flo*fm<0){ hi=mid; } else { lo=mid; flo=fm; } }
+    return (lo+hi)/2*100;
+  }
+  function bouw(inleg, aftrek, looptijd){
+    var rows=[], cum=-inleg, d=A.disconto/100, npv=-inleg, cfs=[];
+    for(var t=1;t<=A.horizon;t++){ var m=margeJaar(t), af=(t<=looptijd?aftrek:0), netto=m.marge-af;
+      cum+=netto; npv+=netto/Math.pow(1+d,t); cfs.push(netto);
+      rows.push({ jaar:t, opbrengst:m.opbrengst, netkost:m.netkost, overige:m.overige,
+        marge:m.marge, aftrek:af, netto:netto, cumulatief:cum }); }
+    var som=cfs.reduce(function(s,x){return s+x;},0);
+    return { inleg:inleg, rows:rows, som_netto:som, meerwaarde:som-inleg, npv:npv, irr:irr(inleg,cfs) };
+  }
+  // 1 · eigen middelen — inleg = capex, geen financierings-aftrek
+  var eigen=bouw(capex, 0, 0);
+  eigen.investering=capex; eigen.jaarwinst=jaarwinst;
+  eigen.tvt=jaarwinst>0?capex/jaarwinst:null; eigen.rendement=capex>0?jaarwinst/capex*100:null;
+  // 2 · lening 75% @ 5% — inleg = eigen inbreng (25%), aftrek = annuïteit over de looptijd
+  var L=capex*A.lening_pct/100, E=capex-L, an=annu(L,A.lening_rente,A.looptijd);
+  var lening=bouw(E, an, A.looptijd);
+  lening.lening=L; lening.eigen_inbreng=E; lening.rente=A.lening_rente; lening.looptijd=A.looptijd;
+  lening.annuiteit=an; lening.netto_jr=jaarwinst-an;
+  lening.rendement_ei=E>0?(jaarwinst-an)/E*100:null; lening.tvt_ei=(jaarwinst-an)>0?E/(jaarwinst-an):null;
+  // 3 · leasing @ 10% — GEEN eigen inleg, GEEN winstdeling; aftrek = leasetermijn over de looptijd,
+  //     daarna is de installatie afgelost en houdt de klant de volle marge.
+  var lease=annu(capex,A.leasing_rente,A.looptijd);
+  var leasing=bouw(0, lease, A.looptijd);
+  leasing.leasetermijn=lease; leasing.rente=A.leasing_rente; leasing.looptijd=A.looptijd;
+  leasing.klant_jr1=jaarwinst-lease;
+  return { aannames:A, eigen:eigen, lening:lening, leasing:leasing };
+}
+// 15-jaar tabel + KPI-rij voor de financieringspagina's (v1.9)
+function _finSom(rows,key){ return rows.reduce(function(s,r){return s+(+r[key]||0);},0); }
+function _finTabel(m, aftrekLabel){
+  var hasAf=!!aftrekLabel, last=m.rows[m.rows.length-1];
+  var h='<table class="fin15"><thead><tr><th>Jaar</th><th>Opbrengst</th><th>Netkosten</th><th>Overige kosten</th><th>Brutomarge</th>'+
+    (hasAf?'<th>'+esc(aftrekLabel)+'</th>':'')+'<th>Netto voor u</th><th>Cumulatief</th></tr></thead><tbody>';
+  m.rows.forEach(function(r){
+    h+='<tr><td>'+r.jaar+'</td><td>'+eur(r.opbrengst)+'</td><td>'+eur(r.netkost)+'</td><td>'+eur(r.overige)+'</td>'+
+      '<td>'+eur(r.marge)+'</td>'+(hasAf?'<td>'+(r.aftrek>0?eur(r.aftrek):'—')+'</td>':'')+
+      '<td class="'+(r.netto>=0?'pos':'neg')+'">'+eur(r.netto)+'</td>'+
+      '<td class="'+(r.cumulatief>=0?'pos':'neg')+'">'+eur(r.cumulatief)+'</td></tr>';
+  });
+  h+='</tbody><tfoot><tr><td>Totaal</td><td>'+eur(_finSom(m.rows,'opbrengst'))+'</td><td>'+eur(_finSom(m.rows,'netkost'))+'</td>'+
+    '<td>'+eur(_finSom(m.rows,'overige'))+'</td><td>'+eur(_finSom(m.rows,'marge'))+'</td>'+
+    (hasAf?'<td>'+eur(_finSom(m.rows,'aftrek'))+'</td>':'')+'<td>'+eur(m.som_netto)+'</td><td>'+eur(last.cumulatief)+'</td></tr></tfoot></table>';
+  return h;
+}
+function _finKPI(m){
+  function kpi(cls,l,v,s){ return '<div class="kpi '+cls+'"><span class="l">'+esc(l)+'</span><div class="v">'+v+'</div><div class="s">'+esc(s)+'</div></div>'; }
+  var rend = m.irr!=null ? pct(m.irr,1) : '—';
+  var rendSub = m.irr!=null ? 'IRR op uw inleg over 15 j' : 'geen eigen inleg';
+  return '<div class="kpi-row">'+
+    kpi('', 'Eigen inleg', m.inleg>0?eur(m.inleg):'€ 0', m.inleg>0?'uw kapitaal':'niets vooraf')+
+    kpi('groen', 'Rendement / jaar', rend, rendSub)+
+    kpi('oranje', 'Totale meerwaarde 15 j', eur(m.meerwaarde), 'netto, na uw inleg')+
+    kpi('groen', 'NPV op uw inleg', eur(m.npv), 'verdisconteerd @ 5 %')+
+  '</div>';
+}
+
+var K=D.kern||{}, IN=D.input||{}, PLN=D.pleinen||[], ST=D.sturingen||{}, F3=D.factuur3||{}, SC=D.scenarios||[], KB=D.kabel||{};
+var GEW=D.gewone_pleinen||[], GEW_BESP=+D.gewone_besparing_eur||0, CREG_MWH=+D.creg_forfait_eur_mwh||0;   // v1.4: niet-betalende (wagenpark) pleinen
+var FIN=_financiering(+K.investering||0, +K.jaarwinst||0, +K.opbrengst||0);
+var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC.filter(function(r){return r.heeftPlein;}).slice(-1)[0] || {};
+
+// ===========================================================================
+// PAGINA 1 — VOORBLAD met kerncijfers voor de investeringsbeoordeling
+// ===========================================================================
+(function(){
+  function veld(l,v){ return '<div class="cf"><div class="cf-l">'+esc(l)+'</div><div class="cf-v">'+v+'</div></div>'; }
+  var p=document.createElement('div'); p.className='a4 cover'; _pg++;
+  p.innerHTML =
+    '<img class="cover-bg" src="/apps/voorblad-simuleer.jpg" onerror="this.style.display=\'none\';var fb=this.parentNode.querySelector(\'.cover-fb\'); if(fb) fb.style.display=\'flex\';" alt="Wattkraft">'+
+    '<div class="cover-fb" style="display:none"><img src="'+EDRIVE_LOGO+'" alt="Wattkraft" style="height:44px;width:auto;align-self:flex-start;max-width:70%;object-fit:contain;display:block;margin-bottom:6px">'+
+      '<div class="cl">Laadplein aan uw gebouw — de investering in cijfers.</div></div>'+
+    '<div class="cover-free">'+
+      '<div class="cf-title">Laadplein-rapport'+(window._LP_DEMO?' · voorbeeldweergave':'')+'</div>'+
+      ((D.project||D.scenario)?'<div style="font-size:17px;font-weight:800;color:#fff;margin:-4px 0 10px">'+esc(D.project||'')+
+        (D.scenario?' <span style="color:#B9C0BE;font-weight:600">· '+esc(D.scenario)+'</span>':'')+'</div>':'')+
+      '<div class="cf-grid">'+
+        veld('Investering', eur(K.investering)+' <span class="u">excl. btw</span>')+
+        veld('Winst / jaar', eur(K.jaarwinst)+' <span class="u">netto</span>')+
+        veld('Terugverdientijd', (K.tvt!=null?jaar(K.tvt):'—'))+
+        veld('Rendement', (K.rendement!=null?pct(K.rendement,1)+' <span class="u">/ jaar</span>':'—'))+
+      '</div>'+
+    '</div>';
+  R.appendChild(p);
+})();
+
+// ===========================================================================
+// PAGINA 2 — DISCLAIMER (leegblad, disclaimer onderaan)
+// ===========================================================================
+(function(){
+  var disc=
+    '<div class="box" style="background:#F5F7FA;border-color:#D5DBE3">'+
+    '<div style="font-size:12px;font-weight:800;color:#1F3864;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px">Disclaimer</div>'+
+    '<div style="font-size:10.5px;color:#3A424C;line-height:1.6;text-align:justify">'+
+    'De analyses in dit document zijn uitsluitend gebaseerd op de door de klant aangeleverde gegevens en input. De keuze van de laadpalen en de definitie van de laadsessies, laadvensters en overige parameters werden in gezamenlijk overleg met de klant bepaald. '+
+    'De simulaties geven weer wat, op basis van de marktgegevens van de afgelopen twaalf (12) maanden, de berekende impact is van een sturing zonder onbalans van deze keuzes. '+
+    'Deze resultaten betreffen een berekening op historische gegevens; resultaten en cijfers uit het verleden bieden geen enkele waarborg of garantie voor de toekomst. '+
+    'Marktprijzen, netwerk- en distributietarieven, heffingen, verbruiks- en laadpatronen, technologie en regelgeving kunnen wijzigen, waardoor de werkelijke resultaten kunnen en zullen afwijken van de in dit document gepresenteerde inschattingen. '+
+    'Dit document vormt geen koop-, verkoop-, investerings-, financieel, fiscaal of juridisch advies, doch enkel een inschatting op basis van de best beschikbare informatie en technologie op het ogenblik van opmaak. '+
+    'De lezer dient zelf zijn eigen conclusies te trekken en, waar aangewezen, onafhankelijk en professioneel advies in te winnen alvorens enige beslissing te nemen. '+
+    'Uit dit document, uit het gebruik ervan, noch uit de gevolgen die er direct of indirect uit voortvloeien, kan enige aansprakelijkheid worden afgeleid. '+
+    'Elke aansprakelijkheid van de opsteller — uit welke hoofde ook, met inbegrip van onnauwkeurigheden, onvolledigheden of vergissingen — wordt uitdrukkelijk uitgesloten voor zover wettelijk toegestaan. '+
+    'Dit document is vertrouwelijk en uitsluitend bestemd voor de geadresseerde.'+
+    '</div></div>';
+  var inner=merkband()+'<div style="height:178mm"></div>'+disc;
+  pagina(inner);
+})();
+
+// ===========================================================================
+// PAGINA 3 — SAMENVATTING (conclusie in klare taal)
+// ===========================================================================
+(function(){
+  var h='';
+  h+=merkband();
+  h+='<div class="eyebrow">Samenvatting</div><h1>Uw gebouw wordt ook een laadplein — en dat rendeert.</h1>';
+  h+='<div class="titel-accent"></div>';
+  h+='<p class="lead">U koppelt aan uw bestaande gebouw een <b>betalend laadplein</b>. Bezoekers laden hun wagen; u rekent hen een tarief aan. '+
+    'De laadenergie halen we <b>uit uw bestaande aansluiting en een batterij</b> — zonder uw aansluitvermogen te verzwaren. '+
+    'De simulatie hieronder toont wat dat concreet oplevert.</p>';
+  h+='<div class="kpi-row">'+
+    '<div class="kpi groen"><span class="l">Winst per jaar</span><div class="v">'+eur(K.jaarwinst)+'</div><div class="s">netto, na energie- en netkosten</div></div>'+
+    '<div class="kpi"><span class="l">Investering</span><div class="v">'+eur(K.investering)+'</div><div class="s">batterij + palen + kabeltracé</div></div>'+
+    '<div class="kpi oranje"><span class="l">Terugverdiend na</span><div class="v">'+(K.tvt!=null?jaar(K.tvt):'—')+'</div><div class="s">op eigen middelen</div></div>'+
+    '<div class="kpi groen"><span class="l">Rendement / jaar</span><div class="v">'+(K.rendement!=null?pct(K.rendement,1):'—')+'</div><div class="s">winst ÷ investering</div></div>'+
+  '</div>';
+  h+='<div class="box groen"><b>Waarom dit werkt.</b> Een batterij vlakt uw piek af en koopt energie op de goedkope uren (arbitrage). '+
+    'Diezelfde batterij levert samen met uw aansluiting het vermogen voor de laadsessies — u verkoopt die energie door aan '+eur(K.tarief)+'/MWh. '+
+    'De marginale kostprijs van de geladen energie is slechts <b>'+eur(K.laadprijs_marg)+'/MWh</b>, dus de marge per MWh is ruim.</div>';
+  h+='<div class="box"><b>Drie manieren om te financieren</b> (details achteraan):'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px;font-size:12px">'+
+      '<div><b>1. Eigen middelen</b><br>Rendement '+(FIN.eigen.rendement!=null?pct(FIN.eigen.rendement,1):'—')+'/jaar, terugverdiend na '+(FIN.eigen.tvt!=null?jaar(FIN.eigen.tvt):'—')+'.</div>'+
+      '<div><b>2. Lening 75% @ 5%</b><br>Netto '+eur(FIN.lening.netto_jr)+'/jaar over, rendement op eigen inbreng '+(FIN.lening.rendement_ei!=null?pct(FIN.lening.rendement_ei,0):'—')+'/jaar.</div>'+
+      '<div><b>3. Leasing @ 10%</b><br>Geen investering; u houdt '+eur(FIN.leasing.klant_jr1)+'/jaar over vanaf jaar 1 — en de volle winst na aflossing.</div>'+
+    '</div></div>';
+  h+='<p class="note">De cijfers gelden voor het gesimuleerde scenario (100% van de verwachte laadsessies) en zijn exclusief btw. '+
+    'Ze zijn gebouwd op de sturing <b>zonder onbalans</b>; onbalans is een extra opportuniteit (zie verder).</p>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 3 — INHOUDSTAFEL
+// ===========================================================================
+(function(){
+  var items=[
+    ['1. De ingegeven installatie','5'],
+    ['2. Het laadplein — sessies, vensters en profiel','6'],
+    ['3. Investering — plan, materiaal en kosten','7'],
+    ['4. Zo rekent de simulatie — en wat sturing oplevert','8'],
+    ['5. De zes scenario’s naast elkaar','9'],
+    ['6. Kabeltracé — plan en luchtfoto','10'],
+    ['7. Financiële analyse','11'],
+    ['8. De drie financieringsmodellen — 15 jaar per model','12']
+  ];
+  var h=merkband()+'<div class="eyebrow">Inhoud</div><h1>Wat u in dit rapport vindt</h1><div class="titel-accent"></div>';
+  h+='<p class="lead">De eerste bladzijden geven u de conclusie. Daarna bouwen we die stap voor stap op — van de ingegeven installatie tot de financiële analyse.</p>';
+  h+='<div class="toc" style="margin-top:10px">';
+  items.forEach(function(it){ h+='<div><span class="t">'+esc(it[0])+'</span><span class="pg">p. '+it[1]+'</span></div>'; });
+  h+='</div>';
+  h+='<div class="box blauw" style="margin-top:18px"><b>Voor wie dit rapport is.</b> U hoeft geen ingenieur of energie-expert te zijn. '+
+    'Elke term die we gebruiken, leggen we uit op de plek waar hij voorkomt. Twijfelt u ergens over? Uw contactpersoon loodst u er graag door.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 4 — DE INGEGEVEN INSTALLATIE
+// ===========================================================================
+(function(){
+  var a=IN.aansluiting||{}, v=IN.verbruik||{}, b=IN.batterij||null;
+  function rij(k,val){ return '<div class="inbox"><div class="k">'+esc(k)+'</div><div class="v">'+val+'</div></div>'; }
+  var h=merkband()+'<div class="stap-band"><div class="nr">1</div><div><h2>De ingegeven installatie</h2><div class="note">Waarop de simulatie zich baseert.</div></div></div>';
+  h+='<h3>Aansluiting</h3>'+rij('Toegangsvermogen', _num(a.kva)+' kVA'+(a.spanning?' · '+esc(a.spanning):''))+
+    (a.max_injectie_kw!=null?rij('Max. injectie', _num(a.max_injectie_kw)+' kW'):'');
+  h+='<h3>Verbruik gebouw</h3>'+rij('Jaarverbruik', _num(v.mwh,1)+' MWh'+(v.label?' · '+esc(v.label):''));
+  h+='<h3>Productie & opslag</h3>'+
+    rij('Zonnepanelen (PV)', IN.pv?_num(IN.pv.kwp)+' kWp':'—')+
+    rij('Batterij (opslag)', b?(_num(b.kw)+' kW / '+_num(b.kwh)+' kWh'+((b.dod_pct||b.rte_pct)?' · DoD '+_num(b.dod_pct)+'% · RTE '+_num(b.rte_pct)+'%':'')+(b.levensduur_jaar?' · levensduur ± '+_num(b.levensduur_jaar,1)+' j':'')):'—');
+  h+='<div class="box blauw" style="margin-top:16px"><b>De kern van de aanpak.</b> Het toegangsvermogen (<b>'+_num(a.kva)+' kVA</b>) wordt '+
+    '<b>nooit verzwaard</b>. Het laadplein wordt bediend uit de vrije ruimte onder dat vermogen én uit de batterij. '+
+    'Wat op een piekmoment niet past, wordt netjes uitgesteld (throttling) — zo blijft uw netfactuur onder controle.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 5 — HET LAADPLEIN: sessies, vensters, profiel (heatmaps)
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">2</div><div><h2>Het laadplein — sessies, vensters en profiel</h2><div class="note">Hoe we een betalend laadplein definiëren.</div></div></div>';
+  h+='<div class="box"><b>Begrippen.</b> Een <b>sessie</b> is één laadbeurt van een bezoeker: een wagen laadt gedurende een vaste <b>duur</b> aan het vermogen van de paal. '+
+    'De sessies vallen willekeurig binnen één of twee <b>vensters</b> (bv. voormiddag en namiddag). '+
+    'Het <b>aantal palen</b> begrenst hoeveel sessies tegelijk kunnen laden.</div>';
+  PLN.forEach(function(p,i){
+    h+='<h3>'+esc(p.naam||('Laadplein '+(i+1)))+'</h3>';
+    h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 8px">'+
+      '<div><span style="color:#5A6577">Paaltype</span><br><b>'+esc(p.paaltype||'—')+' · '+_num(p.paal_kw)+' kW</b></div>'+
+      '<div><span style="color:#5A6577">Aantal palen</span><br><b>'+_num(p.aantal_palen)+'</b></div>'+
+      '<div><span style="color:#5A6577">Duur / sessie</span><br><b>'+_num(p.duur_min)+' min</b></div>'+
+      '<div><span style="color:#5A6577">Dagen / week</span><br><b>'+_num(p.dagen_per_week)+'</b></div>'+
+    '</div>';
+    if(p.vensters&&p.vensters.length){ h+='<div style="font-size:11.5px;color:#5A6577;margin-bottom:4px">Vensters (sessies/dag): '+
+      p.vensters.map(function(w){ return '<b style="color:#1A1F2B">'+_num(w.start)+'–'+_num(w.eind)+'u: '+_num(w.sessies)+'</b>'; }).join(' · ')+'</div>'; }
+    var vp=+p.verkoopprijs_eur_mwh|| +K.tarief ||0;   // v1.2: terugval op het gebruikte tarief als het plein geen eigen prijs meegaf
+    h+='<div class="box groen" style="margin:4px 0 8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'+
+      '<div><b>Verkoopprijs stroom aan de bezoeker</b><div class="note" style="font-style:normal">Wat u de bezoeker per geladen energie aanrekent — bepaalt rechtstreeks de laadwinst.</div></div>'+
+      '<div style="text-align:right"><div style="font-size:20px;font-weight:800;color:#048443">'+eur(vp)+'/MWh</div>'+
+      '<div style="font-size:11px;color:#5A6577">= '+_num(vp/10,1)+' €c/kWh</div></div></div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 6px">'+
+      '<div><span style="color:#5A6577">Gevraagd</span><br><b>'+_num(p.gevraagd_mwh,1)+' MWh</b></div>'+
+      '<div><span style="color:#5A6577">Geleverd</span><br><b style="color:#05B050">'+_num(p.geleverd_mwh,1)+' MWh</b></div>'+
+      '<div><span style="color:#5A6577">Gemist</span><br><b style="color:'+((p.gemist_pct||0)>5?'#9E480E':'#5A6577')+'">'+_num(p.tekort_mwh,1)+' MWh ('+_num(p.gemist_pct,1)+'%)</b></div>'+
+      '<div><span style="color:#5A6577">Piek plein</span><br><b>'+_num(p.piek_kw,0)+' kW</b></div>'+
+    '</div>';
+    h+='<div class="heat-wrap">'+heatmapSvg(p.heat,p.piek_kw)+
+      '<div class="heat-leg"><span>weinig</span><span class="bar"></span><span>veel geladen vermogen</span><span style="margin-left:auto">verticaal = uur van de dag · horizontaal = dag van het jaar</span></div></div>';
+  });
+  // v1.4: NIET-BETALENDE (wagenpark) pleinen — geen verkoop, maar een besparing t.o.v. het CREG-tarief.
+  if(GEW.length){
+    h+='<h3 style="margin-top:14px">Niet-betalende laadpleinen (eigen wagenpark)</h3>';
+    h+='<div class="box">Deze pleinen laden uw <b>eigen voertuigen</b>: er is geen verkoop aan bezoekers, maar u '+
+      '<b>bespaart</b> op wat laden anders zou kosten. De besparing is <b>netto</b>: het <b>CREG-forfait</b> '+
+      (CREG_MWH>0?('(± '+eur(CREG_MWH)+'/MWh, het gereguleerde referentietarief) ')+'':'')+'mín uw eigen laadkost. '+
+      'Deze besparing zit mee verrekend in de winst van de zes scenario’s verderop.</div>';
+    var gbody='';
+    GEW.forEach(function(g){
+      gbody+='<tr><td>'+esc(g.naam)+(g.laadpunten?'<br><span style="font-size:11px;color:#5A6577">'+esc(g.laadpunten)+'</span>':'')+'</td>'+
+        '<td>'+(g.aantal>0?_num(g.aantal)+(g.km_per_jaar>0?' × '+_num(g.km_per_jaar)+' km':''):'—')+'</td>'+
+        '<td>'+_num(g.geleverd_mwh,1)+' MWh</td>'+
+        '<td>'+_num(g.geleverd_km)+' km</td>'+
+        '<td><b class="pos">'+eur(g.besparing_eur)+'</b></td></tr>';
+    });
+    h+='<table><thead><tr><th>Laadplein</th><th>Wagens</th><th>Geladen</th><th>Geleverd (km)</th><th>Besparing/jaar</th></tr></thead><tbody>'+gbody+'</tbody>'+
+      (GEW.length>1?'<tfoot><tr><td>Totale CREG-besparing</td><td></td><td></td><td></td><td>'+eur(GEW_BESP)+'</td></tr></tfoot>':'')+'</table>';
+    // v1.8: laadprofiel-heatmap per gewoon plein (zelfde weergave als de betalende pleinen).
+    GEW.forEach(function(g){
+      if(!g.heat) return;
+      h+='<div style="margin-top:10px;font-weight:700;color:#1F3864;font-size:12.5px">'+esc(g.naam)+' — laadprofiel</div>'+
+        '<div class="heat-wrap">'+heatmapSvg(g.heat, g.piek_kw||0)+
+        '<div class="heat-leg"><span>weinig</span><span class="bar"></span><span>veel geladen vermogen</span><span style="margin-left:auto">verticaal = uur van de dag · horizontaal = dag van het jaar</span></div></div>';
+    });
+  }
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 7 — INVESTERING (componenten + prijzen + extra kosten & werken + totaal)
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">3</div><div><h2>Investering — plan, materiaal en kosten</h2><div class="note">Wat de installatie kost, post per post.</div></div></div>';
+  h+='<p>Hieronder staan alle onderdelen van de installatie met hun prijs. Dit totaal is de basis voor de terugverdientijd en het rendement die u verderop in het rapport terugvindt.</p>';
+  if(KB.bom&&KB.bom.length){
+    var body='';
+    KB.bom.forEach(function(it){
+      body+='<tr><td>'+esc(it.item)+(it.comment?'<br><span style="font-size:11px;color:#5A6577">'+esc(it.comment)+'</span>':'')+'</td>'+
+        '<td>'+_num(it.aantal)+'</td><td>'+eur(it.eenheidsprijs)+'</td><td>'+eur(it.totaal)+'</td></tr>';
+    });
+    h+='<table><thead><tr><th>Onderdeel</th><th>Aantal</th><th>Eenheidsprijs</th><th>Totaal</th></tr></thead><tbody>'+body+'</tbody>'+
+      '<tfoot><tr><td>Totale investering (excl. btw)</td><td></td><td></td><td>'+eur(KB.totaal_capex!=null?KB.totaal_capex:K.investering)+'</td></tr></tfoot></table>';
+  } else {
+    h+='<div class="box"><b>Totale investering:</b> '+eur(K.investering)+' (excl. btw).</div>';
+  }
+  h+='<div class="box blauw">'+(( +KB.extra_kosten>0 )
+      ? '<b>Extra kosten &amp; werken: '+eur(KB.extra_kosten)+'.</b> '+(KB.extra_comment?esc(KB.extra_comment):'Bijkomende posten en werken zoals afgesproken.')
+      : '<b>Extra kosten &amp; werken.</b> Er zijn geen bijkomende kosten of werken opgenomen bovenop batterij, laadpalen en kabeltracé.')+
+    ' Alle bedragen zijn indicatief en exclusief btw; de definitieve prijs wordt per dossier bevestigd.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 8 — SIMULATIEMETHODE + IMPACT VAN STURING + WINDFALL
+// ===========================================================================
+(function(){
+  var g=ST.geen||{}, s=ST.sturing||{}, o=ST.onbalans||{};
+  var h=merkband()+'<div class="stap-band"><div class="nr">4</div><div><h2>Zo rekent de simulatie — en wat sturing oplevert</h2><div class="note">Van ruwe kost naar slimme kost.</div></div></div>';
+  h+='<p>De simulatie draait een volledig jaar in stappen van 15 minuten. Voor élk kwartier bepaalt ze wat het gebouw verbruikt, '+
+    'wat de laadsessies vragen, en hoe de batterij het best laadt of ontlaadt. Dat gebeurt in drie niveaus van «sturing»:</p>';
+  h+='<div class="kpi-row k3">'+
+    '<div class="kpi rood"><span class="l">1 · Geen sturing</span><div class="v">'+eur(g.kost)+'</div><div class="s">alles laadt meteen — duurste geval</div></div>'+
+    '<div class="kpi groen"><span class="l">2 · Sturing zonder onbalans</span><div class="v">'+eur(s.kost)+'</div><div class="s">de business case</div></div>'+
+    '<div class="kpi"><span class="l">3 · Sturing met onbalans</span><div class="v">'+eur(o.kost)+'</div><div class="s">extra opportuniteit</div></div>'+
+  '</div>';
+  h+='<div class="split">'+
+    '<div class="box groen"><b>Meerwaarde van sturing</b><div style="font-size:22px;font-weight:800;color:#048443;margin:4px 0">+ '+eur(ST.meerwaarde_eur)+'</div>'+
+      '<div class="note" style="font-style:normal">'+pct(ST.meerwaarde_pct,1)+' goedkoper dan «geen sturing» — enkel door slim te laden en de piek af te vlakken.</div></div>'+
+    '<div class="box blauw"><b>Windfall onbalans</b><div style="font-size:22px;font-weight:800;color:#1F3864;margin:4px 0">+ '+eur(ST.windfall_eur)+'</div>'+
+      '<div class="note" style="font-style:normal">'+pct(ST.windfall_pct,1)+' extra bovenop niveau 2 — als bonus, niet als basis.</div></div>'+
+  '</div>';
+  h+='<div class="box oranje"><b>Wat is «windfall profit»?</b> Naast de spotmarkt bestaat er een <b>onbalansmarkt</b>: het net beloont (of bestraft) '+
+    'wie op het juiste moment méér of minder afneemt. Door de batterij passief te laten meebewegen met die prijzen valt er soms extra winst te rapen — '+
+    'een <b>meevaller</b> («windfall»). Ze is echter <b>onzeker en niet gegarandeerd</b>. <b>Daarom bouwen we de business case bewust op niveau 2 '+
+    '(sturing zonder onbalans).</b> De onbalanswinst nemen we <b>niet</b> mee in de terugverdientijd; ze is een aspect dat u later samen met uw '+
+    'energieleverancier kunt bekijken en dat, wanneer het meezit, bovenop het rendement komt.</div>';
+  // compacte 3-kolommenfactuur
+  if(F3.rows&&F3.rows.length){
+    var hh=F3.headers||['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'];
+    var body='';
+    F3.rows.forEach(function(r){ var cls=r.groep?'grp':(r.item?'item':'');
+      body+='<tr class="'+cls+'"><td>'+esc(r.label)+'</td><td>'+eur(r.geen)+'</td><td>'+eur(r.sturing)+'</td><td>'+eur(r.onbalans)+'</td></tr>'; });
+    var st=F3.subtotaal||{}, bt=F3.btw||{}, tt=F3.totaal||{};
+    var foot='<tfoot><tr><td>Subtotaal excl. btw</td><td>'+eur(st.geen)+'</td><td>'+eur(st.sturing)+'</td><td>'+eur(st.onbalans)+'</td></tr>'+
+      (bt.geen!=null?'<tr><td>Btw (21%)</td><td>'+eur(bt.geen)+'</td><td>'+eur(bt.sturing)+'</td><td>'+eur(bt.onbalans)+'</td></tr>':'')+
+      (tt.geen!=null?'<tr><td>Totaal incl. btw</td><td>'+eur(tt.geen)+'</td><td>'+eur(tt.sturing)+'</td><td>'+eur(tt.onbalans)+'</td></tr>':'')+'</tfoot>';
+    h+='<h3>Factuurdetails — de drie sturingen</h3><table class="fact3"><thead><tr><th>'+esc(hh[0])+'</th><th>'+esc(hh[1])+'</th><th>'+esc(hh[2])+'</th><th>'+esc(hh[3])+'</th></tr></thead><tbody>'+body+'</tbody>'+foot+'</table>';
+  }
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 7 — DE ZES SCENARIO'S
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">5</div><div><h2>De zes scenario’s naast elkaar</h2><div class="note">Van geen batterij tot een druk bezet laadplein.</div></div></div>';
+  h+='<p>We vergelijken zes gevallen op <b>dezelfde aansluiting</b> (nooit verzwaard) en sturing <b>zonder onbalans</b>. '+
+    'De sessies schalen van 50% tot 200% van de verwachte drukte — zo ziet u meteen hoe gevoelig het rendement is aan bezetting.</p>';
+  // v1.3: mix — zijn er gewone (wagenpark) pleinen? Dan tonen we hun levering + CREG-besparing per scenario.
+  var heeftWag=SC.some(function(x){ return x.geleverd_wag_mwh!=null; });
+  var cregM=Math.round(+D.creg_eur_mwh||0);
+  var head='<tr><th>Scenario</th><th>€/MWh</th><th>km gevraagd</th><th>% gel.</th><th>Laadprijs marg.</th><th>Opbrengst</th>'+
+    (heeftWag?'<th>Gewone pleinen</th><th>CREG-besp.</th>':'')+
+    '<th>Jaarfactuur</th><th>Winst</th><th>Investering</th><th>Terugv.</th><th>Rend./jr</th></tr>';
+  var body='';
+  SC.forEach(function(r){
+    var win=r.is_basis?'<span style="color:#5A6577">ref.</span>':'<b class="'+((r.winst_eur||0)>=0?'pos':'neg')+'">'+eur(r.winst_eur)+'</b>';
+    var inv=r.is_basis?'<span style="color:#5A6577">ref.</span>':eur(r.investering_eur);
+    var tvt=r.is_basis?'—':((r.tvt_jaar==null)?'<span style="color:#C0392B">—</span>':jaar(r.tvt_jaar));
+    var rnd=r.is_basis?'—':((r.rendement_pct==null)?'—':'<b class="pos">'+pct(r.rendement_pct,1)+'</b>');
+    var wagCel=heeftWag?('<td>'+(r.geleverd_wag_mwh!=null?(_num(r.geleverd_wag_mwh,1)+' MWh'+(r.km_wag!=null?' <span style="color:#5A6577">('+_num(r.km_wag)+' km)</span>':'')):'—')+'</td>'+
+      '<td>'+(r.besparing_wag_eur!=null?'<b class="pos">'+eur(r.besparing_wag_eur)+'</b>':'—')+'</td>'):'';
+    body+='<tr><td>'+esc(r.label)+'</td><td>'+eur(r.energieprijs_eur_mwh)+'/MWh</td>'+
+      '<td>'+(r.heeftPlein?_num(r.km_gevraagd)+' km':'—')+'</td>'+
+      '<td>'+(r.heeftPlein?pct(r.pct_geleverd,1):'—')+'</td>'+
+      '<td>'+(r.heeftPlein?eur(r.laadprijs_marg_eur_mwh)+'/MWh':'—')+'</td>'+
+      '<td>'+(r.heeftPlein?eur(r.opbrengst_eur):'—')+'</td>'+
+      wagCel+
+      '<td>'+eur(r.jaarfactuur_eur)+'</td><td>'+win+'</td><td>'+inv+'</td><td>'+tvt+'</td><td>'+rnd+'</td></tr>';
+  });
+  h+='<table class="scn"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+  h+='<div class="box"><b>Hoe u de tabel leest.</b> «Winst» = laadplein-opbrengst − jaarfactuur van dat scenario + jaarfactuur zonder batterij. '+
+    'De batterij-rij (zonder sessies) toont zo het verbruiksvoordeel op zich (piek + arbitrage). «Laadprijs marg.» is de kost van énkel de '+
+    'geladen energie; het verschil met uw tarief van '+eur(K.tarief)+'/MWh is uw marge. De investering is gelijk voor 50–200% (de palen zijn fysiek); '+
+    'enkel de bezetting — en dus de winst — verandert.'+
+    (heeftWag?' <b>Gewone pleinen</b> (eigen wagenpark) laden in élk scenario mee: hun levering en de <b>CREG-besparing</b> '+
+      '(@ '+eur(cregM)+'/MWh t.o.v. het CREG-tarief) staan apart en zitten al vervat in de winst. «km gevraagd» slaat enkel op de '+
+      'betalende pleinen.':'')+'</div>';
+  h+='<div class="box groen"><b>Conclusie.</b> Zelfs op halve bezetting is de installatie rendabel; op de verwachte bezetting (100%) verdient u '+
+    'de volledige investering terug in <b>'+(_100.tvt_jaar!=null?jaar(_100.tvt_jaar):'—')+'</b> aan <b>'+(_100.rendement_pct!=null?pct(_100.rendement_pct,1):'—')+' rendement per jaar</b>.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 8 — KABELTRACÉ: foto + bill of material + kosten
+// ===========================================================================
+(function(){
+  var h=merkband()+'<div class="stap-band"><div class="nr">6</div><div><h2>Kabeltracé — plan en luchtfoto</h2><div class="note">Hoe de installatie op uw aansluiting wordt aangesloten.</div></div></div>';
+  h+='<p>Het kabeltracé bepaalt hoe de palen en de batterij op uw aansluiting worden aangesloten. '+(KB.exact
+      ? 'Het onderstaande plan is <b>exact ingetekend</b> op het terrein via de kabelplanner.'
+      : 'Het onderstaande plan is een <b>eerste schatting</b>; met de kabelplanner tekenen we het tracé exact in en verfijnen we de kost.')+' De kostprijs van het kabeltracé zit mee in de investering (hoofdstuk 3).</p>';
+  if(KB.foto_dataurl){ h+='<img src="'+KB.foto_dataurl+'" style="display:block;width:100%;border-radius:6px;margin:8px 0;border:1px solid #D5DBE3" alt="Kabeltracé">'; }
+  else { h+='<div class="box" style="text-align:center;color:#5A6577;padding:26px">📍 Nog geen luchtfoto ingetekend — teken het tracé in via de kabelplanner voor het exacte plan en de foto.</div>'; }
+  h+='<div class="box blauw"><b>Kabeltracé: '+(KB.exact?'<span style="color:#048443">EXACT</span>':'<span style="color:#9E480E">schatting</span>')+' '+eur(KB.kabeltrace_eur)+'.</b> '+
+    'Deze post is opgenomen in de totale investering (hoofdstuk 3). Zodra het tracé exact is ingetekend, herrekenen investering, terugverdientijd en rendement automatisch mee.</div>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 11 — FINANCIËLE ANALYSE (eigen middelen / lening 75%@5% / leasing 10% + 50/50)
+// ===========================================================================
+(function(){
+  var A=FIN.aannames, e=FIN.eigen, l=FIN.lening, le=FIN.leasing;
+  var h=merkband()+'<div class="stap-band"><div class="nr">7</div><div><h2>Financiële analyse</h2><div class="note">Drie manieren om de installatie te bekostigen.</div></div></div>';
+  h+='<p>De winst van <b>'+eur(K.jaarwinst)+'/jaar</b> (scenario 100%, zonder onbalans) is het vertrekpunt. '+
+    'Hieronder ziet u wat u overhoudt naargelang u de investering van <b>'+eur(K.investering)+'</b> zelf betaalt, leent of least. '+
+    'Aannames: financierings-looptijd '+_num(A.looptijd)+' jaar. '+
+    'Op de volgende drie pagina’s werken we elk model volledig uit over <b>'+_num(A.horizon)+' jaar</b> — met kosteninflatie en de baten voor u (rendement, meerwaarde, NPV).</p>';
+
+  // 1. eigen middelen
+  h+='<h3>1 · Eigen middelen</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Investering</div><div class="v">'+eur(e.investering)+'</div></div>'+
+    '<div class="inbox"><div class="k">Winst / jaar</div><div class="v">'+eur(e.jaarwinst)+'</div></div>'+
+    '<div class="inbox"><div class="k">Terugverdientijd</div><div class="v">'+(e.tvt!=null?jaar(e.tvt):'—')+'</div></div>'+
+    '<div class="inbox"><div class="k">Rendement / jaar</div><div class="v"><b class="pos">'+(e.rendement!=null?pct(e.rendement,1):'—')+'</b></div></div>'+
+  '</div><div class="box groen" style="align-self:stretch"><b>U betaalt alles zelf.</b> Het eenvoudigste geval: na '+(e.tvt!=null?jaar(e.tvt):'—')+' '+
+    'heeft de installatie zichzelf terugbetaald; daarna is de winst zuivere opbrengst. Ideaal als u over de middelen beschikt en het maximale rendement wil.</div></div>';
+
+  // 2. lening
+  h+='<h3>2 · Financiering op eigen conto — 75% geleend aan 5%</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Eigen inbreng (25%)</div><div class="v">'+eur(l.eigen_inbreng)+'</div></div>'+
+    '<div class="inbox"><div class="k">Lening (75% @ '+_num(l.rente)+'%)</div><div class="v">'+eur(l.lening)+'</div></div>'+
+    '<div class="inbox"><div class="k">Aflossing / jaar</div><div class="v">'+eur(l.annuiteit)+' <span style="font-size:11px;color:#5A6577">('+_num(l.looptijd)+' j)</span></div></div>'+
+    '<div class="inbox"><div class="k">Netto over / jaar</div><div class="v"><b class="'+(l.netto_jr>=0?'pos':'neg')+'">'+eur(l.netto_jr)+'</b></div></div>'+
+    '<div class="inbox"><div class="k">Rendement op eigen inbreng</div><div class="v"><b class="pos">'+(l.rendement_ei!=null?pct(l.rendement_ei,0):'—')+'</b></div></div>'+
+  '</div><div class="box blauw" style="align-self:stretch"><b>Het hefboomeffect.</b> U legt maar '+eur(l.eigen_inbreng)+' zelf in. '+
+    'De winst (35% op de installatie) ligt véél hoger dan de leenrente (5%), dus op uw eigen inbreng loopt het rendement op tot '+
+    '<b>'+(l.rendement_ei!=null?pct(l.rendement_ei,0):'—')+' per jaar</b>. Na '+_num(l.looptijd)+' jaar is de lening afbetaald en houdt u de volle '+eur(K.jaarwinst)+'/jaar over.</div></div>';
+
+  // 3. leasing (v1.9: geen winstdeling — klant houdt alles; na aflossing de volle marge)
+  h+='<h3>3 · Leasing aan 10% — u houdt de volledige winst</h3>';
+  h+='<div class="split"><div class="box">'+
+    '<div class="inbox"><div class="k">Uw investering</div><div class="v"><b class="pos">€ 0</b></div></div>'+
+    '<div class="inbox"><div class="k">Leasetermijn / jaar (@ '+_num(le.rente)+'%)</div><div class="v">'+eur(le.leasetermijn)+' <span style="font-size:11px;color:#5A6577">('+_num(le.looptijd)+' j)</span></div></div>'+
+    '<div class="inbox"><div class="k">Netto over / jaar (jaar 1)</div><div class="v"><b class="'+(le.klant_jr1>=0?'pos':'neg')+'">'+eur(le.klant_jr1)+'</b></div></div>'+
+    '<div class="inbox"><div class="k">Na aflossing (vanaf jaar '+_num(le.looptijd+1)+')</div><div class="v"><b class="pos">'+eur(K.jaarwinst)+'</b></div></div>'+
+  '</div><div class="box groen" style="align-self:stretch"><b>Geen investering, en u houdt alles.</b> De partner financiert en leaset de installatie (aan '+_num(le.rente)+'%). '+
+    'U betaalt niets vooraf en draagt geen risico. De volledige winst boven de leasetermijn is voor u: <b>'+eur(le.klant_jr1)+'/jaar</b> vanaf het eerste jaar. '+
+    'Na '+_num(le.looptijd)+' jaar is de leasing afgelost en houdt u de volle '+eur(K.jaarwinst)+'/jaar over. Ideaal als u uw kapitaal liever voor uw kernactiviteit bewaart.</div></div>';
+
+  h+='<div class="box"><b>Samengevat.</b> '+
+    'Eigen middelen geven het hoogste absolute rendement; een lening geeft de hoogste hefboom op uw eigen inbreng; leasing geeft u winst zónder te investeren. '+
+    'Alle drie vertrekken van dezelfde jaarwinst van '+eur(K.jaarwinst)+' — en houden geen rekening met de onbalans-windfall, die er bovenop kan komen.</div>';
+  h+='<p class="note">Indicatieve berekening, exclusief btw en fiscaliteit (investeringsaftrek, afschrijvingen). Rentes en looptijd zijn aannames en worden per dossier bevestigd.</p>';
+  pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 12/13/14 — DE DRIE FINANCIERINGSMODELLEN, VOLLEDIG OVER 15 JAAR
+//   (in hoofde van de klant; kosteninflatie 2%/j, netkosten +6%/j, opbrengst constant)
+// ===========================================================================
+(function(){
+  var A=FIN.aannames;
+  var uitlegKost=
+    'De opbrengst houden we constant; enkel de <b>kosten</b> lopen op. We rekenen '+_num(A.infl_kost)+' % inflatie per jaar op alle kosten, '+
+    'en daar bovenop nog eens '+_num(A.infl_net_extra)+' % op de <b>netkosten</b> (distributie, transport, capaciteit) — die dus met '+
+    _num(A.infl_kost+A.infl_net_extra)+' % per jaar stijgen. Jaar 1 komt exact overeen met de winst van '+eur(K.jaarwinst)+' uit de simulatie. '+
+    'De netkosten schatten we op '+_num(A.net_aandeel)+' % van de jaarlijkse kosten (bij te sturen per dossier).';
+
+  // ---- Model 1: eigen middelen ----
+  (function(){
+    var m=FIN.eigen;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7a</div><div><h2>Model 1 — Eigen middelen, 15 jaar uitgewerkt</h2>'+
+      '<div class="note">U betaalt de installatie zelf. Uw inleg is de investering; daarna is elke euro marge voor u.</div></div></div>';
+    h+='<p>'+uitlegKost+'</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, null);
+    h+='<div class="box groen"><b>Wat dit betekent.</b> U legt '+eur(m.inleg)+' in. Over 15 jaar houdt u — ná uw inleg en ná de oplopende kosten — '+
+      '<b>'+eur(m.meerwaarde)+'</b> netto over. Dat komt neer op een rendement van '+
+      (m.irr!=null?'<b>'+pct(m.irr,1)+' per jaar</b> (IRR op uw inleg)':'—')+'. '+
+      'Verdisconteerd aan '+_num(A.disconto)+' % is de netto contante waarde (NPV) van uw inleg <b>'+eur(m.npv)+'</b>.</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
+
+  // ---- Model 2: lening 75% @ 5% ----
+  (function(){
+    var m=FIN.lening;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7b</div><div><h2>Model 2 — Lening (75% @ 5%), 15 jaar uitgewerkt</h2>'+
+      '<div class="note">U leent 75% en legt 25% zelf in. Tijdens de looptijd betaalt u de annuïteit; daarna houdt u de volle marge.</div></div></div>';
+    h+='<p>'+uitlegKost+' De aflossing bedraagt '+eur(m.annuiteit)+'/jaar gedurende '+_num(m.looptijd)+' jaar (lening van '+eur(m.lening)+' @ '+_num(m.rente)+' %).</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, 'Aflossing');
+    h+='<div class="box blauw"><b>Wat dit betekent.</b> U legt maar '+eur(m.inleg)+' zelf in (25%). Over 15 jaar houdt u — ná uw inleg, de aflossingen en de oplopende kosten — '+
+      '<b>'+eur(m.meerwaarde)+'</b> netto over. Op die beperkte inleg loopt het rendement op tot '+
+      (m.irr!=null?'<b>'+pct(m.irr,1)+' per jaar</b> (IRR)':'—')+' — het hefboomeffect. '+
+      'De NPV op uw inleg (@ '+_num(A.disconto)+' %) is <b>'+eur(m.npv)+'</b>. Vanaf jaar '+_num(m.looptijd+1)+' is de lening afbetaald en valt de aflossing weg.</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
+
+  // ---- Model 3: leasing @ 10% (geen inleg, geen winstdeling) ----
+  (function(){
+    var m=FIN.leasing;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7c</div><div><h2>Model 3 — Leasing (@ 10%), 15 jaar uitgewerkt</h2>'+
+      '<div class="note">Geen eigen inleg. U betaalt de leasetermijn; de volledige winst daarboven is voor u. Na aflossing houdt u alles.</div></div></div>';
+    h+='<p>'+uitlegKost+' De leasetermijn bedraagt '+eur(m.leasetermijn)+'/jaar gedurende '+_num(m.looptijd)+' jaar (@ '+_num(m.rente)+' %). '+
+      'Er is <b>geen winstdeling</b>: u houdt de volledige marge boven de leasetermijn, en na de looptijd de volle winst.</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, 'Leasetermijn');
+    h+='<div class="box groen"><b>Wat dit betekent.</b> U legt <b>niets</b> in en draagt geen risico. Toch houdt u vanaf jaar 1 <b>'+eur(m.klant_jr1)+'/jaar</b> over, '+
+      'en na jaar '+_num(m.looptijd)+' de volle winst. Over 15 jaar is dat samen <b>'+eur(m.meerwaarde)+'</b> netto — zuivere meerwaarde zonder eigen kapitaal. '+
+      'Verdisconteerd aan '+_num(A.disconto)+' % is de NPV <b>'+eur(m.npv)+'</b>. Een rendement op de inleg is niet van toepassing (u legt niets in).</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
+})();
+
+// ===========================================================================
+// SLOTPAGINA — CTA + Wattkraft services-matrix
+// ===========================================================================
+(function(){
+  var SVC=[
+   {sec:'Management'},
+   {r:'Central monitoring using platform', v:[1,1,1,1]},{r:'Firmware updates', v:[1,1,1,1]},
+   {r:'Central whitelisting', v:[1,1,1,1]},{r:'Split billing (employer-employee)', v:[1,0,0,0]},
+   {r:'Invoicing public sessions', v:[0,1,1,1]},{r:'Allow all charge cards (roaming)', v:[0,1,1,1]},
+   {r:'Helpdesk (Office hours / Free)', v:[1,0,0,0]},{r:'Helpdesk (24/7 / Free)', v:[0,1,1,1]},
+   {r:'SIM card (mobile data – backup)', v:['option',1,1,1]},{r:'Charging pass', v:['option','option','option','option']},
+   {sec:'Preventive Maintenance'},
+   {r:'Maintenance frequency / year — AC', v:['none','none','1','1']},{r:'Maintenance frequency / year — DC', v:['none','none','2','2']},
+   {r:'Cleaning of the charger', v:[0,0,1,1]},{r:'Stability inspection', v:[0,0,1,1]},
+   {r:'Site inspection (collision protection, signs, …)', v:[0,0,1,1]},{r:'Inspection of electrical connection', v:[0,0,1,1]},
+   {r:'Inspection of labels / stickers', v:[0,0,1,1]},{r:'Cleaning/Swap of air filters (DC only)', v:[0,0,1,1]},
+   {r:'Test of charger', v:[0,0,1,1]},{r:'Inspection report', v:[0,0,1,1]},
+   {sec:'Curative Maintenance'},
+   {r:'Incident management', v:['ad-hoc','ad-hoc',1,1]},{r:'Response time (SLA — working days)', v:['5','3','2','2']},
+   {r:'On site interventions', v:['Paid','Paid','Paid',1]},{r:'Spare parts (in warranty period)', v:[1,1,1,1]},
+   {r:'Spare parts (after warranty period)', v:['Paid','Paid','Paid',1]},
+   {r:'Repair of site assets (collision protection, signs, …)', v:['Paid','Paid','Paid',1]},
+   {r:'Damage (improper use, vandalism, collision)', v:['Paid','Paid','Paid','Paid']}
+  ];
+  function cell(x){ if(x===1) return '<span class="svc-chk">✓</span>'; if(x===0) return '<span class="svc-un"></span>'; return '<span class="svc-txt">'+esc(x)+'</span>'; }
+  var rows='';
+  SVC.forEach(function(r){ if(r.sec){ rows+='<tr class="sec"><td colspan="5">'+esc(r.sec)+'</td></tr>'; }
+    else { rows+='<tr><td class="r">'+esc(r.r)+'</td><td class="c">'+cell(r.v[0])+'</td><td class="c">'+cell(r.v[1])+'</td><td class="c">'+cell(r.v[2])+'</td><td class="c">'+cell(r.v[3])+'</td></tr>'; } });
+  var p=document.createElement('div'); p.className='a4 slot'; _pg++;
+  p.innerHTML=
+    '<div class="slot-eyebrow">Wattkraft</div>'+
+    '<div class="slot-h">Klaar om van uw parking een <span class="g">rendabel laadplein</span> te maken?</div>'+
+    '<div class="slot-sub">Wij plaatsen, verbinden en beheren de laadpalen en sturen de energie zo dat uw investering maximaal rendeert. '+
+      'Contacteer ons — de services hieronder komen als bonus op uw opbrengst.</div>'+
+    '<div class="svc-card"><div class="svc-cap">Onze diensten — kies het pakket dat bij u past</div>'+
+      '<table class="svc"><thead><tr><th></th>'+
+        '<th>E+Manage<span class="sub" style="display:block">Home</span></th><th>E+Manage<span class="sub" style="display:block">B2B</span></th>'+
+        '<th>E+Care<span class="sub" style="display:block">B2B</span></th><th>E+Omnium<span class="sub" style="display:block">B2B</span></th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>'+
+    '<img class="slot-foto" src="/apps/voertuig-personenwagen-ms.jpg" onerror="this.style.display=\'none\'" alt="Laadplein">'+
+    '<div class="slot-foot"><span>'+FOOT_L+'</span></div>';
+  R.appendChild(p);
+})();
+
+// ---------------------------------------------------------------------------
+// PDF / print
+// ---------------------------------------------------------------------------
+(function(){
+  var btn=document.getElementById('fdpdf-save');
+  async function genPdf(){
+    if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internetverbinding?)');
+    var pages=document.querySelectorAll('.a4');
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+    for(var i=0;i<pages.length;i++){
+      var canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var img=canvas.toDataURL('image/jpeg',0.92);
+      var hh=canvas.height*210/canvas.width;
+      if(i>0) pdf.addPage();
+      pdf.addImage(img,'JPEG',0,0,210,hh>297?297:hh);
+    }
+    return pdf;
+  }
+  btn.onclick=async function(){
+    btn.disabled=true; var orig=btn.textContent; btn.textContent='⏳ PDF…';
+    try{ var pdf=await genPdf(); pdf.save('Laadplein_rapport_Wattkraft'+(PID?'_'+PID:'')+'.pdf'); }
+    catch(e){ alert('PDF maken lukte niet: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent=orig; }
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// DEMO-data (standalone preview, geen echte sim)
+// ---------------------------------------------------------------------------
+function _demo(){
+  // Heatmap-demo: 2 vensters (8-12u, 13-18u), 6 dagen/week, hogere intensiteit rond middag.
+  function demoHeat(seed){ var m=[]; for(var hh=0;hh<24;hh++){ var row=[]; for(var d=0;d<365;d++){
+      var wd=(d%7)<6, inW=(hh>=8&&hh<12)||(hh>=13&&hh<18);
+      var v=(wd&&inW)?(0.35+0.5*Math.abs(Math.sin((hh+seed+d*0.3))))*((hh>=13&&hh<18)?1:0.8):0; row.push(+v.toFixed(2)); } m.push(row);} return m; }
+  return {
+    klant:'Kantoorgebouw (voorbeeld)', project:'Laadplein', scenario:'2 pleinen · 45 kVA · batterij 120/260',
+    locatie:'Fluvius · LS', datum:'augustus 2026', project_id:'FLX-LP-DEMO',
+    kern:{ investering:141906, jaarwinst:50445, tvt:2.8, rendement:35.5, opbrengst:62503, laadprijs_marg:131, tarief:500, geleverd_mwh:125 },
+    input:{ aansluiting:{kva:45,spanning:'LS',max_injectie_kw:0}, verbruik:{mwh:100,label:'Kantoor (kwartier)'},
+      pv:null, batterij:{kw:120,kwh:260,dod_pct:90,rte_pct:92,cycli:384,levensduur_jaar:20.8} },
+    pleinen:[
+      { naam:'Laadplein 1', paaltype:'DC160', paal_kw:160, aantal_palen:1, duur_min:30, dagen_per_week:6, verkoopprijs_eur_mwh:500,
+        vensters:[{start:8,eind:12,sessies:12},{start:13,eind:18,sessies:12}], gevraagd_mwh:57, geleverd_mwh:54, tekort_mwh:3, gemist_pct:5.3, piek_kw:160, heat:demoHeat(0) },
+      { naam:'Laadplein 2', paaltype:'AC22', paal_kw:22, aantal_palen:3, duur_min:30, dagen_per_week:7, verkoopprijs_eur_mwh:500,
+        vensters:[{start:8,eind:12,sessies:16},{start:13,eind:18,sessies:16}], gevraagd_mwh:71, geleverd_mwh:71, tekort_mwh:0, gemist_pct:0, piek_kw:66, heat:demoHeat(1.7) }
+    ],
+    sturingen:{ geen:{kost:56219,eur_mwh:249.9}, sturing:{kost:32481,eur_mwh:144.4}, onbalans:{kost:14957,eur_mwh:66.5},
+      meerwaarde_eur:23739, meerwaarde_pct:42.2, windfall_eur:17523, windfall_pct:53.9 },
+    factuur3:{ headers:['Onderdeel','Geen sturing','Excl. onbalans','Incl. onbalans'],
+      rows:[
+        {label:'Groep A — Energiekost',groep:true,geen:27134,sturing:22680,onbalans:4590},
+        {label:'Afname energie spot',item:true,geen:20013,sturing:17718,onbalans:10026},
+        {label:'Groep B — Netgebruik afname',groep:true,geen:23059,sturing:3627,onbalans:3627},
+        {label:'Maandpiek',item:true,geen:12257,sturing:2201,onbalans:2201},
+        {label:'Toegangsvermogen',item:true,geen:1368,sturing:1368,onbalans:1368},
+        {label:'Groep E — Heffingen',groep:true,geen:6027,sturing:6174,onbalans:6741}
+      ],
+      subtotaal:{geen:56219,sturing:32481,onbalans:14957}, btw:{geen:11322,sturing:6337,onbalans:2657}, totaal:{geen:67541,sturing:38817,onbalans:17614} },
+    scenarios:[
+      {label:'Geen batterij',pct:0,is_basis:true,heeftPlein:false,energieprijs_eur_mwh:204,jaarfactuur_eur:20423,winst_eur:0},
+      {label:'Batterij',pct:0,is_basis:false,heeftPlein:false,energieprijs_eur_mwh:161,jaarfactuur_eur:16088,winst_eur:4335,investering_eur:106000,tvt_jaar:24.5,rendement_pct:4.1},
+      {label:'Batterij + laadplein · 50% sessies',pct:50,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:407969,pct_geleverd:97.6,laadprijs_marg_eur_mwh:134,opbrengst_eur:31865,jaarfactuur_eur:24630,winst_eur:27658,investering_eur:141906,tvt_jaar:5.1,rendement_pct:19.5},
+      {label:'Batterij + laadplein · 100% sessies',pct:100,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:800019,pct_geleverd:97.7,laadprijs_marg_eur_mwh:131,opbrengst_eur:62503,jaarfactuur_eur:32481,winst_eur:50445,investering_eur:141906,tvt_jaar:2.8,rendement_pct:35.5},
+      {label:'Batterij + laadplein · 150% sessies',pct:150,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:144,km_gevraagd:1163925,pct_geleverd:86.0,laadprijs_marg_eur_mwh:133,opbrengst_eur:80051,jaarfactuur_eur:37436,winst_eur:63038,investering_eur:141906,tvt_jaar:2.3,rendement_pct:44.4},
+      {label:'Batterij + laadplein · 200% sessies',pct:200,is_basis:false,heeftPlein:true,energieprijs_eur_mwh:150,km_gevraagd:1488981,pct_geleverd:72.4,laadprijs_marg_eur_mwh:144,opbrengst_eur:86241,jaarfactuur_eur:40907,winst_eur:65757,investering_eur:141906,tvt_jaar:2.2,rendement_pct:46.3}
+    ],
+    kabel:{ exact:false, kabeltrace_eur:30000, foto_dataurl:null, totaal_capex:154906,
+      extra_kosten:13000, extra_comment:'Grondwerken, signalisatie en betaalterminal (voorbeeld).',
+      bom:[
+        {item:'Batterij 120 kW / 260 kWh',aantal:1,eenheidsprijs:91000,totaal:91000},
+        {item:'DC-laadpaal 160 kW',aantal:1,eenheidsprijs:40000,totaal:40000},
+        {item:'AC-laadpaal 22 kW',aantal:3,eenheidsprijs:2500,totaal:7500},
+        {item:'Kabeltracé (schatting)',aantal:1,eenheidsprijs:30000,totaal:30000},
+        {item:'Extra kosten & werken',aantal:1,eenheidsprijs:13000,totaal:13000,comment:'Grondwerken, signalisatie en betaalterminal (voorbeeld).'}
+      ] }
+  };
+}
+</script>
+</body>
+</html>
