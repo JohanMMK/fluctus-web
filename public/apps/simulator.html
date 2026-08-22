@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.76.0  (2026-08-22 Europe/Brussels)
+     v1.76.0 (Johan 22-08): PROJECTCODE in de betaalplein Project-groep. Toont live de deterministische FLX-code
+              (_projectIdLokaal, zelfde als de server) zodra er een projectnaam is → de gebruiker kan zijn project
+              later heropvragen. Plus een compact "bestaand project heropvragen op code"-veld (open via
+              _managerOpenKamino, endpoint /api/kamino/project-get). apiPost stuurt die code al mee op elke sim-call,
+              dus het project wordt bij het simuleren/bewaren onder die code geregistreerd.
+     FLUCTUS SIMULATOR  v1.75.0  (2026-08-22 Europe/Brussels)
+     v1.75.0 (Johan 22-08): BETAALPLEIN-INVOER = één logische flow. _renderBetaalpleinInvoer herwerkt naar vier
+              groepen: (1) Project — factuur opladen (vult alles) óf manueel (klant + adres → projectnaam, locatie +
+              spanning, profiel + verbruik, aansluiting/piek in kVA); (2) PV; (3) Batterij — ENKEL kW/kWh, standaard
+              120/260 via CUSTOM met Fluctus-standaardparameters (_bpBatterijCompact), + "geen batterij"-toggle;
+              (4) Laadpleinen → Bereken. Aparte tussenstappen (Locatie/Verbruik/Toegangsvermogen + injectie/verzwaring)
+              zijn weg; alles één keer, logisch geordend. Reüseert de bestaande gewired renders (geen sim-contract-wijziging).
      FLUCTUS SIMULATOR  v1.74.0  (2026-08-22 Europe/Brussels)
      v1.74.0 (Johan 22-08): EXTRA KOSTEN & WERKEN werkt door. Het lump-sum veld paste totaal/investering/tvt/rendement
               enkel aan op onchange (blur) + een volledige tabel-re-render, die kon achterblijven waardoor de post niet
@@ -1274,7 +1287,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.74.0';   // v1.74.0 (22-08): "extra kosten & werken" werkt nu LIVE door in totaal/investering/tvt/rendement (oninput i.p.v. enkel onchange/blur + volledige re-render die kon achterblijven); gerichte cel-update _bezUpdateTotals() behoudt de focus in de input. // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
+var SIM_VERSIE = 'v1.76.0';   // v1.76.0 (22-08): betaalplein Project-groep toont nu de PROJECTCODE (deterministisch FLX uit de projectnaam, live), + een "bestaand project heropvragen op code"-veld (open-op-code via _managerOpenKamino). // v1.75.0 (22-08): betaalplein-invoer herwerkt tot één logische flow — 1) Project (factuur óf manueel: klant+adres→projectnaam, locatie/spanning, profiel/verbruik, aansluiting-kVA) 2) PV 3) Batterij (enkel kW/kWh, standaard 120/260, rest = standaard) 4) Laadpleinen → Bereken. Aparte tussenstappen (injectie/verzwaring) weg; alles één keer. // v1.74.0 (22-08): "extra kosten & werken" werkt nu LIVE door in totaal/investering/tvt/rendement (oninput i.p.v. enkel onchange/blur + volledige re-render die kon achterblijven); gerichte cel-update _bezUpdateTotals() behoudt de focus in de input. // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -2710,19 +2723,146 @@ function _renderBetaalpleinInvoer(){
     if(node) c.appendChild(node);
     return c;
   }
-  wrap.appendChild(sec(1,'Aansluiting — factuur of manueel','Laad de energiefactuur op (we lezen ze automatisch uit), of geef manueel de aansluiting in.', _bpSafe(renderStepFactuuranalyse)));
-  wrap.appendChild(sec(2,'Locatie','', _bpSafe(renderStep2Locatie)));
-  wrap.appendChild(sec(3,'Verbruik van het gebouw','', _bpSafe(renderStep3Profiel)));
-  wrap.appendChild(sec(4,'Zonnepanelen — bestaand & nieuw','', _bpSafe(renderStep4PV)));
-  wrap.appendChild(sec(5,'Batterij','', _bpSafe(renderStep5Batterij)));
-  wrap.appendChild(sec(6,'Laadpleinen — betalend en/of gewoon','Voeg één of meer laadpleinen toe. Een <b>betalend</b> plein verdient met de verkoopprijs aan de bezoeker; een <b>gewoon</b> (wagenpark) plein verdient de besparing t.o.v. de CREG/diesel-kost. U kunt ze mixen.', _bpSafe(renderStepLaadplein)));
-  wrap.appendChild(sec(7,'Toegangsvermogen','', _bpSafe(renderStep7Aansluiting)));
+  // ── 1. PROJECT — factuur OF manueel (alles één keer) ──────────────────────
+  var g1 = sec(1,'Project — factuur of manueel','Laad de energiefactuur op (we lezen alles automatisch uit) óf vul manueel in. Bij manueel maken we uit klantnaam + adres de projectnaam.');
+  // factuur-CTA of actieve-factuur-badge
+  if(!STATE.baseCase){
+    var cta=el('button',{class:'fdsim-factuur-cta',type:'button',onclick:(typeof _fmodOpen==='function'?_fmodOpen:function(){})},[
+      el('span',{class:'fdsim-factuur-cta-icon'},'📄'),
+      el('span',null,'Factuur opladen — vult klant, verbruik, aansluiting, spanning en netbeheerder automatisch in')
+    ]);
+    g1.appendChild(cta);
+  } else {
+    var bcInfo=el('div',{style:'background:#F0F6E9;border:1px solid #05B050;border-radius:6px;padding:9px 13px;margin-bottom:12px;font-size:12.5px;color:#1A1F2B'});
+    bcInfo.innerHTML='📎 Factuur actief: <b>'+escapeHtml(STATE.baseCase.klantNaam||STATE.baseCase.factuurNummer||'?')+'</b> — alle aansluitingsdata is ingevuld. Nieuwe klant? Start een nieuw project.';
+    g1.appendChild(bcInfo);
+  }
+  // klant + adres + project + scenario
+  var pgrid=el('div',{class:'fdsim-grid2'});
+  function veld(label,val,ph,oninput,hint){
+    var b=el('div',{class:'fdsim-row col'});
+    b.appendChild(el('label',{class:'fdsim-label'},label));
+    var inp=el('input',{class:'fdsim-input',type:'text',placeholder:ph||'',value:(val||'')});
+    inp.oninput=function(){ oninput(inp.value,inp); };
+    b.appendChild(inp);
+    if(hint) b.appendChild(el('div',{class:'fdsim-hint'},hint));
+    return {box:b,input:inp};
+  }
+  var _projIn=null;
+  var klantV=veld('Klant','','bv. Van Oeckel Energy',function(v){
+    STATE.klantNaam=v;
+    if(!STATE._projectManueel && typeof _cleanProjectName==='function'){ STATE.project=_cleanProjectName(v)||v; if(_projIn) _projIn.value=STATE.project; }
+  }, 'Naam van de klant/site');
+  // preload klant
+  try{ if(STATE.klantNaam) klantV.input.value=STATE.klantNaam; else if(STATE.baseCase&&STATE.baseCase.klantNaam){ klantV.input.value=STATE.baseCase.klantNaam; STATE.klantNaam=STATE.baseCase.klantNaam; } }catch(e){}
+  var adresV=veld('Adres',(STATE.adres||''),'straat, nr, gemeente',function(v){ STATE.adres=v; }, 'Voor projectnaam/-code + kabeltracé');
+  pgrid.appendChild(klantV.box); pgrid.appendChild(adresV.box);
+  var projV=veld('Projectnaam',(STATE.project||''),'auto uit klant',function(v){ STATE.project=v; STATE._projectManueel=true; }, 'Automatisch uit de klantnaam — vrij aanpasbaar');
+  _projIn=projV.input;
+  var scenV=veld('Scenario',(STATE.scenario||''),'bv. betaalplein-100%',function(v){ STATE.scenario=v; }, 'Beschrijving van deze configuratie');
+  pgrid.appendChild(projV.box); pgrid.appendChild(scenV.box);
+  g1.appendChild(pgrid);
+  // v1.76: PROJECTCODE — deterministisch uit de projectnaam (zelfde FLX-code als de server). Hiermee roept de
+  //   gebruiker zijn project later terug op. Wordt live bijgewerkt en bij het bewaren/simuleren geregistreerd.
+  var codeBadge=el('div',{style:'background:#1F386410;border:1px solid #1F386440;border-radius:6px;padding:9px 13px;margin-top:8px;font-size:12.5px;color:#1F3864;display:flex;align-items:center;gap:10px;flex-wrap:wrap'});
+  var codeVal=el('b',{style:'font-family:monospace;font-size:14px;letter-spacing:.5px'},'—');
+  function _bpUpdateCode(){ try{ codeVal.textContent = (STATE.project && typeof _projectIdLokaal==='function') ? _projectIdLokaal(STATE.project) : '—'; }catch(e){ codeVal.textContent='—'; } }
+  codeBadge.appendChild(el('span',null,'🔖 Projectcode:'));
+  codeBadge.appendChild(codeVal);
+  codeBadge.appendChild(el('span',{style:'color:#5A6577;font-size:11.5px'},'— bewaar deze code; hiermee roept u dit project later terug op.'));
+  g1.appendChild(codeBadge);
+  _bpUpdateCode();
+  // koppel de code-update aan klant- en projectnaam-invoer
+  (function(){ var _k=klantV.input.oninput; klantV.input.oninput=function(){ if(_k)_k.call(this); _bpUpdateCode(); }; })();
+  (function(){ var _p=projV.input.oninput; projV.input.oninput=function(){ if(_p)_p.call(this); _bpUpdateCode(); }; })();
+  // ── Bestaand project heropvragen op code ──────────────────────────────────
+  var recWrap=el('div',{style:'margin-top:10px'});
+  var recRow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'});
+  var recBox=el('div',{class:'fdsim-row col',style:'flex:1;min-width:200px'});
+  recBox.appendChild(el('label',{class:'fdsim-label'},'Bestaand project heropvragen (code)'));
+  var recIn=el('input',{class:'fdsim-input',type:'text',id:'fdsim-mgr-id',placeholder:'FLX-XXX-XXXX'});
+  recBox.appendChild(recIn); recRow.appendChild(recBox);
+  var recBtn=el('button',{class:'fdsim-btn small',type:'button'},'Project openen');
+  recBtn.onclick=function(){ try{ _managerOpenKamino(recIn.value); }catch(e){ var m=$('fdsim-mgr-msg'); if(m){m.style.color='#B23';m.textContent='Openen mislukt: '+(e&&e.message||e);} } };
+  recRow.appendChild(recBtn);
+  recWrap.appendChild(recRow);
+  recWrap.appendChild(el('div',{id:'fdsim-mgr-msg',class:'fdsim-hint',style:'margin-top:6px'}));
+  recWrap.appendChild(el('div',{id:'fdsim-mgr-rapporten',style:'margin-top:8px'}));
+  g1.appendChild(recWrap);
+  // aansluiting & verbruik (bestaande, gewired renders — locatie/spanning + profiel/verbruik)
+  g1.appendChild(el('div',{style:'height:6px'}));
+  g1.appendChild(_bpSafe(renderStep2Locatie));
+  g1.appendChild(_bpSafe(renderStep3Profiel));
+  // aansluiting / piekvermogen (kVA) — compact (injectie blijft auto)
+  var kg=el('div',{class:'fdsim-grid2',style:'margin-top:6px'});
+  var kBox=el('div',{class:'fdsim-row col'});
+  kBox.appendChild(el('label',{class:'fdsim-label'},'Aansluiting / piekvermogen (kVA) *'));
+  var kIn=el('input',{class:'fdsim-input',type:'number',min:'1',step:'1',value:STATE.aansluitingKva});
+  kIn.oninput=function(){ STATE.aansluitingKva=parseFloat(kIn.value)||0; STATE._aansluitingManueel=true; };
+  kBox.appendChild(kIn);
+  kBox.appendChild(el('div',{class:'fdsim-hint'},'Typisch KMO: 56 / 100 / 160 / 250 kVA. De aansluiting wordt nooit stil verzwaard.'));
+  kg.appendChild(kBox);
+  g1.appendChild(kg);
+  wrap.appendChild(g1);
+
+  // ── 2. PV ─────────────────────────────────────────────────────────────────
+  wrap.appendChild(sec(2,'Zonnepanelen','', _bpSafe(renderStep4PV)));
+
+  // ── 3. BATTERIJ — enkel kW / kWh (standaard 120 / 260) ────────────────────
+  wrap.appendChild(sec(3,'Batterij','Geef enkel het vermogen (kW) en de capaciteit (kWh). De overige parameters (DoD, rendement, cycli) staan op de Fluctus-standaard.', _bpSafe(_bpBatterijCompact)));
+
+  // ── 4. LAADPLEINEN ────────────────────────────────────────────────────────
+  wrap.appendChild(sec(4,'Laadpleinen — betalend en/of gewoon','Een <b>betalend</b> plein verdient met de verkoopprijs aan de bezoeker; een <b>gewoon</b> (wagenpark) plein verdient de besparing t.o.v. de CREG-kost. U kunt ze mixen.', _bpSafe(renderStepLaadplein)));
   var brow=el('div',{style:'display:flex;gap:10px;justify-content:flex-end;margin:6px 0 20px'});
   var bb=el('button',{class:'fdsim-btn',style:'background:#048443;color:#fff;font-size:15px;padding:11px 20px'}, STATE.isRunning?'⏳ Rekenen…':'🔌 Bereken laadplein');
   bb.disabled=!!STATE.isRunning;
   bb.onclick=function(){ try{ if(typeof simuleerVasteInstallatie==='function') simuleerVasteInstallatie(); else runSimulatie(); }catch(e){ alert('Berekenen mislukt: '+(e&&e.message||e)); } };
   brow.appendChild(bb); wrap.appendChild(brow);
   return wrap;
+}
+// v1.75: compacte batterij voor de betaalplein-flow — ENKEL kW + kWh (standaard 120/260).
+//   Zet een CUSTOM-batterij met de Fluctus-standaardparameters (DoD 90% / RTE 92% / 8000 cycli / €350/kWh);
+//   die worden hier NIET getoond of herdefinieerd. "Geen batterij" is een kleine toggle.
+function _bpBatterijCompact(){
+  var box=el('div');
+  var geen = (STATE.batterijId==='' || STATE.batterijId==null) && !STATE.batterijCustom && STATE._bpBattGeen===true;
+  // default: als er nog geen (custom) batterij is en de gebruiker koos niet expliciet "geen" → 120/260 custom.
+  if(!geen && (STATE.batterijId!=='CUSTOM' || !STATE.batterijCustom)){
+    STATE.batterijId='CUSTOM';
+    STATE.batterijCustom={naam:'Betaalplein-standaard',kw:120,kwh:260,dod_pct:90,rte_pct:92,max_cycli:8000,capex_eur:Math.round(260*350)};
+  }
+  // toggle-rij
+  var tog=el('div',{style:'display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px'});
+  function radio(val,label){
+    var lbl=el('label',{style:'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px'});
+    var r=el('input',{type:'radio',name:'bp-batt'});
+    r.checked = (val==='batt') ? !geen : geen;
+    r.onchange=function(){
+      if(val==='geen'){ STATE._bpBattGeen=true; STATE.batterijId=''; STATE.batterijCustom=null; }
+      else { STATE._bpBattGeen=false; STATE.batterijId='CUSTOM'; STATE.batterijCustom={naam:'Betaalplein-standaard',kw:120,kwh:260,dod_pct:90,rte_pct:92,max_cycli:8000,capex_eur:Math.round(260*350)}; }
+      try{ renderStage(); }catch(e){}
+    };
+    lbl.appendChild(r); lbl.appendChild(el('span',null,label)); return lbl;
+  }
+  tog.appendChild(radio('batt','Batterij (standaard 120 kW / 260 kWh)'));
+  tog.appendChild(radio('geen','Geen batterij'));
+  box.appendChild(tog);
+  if(geen) return box;
+  var bc=STATE.batterijCustom;
+  var grid=el('div',{class:'fdsim-grid2'});
+  function num(label,val,ph,cb,hint){
+    var b=el('div',{class:'fdsim-row col'});
+    b.appendChild(el('label',{class:'fdsim-label'},label));
+    var inp=el('input',{class:'fdsim-input',type:'number',min:'0',step:'1',value:(val!=null?val:''),placeholder:ph||''});
+    inp.oninput=function(){ cb(parseFloat(inp.value)||0); };
+    b.appendChild(inp);
+    if(hint) b.appendChild(el('div',{class:'fdsim-hint'},hint));
+    return b;
+  }
+  grid.appendChild(num('Vermogen (kW)',bc.kw,'120',function(v){ bc.kw=v; },'Laad-/ontlaadvermogen'));
+  grid.appendChild(num('Capaciteit (kWh)',bc.kwh,'260',function(v){ bc.kwh=v; bc.capex_eur=Math.round(v*350); },'Opslagcapaciteit (bepaalt de batterij-CAPEX @ €350/kWh)'));
+  box.appendChild(grid);
+  return box;
 }
 
 // ---------- STAP 1: PROJECT & SCENARIO ----------
