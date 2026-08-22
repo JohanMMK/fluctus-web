@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS · LAADPLEIN-RAPPORT  v1.7.0  (2026-08-22 Europe/Brussels)
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.9.0  (2026-08-22 Europe/Brussels)
+     v1.9.0 (Johan 22-08): FINANCIERING herwerkt. (1) Leasing zonder 50/50-winstdeling: de klant houdt de volle
+              marge boven de leasetermijn, en na aflossing van de leasing de volledige marge. (2) Drie nieuwe
+              pagina's — één per financieringsmodel — met de VOLLEDIGE 15 jaar in hoofde van de klant:
+              kosten-inflatie 2%/j, met +4% extra op de netkosten (netkosten dus +6%/j), opbrengst constant.
+              Per model: rendement (IRR op eigen inleg), totale absolute meerwaarde en NPV op de inleg (disconto 5%).
+              Deze drie pagina's staan vóór de slotpagina (E+DRIVE-productfeatures). Aannames in _financiering.A.
+     v1.8.0 (Johan 22-08): heatmap (laadprofiel) nu OOK voor de niet-betalende (wagenpark) pleinen, onder de tabel.
      v1.7.0 (Johan 22-08): titel "Betalend-laadplein rapport" → "Laadplein-rapport" (title-tag, cover, footer,
               PDF-bestandsnaam). De inhoudelijke uitleg betalend vs niet-betalend (wagenpark) blijft behouden.
      v1.6.0 (Johan 22-08): ECHT E+DRIVE-logo (uit EDRIVE_logo_green.pdf, ingebed als PNG data-URI) i.p.v. de
@@ -68,6 +75,10 @@
   table.fact3 thead th{font-size:10.5px}
   table.scn{font-size:10.5px}
   table.scn th,table.scn td{padding:3.5px 6px}
+  table.fin15{font-size:10px;margin:8px 0}
+  table.fin15 th,table.fin15 td{padding:3px 6px}
+  table.fin15 thead th{font-size:9.5px}
+  table.fin15 tfoot td{background:#eef2f8}
   .pos{color:var(--groen-d);font-weight:700} .neg{color:var(--rood);font-weight:700}
   .box{border:1px solid var(--lijn);border-radius:6px;padding:14px;margin:12px 0;background:var(--bg)}
   .box.blauw{background:#1F386408;border-color:#1F386430}
@@ -203,23 +214,88 @@ function heatmapSvg(mat, piek){
   return s;
 }
 
-// ---------- financieringsmodellen (rekent uit capex + jaarwinst) ----------
-function _financiering(capex, jaarwinst){
-  var A={ looptijd:10, lening_pct:75, lening_rente:5, leasing_rente:10, split:50 };
+// ---------- financieringsmodellen (15-jaar, in hoofde van de klant) ----------
+// v1.9: leasing zonder winstdeling (klant houdt alles; na aflossing de volle marge) + drie modellen
+//   volledig over de horizon (15 j) uitgewerkt. Kosten inflateren 2%/j; netkosten krijgen daarbovenop
+//   +4% (dus +6%/j). Opbrengst blijft constant (conservatief; enkel kosten inflateren). Jaar 1 valt
+//   exact samen met de gerapporteerde jaarwinst. Baten: rendement (IRR op inleg), totale absolute
+//   meerwaarde en NPV op de inleg (disconto). Alle aannames staan in A en zijn per dossier bij te sturen.
+function _financiering(capex, jaarwinst, opbrengst){
+  var A={ horizon:15, looptijd:10, lening_pct:75, lening_rente:5, leasing_rente:10,
+          infl_kost:2, infl_net_extra:4, net_aandeel:50, disconto:5 };
   function annu(pv,r,n){ r=r/100; return (r<=0)?pv/n:(pv*r/(1-Math.pow(1+r,-n))); }
-  var eigen={ investering:capex, jaarwinst:jaarwinst, tvt:jaarwinst>0?capex/jaarwinst:null, rendement:capex>0?jaarwinst/capex*100:null };
+  var O=+opbrengst||0, kost1=Math.max(0, O-jaarwinst);
+  var net1=kost1*A.net_aandeel/100, ov1=kost1-net1;
+  var gNet=1+(A.infl_kost+A.infl_net_extra)/100, gOv=1+A.infl_kost/100;
+  function margeJaar(t){ var net=net1*Math.pow(gNet,t-1), ov=ov1*Math.pow(gOv,t-1);
+    return { opbrengst:O, netkost:net, overige:ov, marge:O-net-ov }; }
+  function irr(inleg, cfs){
+    if(!(inleg>0)) return null;
+    function npvAt(r){ var s=-inleg; for(var t=0;t<cfs.length;t++) s+=cfs[t]/Math.pow(1+r,t+1); return s; }
+    var lo=-0.9, hi=2, flo=npvAt(lo), fhi=npvAt(hi); if(flo*fhi>0) return null;
+    for(var i=0;i<100;i++){ var mid=(lo+hi)/2, fm=npvAt(mid);
+      if(Math.abs(fm)<1e-4) return mid*100; if(flo*fm<0){ hi=mid; } else { lo=mid; flo=fm; } }
+    return (lo+hi)/2*100;
+  }
+  function bouw(inleg, aftrek, looptijd){
+    var rows=[], cum=-inleg, d=A.disconto/100, npv=-inleg, cfs=[];
+    for(var t=1;t<=A.horizon;t++){ var m=margeJaar(t), af=(t<=looptijd?aftrek:0), netto=m.marge-af;
+      cum+=netto; npv+=netto/Math.pow(1+d,t); cfs.push(netto);
+      rows.push({ jaar:t, opbrengst:m.opbrengst, netkost:m.netkost, overige:m.overige,
+        marge:m.marge, aftrek:af, netto:netto, cumulatief:cum }); }
+    var som=cfs.reduce(function(s,x){return s+x;},0);
+    return { inleg:inleg, rows:rows, som_netto:som, meerwaarde:som-inleg, npv:npv, irr:irr(inleg,cfs) };
+  }
+  // 1 · eigen middelen — inleg = capex, geen financierings-aftrek
+  var eigen=bouw(capex, 0, 0);
+  eigen.investering=capex; eigen.jaarwinst=jaarwinst;
+  eigen.tvt=jaarwinst>0?capex/jaarwinst:null; eigen.rendement=capex>0?jaarwinst/capex*100:null;
+  // 2 · lening 75% @ 5% — inleg = eigen inbreng (25%), aftrek = annuïteit over de looptijd
   var L=capex*A.lening_pct/100, E=capex-L, an=annu(L,A.lening_rente,A.looptijd);
-  var lening={ lening:L, eigen_inbreng:E, rente:A.lening_rente, looptijd:A.looptijd, annuiteit:an,
-    netto_jr:jaarwinst-an, rendement_ei:E>0?(jaarwinst-an)/E*100:null, tvt_ei:(jaarwinst-an)>0?E/(jaarwinst-an):null };
+  var lening=bouw(E, an, A.looptijd);
+  lening.lening=L; lening.eigen_inbreng=E; lening.rente=A.lening_rente; lening.looptijd=A.looptijd;
+  lening.annuiteit=an; lening.netto_jr=jaarwinst-an;
+  lening.rendement_ei=E>0?(jaarwinst-an)/E*100:null; lening.tvt_ei=(jaarwinst-an)>0?E/(jaarwinst-an):null;
+  // 3 · leasing @ 10% — GEEN eigen inleg, GEEN winstdeling; aftrek = leasetermijn over de looptijd,
+  //     daarna is de installatie afgelost en houdt de klant de volle marge.
   var lease=annu(capex,A.leasing_rente,A.looptijd);
-  var extra=jaarwinst-lease, klant=extra*A.split/100, partner=extra*(100-A.split)/100+lease;
-  var leasing={ leasetermijn:lease, extra_winst:extra, klant_netto:klant, partner_netto:partner, rente:A.leasing_rente, split:A.split, looptijd:A.looptijd };
+  var leasing=bouw(0, lease, A.looptijd);
+  leasing.leasetermijn=lease; leasing.rente=A.leasing_rente; leasing.looptijd=A.looptijd;
+  leasing.klant_jr1=jaarwinst-lease;
   return { aannames:A, eigen:eigen, lening:lening, leasing:leasing };
+}
+// 15-jaar tabel + KPI-rij voor de financieringspagina's (v1.9)
+function _finSom(rows,key){ return rows.reduce(function(s,r){return s+(+r[key]||0);},0); }
+function _finTabel(m, aftrekLabel){
+  var hasAf=!!aftrekLabel, last=m.rows[m.rows.length-1];
+  var h='<table class="fin15"><thead><tr><th>Jaar</th><th>Opbrengst</th><th>Netkosten</th><th>Overige kosten</th><th>Brutomarge</th>'+
+    (hasAf?'<th>'+esc(aftrekLabel)+'</th>':'')+'<th>Netto voor u</th><th>Cumulatief</th></tr></thead><tbody>';
+  m.rows.forEach(function(r){
+    h+='<tr><td>'+r.jaar+'</td><td>'+eur(r.opbrengst)+'</td><td>'+eur(r.netkost)+'</td><td>'+eur(r.overige)+'</td>'+
+      '<td>'+eur(r.marge)+'</td>'+(hasAf?'<td>'+(r.aftrek>0?eur(r.aftrek):'—')+'</td>':'')+
+      '<td class="'+(r.netto>=0?'pos':'neg')+'">'+eur(r.netto)+'</td>'+
+      '<td class="'+(r.cumulatief>=0?'pos':'neg')+'">'+eur(r.cumulatief)+'</td></tr>';
+  });
+  h+='</tbody><tfoot><tr><td>Totaal</td><td>'+eur(_finSom(m.rows,'opbrengst'))+'</td><td>'+eur(_finSom(m.rows,'netkost'))+'</td>'+
+    '<td>'+eur(_finSom(m.rows,'overige'))+'</td><td>'+eur(_finSom(m.rows,'marge'))+'</td>'+
+    (hasAf?'<td>'+eur(_finSom(m.rows,'aftrek'))+'</td>':'')+'<td>'+eur(m.som_netto)+'</td><td>'+eur(last.cumulatief)+'</td></tr></tfoot></table>';
+  return h;
+}
+function _finKPI(m){
+  function kpi(cls,l,v,s){ return '<div class="kpi '+cls+'"><span class="l">'+esc(l)+'</span><div class="v">'+v+'</div><div class="s">'+esc(s)+'</div></div>'; }
+  var rend = m.irr!=null ? pct(m.irr,1) : '—';
+  var rendSub = m.irr!=null ? 'IRR op uw inleg over 15 j' : 'geen eigen inleg';
+  return '<div class="kpi-row">'+
+    kpi('', 'Eigen inleg', m.inleg>0?eur(m.inleg):'€ 0', m.inleg>0?'uw kapitaal':'niets vooraf')+
+    kpi('groen', 'Rendement / jaar', rend, rendSub)+
+    kpi('oranje', 'Totale meerwaarde 15 j', eur(m.meerwaarde), 'netto, na uw inleg')+
+    kpi('groen', 'NPV op uw inleg', eur(m.npv), 'verdisconteerd @ 5 %')+
+  '</div>';
 }
 
 var K=D.kern||{}, IN=D.input||{}, PLN=D.pleinen||[], ST=D.sturingen||{}, F3=D.factuur3||{}, SC=D.scenarios||[], KB=D.kabel||{};
 var GEW=D.gewone_pleinen||[], GEW_BESP=+D.gewone_besparing_eur||0, CREG_MWH=+D.creg_forfait_eur_mwh||0;   // v1.4: niet-betalende (wagenpark) pleinen
-var FIN=_financiering(+K.investering||0, +K.jaarwinst||0);
+var FIN=_financiering(+K.investering||0, +K.jaarwinst||0, +K.opbrengst||0);
 var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC.filter(function(r){return r.heeftPlein;}).slice(-1)[0] || {};
 
 // ===========================================================================
@@ -292,7 +368,7 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px;font-size:12px">'+
       '<div><b>1. Eigen middelen</b><br>Rendement '+(FIN.eigen.rendement!=null?pct(FIN.eigen.rendement,1):'—')+'/jaar, terugverdiend na '+(FIN.eigen.tvt!=null?jaar(FIN.eigen.tvt):'—')+'.</div>'+
       '<div><b>2. Lening 75% @ 5%</b><br>Netto '+eur(FIN.lening.netto_jr)+'/jaar over, rendement op eigen inbreng '+(FIN.lening.rendement_ei!=null?pct(FIN.lening.rendement_ei,0):'—')+'/jaar.</div>'+
-      '<div><b>3. Leasing @ 10% (50/50)</b><br>Geen investering; u houdt '+eur(FIN.leasing.klant_netto)+'/jaar over vanaf jaar 1.</div>'+
+      '<div><b>3. Leasing @ 10%</b><br>Geen investering; u houdt '+eur(FIN.leasing.klant_jr1)+'/jaar over vanaf jaar 1 — en de volle winst na aflossing.</div>'+
     '</div></div>';
   h+='<p class="note">De cijfers gelden voor het gesimuleerde scenario (100% van de verwachte laadsessies) en zijn exclusief btw. '+
     'Ze zijn gebouwd op de sturing <b>zonder onbalans</b>; onbalans is een extra opportuniteit (zie verder).</p>';
@@ -310,7 +386,8 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     ['4. Zo rekent de simulatie — en wat sturing oplevert','8'],
     ['5. De zes scenario’s naast elkaar','9'],
     ['6. Kabeltracé — plan en luchtfoto','10'],
-    ['7. Financiële analyse','11']
+    ['7. Financiële analyse','11'],
+    ['8. De drie financieringsmodellen — 15 jaar per model','12']
   ];
   var h=merkband()+'<div class="eyebrow">Inhoud</div><h1>Wat u in dit rapport vindt</h1><div class="titel-accent"></div>';
   h+='<p class="lead">De eerste bladzijden geven u de conclusie. Daarna bouwen we die stap voor stap op — van de ingegeven installatie tot de financiële analyse.</p>';
@@ -390,6 +467,13 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     });
     h+='<table><thead><tr><th>Laadplein</th><th>Wagens</th><th>Geladen</th><th>Geleverd (km)</th><th>Besparing/jaar</th></tr></thead><tbody>'+gbody+'</tbody>'+
       (GEW.length>1?'<tfoot><tr><td>Totale CREG-besparing</td><td></td><td></td><td></td><td>'+eur(GEW_BESP)+'</td></tr></tfoot>':'')+'</table>';
+    // v1.8: laadprofiel-heatmap per gewoon plein (zelfde weergave als de betalende pleinen).
+    GEW.forEach(function(g){
+      if(!g.heat) return;
+      h+='<div style="margin-top:10px;font-weight:700;color:#1F3864;font-size:12.5px">'+esc(g.naam)+' — laadprofiel</div>'+
+        '<div class="heat-wrap">'+heatmapSvg(g.heat, g.piek_kw||0)+
+        '<div class="heat-leg"><span>weinig</span><span class="bar"></span><span>veel geladen vermogen</span><span style="margin-left:auto">verticaal = uur van de dag · horizontaal = dag van het jaar</span></div></div>';
+    });
   }
   pagina(h);
 })();
@@ -522,7 +606,8 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
   var h=merkband()+'<div class="stap-band"><div class="nr">7</div><div><h2>Financiële analyse</h2><div class="note">Drie manieren om de installatie te bekostigen.</div></div></div>';
   h+='<p>De winst van <b>'+eur(K.jaarwinst)+'/jaar</b> (scenario 100%, zonder onbalans) is het vertrekpunt. '+
     'Hieronder ziet u wat u overhoudt naargelang u de investering van <b>'+eur(K.investering)+'</b> zelf betaalt, leent of least. '+
-    'Aannames: looptijd '+_num(A.looptijd)+' jaar.</p>';
+    'Aannames: financierings-looptijd '+_num(A.looptijd)+' jaar. '+
+    'Op de volgende drie pagina’s werken we elk model volledig uit over <b>'+_num(A.horizon)+' jaar</b> — met kosteninflatie en de baten voor u (rendement, meerwaarde, NPV).</p>';
 
   // 1. eigen middelen
   h+='<h3>1 · Eigen middelen</h3>';
@@ -546,23 +631,83 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     'De winst (35% op de installatie) ligt véél hoger dan de leenrente (5%), dus op uw eigen inbreng loopt het rendement op tot '+
     '<b>'+(l.rendement_ei!=null?pct(l.rendement_ei,0):'—')+' per jaar</b>. Na '+_num(l.looptijd)+' jaar is de lening afbetaald en houdt u de volle '+eur(K.jaarwinst)+'/jaar over.</div></div>';
 
-  // 3. leasing
-  h+='<h3>3 · Leasing aan 10% — met winstdeling 50/50</h3>';
+  // 3. leasing (v1.9: geen winstdeling — klant houdt alles; na aflossing de volle marge)
+  h+='<h3>3 · Leasing aan 10% — u houdt de volledige winst</h3>';
   h+='<div class="split"><div class="box">'+
     '<div class="inbox"><div class="k">Uw investering</div><div class="v"><b class="pos">€ 0</b></div></div>'+
-    '<div class="inbox"><div class="k">Leasetermijn / jaar (@ '+_num(le.rente)+'%)</div><div class="v">'+eur(le.leasetermijn)+'</div></div>'+
-    '<div class="inbox"><div class="k">Extra winst (na leasing)</div><div class="v">'+eur(le.extra_winst)+'</div></div>'+
-    '<div class="inbox"><div class="k">Uw deel (50%)</div><div class="v"><b class="pos">'+eur(le.klant_netto)+'</b></div></div>'+
-    '<div class="inbox"><div class="k">Deel partner (50%)</div><div class="v">'+eur(le.extra_winst*0.5)+'</div></div>'+
-  '</div><div class="box groen" style="align-self:stretch"><b>Geen investering, wél winst.</b> De partner financiert en leaset de installatie (aan '+_num(le.rente)+'%). '+
-    'U betaalt niets vooraf en draagt geen risico. De winst boven de leasingkost wordt <b>50/50</b> gedeeld: u houdt '+
-    '<b>'+eur(le.klant_netto)+'/jaar</b> over vanaf het eerste jaar. Ideaal als u uw kapitaal liever voor uw kernactiviteit bewaart.</div></div>';
+    '<div class="inbox"><div class="k">Leasetermijn / jaar (@ '+_num(le.rente)+'%)</div><div class="v">'+eur(le.leasetermijn)+' <span style="font-size:11px;color:#5A6577">('+_num(le.looptijd)+' j)</span></div></div>'+
+    '<div class="inbox"><div class="k">Netto over / jaar (jaar 1)</div><div class="v"><b class="'+(le.klant_jr1>=0?'pos':'neg')+'">'+eur(le.klant_jr1)+'</b></div></div>'+
+    '<div class="inbox"><div class="k">Na aflossing (vanaf jaar '+_num(le.looptijd+1)+')</div><div class="v"><b class="pos">'+eur(K.jaarwinst)+'</b></div></div>'+
+  '</div><div class="box groen" style="align-self:stretch"><b>Geen investering, en u houdt alles.</b> De partner financiert en leaset de installatie (aan '+_num(le.rente)+'%). '+
+    'U betaalt niets vooraf en draagt geen risico. De volledige winst boven de leasetermijn is voor u: <b>'+eur(le.klant_jr1)+'/jaar</b> vanaf het eerste jaar. '+
+    'Na '+_num(le.looptijd)+' jaar is de leasing afgelost en houdt u de volle '+eur(K.jaarwinst)+'/jaar over. Ideaal als u uw kapitaal liever voor uw kernactiviteit bewaart.</div></div>';
 
   h+='<div class="box"><b>Samengevat.</b> '+
     'Eigen middelen geven het hoogste absolute rendement; een lening geeft de hoogste hefboom op uw eigen inbreng; leasing geeft u winst zónder te investeren. '+
     'Alle drie vertrekken van dezelfde jaarwinst van '+eur(K.jaarwinst)+' — en houden geen rekening met de onbalans-windfall, die er bovenop kan komen.</div>';
   h+='<p class="note">Indicatieve berekening, exclusief btw en fiscaliteit (investeringsaftrek, afschrijvingen). Rentes en looptijd zijn aannames en worden per dossier bevestigd.</p>';
   pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 12/13/14 — DE DRIE FINANCIERINGSMODELLEN, VOLLEDIG OVER 15 JAAR
+//   (in hoofde van de klant; kosteninflatie 2%/j, netkosten +6%/j, opbrengst constant)
+// ===========================================================================
+(function(){
+  var A=FIN.aannames;
+  var uitlegKost=
+    'De opbrengst houden we constant; enkel de <b>kosten</b> lopen op. We rekenen '+_num(A.infl_kost)+' % inflatie per jaar op alle kosten, '+
+    'en daar bovenop nog eens '+_num(A.infl_net_extra)+' % op de <b>netkosten</b> (distributie, transport, capaciteit) — die dus met '+
+    _num(A.infl_kost+A.infl_net_extra)+' % per jaar stijgen. Jaar 1 komt exact overeen met de winst van '+eur(K.jaarwinst)+' uit de simulatie. '+
+    'De netkosten schatten we op '+_num(A.net_aandeel)+' % van de jaarlijkse kosten (bij te sturen per dossier).';
+
+  // ---- Model 1: eigen middelen ----
+  (function(){
+    var m=FIN.eigen;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7a</div><div><h2>Model 1 — Eigen middelen, 15 jaar uitgewerkt</h2>'+
+      '<div class="note">U betaalt de installatie zelf. Uw inleg is de investering; daarna is elke euro marge voor u.</div></div></div>';
+    h+='<p>'+uitlegKost+'</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, null);
+    h+='<div class="box groen"><b>Wat dit betekent.</b> U legt '+eur(m.inleg)+' in. Over 15 jaar houdt u — ná uw inleg en ná de oplopende kosten — '+
+      '<b>'+eur(m.meerwaarde)+'</b> netto over. Dat komt neer op een rendement van '+
+      (m.irr!=null?'<b>'+pct(m.irr,1)+' per jaar</b> (IRR op uw inleg)':'—')+'. '+
+      'Verdisconteerd aan '+_num(A.disconto)+' % is de netto contante waarde (NPV) van uw inleg <b>'+eur(m.npv)+'</b>.</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
+
+  // ---- Model 2: lening 75% @ 5% ----
+  (function(){
+    var m=FIN.lening;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7b</div><div><h2>Model 2 — Lening (75% @ 5%), 15 jaar uitgewerkt</h2>'+
+      '<div class="note">U leent 75% en legt 25% zelf in. Tijdens de looptijd betaalt u de annuïteit; daarna houdt u de volle marge.</div></div></div>';
+    h+='<p>'+uitlegKost+' De aflossing bedraagt '+eur(m.annuiteit)+'/jaar gedurende '+_num(m.looptijd)+' jaar (lening van '+eur(m.lening)+' @ '+_num(m.rente)+' %).</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, 'Aflossing');
+    h+='<div class="box blauw"><b>Wat dit betekent.</b> U legt maar '+eur(m.inleg)+' zelf in (25%). Over 15 jaar houdt u — ná uw inleg, de aflossingen en de oplopende kosten — '+
+      '<b>'+eur(m.meerwaarde)+'</b> netto over. Op die beperkte inleg loopt het rendement op tot '+
+      (m.irr!=null?'<b>'+pct(m.irr,1)+' per jaar</b> (IRR)':'—')+' — het hefboomeffect. '+
+      'De NPV op uw inleg (@ '+_num(A.disconto)+' %) is <b>'+eur(m.npv)+'</b>. Vanaf jaar '+_num(m.looptijd+1)+' is de lening afbetaald en valt de aflossing weg.</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
+
+  // ---- Model 3: leasing @ 10% (geen inleg, geen winstdeling) ----
+  (function(){
+    var m=FIN.leasing;
+    var h=merkband()+'<div class="stap-band"><div class="nr">7c</div><div><h2>Model 3 — Leasing (@ 10%), 15 jaar uitgewerkt</h2>'+
+      '<div class="note">Geen eigen inleg. U betaalt de leasetermijn; de volledige winst daarboven is voor u. Na aflossing houdt u alles.</div></div></div>';
+    h+='<p>'+uitlegKost+' De leasetermijn bedraagt '+eur(m.leasetermijn)+'/jaar gedurende '+_num(m.looptijd)+' jaar (@ '+_num(m.rente)+' %). '+
+      'Er is <b>geen winstdeling</b>: u houdt de volledige marge boven de leasetermijn, en na de looptijd de volle winst.</p>';
+    h+=_finKPI(m);
+    h+=_finTabel(m, 'Leasetermijn');
+    h+='<div class="box groen"><b>Wat dit betekent.</b> U legt <b>niets</b> in en draagt geen risico. Toch houdt u vanaf jaar 1 <b>'+eur(m.klant_jr1)+'/jaar</b> over, '+
+      'en na jaar '+_num(m.looptijd)+' de volle winst. Over 15 jaar is dat samen <b>'+eur(m.meerwaarde)+'</b> netto — zuivere meerwaarde zonder eigen kapitaal. '+
+      'Verdisconteerd aan '+_num(A.disconto)+' % is de NPV <b>'+eur(m.npv)+'</b>. Een rendement op de inleg is niet van toepassing (u legt niets in).</div>';
+    h+='<p class="note">Indicatief, exclusief btw en fiscaliteit. Opbrengst constant verondersteld; kosteninflatie zoals hierboven. Aannames bij te sturen per dossier.</p>';
+    pagina(h);
+  })();
 })();
 
 // ===========================================================================
