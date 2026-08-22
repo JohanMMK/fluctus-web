@@ -1,4 +1,12 @@
+// portal.js v1.5.0 — 2026-08-22 23:45 (Europe/Brussels) — 2e videoknop 'W' (Wattkraft) naast de info-i op de Laadplein-tegel (video2-veld)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// CHANGELOG (nieuwste bovenaan):
+// v1.5.0 — 2026-08-22 23:45 — Laadplein-tegel: 2e ronde knop 'W' (Wattkraft) links naast de bestaande info-'i'.
+//          i = Jacops-video, W = Wattkraft-video. Additief: velden video2/video2Label/video2Title in de catalog,
+//          extra knop-blok in renderLauncher() + .tile-info2-styling in ensureVideoUI(). i-logica ongewijzigd.
+//          Wattkraft-video verwacht als Laadplein_WATTKRAFT.mp4 in JohanMMK/jacops-presentatie@main (jsDelivr).
+// v1.4.x — 22-08 (Johan): tegelnaam "Betalend laadplein" → "Laadplein"; 23-08: productvideo achter info-i op
+//          Laadplein + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd).
 // 22-08 (Johan): tegelnaam "Betalend laadplein" → "Laadplein". Interne id ('betaalplein') + flow (?flow=betaalplein) ongewijzigd.
 // 21-08: Nieuwe tegel "Betalend laadplein" (id 'betaalplein') na Simulator → opent
 //        /apps/simulator.html?flow=betaalplein (gefocuste flow: enkel betaalplein-rapport + kabeltracé).
@@ -41,7 +49,7 @@ const APP_CATALOG = [
   // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
   // Simulator (gatedBy:'simulator') → geen aparte app_id/proxy-grant nodig. Eindigt in het ontwerpscherm met
   // enkel het betaalplein-rapport + kabeltracé.
-  { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_JACOPS_EDrive.mp4', video2: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_WATTKRAFT.mp4', video2Label: 'W', video2Title: 'Bekijk de Wattkraft-video' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd. 23-08: productvideo achter info-i (zoals thuisladen) + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd) zodat de Gebruikers-app Laadplein apart kan toekennen. 24-08: 2e knop 'W' naast de i → Wattkraft-versie van de laadplein-video (video2)
+  { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_JACOPS_EDrive.mp4', video2: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_WATTKRAFT.mp4', video2Label: 'W', video2Title: 'Bekijk de Wattkraft-video' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd. 23-08: productvideo achter info-i (zoals thuisladen) + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd) zodat de Gebruikers-app Laadplein apart kan toekennen. 22-08 (v1.5.0): 2e knop 'W' naast de i → Wattkraft-versie van de laadplein-video (video2)
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen_JACOPS_EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
