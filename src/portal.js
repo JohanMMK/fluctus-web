@@ -41,7 +41,7 @@ const APP_CATALOG = [
   // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
   // Simulator (gatedBy:'simulator') → geen aparte app_id/proxy-grant nodig. Eindigt in het ontwerpscherm met
   // enkel het betaalplein-rapport + kabeltracé.
-  { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_JACOPS_EDrive.mp4' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd. 23-08: productvideo achter info-i (zoals thuisladen) + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd) zodat de Gebruikers-app Laadplein apart kan toekennen
+  { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_JACOPS_EDrive.mp4', video2: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_WATTKRAFT.mp4', video2Label: 'W', video2Title: 'Bekijk de Wattkraft-video' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd. 23-08: productvideo achter info-i (zoals thuisladen) + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd) zodat de Gebruikers-app Laadplein apart kan toekennen. 24-08: 2e knop 'W' naast de i → Wattkraft-versie van de laadplein-video (video2)
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen_JACOPS_EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
@@ -183,6 +183,18 @@ function renderLauncher(apps) {
       info.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openVideoModal(a.video, a.naam); });
       t.appendChild(info);
     }
+    // 2e videoknop (bv. 'W' = Wattkraft) links naast de info-i: opent een alternatieve productvideo.
+    if (a.video2) {
+      t.style.position = 'relative';
+      const alt = document.createElement('button');
+      alt.className = a.video ? 'tile-info tile-info2' : 'tile-info';
+      alt.type = 'button';
+      alt.textContent = a.video2Label || 'W';
+      alt.title = a.video2Title || 'Bekijk de video';
+      alt.setAttribute('aria-label', a.video2Title || 'Bekijk de video');
+      alt.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openVideoModal(a.video2, (a.video2Label === 'W' ? a.naam + ' · Wattkraft' : a.naam)); });
+      t.appendChild(alt);
+    }
     host.appendChild(t);
   });
 }
@@ -197,6 +209,10 @@ function ensureVideoUI() {
       font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1;cursor:pointer;
       display:flex;align-items:center;justify-content:center;padding:0;z-index:3;transition:all .15s}
     .app-tile .tile-info:hover{background:#1F3864;color:#fff;transform:scale(1.08)}
+    /* 2e videoknop ('W' = Wattkraft) links naast de info-i */
+    .app-tile .tile-info2{right:42px;border-color:#12315E;color:#12315E;font-style:normal;
+      font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:14px}
+    .app-tile .tile-info2:hover{background:#12315E;color:#fff}
     .tlvid-bg{position:fixed;inset:0;background:rgba(15,22,40,.82);display:none;align-items:center;
       justify-content:center;z-index:9999;padding:24px}
     .tlvid-bg.open{display:flex}
