@@ -1,4 +1,5 @@
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
+// 22-08 (Johan): tegelnaam "Betalend laadplein" → "Laadplein". Interne id ('betaalplein') + flow (?flow=betaalplein) ongewijzigd.
 // 21-08: Nieuwe tegel "Betalend laadplein" (id 'betaalplein') na Simulator → opent
 //        /apps/simulator.html?flow=betaalplein (gefocuste flow: enkel betaalplein-rapport + kabeltracé).
 //        Nieuw vlag gatedBy:'simulator' → de tegel volgt exact de toegang van de Simulator (managers altijd,
@@ -40,7 +41,7 @@ const APP_CATALOG = [
   // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
   // Simulator (gatedBy:'simulator') → geen aparte app_id/proxy-grant nodig. Eindigt in het ontwerpscherm met
   // enkel het betaalplein-rapport + kabeltracé.
-  { id: 'betaalplein', naam: 'Betalend laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → betalend laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', gatedBy: 'simulator' },
+  { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', gatedBy: 'simulator' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen_JACOPS_EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
