@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
+     FLUCTUS SIMULATOR  v1.74.0  (2026-08-22 Europe/Brussels)
+     v1.74.0 (Johan 22-08): EXTRA KOSTEN & WERKEN werkt door. Het lump-sum veld paste totaal/investering/tvt/rendement
+              enkel aan op onchange (blur) + een volledige tabel-re-render, die kon achterblijven waardoor de post niet
+              in de totalen/rendement verscheen. Nu LIVE op oninput via _bezUpdateTotals() dat enkel de betrokken cellen
+              patcht (focus blijft in de input). Report-BOM/totaal telde de post al mee.
      FLUCTUS SIMULATOR  v1.73.0  (2026-08-21 Europe/Brussels)
      v1.73.0 (Johan 21-08): CREG-BESPARING COHERENT. Het groene detailblok toonde BRUTO (geleverd × CREG-forfait
               €3101) terwijl de scenariokolom NETTO toonde (€1036–1416, per rij variërend). Nu overal ÉÉN NETTO
@@ -1269,7 +1274,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.73.0';   // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
+var SIM_VERSIE = 'v1.74.0';   // v1.74.0 (22-08): "extra kosten & werken" werkt nu LIVE door in totaal/investering/tvt/rendement (oninput i.p.v. enkel onchange/blur + volledige re-render die kon achterblijven); gerichte cel-update _bezUpdateTotals() behoudt de focus in de input. // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -4409,14 +4414,16 @@ function _renderBezTabelHtml(r){
     (cx.palen>0?invRij('Laadpalen', cx.palen, cx.palenLabel):'')+
     invRij('Kabeltracé', cx.kabelPlein, (cx.exact?'exact (kabelplanner)':'schatting'))+
     '<tr style="border-bottom:1px solid #E5E9F0"><td style="padding:5px 8px">Extra kosten &amp; werken '+
-      '<input type="number" value="'+(+cx.extra||0)+'" min="0" step="100" oninput="_bezSetExtra(this.value)" onchange="_bezRerenderTabel()" '+
+      // v1.74: LIVE update op oninput (mobiel: onchange/blur van number-inputs vuurt onbetrouwbaar → totalen bleven staan).
+      //   _bezUpdateTotals() patcht enkel de totaal/investering/tvt/rendement-cellen → focus in de input blijft behouden.
+      '<input type="number" value="'+(+cx.extra||0)+'" min="0" step="100" inputmode="numeric" oninput="_bezSetExtra(this.value);_bezUpdateTotals()" onchange="_bezSetExtra(this.value);_bezUpdateTotals()" '+
       'style="width:120px;padding:3px 6px;margin-left:6px;border:1px solid #C7CED8;border-radius:4px;font-size:12px" placeholder="lump sum"></td>'+
-      '<td style="padding:5px 8px;text-align:right;font-weight:600">'+eur(+cx.extra||0)+'</td></tr>'+
+      '<td id="bez-extra-disp" style="padding:5px 8px;text-align:right;font-weight:600">'+eur(+cx.extra||0)+'</td></tr>'+
     '<tr><td colspan="2" style="padding:6px 8px 2px"><textarea rows="2" oninput="_bezSetComment(this.value)" '+
       'style="width:100%;border:1px solid #C7CED8;border-radius:4px;font-size:12px;padding:5px 7px;resize:vertical;font-family:inherit" '+
       'placeholder="Omschrijving extra kosten &amp; werken (verschijnt in het rapport)">'+escapeHtml(cx.comment||'')+'</textarea></td></tr>'+
     '<tr style="border-top:2px solid #1F3864"><td style="padding:7px 8px;font-weight:800;color:#1F3864">Totaal investering</td>'+
-      '<td style="padding:7px 8px;text-align:right;font-weight:800;color:#1F3864">'+eur(invTot)+'</td></tr>'+
+      '<td id="bez-inv-tot" style="padding:7px 8px;text-align:right;font-weight:800;color:#1F3864">'+eur(invTot)+'</td></tr>'+
     '</table></div>';
   var kblLine = cx.exact
     ? '<b style="color:#048443">Kabeltracé EXACT: '+eur(cx.kabelPlein)+'</b> (uit de kabelplanner).'
@@ -4464,11 +4471,32 @@ function _renderBezTabelHtml(r){
         '<td style="padding:5px 8px">'+(row.besparing_wag_eur!=null?'<b style="color:#048443">'+eur(row.besparing_wag_eur)+'</b>':'—')+'</td>'):'')+
       '<td style="padding:5px 8px">'+eur(row.jaarfactuur_eur)+'</td>'+
       '<td style="padding:5px 8px">'+win+'</td>'+
-      '<td style="padding:5px 8px">'+invCell+'</td>'+
-      '<td style="padding:5px 8px">'+tvtCell+'</td>'+
-      '<td style="padding:5px 8px">'+rendCell+'</td></tr>';
+      '<td id="bez-inv-'+row.key+'" style="padding:5px 8px">'+invCell+'</td>'+
+      '<td id="bez-tvt-'+row.key+'" style="padding:5px 8px">'+tvtCell+'</td>'+
+      '<td id="bez-rend-'+row.key+'" style="padding:5px 8px">'+rendCell+'</td></tr>';
   });
   return h+'</tbody></table></div>';
+}
+// v1.74: LIVE herberekening van investering/totaal/tvt/rendement bij het wijzigen van "extra kosten & werken",
+//   ZONDER de tabel opnieuw op te bouwen (focus blijft in de input — cruciaal op mobiel). Patcht enkel de cellen.
+function _bezUpdateTotals(){
+  if(!STATE._bezLaatste) return;
+  var cx=_bezCapex();
+  function eur(v){ return (v==null)?'—':('€ '+Math.round(v).toLocaleString('nl-BE')); }
+  function jr(v){ return (v==null)?'—':(fmtNum(v,1)+' j'); }
+  function pct(v){ return (v==null)?'—':(fmtNum(v,1)+' %'); }
+  function rowCapex(row){ if(row.is_basis) return 0; if(!row.heeftPlein) return cx.battCapex+cx.battTrace; return cx.battCapex+cx.palen+cx.kabelPlein+(+cx.extra||0); }
+  var invTot=cx.battCapex+cx.palen+cx.kabelPlein+(+cx.extra||0);
+  var elTot=document.getElementById('bez-inv-tot'); if(elTot) elTot.textContent=eur(invTot);
+  var elEx=document.getElementById('bez-extra-disp'); if(elEx) elEx.textContent=eur(+cx.extra||0);
+  (STATE._bezLaatste.rows||[]).forEach(function(row){
+    var capex=rowCapex(row);
+    var tvt=(capex>0 && row.winst_eur>0)?(capex/row.winst_eur):null;
+    var rend=(capex>0 && row.winst_eur>0)?(row.winst_eur/capex*100):null;
+    var ci=document.getElementById('bez-inv-'+row.key); if(ci) ci.innerHTML=row.is_basis?'<span style="color:#5A6577">referentie</span>':eur(capex);
+    var ct=document.getElementById('bez-tvt-'+row.key); if(ct) ct.innerHTML=row.is_basis?'—':((tvt==null)?'<span style="color:#C0392B">geen terugverdien</span>':jr(tvt));
+    var cr=document.getElementById('bez-rend-'+row.key); if(cr) cr.innerHTML=row.is_basis?'—':((rend==null)?'—':'<b style="color:'+(rend>=8?'#048443':'#1F3864')+'">'+pct(rend)+'</b>');
+  });
 }
 // v1.67: lump sum extra kosten & werken + omschrijving (live in STATE; her-render bij blur zodat totalen kloppen).
 function _bezSetExtra(v){ STATE.bezExtraKosten = Math.max(0, (parseFloat(String(v).replace(',','.'))||0)); }
