@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.83.0  (2026-08-23 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.84.0  (2026-08-24 Europe/Brussels)
+     v1.84.0 (Johan 24-08): Laadplein-rapport-hoofdstuk "Waarom uw kilometers zo goedkoop zijn" krijgt ECHTE
+              per-kwartier data. Nieuwe _lpChartData() leest de al bewaarde varianten (STATE.resultaatVarianten
+              .geen = dom laden/batterij idle, .sturing = sturing zonder onbalans): profielen.vermogen_aansluiting_kw
+              + spot_prijs_eur_mwh + laadplein.pleinen[].load_kw. Bouwt duurkromme{piek_kw,baseline,direct,batterij,
+              nieuw} (Deel 1, gesorteerd op afname) en spotkost{prijs,ng_cum,lp_cum,batt_cum,besparing_eur} (Deel 2,
+              gesorteerd op spotprijs) en geeft ze mee in _laadpleinRapportData(). GEEN wijziging aan server.js of
+              simulator.py (money-path onaangeroerd). Vereist laadplein-rapport(-wattkraft).html v1.12.0+.
      v1.83.0 (Johan 23-08): Laadplein-resultaat — TWEE klantrapport-knoppen (Jacops rood + Wattkraft navy, zelfde
               data, andere huisstijl → /apps/laadplein-rapport.html vs /apps/laadplein-rapport-wattkraft.html).
               "Terug naar standaard" overal verwijderd (invoer-banner, scenario-rij, ontwerp-nav).
@@ -10170,8 +10177,84 @@ function _laadpleinHeat(load){
   for(var hh=0;hh<24;hh++){ for(var d=0;d<365;d++){ heat[hh][d]=Math.round(heat[hh][d]/4*10)/10; } }
   return heat;
 }
+// v1.84.0 (24-08): ECHTE per-kwartier data voor het rapport-hoofdstuk "Waarom uw kilometers zo goedkoop zijn".
+//   Leest de VOLLEDIGE sturing-varianten (STATE.resultaatVarianten.geen / .sturing) die de client al bewaart:
+//   elke variant draagt profielen.vermogen_aansluiting_kw (netto grid-kW/kwartier) + spot_prijs_eur_mwh, en
+//   laadplein.pleinen[].load_kw (EV geleverd/kwartier). Zo bouwen we ZONDER server/simulator.py-wijziging:
+//     • duurkromme (Deel 1): begin-afname (gebouw), + direct naar de laadpalen, + via de batterij, tot de nieuwe
+//       afname — kwartieren gesorteerd laag→hoog en gemiddeld in 180 emmers.
+//     • spotkost  (Deel 2): cumulatieve energiekost (volume × spot) van de LAADENERGIE, kwartieren gesorteerd op
+//       spotprijs (goedkoop→duur); niet-gestuurd (dom laden) vs gestuurd (direct + via batterij).
+//   "geen sturing" = variant 'geen' (batterij idle, dom laden); "gestuurd" = variant 'sturing' (sturing zonder
+//   onbalans). Alles defensief: ontbreekt een array → return null → het rapport valt terug op de schematische weergave.
+function _lpEvLoadPerKwartier(v, n){
+  var out=new Array(n); for(var i=0;i<n;i++) out[i]=0;
+  var pls=(v&&v.laadplein&&v.laadplein.pleinen)||[];
+  for(var j=0;j<pls.length;j++){ var lk=(pls[j]&&pls[j].load_kw)||[]; var m=Math.min(n,lk.length);
+    for(var t=0;t<m;t++){ out[t]+=(+lk[t]||0); } }
+  return out;
+}
+function _lpChartData(varG, varS, piekKva){
+  try{
+    if(!varG||!varS) return null;
+    var prG=varG.profielen||{}, prS=varS.profielen||{};
+    var vermG=prG.vermogen_aansluiting_kw||[], vermS=prS.vermogen_aansluiting_kw||[];
+    var spot=(prS.spot_prijs_eur_mwh&&prS.spot_prijs_eur_mwh.length)?prS.spot_prijs_eur_mwh:(prG.spot_prijs_eur_mwh||[]);
+    var n=Math.min(vermG.length, vermS.length, spot.length);
+    if(!(n>=96)) return null;                                  // minstens één dag echte data
+    var evG=_lpEvLoadPerKwartier(varG,n), evS=_lpEvLoadPerKwartier(varS,n);
+    var building=new Array(n), nieuw=new Array(n), direct=new Array(n), batt=new Array(n), i;
+    var qf=0.25/1000.0;                                        // kW-kwartier → MWh
+    for(i=0;i<n;i++){
+      var afnG=Math.max(0,+vermG[i]||0), afnS=Math.max(0,+vermS[i]||0);
+      var b=afnG-(+evG[i]||0); if(b<0)b=0; building[i]=b;      // begin-afname = gebouw (geen-variant, batterij idle)
+      var gap=afnS-b; if(gap<0)gap=0;                          // extra grid voor laden/batterij bij sturing
+      var d=Math.min(gap, +evS[i]||0); if(d<0)d=0; direct[i]=d;// direct naar de laadpalen (gelijktijdig geladen)
+      batt[i]=Math.max(0, gap-d);                              // rest = via de batterij (grid → batterij)
+      nieuw[i]=b+d+batt[i];                                    // nieuwe afname (= begin + laden), stapelbaar
+    }
+    // ---- Deel 1: belastingsduurkromme (sorteer op nieuwe afname, laag→hoog; 180 emmers) ----
+    var NB=180, idx=new Array(n); for(i=0;i<n;i++) idx[i]=i;
+    idx.sort(function(a,b){ return nieuw[a]-nieuw[b]; });
+    var dkBase=[], dkNieuw=[], dkDir=[], dkBatt=[], bkt;
+    for(bkt=0;bkt<NB;bkt++){
+      var lo=Math.floor(bkt*n/NB), hi=Math.floor((bkt+1)*n/NB); if(hi<=lo)hi=lo+1; if(hi>n)hi=n;
+      var sB=0,sN=0,sD=0,sBt=0,cnt=0,t;
+      for(t=lo;t<hi;t++){ var q=idx[t]; sB+=building[q]; sN+=nieuw[q]; sD+=direct[q]; sBt+=batt[q]; cnt++; }
+      if(cnt<1)cnt=1;
+      dkBase.push(sB/cnt); dkNieuw.push(sN/cnt); dkDir.push(sD/cnt); dkBatt.push(sBt/cnt);
+    }
+    var piek=+piekKva||0; var mxN=dkNieuw[NB-1]||0; if(piek<mxN) piek=mxN;
+    var duurkromme={ piek_kw:Math.round(piek*10)/10,
+      baseline:dkBase.map(function(v){return Math.round(v*10)/10;}),
+      nieuw:dkNieuw.map(function(v){return Math.round(v*10)/10;}),
+      direct:dkDir.map(function(v){return Math.round(v*10)/10;}),
+      batterij:dkBatt.map(function(v){return Math.round(v*10)/10;}) };
+    // ---- Deel 2: cumulatieve energiekost van de laadenergie (sorteer op spotprijs, goedkoop→duur) ----
+    var NB2=180, idx2=new Array(n); for(i=0;i<n;i++) idx2[i]=i;
+    idx2.sort(function(a,b){ return (+spot[a]||0)-(+spot[b]||0); });
+    var accNg=0, accLp=0, accBt=0, prijs=[], ngCum=[], lpCum=[], btCum=[];
+    for(var tt=0;tt<n;tt++){
+      var qq=idx2[tt], sp=(+spot[qq]||0);
+      accNg += (evG[qq]*qf)*sp;        // niet gestuurd: dom laden koopt op het moment zelf
+      accLp += (direct[qq]*qf)*sp;     // gestuurd: direct naar de laadpalen
+      accBt += (batt[qq]*qf)*sp;       // gestuurd: via de batterij (koopt op de goedkoopste kwartieren)
+      if(tt===n-1 || Math.floor((tt+1)*NB2/n) > Math.floor(tt*NB2/n)){
+        prijs.push(Math.round(sp*10)/10);
+        ngCum.push(Math.round(accNg)); lpCum.push(Math.round(accLp)); btCum.push(Math.round(accBt));
+      }
+    }
+    var tot_ng=Math.round(accNg), tot_g=Math.round(accLp+accBt);
+    var spotkost={ prijs:prijs, ng_cum:ngCum, lp_cum:lpCum, batt_cum:btCum,
+      besparing_eur:tot_ng-tot_g, tot_ng_eur:tot_ng, tot_g_eur:tot_g };
+    return { duurkromme:duurkromme, spotkost:spotkost };
+  }catch(e){ try{ console.warn('[lprapport] grafiekdata faalt, val terug op schema:', e&&e.message); }catch(_e){} return null; }
+}
 function _laadpleinRapportData(){
   var res=STATE.resultaat||{}, k=STATE.kpiSturing||{}, bez=STATE._bezLaatste||null;
+  // v1.84.0: echte grafiekdata uit de bewaarde sturing-varianten (geen/sturing). Faalt stil → schema-fallback.
+  var _rv=STATE.resultaatVarianten||{};
+  var _grf=_lpChartData(_rv.geen, _rv.sturing, +STATE.aansluitingKva||0);
   var cx=(typeof _bezCapex==='function')?_bezCapex():{battCapex:0,palen:0,battTrace:0,kabelPlein:0,exact:false,palenLabel:''};
   function rowCapex(row){ if(row.is_basis) return 0; if(!row.heeftPlein) return cx.battCapex+cx.battTrace; return cx.battCapex+cx.palen+cx.kabelPlein+(+cx.extra||0); }
   // scenarios (met capex/rendement, identiek aan de tabel)
@@ -10272,6 +10355,9 @@ function _laadpleinRapportData(){
       meerwaarde_eur:Math.round(mSt), meerwaarde_pct:kg>0?(mSt/kg*100):0,
       windfall_eur:Math.round(mOn), windfall_pct:ks>0?(mOn/ks*100):0 },
     factuur3:(typeof _simFactuur3Data==='function')?_simFactuur3Data():null,
+    // v1.84.0: echte per-kwartier grafiekdata voor het hoofdstuk "Waarom uw kilometers zo goedkoop zijn".
+    //   null = geen varianten beschikbaar → rapport toont de schematische weergave.
+    duurkromme:(_grf&&_grf.duurkromme)||null, spotkost:(_grf&&_grf.spotkost)||null,
     scenarios:scenarios, creg_eur_mwh:Math.round(cregEurMwh),
     kabel:{ exact:!!cx.exact, kabeltrace_eur:Math.round(cx.kabelPlein),
       foto_dataurl:(STATE.kabeltraceResult&&STATE.kabeltraceResult.foto_dataurl)||null,
