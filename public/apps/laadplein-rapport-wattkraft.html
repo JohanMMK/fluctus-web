@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS · LAADPLEIN-RAPPORT  v1.9.0  (2026-08-22 Europe/Brussels)
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.10.0  (2026-08-24 Europe/Brussels)  [Wattkraft-huisstijl]
+     v1.10.0 (24-08): hoofdstuk "Waarom uw kilometers zo goedkoop zijn" toegevoegd (geport uit de E+Drive/Jacops-
+              versie v1.15.0): Deel 1 belastingsduurkromme (rode gebouwlijn tot de piek, renderer-side optil-fix),
+              Deel 2 cumulatieve spotkost (gebouw · laadpalen · batterij), + samenvattingspagina met beide grafieken
+              zonder getallen voor de productsheets. Zelfde datacontract (D.duurkromme/D.spotkost) en grafiek-
+              kleuren; merk-accent (nr-cirkels) volgt de Wattkraft-huisstijl (var(--blauw)).
      v1.9.0 (Johan 22-08): FINANCIERING herwerkt. (1) Leasing zonder 50/50-winstdeling: de klant houdt de volle
               marge boven de leasetermijn, en na aflossing van de leasing de volledige marge. (2) Drie nieuwe
               pagina's — één per financieringsmodel — met de VOLLEDIGE 15 jaar in hoofde van de klant:
@@ -499,6 +504,266 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     });
   }
   pagina(h);
+})();
+
+// ===========================================================================
+// PAGINA 6b — VRIJ VERMOGEN: belastingsduurkromme (laden zonder de piek te verhogen)
+// v1.10.0 (24-08): hoofdstuk "Waarom uw kilometers zo goedkoop zijn" — geport uit laadplein-rapport.html v1.15.0.
+//   Zelfde datacontract (D.duurkromme / D.spotkost) en dezelfde grafiek-kleuren; enkel de merk-accent (nr-cirkels)
+//   volgt de Wattkraft-huisstijl (var(--blauw)). Renderer-side optil-fix inbegrepen (rode gebouwlijn tot de piek).
+(function(){
+  var P=+((IN.aansluiting||{}).kva)||0;
+  var piekSom=PLN.reduce(function(s,p){return s+(+p.piek_kw||0);},0)+GEW.reduce(function(s,p){return s+(+p.piek_kw||0);},0);
+  if(!P) P=Math.max(50, Math.round((piekSom/0.55)/10)*10) || 250;
+  var geladenMwh=(+K.geleverd_mwh||0);
+  var somGel=PLN.reduce(function(s,p){return s+(+p.geleverd_mwh||0);},0)+GEW.reduce(function(s,p){return s+(+p.geleverd_mwh||0);},0);
+  if(geladenMwh<=0) geladenMwh=somGel;
+  var battKwh=((IN.batterij||{}).kwh)?+IN.batterij.kwh:0;
+  var verbruikMwh=((IN.verbruik||{}).mwh)?+IN.verbruik.mwh:0;
+  var nPlein=PLN.length+GEW.length;
+
+  var N=180, x=[], baseline=[], nieuw=[], mid=[], i, q;
+  var dk=D.duurkromme, exact=dk&&dk.baseline&&dk.baseline.length&&dk.nieuw&&dk.nieuw.length&&dk.direct&&dk.batterij;
+  if(exact){
+    N=Math.min(dk.baseline.length, dk.nieuw.length, dk.direct.length, dk.batterij.length);
+    var _bl=[], _dr=[], _bt2=[];
+    for(i=0;i<N;i++){ _bl.push(+dk.baseline[i]||0); _dr.push(+dk.direct[i]||0); _bt2.push(+dk.batterij[i]||0); }
+    if(!(P>0)){ P=+dk.piek_kw||0; if(!(P>0)){ var _mxn=0; for(i=0;i<N;i++){ var _t=_bl[i]+_dr[i]+_bt2[i]; if(_t>_mxn)_mxn=_t; } P=_mxn||250; } }
+    // begin-afname (gebouw) tot de piek tillen — ENKEL de top additief (gewicht ~rang^5) zodat de vrije ruimte
+    //   links/midden behouden blijft. Renderer-side → werkt ongeacht welke simulator-versie de data aanleverde.
+    var _bpk=_bl[N-1]||0, _lift=P-_bpk; if(_lift<0)_lift=0;
+    for(i=0;i<N;i++){ x.push(N>1?i/(N-1):0);
+      var _w=Math.pow(N>1?i/(N-1):1,5);
+      var _b=_bl[i]+_lift*_w; if(_b>P)_b=P;
+      var _tot=_b+_dr[i]+_bt2[i]; if(_tot>P)_tot=P; if(_tot<_b)_tot=_b;
+      var _gap=_tot-_b, _og=_dr[i]+_bt2[i], _fb=(_og>1e-9)?(_bt2[i]/_og):0;
+      baseline.push(_b); mid.push(_b+_gap*(1-_fb)); nieuw.push(_tot); }
+  } else {
+    var meanB=verbruikMwh>0?(verbruikMwh*1000/8760):(P*0.34);
+    var kB=2.2, peakB=Math.min(0.86*P, Math.max(meanB*2.4, meanB*1.25)), floorB=(meanB-peakB/(kB+1))/(1-1/(kB+1));
+    if(!(floorB>=0)) floorB=Math.max(2,0.05*P);
+    for(i=0;i<N;i++){ q=i/(N-1); x.push(q); baseline.push(floorB+(peakB-floorB)*Math.pow(q,kB)); }
+    var g0=[], sumg=0, free, w, v;
+    for(i=0;i<N;i++){ free=Math.max(0,P-baseline[i]); w=0.35+0.65*Math.pow(x[i],0.7); v=free*w; g0.push(v); sumg+=v; }
+    var meang=sumg/N, chargeMean=geladenMwh>0?(geladenMwh*1000/8760):(P*0.12), scale=meang>0?(chargeMean/meang):0;
+    if(scale>1.25) scale=1.25;
+    var hasB=battKwh>0, s, gap, nv;
+    for(i=0;i<N;i++){ nv=baseline[i]+g0[i]*scale; if(nv>P*0.994)nv=P*0.994; nieuw.push(nv);
+      s=hasB?(0.55-0.40*x[i]):0; gap=nieuw[i]-baseline[i]; mid.push(baseline[i]+gap*(1-s)); }
+  }
+  var hasBatt=(exact? (dk.batterij.some(function(v){return (+v||0)>0.5;})) : battKwh>0);
+
+  // ---- SVG ----
+  var W=1000,H=430,L=62,R=18,T=20,B=48,PW=W-L-R,PH=H-T-B, ymax=P*1.16;
+  var BL='#1F3864',GR='#05B050',GRD='#048443',BAT='#3B82C6',BATD='#173e6b',CEIL='#E8352A',BASE='#C9D0D8',BASEL='#8A94A2',MU='#5A6577',LN='#E2E7EE';
+  function X(i){return (L+PW*x[i]);} function Y(v){return (T+PH*(1-v/ymax));}
+  function ap(top,bot){var d='M',j;for(j=0;j<N;j++)d+=(j?'L':'')+X(j).toFixed(1)+','+Y(top[j]).toFixed(1)+' ';for(j=N-1;j>=0;j--)d+='L'+X(j).toFixed(1)+','+Y(bot[j]).toFixed(1)+' ';return d+'Z';}
+  function lp(a){var d='M',j;for(j=0;j<N;j++)d+=(j?'L':'')+X(j).toFixed(1)+','+Y(a[j]).toFixed(1)+' ';return d;}
+  var zero=[];for(i=0;i<N;i++)zero.push(0);
+  var step=P<=120?20:(P<=320?50:100), g='';
+  for(var kv=0;kv<=ymax;kv+=step){ var yy=Y(kv); g+='<line x1="'+L+'" y1="'+yy.toFixed(1)+'" x2="'+(L+PW)+'" y2="'+yy.toFixed(1)+'" stroke="'+LN+'"/>'+
+    '<text x="'+(L-7)+'" y="'+(yy+3.5).toFixed(1)+'" text-anchor="end" font-size="10.5" fill="'+MU+'">'+kv+'</text>'; }
+  var yc=Y(P);
+  var lblG_x=X(Math.round(N*0.72)), lblG_y=(Y(baseline[Math.round(N*0.72)])+Y(mid[Math.round(N*0.72)]))/2;
+  var lblB_x=X(Math.round(N*0.30)), lblB_y=(Y(mid[Math.round(N*0.30)])+Y(nieuw[Math.round(N*0.30)]))/2;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" style="display:block;width:100%;height:auto;font-family:Helvetica,Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">'
+    + g
+    + '<path d="'+ap(baseline,zero)+'" fill="'+BASE+'" fill-opacity="0.85"/>'
+    + '<path d="'+ap(mid,baseline)+'" fill="'+GR+'" fill-opacity="0.90"/>'
+    + (hasBatt?('<path d="'+ap(nieuw,mid)+'" fill="'+BAT+'" fill-opacity="0.90"/>'):'')
+    + (hasBatt?('<path d="'+lp(mid)+'" fill="none" stroke="#fff" stroke-width="1.4"/>'):'')
+    + '<path d="'+lp(baseline)+'" fill="none" stroke="#fff" stroke-width="4.4"/>'
+    + '<path d="'+lp(baseline)+'" fill="none" stroke="'+CEIL+'" stroke-width="3.2"/>'
+    + '<path d="'+lp(nieuw)+'" fill="none" stroke="'+BL+'" stroke-width="2.4"/>'
+    + '<line x1="'+L+'" y1="'+yc.toFixed(1)+'" x2="'+(L+PW)+'" y2="'+yc.toFixed(1)+'" stroke="'+CEIL+'" stroke-width="2" stroke-dasharray="7 5"/>'
+    + '<text x="'+(L+4)+'" y="'+(yc-7).toFixed(1)+'" font-size="11" font-weight="700" fill="'+CEIL+'">Beschikbaar aansluitvermogen ('+_num(P,0)+' kVA) — blijft gelijk</text>'
+    + '<circle cx="'+X(N-6).toFixed(1)+'" cy="'+yc.toFixed(1)+'" r="3.4" fill="none" stroke="'+BL+'" stroke-width="2"/>'
+    + '<line x1="'+L+'" y1="'+T+'" x2="'+L+'" y2="'+(T+PH)+'" stroke="'+MU+'"/>'
+    + '<line x1="'+L+'" y1="'+(T+PH)+'" x2="'+(L+PW)+'" y2="'+(T+PH)+'" stroke="'+MU+'"/>'
+    + '<text transform="translate(15,'+(T+PH/2)+') rotate(-90)" text-anchor="middle" font-size="11" font-weight="700" fill="'+BL+'">Afgenomen vermogen (kW)</text>'
+    + '<text x="'+(L+PW/2)+'" y="'+(H-10)+'" text-anchor="middle" font-size="11" font-weight="700" fill="'+BL+'">Kwartieren — gerangschikt op afgenomen vermogen (laag → hoog)</text>'
+    + '<text x="'+lblG_x.toFixed(1)+'" y="'+(lblG_y+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="'+GRD+'">direct naar de laadpalen</text>'
+    + (hasBatt?('<text x="'+lblB_x.toFixed(1)+'" y="'+(lblB_y+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="'+BATD+'">via de batterij</text>'):'')
+    + '<text x="'+X(Math.round(N*0.5)).toFixed(1)+'" y="'+(Y(baseline[Math.round(N*0.5)])+15).toFixed(1)+'" text-anchor="middle" font-size="10.5" font-weight="800" fill="'+CEIL+'">begin-afname (gebouw)</text>'
+    + '</svg>';
+
+  function chip(lab,val){ return '<div style="flex:1;border:1px solid var(--lijn);border-radius:7px;padding:7px 10px">'+
+    '<div style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--grijs);font-weight:700">'+lab+'</div>'+
+    '<div style="font-size:15px;font-weight:800;color:var(--blauw)">'+val+'</div></div>'; }
+  function lg(c,t){ return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--zwart,#1A2230)"><span style="width:13px;height:13px;border-radius:3px;background:'+c+';display:inline-block"></span>'+t+'</span>'; }
+  function lgl(c,t,dash){ return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600"><svg width="20" height="10"><line x1="1" y1="5" x2="19" y2="5" stroke="'+c+'" stroke-width="3"'+(dash?' stroke-dasharray="5 4"':'')+'/></svg>'+t+'</span>'; }
+
+  var h=merkband()+'<div class="stap-band"><div class="nr" style="background:var(--blauw)">⚡</div>'+
+    '<div><h2>Waarom uw kilometers zo goedkoop zijn</h2>'+
+    '<div class="note">Geen extra netkosten — en energie van de goedkoopste momenten.</div></div></div>';
+  h+='<p>Elke geladen kilometer is goedkoop om <b>twee redenen</b>. <b>Eén:</b> we laden binnen uw bestaande aansluiting, '+
+    'dus <b>zonder extra netkosten of piekverzwaring</b>. <b>Twee:</b> we halen de energie uit de <b>goedkoopste momenten</b> '+
+    'van de markt. Hieronder ziet u beide.</p>';
+  h+='<div style="font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#048443;margin:10px 0 4px">Deel 1 · Vermogen — het vrije vermogen dat u al betaalt</div>';
+  h+='<p>We rangschikken elk kwartier van het jaar volgens het afgenomen vermogen, van laag naar hoog. Tussen uw '+
+    '<b>begin-afname</b> en de <b>nieuwe afname</b> zit het <b>vrije vermogen</b> dat u vandaag al betaalt maar niet gebruikt '+
+    '— tot we het inzetten om te laden'+
+    (hasBatt?', rechtstreeks naar de laadpalen of via de batterij die de dalen opvult':'')+'. '+
+    'Zo laadt u <b>zonder het afgenomen piekvermogen — en dus het capaciteitstarief — te verhogen</b>.</p>';
+  h+='<div style="display:flex;gap:8px;margin:8px 0 10px">'+
+    chip('Aansluiting', _num(P,0)+' kVA')+
+    chip('Geladen energie', _num(geladenMwh,1)+' MWh/j')+
+    chip('Batterij', battKwh>0?(_num(battKwh,0)+' kWh'):'geen')+
+    chip('Laadpleinen', _num(nPlein,0))+'</div>';
+  h+='<div style="display:flex;flex-wrap:wrap;gap:14px;margin:2px 0 6px">'+
+    lgl(CEIL,'Begin-afname (gebouw)')+lg(GR,'Direct naar de laadpalen')+(hasBatt?lg(BAT,'Via de batterij'):'')+
+    lgl(BL,'Nieuwe afname')+lgl(CEIL,'Piek / aansluitvermogen',true)+'</div>';
+  h+=svg;
+  h+='<div class="box"><b>Wat u ziet.</b> De oppervlakte tussen beide krommen is de energie die extra wordt afgenomen om te laden'+
+    (hasBatt?', deels rechtstreeks en deels via de batterij die laadt in de dalen en later ontlaadt':'')+
+    '. De nieuwe afname blijft onder uw beschikbaar aansluitvermogen: het afgenomen piekvermogen — en dus het capaciteitstarief — blijft ongewijzigd.'+
+    (exact?'':'<br><span class="note" style="font-style:normal">De piek, de geleverde laadenergie en de batterij komen uit uw dossier; de verdeling over de kwartieren is schematisch weergegeven.</span>')+'</div>';
+  pagina(h);
+
+  // ===== DEEL 2 — SPOTPRIJS: energie van de goedkoopste momenten =====
+  var M=+((ST||{}).meerwaarde_eur)||0;
+  var sk=D.spotkost, exact2=sk&&sk.ng_cum&&sk.ng_cum.length&&sk.lp_cum&&sk.batt_cum;
+  var N2, x2=[], cgeb=[], cng=[], cb=[], cg=[], j, ngEnd, gEnd, bespShown, hasB2, hasGeb2=false;
+  if(exact2){
+    N2=Math.min(sk.ng_cum.length, sk.lp_cum.length, sk.batt_cum.length);
+    var _hasGebArr=sk.geb_cum&&sk.geb_cum.length>=N2;
+    for(j=0;j<N2;j++){ x2.push(N2>1?j/(N2-1):0);
+      var _gb=_hasGebArr?(+sk.geb_cum[j]||0):0, _bt=+sk.batt_cum[j]||0, _lp=+sk.lp_cum[j]||0, _ng=+sk.ng_cum[j]||0;
+      cgeb.push(_gb); cb.push(_gb+_bt); cg.push(_gb+_bt+_lp); cng.push(_gb+_ng); }
+    ngEnd=cng[N2-1]||0; gEnd=cg[N2-1]||0;
+    bespShown=(sk.besparing_eur!=null)?+sk.besparing_eur:(ngEnd-gEnd);
+    hasB2=sk.batt_cum.some(function(v){return (+v||0)>0.5;});
+    hasGeb2=_hasGebArr && (sk.tot_geb_eur==null || +sk.tot_geb_eur>0.5);
+  } else {
+    N2=180; var price=[], q2;
+    for(j=0;j<N2;j++){ q2=j/(N2-1); x2.push(q2); price.push(25+205*Math.pow(q2,1.9)); cgeb.push(0); }
+    var battShareE=battKwh>0?0.40:0;
+    var Etot=geladenMwh>0?geladenMwh:150, Eb=Etot*battShareE, El=Etot*(1-battShareE);
+    var normw=function(fn,E){ var w=[],s=0,k; for(k=0;k<N2;k++){var val=fn(x2[k]); w.push(val); s+=val;} for(k=0;k<N2;k++) w[k]=(s>0?w[k]/s*E:0); return w; };
+    var vng=normw(function(){return 1;},Etot), vglp=normw(function(t){return Math.exp(-2.4*t);},El), vgb=normw(function(t){return Math.exp(-5.5*t);},Eb);
+    var clp=[],an=0,ab=0,al=0;
+    for(j=0;j<N2;j++){ an+=vng[j]*price[j]; cng.push(an); ab+=vgb[j]*price[j]; cb.push(ab); al+=vglp[j]*price[j]; clp.push(al); cg.push(cb[j]+clp[j]); }
+    ngEnd=cng[N2-1]; gEnd=cg[N2-1]; var f=(M>0 && (ngEnd-gEnd)>0)?(M/(ngEnd-gEnd)):1;
+    for(j=0;j<N2;j++){ cng[j]*=f; cb[j]*=f; cg[j]*=f; }
+    ngEnd*=f; gEnd*=f; bespShown=(M>0?M:(ngEnd-gEnd)); hasB2=battKwh>0;
+  }
+  var W2=1000,H2=430,L2=76,R2=18,T2=22,B2=48,PW2=W2-L2-R2,PH2=H2-T2-B2;
+  var _ymx=Math.max(ngEnd,gEnd); for(j=0;j<N2;j++){ if(cng[j]>_ymx)_ymx=cng[j]; if(cg[j]>_ymx)_ymx=cg[j]; }
+  var ymax2=(_ymx>0?_ymx:1)*1.10;
+  var NG='#E8352A',GEST='#1F3864',LPc='#05B050',BATc='#3B82C6',SAVE='#E8352A';
+  function X2(k){return L2+PW2*x2[k];} function Y2(v){return T2+PH2*(1-v/ymax2);}
+  function ap2(top,bot){var d='M',k;for(k=0;k<N2;k++)d+=(k?'L':'')+X2(k).toFixed(1)+','+Y2(top[k]).toFixed(1)+' ';for(k=N2-1;k>=0;k--)d+='L'+X2(k).toFixed(1)+','+Y2(bot[k]).toFixed(1)+' ';return d+'Z';}
+  function lp2(a){var d='M',k;for(k=0;k<N2;k++)d+=(k?'L':'')+X2(k).toFixed(1)+','+Y2(a[k]).toFixed(1)+' ';return d;}
+  var z2=[];for(j=0;j<N2;j++)z2.push(0);
+  var st2=ymax2>12000?4000:(ymax2>6000?2000:(ymax2>2500?1000:500)), g2='';
+  for(var kv2=0;kv2<=ymax2;kv2+=st2){ var yy2=Y2(kv2); g2+='<line x1="'+L2+'" y1="'+yy2.toFixed(1)+'" x2="'+(L2+PW2)+'" y2="'+yy2.toFixed(1)+'" stroke="#E2E7EE"/>'+
+    '<text x="'+(L2-7)+'" y="'+(yy2+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="#5A6577">'+eur(kv2)+'</text>'; }
+  var svg2='<svg viewBox="0 0 '+W2+' '+H2+'" style="display:block;width:100%;height:auto;font-family:Helvetica,Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">'
+    + g2
+    + (hasGeb2?('<path d="'+ap2(cgeb,z2)+'" fill="'+BASE+'" fill-opacity="0.85"/>'):'')
+    + '<path d="'+ap2(cb,cgeb)+'" fill="'+BATc+'" fill-opacity="0.90"/>'
+    + '<path d="'+ap2(cg,cb)+'" fill="'+LPc+'" fill-opacity="0.90"/>'
+    + (hasGeb2?('<path d="'+lp2(cgeb)+'" fill="none" stroke="#fff" stroke-width="1.4"/>'):'')
+    + '<path d="'+lp2(cb)+'" fill="none" stroke="#fff" stroke-width="1.4"/>'
+    + '<path d="'+ap2(cng,cg)+'" fill="'+SAVE+'" fill-opacity="0.10"/>'
+    + '<path d="'+lp2(cg)+'" fill="none" stroke="'+GEST+'" stroke-width="2.6"/>'
+    + '<path d="'+lp2(cng)+'" fill="none" stroke="#fff" stroke-width="5"/>'
+    + '<path d="'+lp2(cng)+'" fill="none" stroke="'+NG+'" stroke-width="3.8"/>'
+    + '<circle cx="'+X2(N2-1).toFixed(1)+'" cy="'+Y2(ngEnd).toFixed(1)+'" r="3" fill="'+NG+'"/>'
+    + '<circle cx="'+X2(N2-1).toFixed(1)+'" cy="'+Y2(gEnd).toFixed(1)+'" r="3" fill="'+GEST+'"/>'
+    + '<text x="'+(X2(N2-1)-6).toFixed(1)+'" y="'+(Y2(ngEnd)-6).toFixed(1)+'" text-anchor="end" font-size="11.5" font-weight="800" fill="'+NG+'">niet gestuurd</text>'
+    + '<text x="'+(X2(N2-1)-6).toFixed(1)+'" y="'+(Y2(gEnd)+15).toFixed(1)+'" text-anchor="end" font-size="11.5" font-weight="800" fill="'+GEST+'">gestuurd</text>'
+    + '<text x="'+X2(Math.round(N2*0.58)).toFixed(1)+'" y="'+((Y2(ngEnd)+Y2(gEnd))/2).toFixed(1)+'" text-anchor="middle" font-size="12" font-weight="800" fill="'+SAVE+'">besparing '+eur(bespShown)+'</text>'
+    + '<text x="'+X2(Math.round(N2*0.40)).toFixed(1)+'" y="'+((Y2(cb[Math.round(N2*0.40)])+Y2(cg[Math.round(N2*0.40)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#0b5a30">afname laadpalen</text>'
+    + (hasB2?('<text x="'+X2(Math.round(N2*0.22)).toFixed(1)+'" y="'+((Y2(cgeb[Math.round(N2*0.22)])+Y2(cb[Math.round(N2*0.22)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#173e6b">afname batterij</text>'):'')
+    + (hasGeb2?('<text x="'+X2(Math.round(N2*0.62)).toFixed(1)+'" y="'+((Y2(z2[Math.round(N2*0.62)])+Y2(cgeb[Math.round(N2*0.62)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="'+BASEL+'">afname gebouw</text>'):'')
+    + '<line x1="'+L2+'" y1="'+T2+'" x2="'+L2+'" y2="'+(T2+PH2)+'" stroke="#5A6577"/>'
+    + '<line x1="'+L2+'" y1="'+(T2+PH2)+'" x2="'+(L2+PW2)+'" y2="'+(T2+PH2)+'" stroke="#5A6577"/>'
+    + '<text transform="translate(16,'+(T2+PH2/2)+') rotate(-90)" text-anchor="middle" font-size="11" font-weight="700" fill="'+GEST+'">Cumulatieve energiekost (spotprijs)</text>'
+    + '<text x="'+(L2+PW2/2)+'" y="'+(H2-10)+'" text-anchor="middle" font-size="11" font-weight="700" fill="'+GEST+'">Kwartieren — gerangschikt op spotprijs (goedkoop → duur)</text>'
+    + '</svg>';
+
+  var h2=merkband()+'<div class="stap-band"><div class="nr" style="background:var(--blauw)">€</div>'+
+    '<div><h2>Energie van de goedkoopste momenten</h2>'+
+    '<div class="note">Deel 2 — met sturing koopt u wanneer het goedkoop is.</div></div></div>';
+  h2+='<p><b>Zonder sturing</b> laadt u net wanneer heel Vlaanderen laadt: die vraag stuwt de <b>spotprijs</b> op dat '+
+    'moment omhoog, en u koopt duur. <b>Met sturing</b> haalt de batterij de goedkope energie <b>op voorhand</b> binnen en '+
+    'zet ze klaar tot u ze nodig hebt. Het vermogen van de batterij zorgt er bovendien voor dat u zich <b>geen zorgen</b> '+
+    'hoeft te maken over het vermogen dat het gebouw intussen vraagt.'+
+    (hasGeb2?' De grijze ondergrond is de <b>afname van het gebouw</b> — die is in beide gevallen gelijk; het verschil zit volledig in het laden.':'')+'</p>';
+  h2+='<div style="display:flex;flex-wrap:wrap;gap:14px;margin:4px 0 6px">'+
+    (hasGeb2?lg(BASE,'Afname gebouw'):'')+
+    lg(LPc,'Gestuurd — afname laadpalen')+(hasB2?lg(BATc,'Gestuurd — afname batterij'):'')+
+    lgl(GEST,'Gestuurd — totaal')+lgl(NG,'Niet gestuurd')+'</div>';
+  h2+=svg2;
+  h2+='<div class="box groen"><b>Het resultaat.</b> De gestuurde kost blijft veel lager dan de ongestuurde: het verschil is de '+
+    '<b>'+(exact2?'besparing op de laadenergie':'besparing door sturing')+((bespShown>0)?(' — '+eur(bespShown)+' per jaar'):'')+'</b>. '+
+    'Samen met het vrije vermogen uit deel 1 (laden zonder extra netkosten) verklaart dit waarom uw kilometers zo goedkoop zijn.'+
+    (exact2
+      ? '<br><span class="note" style="font-style:normal">Berekend op de werkelijke spotprijzen en laadvolumes uit uw dossier.</span>'
+      : '<br><span class="note" style="font-style:normal">De besparing komt uit uw dossier; de verdeling over de spotprijs-kwartieren is schematisch weergegeven.</span>')+'</div>';
+  pagina(h2);
+
+  // ===== SAMENVATTING: beide grafieken NAAST ELKAAR, zonder getallen, met legenden (voor productsheets) =====
+  var mW=520,mH=330,mL=10,mRr=10,mT=14,mB=24, mPW=mW-mL-mRr, mPH=mH-mT-mB;
+  function m1X(i){return mL+mPW*x[i];} function m1Y(v){return mT+mPH*(1-v/ymax);}
+  function m1A(top,bot){var d='M',jj;for(jj=0;jj<N;jj++)d+=(jj?'L':'')+m1X(jj).toFixed(1)+','+m1Y(top[jj]).toFixed(1)+' ';for(jj=N-1;jj>=0;jj--)d+='L'+m1X(jj).toFixed(1)+','+m1Y(bot[jj]).toFixed(1)+' ';return d+'Z';}
+  function m1L(a){var d='M',jj;for(jj=0;jj<N;jj++)d+=(jj?'L':'')+m1X(jj).toFixed(1)+','+m1Y(a[jj]).toFixed(1)+' ';return d;}
+  var mz1=[];for(i=0;i<N;i++)mz1.push(0);
+  var mini1='<svg viewBox="0 0 '+mW+' '+mH+'" style="display:block;width:100%;height:auto;font-family:Helvetica,Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">'
+    + '<path d="'+m1A(baseline,mz1)+'" fill="'+BASE+'" fill-opacity="0.85"/>'
+    + '<path d="'+m1A(mid,baseline)+'" fill="'+GR+'" fill-opacity="0.9"/>'
+    + (hasBatt?('<path d="'+m1A(nieuw,mid)+'" fill="'+BAT+'" fill-opacity="0.9"/>'):'')
+    + (hasBatt?('<path d="'+m1L(mid)+'" fill="none" stroke="#fff" stroke-width="1.2"/>'):'')
+    + '<path d="'+m1L(baseline)+'" fill="none" stroke="#fff" stroke-width="4.2"/>'
+    + '<path d="'+m1L(baseline)+'" fill="none" stroke="'+CEIL+'" stroke-width="3"/>'
+    + '<path d="'+m1L(nieuw)+'" fill="none" stroke="'+BL+'" stroke-width="2.4"/>'
+    + '<line x1="'+mL+'" y1="'+m1Y(P).toFixed(1)+'" x2="'+(mL+mPW)+'" y2="'+m1Y(P).toFixed(1)+'" stroke="'+CEIL+'" stroke-width="2" stroke-dasharray="7 5"/>'
+    + '<line x1="'+mL+'" y1="'+mT+'" x2="'+mL+'" y2="'+(mT+mPH)+'" stroke="'+MU+'"/>'
+    + '<line x1="'+mL+'" y1="'+(mT+mPH)+'" x2="'+(mL+mPW)+'" y2="'+(mT+mPH)+'" stroke="'+MU+'"/>'
+    + '<text x="'+(mL+mPW/2)+'" y="'+(mH-5)+'" text-anchor="middle" font-size="10.5" font-weight="700" fill="'+BL+'">Afgenomen vermogen — laag → hoog</text>'
+    + '</svg>';
+  function m2X(k){return mL+mPW*x2[k];} function m2Y(v){return mT+mPH*(1-v/ymax2);}
+  function m2A(top,bot){var d='M',kk;for(kk=0;kk<N2;kk++)d+=(kk?'L':'')+m2X(kk).toFixed(1)+','+m2Y(top[kk]).toFixed(1)+' ';for(kk=N2-1;kk>=0;kk--)d+='L'+m2X(kk).toFixed(1)+','+m2Y(bot[kk]).toFixed(1)+' ';return d+'Z';}
+  function m2L(a){var d='M',kk;for(kk=0;kk<N2;kk++)d+=(kk?'L':'')+m2X(kk).toFixed(1)+','+m2Y(a[kk]).toFixed(1)+' ';return d;}
+  var mz2b=[];for(j=0;j<N2;j++)mz2b.push(0);
+  var mini2='<svg viewBox="0 0 '+mW+' '+mH+'" style="display:block;width:100%;height:auto;font-family:Helvetica,Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">'
+    + (hasGeb2?('<path d="'+m2A(cgeb,mz2b)+'" fill="'+BASE+'" fill-opacity="0.85"/>'):'')
+    + '<path d="'+m2A(cb,cgeb)+'" fill="'+BATc+'" fill-opacity="0.9"/>'
+    + '<path d="'+m2A(cg,cb)+'" fill="'+LPc+'" fill-opacity="0.9"/>'
+    + (hasGeb2?('<path d="'+m2L(cgeb)+'" fill="none" stroke="#fff" stroke-width="1.2"/>'):'')
+    + '<path d="'+m2L(cb)+'" fill="none" stroke="#fff" stroke-width="1.2"/>'
+    + '<path d="'+m2L(cg)+'" fill="none" stroke="'+GEST+'" stroke-width="2.4"/>'
+    + '<path d="'+m2L(cng)+'" fill="none" stroke="#fff" stroke-width="4.6"/>'
+    + '<path d="'+m2L(cng)+'" fill="none" stroke="'+NG+'" stroke-width="3.4"/>'
+    + '<line x1="'+mL+'" y1="'+mT+'" x2="'+mL+'" y2="'+(mT+mPH)+'" stroke="'+MU+'"/>'
+    + '<line x1="'+mL+'" y1="'+(mT+mPH)+'" x2="'+(mL+mPW)+'" y2="'+(mT+mPH)+'" stroke="'+MU+'"/>'
+    + '<text x="'+(mL+mPW/2)+'" y="'+(mH-5)+'" text-anchor="middle" font-size="10.5" font-weight="700" fill="'+GEST+'">Spotprijs — goedkoop → duur</text>'
+    + '</svg>';
+  var leg1='<div style="display:flex;flex-wrap:wrap;gap:10px 14px;margin:2px 0 8px">'+
+    lgl(CEIL,'Begin-afname (gebouw)')+lg(GR,'Direct naar de laadpalen')+(hasBatt?lg(BAT,'Via de batterij'):'')+
+    lgl(BL,'Nieuwe afname')+lgl(CEIL,'Piek',true)+'</div>';
+  var leg2='<div style="display:flex;flex-wrap:wrap;gap:10px 14px;margin:2px 0 8px">'+
+    (hasGeb2?lg(BASE,'Afname gebouw'):'')+lg(LPc,'Afname laadpalen')+(hasB2?lg(BATc,'Afname batterij'):'')+
+    lgl(GEST,'Gestuurd')+lgl(NG,'Niet gestuurd')+'</div>';
+  var h3=merkband()+'<div class="stap-band"><div class="nr" style="background:var(--blauw)">✓</div>'+
+    '<div><h2>Waarom uw kilometers zo goedkoop zijn — samengevat</h2>'+
+    '<div class="note">De twee redenen naast elkaar: vrij vermogen én goedkope momenten.</div></div></div>';
+  h3+='<p>Extra verbruik binnen het <b>vrije vermogen dat u al betaalt</b>, op de momenten dat de <b>energie goedkoop</b> is. '+
+    'Zo betaalt u <b>minder voor méér energie</b>.</p>';
+  h3+='<div style="display:flex;gap:16px;align-items:stretch;margin-top:6px">'+
+    '<div style="flex:1;min-width:0;border:1px solid var(--lijn);border-radius:10px;padding:12px 12px 8px;background:#fff">'+
+      '<div style="font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#048443;margin-bottom:6px">Vermogen · vrij vermogen</div>'+
+      leg1+mini1+
+    '</div>'+
+    '<div style="flex:1;min-width:0;border:1px solid var(--lijn);border-radius:10px;padding:12px 12px 8px;background:#fff">'+
+      '<div style="font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#048443;margin-bottom:6px">Prijs · goedkoopste momenten</div>'+
+      leg2+mini2+
+    '</div>'+
+  '</div>';
+  h3+='<div class="box"><b>Links:</b> we laden in de vrije ruimte onder uw aansluiting — <b>zonder de piek te verhogen</b>. '+
+    '<b>Rechts:</b> we kopen de energie op de <b>goedkoopste momenten</b>. Samen maken ze elke geladen kilometer goedkoop.</div>';
+  pagina(h3);
 })();
 
 // ===========================================================================
