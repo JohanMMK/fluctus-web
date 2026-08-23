@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS · LAADPLEIN-RAPPORT  v1.14.0  (2026-08-24 Europe/Brussels)
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.15.0  (2026-08-24 Europe/Brussels)
+     v1.15.0 (24-08): FIX gebouwlijn raakt de piek — nu RENDERER-side (werkt met élke dataversie, geen redeploy
+              van simulator.html nodig). Plafond = toegangsvermogen (kVA), niet meer opgetrokken tot de hoogste
+              last. Begin-afname wordt met een top-lift (~rang^5) tot het toegangsvermogen getild; vrije ruimte
+              links/midden blijft behouden; nieuwe afname geclampt onder de piek. Lost "rode lijn haalt de piek
+              niet" definitief op, ongeacht of de sim de data al optilde.
      v1.14.0 (24-08): grafiek-review 2 (Johan). (1) Deel 1 — begin-afname (gebouw) nu als DIKKE RODE lijn boven
               het grijs (met witte halo), duidelijk zichtbaar tot waar ze eindigt onder de piek. (2) Deel 2 —
               niet-gestuurde lijn dikker + witte halo. (3) NIEUWE derde pagina "…samengevat": beide grafieken
@@ -524,11 +529,20 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
   var dk=D.duurkromme, exact=dk&&dk.baseline&&dk.baseline.length&&dk.nieuw&&dk.nieuw.length&&dk.direct&&dk.batterij;
   if(exact){
     N=Math.min(dk.baseline.length, dk.nieuw.length, dk.direct.length, dk.batterij.length);
+    var _bl=[], _dr=[], _bt2=[];
+    for(i=0;i<N;i++){ _bl.push(+dk.baseline[i]||0); _dr.push(+dk.direct[i]||0); _bt2.push(+dk.batterij[i]||0); }
+    // v1.15.0: plafond = TOEGANGSVERMOGEN (= bestaande maandpiek). Val enkel terug op dk/max als de kVA ontbreekt.
+    //   NIET meer optrekken tot de hoogste last (dat verstopte de piek). Zo blijft de streepjeslijn op je aansluiting.
+    if(!(P>0)){ P=+dk.piek_kw||0; if(!(P>0)){ var _mxn=0; for(i=0;i<N;i++){ var _t=_bl[i]+_dr[i]+_bt2[i]; if(_t>_mxn)_mxn=_t; } P=_mxn||250; } }
+    // begin-afname (gebouw) tot de piek tillen — ENKEL de top additief (gewicht ~rang^5) zodat de vrije ruimte
+    //   links/midden behouden blijft. Renderer-side → werkt ongeacht welke simulator-versie de data aanleverde.
+    var _bpk=_bl[N-1]||0, _lift=P-_bpk; if(_lift<0)_lift=0;
     for(i=0;i<N;i++){ x.push(N>1?i/(N-1):0);
-      var _b=+dk.baseline[i]||0, _d=+dk.direct[i]||0, _bt=+dk.batterij[i]||0;
-      baseline.push(_b); mid.push(_b+_d); nieuw.push(_b+_d+_bt); }
-    if(dk.piek_kw && P<+dk.piek_kw) P=+dk.piek_kw;
-    var mx=nieuw[N-1]||0; if(P<mx) P=mx;
+      var _w=Math.pow(N>1?i/(N-1):1,5);
+      var _b=_bl[i]+_lift*_w; if(_b>P)_b=P;
+      var _tot=_b+_dr[i]+_bt2[i]; if(_tot>P)_tot=P; if(_tot<_b)_tot=_b;
+      var _gap=_tot-_b, _og=_dr[i]+_bt2[i], _fb=(_og>1e-9)?(_bt2[i]/_og):0;
+      baseline.push(_b); mid.push(_b+_gap*(1-_fb)); nieuw.push(_tot); }
   } else {
     var meanB=verbruikMwh>0?(verbruikMwh*1000/8760):(P*0.34);
     var kB=2.2, peakB=Math.min(0.86*P, Math.max(meanB*2.4, meanB*1.25)), floorB=(meanB-peakB/(kB+1))/(1-1/(kB+1));
