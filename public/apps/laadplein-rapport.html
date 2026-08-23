@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS · LAADPLEIN-RAPPORT  v1.12.0  (2026-08-24 Europe/Brussels)
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.13.0  (2026-08-24 Europe/Brussels)
+     v1.13.0 (24-08): grafiek-review (Johan). Deel 1 — begin-afname (gebouw) staat nu helder als ondergrond
+              (aparte oplopende duurkrommen i.p.v. verstopt achter de laadpieken). Deel 2 — gebouw-afname
+              toegevoegd als gedeelde grijze ondergrond (D.spotkost.geb_cum) → zelfde drie componenten als Deel 1
+              (gebouw · laadpalen · batterij). Legende + tekst + labels aangepast; besparing = het laad-verschil.
      v1.12.0 (24-08): ECHTE per-kwartier data in het hoofdstuk "Waarom uw kilometers zo goedkoop zijn".
               Deel 1 leest nu D.duurkromme{piek_kw,baseline,direct,batterij,nieuw} (al gesorteerd laag→hoog) →
               begin-afname + direct naar de laadpalen + via de batterij, exact uit het dossier. Deel 2 leest
@@ -604,23 +608,25 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
 
   // ===== DEEL 2 — SPOTPRIJS: energie van de goedkoopste momenten =====
   var M=+((ST||{}).meerwaarde_eur)||0;               // volledige meerwaarde door sturing (dossier)
-  // v1.12.0: exacte spotkost{prijs,ng_cum,lp_cum,batt_cum,besparing_eur} — cumulatieve energiekost van de
-  //   laadenergie, kwartieren gesorteerd op spotprijs (goedkoop→duur). cb = via batterij (blauw, onderaan),
-  //   cg = totaal gestuurd, cng = niet gestuurd. Terugval op de schematische weergave als ze ontbreekt.
+  // v1.13.0: exacte spotkost{prijs,geb_cum,ng_cum,lp_cum,batt_cum,besparing_eur} — cumulatieve energiekost,
+  //   kwartieren gesorteerd op spotprijs (goedkoop→duur). Gestapeld: cgeb = gebouw (grijs, gedeelde ondergrond),
+  //   cb = + via batterij (blauw), cg = + laadpalen (groen) = gestuurd totaal; cng = gebouw + niet-gestuurd laden.
+  //   Het gebouw is identiek in beide gevallen ⇒ de besparing (verschil cng↔cg) zit volledig in het laden.
   var sk=D.spotkost, exact2=sk&&sk.ng_cum&&sk.ng_cum.length&&sk.lp_cum&&sk.batt_cum;
-  var N2, x2=[], cng=[], cb=[], cg=[], j, ngEnd, gEnd, bespShown, hasB2;
+  var N2, x2=[], cgeb=[], cng=[], cb=[], cg=[], j, ngEnd, gEnd, bespShown, hasB2, hasGeb2=false;
   if(exact2){
     N2=Math.min(sk.ng_cum.length, sk.lp_cum.length, sk.batt_cum.length);
+    var _hasGebArr=sk.geb_cum&&sk.geb_cum.length>=N2;
     for(j=0;j<N2;j++){ x2.push(N2>1?j/(N2-1):0);
-      var _bt=+sk.batt_cum[j]||0, _lp=+sk.lp_cum[j]||0;
-      cb.push(_bt); cg.push(_bt+_lp); cng.push(+sk.ng_cum[j]||0); }
-    ngEnd=(sk.tot_ng_eur!=null)?+sk.tot_ng_eur:(cng[N2-1]||0);
-    gEnd=(sk.tot_g_eur!=null)?+sk.tot_g_eur:(cg[N2-1]||0);
+      var _gb=_hasGebArr?(+sk.geb_cum[j]||0):0, _bt=+sk.batt_cum[j]||0, _lp=+sk.lp_cum[j]||0, _ng=+sk.ng_cum[j]||0;
+      cgeb.push(_gb); cb.push(_gb+_bt); cg.push(_gb+_bt+_lp); cng.push(_gb+_ng); }
+    ngEnd=cng[N2-1]||0; gEnd=cg[N2-1]||0;
     bespShown=(sk.besparing_eur!=null)?+sk.besparing_eur:(ngEnd-gEnd);
     hasB2=sk.batt_cum.some(function(v){return (+v||0)>0.5;});
+    hasGeb2=_hasGebArr && (sk.tot_geb_eur==null || +sk.tot_geb_eur>0.5);
   } else {
     N2=180; var price=[], q2;
-    for(j=0;j<N2;j++){ q2=j/(N2-1); x2.push(q2); price.push(25+205*Math.pow(q2,1.9)); }
+    for(j=0;j<N2;j++){ q2=j/(N2-1); x2.push(q2); price.push(25+205*Math.pow(q2,1.9)); cgeb.push(0); }
     var battShareE=battKwh>0?0.40:0;
     var Etot=geladenMwh>0?geladenMwh:150, Eb=Etot*battShareE, El=Etot*(1-battShareE);
     var normw=function(fn,E){ var w=[],s=0,k; for(k=0;k<N2;k++){var val=fn(x2[k]); w.push(val); s+=val;} for(k=0;k<N2;k++) w[k]=(s>0?w[k]/s*E:0); return w; };
@@ -644,8 +650,10 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     '<text x="'+(L2-7)+'" y="'+(yy2+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="#5A6577">'+eur(kv2)+'</text>'; }
   var svg2='<svg viewBox="0 0 '+W2+' '+H2+'" style="display:block;width:100%;height:auto;font-family:Helvetica,Arial,sans-serif" xmlns="http://www.w3.org/2000/svg">'
     + g2
-    + '<path d="'+ap2(cb,z2)+'" fill="'+BATc+'" fill-opacity="0.90"/>'
+    + (hasGeb2?('<path d="'+ap2(cgeb,z2)+'" fill="'+BASE+'" fill-opacity="0.85"/>'):'')
+    + '<path d="'+ap2(cb,cgeb)+'" fill="'+BATc+'" fill-opacity="0.90"/>'
     + '<path d="'+ap2(cg,cb)+'" fill="'+LPc+'" fill-opacity="0.90"/>'
+    + (hasGeb2?('<path d="'+lp2(cgeb)+'" fill="none" stroke="#fff" stroke-width="1.4"/>'):'')
     + '<path d="'+lp2(cb)+'" fill="none" stroke="#fff" stroke-width="1.4"/>'
     + '<path d="'+ap2(cng,cg)+'" fill="'+SAVE+'" fill-opacity="0.10"/>'
     + '<path d="'+lp2(cg)+'" fill="none" stroke="'+GEST+'" stroke-width="2.6"/>'
@@ -655,8 +663,9 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
     + '<text x="'+(X2(N2-1)-6).toFixed(1)+'" y="'+(Y2(ngEnd)-6).toFixed(1)+'" text-anchor="end" font-size="11.5" font-weight="800" fill="'+NG+'">niet gestuurd</text>'
     + '<text x="'+(X2(N2-1)-6).toFixed(1)+'" y="'+(Y2(gEnd)+15).toFixed(1)+'" text-anchor="end" font-size="11.5" font-weight="800" fill="'+GEST+'">gestuurd</text>'
     + '<text x="'+X2(Math.round(N2*0.58)).toFixed(1)+'" y="'+((Y2(ngEnd)+Y2(gEnd))/2).toFixed(1)+'" text-anchor="middle" font-size="12" font-weight="800" fill="'+SAVE+'">besparing '+eur(bespShown)+'</text>'
-    + '<text x="'+X2(Math.round(N2*0.36)).toFixed(1)+'" y="'+((Y2(cb[Math.round(N2*0.36)])+Y2(cg[Math.round(N2*0.36)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#0b5a30">afname laadpalen</text>'
-    + (hasB2?('<text x="'+X2(Math.round(N2*0.17)).toFixed(1)+'" y="'+((Y2(z2[0])+Y2(cb[Math.round(N2*0.17)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#173e6b">afname batterij</text>'):'')
+    + '<text x="'+X2(Math.round(N2*0.40)).toFixed(1)+'" y="'+((Y2(cb[Math.round(N2*0.40)])+Y2(cg[Math.round(N2*0.40)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#0b5a30">afname laadpalen</text>'
+    + (hasB2?('<text x="'+X2(Math.round(N2*0.22)).toFixed(1)+'" y="'+((Y2(cgeb[Math.round(N2*0.22)])+Y2(cb[Math.round(N2*0.22)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="#173e6b">afname batterij</text>'):'')
+    + (hasGeb2?('<text x="'+X2(Math.round(N2*0.62)).toFixed(1)+'" y="'+((Y2(z2[Math.round(N2*0.62)])+Y2(cgeb[Math.round(N2*0.62)]))/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="800" fill="'+BASEL+'">afname gebouw</text>'):'')
     + '<line x1="'+L2+'" y1="'+T2+'" x2="'+L2+'" y2="'+(T2+PH2)+'" stroke="#5A6577"/>'
     + '<line x1="'+L2+'" y1="'+(T2+PH2)+'" x2="'+(L2+PW2)+'" y2="'+(T2+PH2)+'" stroke="#5A6577"/>'
     + '<text transform="translate(16,'+(T2+PH2/2)+') rotate(-90)" text-anchor="middle" font-size="11" font-weight="700" fill="'+GEST+'">Cumulatieve energiekost (spotprijs)</text>'
@@ -669,8 +678,10 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
   h2+='<p><b>Zonder sturing</b> laadt u net wanneer heel Vlaanderen laadt: die vraag stuwt de <b>spotprijs</b> op dat '+
     'moment omhoog, en u koopt duur. <b>Met sturing</b> haalt de batterij de goedkope energie <b>op voorhand</b> binnen en '+
     'zet ze klaar tot u ze nodig hebt. Het vermogen van de batterij zorgt er bovendien voor dat u zich <b>geen zorgen</b> '+
-    'hoeft te maken over het vermogen dat het gebouw intussen vraagt.</p>';
+    'hoeft te maken over het vermogen dat het gebouw intussen vraagt.'+
+    (hasGeb2?' De grijze ondergrond is de <b>afname van het gebouw</b> — die is in beide gevallen gelijk; het verschil zit volledig in het laden.':'')+'</p>';
   h2+='<div style="display:flex;flex-wrap:wrap;gap:14px;margin:4px 0 6px">'+
+    (hasGeb2?lg(BASE,'Afname gebouw'):'')+
     lg(LPc,'Gestuurd — afname laadpalen')+(hasB2?lg(BATc,'Gestuurd — afname batterij'):'')+
     lgl(GEST,'Gestuurd — totaal')+lgl(NG,'Niet gestuurd')+'</div>';
   h2+=svg2;
