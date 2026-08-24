@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS · LAADPLEIN-RAPPORT  v1.15.0  (2026-08-24 Europe/Brussels)
+     FLUCTUS · LAADPLEIN-RAPPORT  v1.16.0  (2026-08-24 Europe/Brussels)
+     v1.16.0 (24-08): laadplein-hoofdstuk PAGINEERT over meerdere A4's bij meerdere pleinen (niet meer alles op
+              1 blad squeezen). Elk plein-blok (stats + heatmap) blijft ATOMISCH op één blad — nooit gesplitst.
+              Compacte begrippen-box + heatmap-hoogte 36mm zodat er 2 pleinen per blad passen. (Data: sim v1.89
+              zet nu ALLE berekende pleinen in de rapportdata, ook wagenpark-plein 4 met heatmap.)
      v1.15.0 (24-08): FIX gebouwlijn raakt de piek — nu RENDERER-side (werkt met élke dataversie, geen redeploy
               van simulator.html nodig). Plafond = toegangsvermogen (kVA), niet meer opgetrokken tot de hoogste
               last. Begin-afname wordt met een top-lift (~rang^5) tot het toegangsvermogen getild; vrije ruimte
@@ -128,7 +132,7 @@
   .toc .t{color:var(--zwart)} .toc .pg{color:var(--grijs);font-weight:700}
   /* heatmap */
   .heat-wrap{margin:8px 0 4px}
-  .heat-svg{display:block;width:100%;height:auto;border:1px solid var(--lijn);border-radius:4px}
+  .heat-svg{display:block;width:100%;height:36mm;border:1px solid var(--lijn);border-radius:4px}
   .heat-leg{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--grijs);margin-top:4px}
   .heat-leg .bar{height:9px;width:120px;border-radius:2px;background:linear-gradient(90deg,#EAF7EE,#9AD4A6,#05B050,#048443,#0B3D24)}
   /* E+Drive-voorblad */
@@ -450,6 +454,56 @@ var _100 = SC.filter(function(r){return r.heeftPlein && +r.pct===100;})[0] || SC
 // PAGINA 5 — HET LAADPLEIN: sessies, vensters, profiel (heatmaps)
 // ===========================================================================
 (function(){
+  // v1.16: PAGINEER dit hoofdstuk over meerdere A4's bij meerdere pleinen (niet meer alles op 1 blad squeezen).
+  //   Elk plein-blok (stats + heatmap) blijft ATOMISCH bij elkaar op één blad — nooit een plein over een
+  //   paginagrens splitsen. We starten een nieuwe pagina zodra het volgende blok niet meer past.
+  function _hdr(cont){ return merkband()+'<div class="stap-band"><div class="nr">2</div><div><h2>Het laadplein — sessies, vensters en profiel'+
+    (cont?' <span style="font-size:13px;font-weight:600;color:#5A6577">(vervolg)</span>':'')+'</h2><div class="note">Hoe we een betalend laadplein definiëren.</div></div></div>'; }
+  var _begrippen='<div class="box" style="padding:8px 14px"><b>Begrippen.</b> Een <b>sessie</b> = één laadbeurt aan het vermogen van de paal, binnen één of twee <b>vensters</b> (bv. voor- en namiddag); het <b>aantal palen</b> begrenst hoeveel er tegelijk laden.</div>';
+  function _heat(hh,pk){ return '<div class="heat-wrap">'+heatmapSvg(hh,pk)+'<div class="heat-leg"><span>weinig</span><span class="bar"></span><span>veel geladen vermogen</span><span style="margin-left:auto">verticaal = uur van de dag · horizontaal = dag van het jaar</span></div></div>'; }
+  function _betaalBlok(p,i){
+    var vp=+p.verkoopprijs_eur_mwh|| +K.tarief ||0;
+    return '<div style="break-inside:avoid">'
+      +'<h3>'+esc(p.naam||('Laadplein '+(i+1)))+'</h3>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 8px">'
+        +'<div><span style="color:#5A6577">Paaltype</span><br><b>'+esc(p.paaltype||'—')+' · '+_num(p.paal_kw)+' kW</b></div>'
+        +'<div><span style="color:#5A6577">Aantal palen</span><br><b>'+_num(p.aantal_palen)+'</b></div>'
+        +'<div><span style="color:#5A6577">Duur / sessie</span><br><b>'+_num(p.duur_min)+' min</b></div>'
+        +'<div><span style="color:#5A6577">Dagen / week</span><br><b>'+_num(p.dagen_per_week)+'</b></div></div>'
+      +((p.vensters&&p.vensters.length)?('<div style="font-size:11.5px;color:#5A6577;margin-bottom:4px">Vensters (sessies/dag): '+p.vensters.map(function(w){return '<b style="color:#1A1F2B">'+_num(w.start)+'–'+_num(w.eind)+'u: '+_num(w.sessies)+'</b>';}).join(' · ')+'</div>'):'')
+      +'<div class="box groen" style="margin:4px 0 8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center"><div><b>Verkoopprijs stroom aan de bezoeker</b><div class="note" style="font-style:normal">Wat u de bezoeker per geladen energie aanrekent — bepaalt rechtstreeks de laadwinst.</div></div><div style="text-align:right"><div style="font-size:20px;font-weight:800;color:#048443">'+eur(vp)+'/MWh</div><div style="font-size:11px;color:#5A6577">= '+_num(vp/10,1)+' €c/kWh</div></div></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11.5px;margin:4px 0 6px">'
+        +'<div><span style="color:#5A6577">Gevraagd</span><br><b>'+_num(p.gevraagd_mwh,1)+' MWh</b></div>'
+        +'<div><span style="color:#5A6577">Geleverd</span><br><b style="color:#05B050">'+_num(p.geleverd_mwh,1)+' MWh</b></div>'
+        +'<div><span style="color:#5A6577">Gemist</span><br><b style="color:'+((p.gemist_pct||0)>5?'#9E480E':'#5A6577')+'">'+_num(p.tekort_mwh,1)+' MWh ('+_num(p.gemist_pct,1)+'%)</b></div>'
+        +'<div><span style="color:#5A6577">Piek plein</span><br><b>'+_num(p.piek_kw,0)+' kW</b></div></div>'
+      +_heat(p.heat,p.piek_kw)+'</div>';
+  }
+  function _wagenIntro(){
+    var gbody='';
+    GEW.forEach(function(g){ gbody+='<tr><td>'+esc(g.naam)+(g.laadpunten?'<br><span style="font-size:11px;color:#5A6577">'+esc(g.laadpunten)+'</span>':'')+'</td>'+
+      '<td>'+(g.aantal>0?_num(g.aantal)+(g.km_per_jaar>0?' × '+_num(g.km_per_jaar)+' km':''):'—')+'</td>'+
+      '<td>'+_num(g.geleverd_mwh,1)+' MWh</td><td>'+_num(g.geleverd_km)+' km</td><td><b class="pos">'+eur(g.besparing_eur)+'</b></td></tr>'; });
+    return '<div style="break-inside:avoid"><h3 style="margin-top:8px">Niet-betalende laadpleinen (eigen wagenpark)</h3>'+
+      '<div class="box">Deze pleinen laden uw <b>eigen voertuigen</b>: er is geen verkoop aan bezoekers, maar u <b>bespaart</b> op wat laden anders zou kosten. De besparing is <b>netto</b>: het <b>CREG-forfait</b> '+
+      (CREG_MWH>0?('(± '+eur(CREG_MWH)+'/MWh, het gereguleerde referentietarief) '):'')+'mín uw eigen laadkost. Deze besparing zit mee verrekend in de winst van de zes scenario’s verderop.</div>'+
+      '<table><thead><tr><th>Laadplein</th><th>Wagens</th><th>Geladen</th><th>Geleverd (km)</th><th>Besparing/jaar</th></tr></thead><tbody>'+gbody+'</tbody>'+
+      (GEW.length>1?'<tfoot><tr><td>Totale CREG-besparing</td><td></td><td></td><td></td><td>'+eur(GEW_BESP)+'</td></tr></tfoot>':'')+'</table></div>';
+  }
+  function _wagenHeat(g){ return '<div style="break-inside:avoid"><div style="margin-top:8px;font-weight:700;color:#1F3864;font-size:12.5px">'+esc(g.naam)+' — laadprofiel</div>'+_heat(g.heat,g.piek_kw||0)+'</div>'; }
+  // ---- paginator: mm-schatting per blok; blok blijft altijd op één blad ----
+  var _PAGE=262, _HDR=52, _used=0, _buf='';
+  function _flush(){ if(_buf){ pagina(_buf); _buf=''; } }
+  function _newp(cont){ _buf=_hdr(cont); _used=_HDR; }
+  function _add(html,hh){ if(_used+hh>_PAGE){ _flush(); _newp(true); } _buf+=html; _used+=hh; }
+  _newp(false);
+  _add(_begrippen, 13);
+  PLN.forEach(function(p,i){ _add(_betaalBlok(p,i), 97); });
+  if(GEW.length){ _add(_wagenIntro(), 36 + GEW.length*9); GEW.forEach(function(g){ if(g.heat) _add(_wagenHeat(g), 49); }); }
+  _flush();
+})();
+/* ---- oude één-pagina-opbouw (vervangen door paginator hierboven) ---- */
+(function(){ if(true) return;
   var h=merkband()+'<div class="stap-band"><div class="nr">2</div><div><h2>Het laadplein — sessies, vensters en profiel</h2><div class="note">Hoe we een betalend laadplein definiëren.</div></div></div>';
   h+='<div class="box"><b>Begrippen.</b> Een <b>sessie</b> is één laadbeurt van een bezoeker: een wagen laadt gedurende een vaste <b>duur</b> aan het vermogen van de paal. '+
     'De sessies vallen willekeurig binnen één of twee <b>vensters</b> (bv. voormiddag en namiddag). '+

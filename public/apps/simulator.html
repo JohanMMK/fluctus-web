@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS SIMULATOR  v1.88.0  (2026-08-24 Europe/Brussels)
+     FLUCTUS SIMULATOR  v1.89.0  (2026-08-24 Europe/Brussels)
+     v1.89.0 (Johan 24-08): FIX ontbrekend laadplein in het rapport. _laadpleinRapportData bouwde de plein-lijsten
+              op basis van de INVOERlijst (inPleinen/inGew) → een berekend plein viel weg als die lijst korter/stale
+              was dan wat de sim effectief berekende (bv. Laadplein 4 miste, incl. heatmap). Nu itereren beide
+              lijsten over het MAXIMUM van invoer én sim-output; ontbrekende velden uit de sim aangevuld (naam) of
+              afgeleid (km uit de energie, 0,16 kWh/km). Elk berekend plein verschijnt nu met heatmap.
      v1.88.0 (Johan 24-08): gebouwlijn raakt nu GEGARANDEERD de piek. De ×1,4-limiet op het anker viel weg;
               i.p.v. de hele curve te schalen tillen we enkel de TOP additief op tot het toegangsvermogen
               (gewicht ~rang^5), zodat de vrije ruimte links/midden behouden blijft. Let op: vereist redeploy
@@ -1347,7 +1352,7 @@ function apiPost(path,body){
 var SIM_POLL_MS = 1500;
 // v1.63.35: ÉÉN bron voor het zichtbare versienummer. Badge (rechtsboven) + init-log lezen dit → geen stale labels meer.
 // Bump dit samen met de header-comment bovenaan.
-var SIM_VERSIE = 'v1.88.0';   // v1.88.0 (24-08): gebouwlijn raakt GEGARANDEERD de piek — top additief opgetild tot toegangsvermogen (geen ×1,4-limiet meer), vrije ruimte links/midden behouden. Vereist redeploy + opnieuw simuleren. // v1.87.0 (24-08): plafond duurkromme = toegangsvermogen (bestaande maandpiek); gebouwlijn erop verankerd, nieuwe afname geclampt eronder → rode lijn raakt de piek. // v1.86.0 (24-08): duurkromme via kwantiel-sampling + 300 punten → rode gebouwlijn eindigt op de ECHTE bestaande maandpiek (niet platgeslagen). // v1.85.0 (24-08): grafiek-review — Deel 1 gebouw als aparte duurkromme (niet verstopt); Deel 2 gebouw-afname als grijze ondergrond (spotkost.geb_cum), zelfde 3 componenten als Deel 1. Rapport v1.13.0. // v1.84.0 (24-08): rapport-hoofdstuk "Waarom uw kilometers zo goedkoop zijn" op ECHTE per-kwartier data (_lpChartData → duurkromme + spotkost uit de bewaarde geen/sturing-varianten); rapport v1.12.0. Geen wijziging aan server.js/simulator.py. // v1.83.0 (23-08): Laadplein-resultaat — TWEE klantrapport-knoppen: Jacops (rood) + Wattkraft (navy), zelfde data (_openLaadpleinRapport('jacops'|'wattkraft') → /apps/laadplein-rapport(-wattkraft).html). "Terug naar standaard" overal verwijderd (3 plekken: invoer-banner, scenario-rij, ontwerp-nav) — die bracht terug naar de gewone manuele wizard. // v1.82.0 (22-08): Laadplein-flow UI — stappenbalk 1.Input/2.Simulatie i.p.v. 11-staps wizard; "Terug naar standaard" naast de kabelplanner-knop; apart rapport/kabel-blok onderaan weg (Laadplein-rapportknop blijft in de scenario-rij). // v1.81.0 (22-08): laadprofiel-heatmap ook voor niet-betalende (wagenpark) pleinen in het klantrapport (gewonePleinen krijgt heat+piek_kw uit de sim). // v1.80.0 (22-08): standaardwaarden laadpleinen. Betalend: vensters 8-13/13-23; DC 15min/€500/MWh (2+2 sessies/paal), AC 30min/€330/MWh (1,5+3 sessies/paal); sessies/venster = factor×aantal palen (herschaalt bij paaltype/palen-wijziging). Wagenpark: standaard 4 wagens. // v1.79.1 (22-08): typfix laadscherm "zig met dispatch-optimalisatie" → "Bezig met dispatch-optimalisatie". // v1.79.0 (22-08): FIX extra kosten & werken — de inline oninput-handlers van de bezoekers-tabel resolveren in globale scope, maar het script draait in een IIFE → _bezSetExtra/_bezUpdateTotals waren niet bereikbaar (stil ReferenceError). Nu op window geëxposeerd → extra kosten tellen live mee in totaal + rendement. // v1.78.0 (22-08): zichtbare titels "Betalend laadplein" → "Laadplein" (banner, knoppen, ontwerp-sectie); id/flow ongewijzigd. // v1.77.0 (22-08): (1) manueel adres gaat nu mee naar de kabelplanner (STATE.adres als seed-fallback). (2) scenario's worden AUTO berekend op de resultatenpagina (simuleer/betaalplein-flow). (3) geen betalende pleinen → enkel scenario 1 (geen batt) + 2 (batt) met de gewone pleinen (server alleen_basis, 4 sims minder). // v1.76.0 (22-08): betaalplein Project-groep toont nu de PROJECTCODE (deterministisch FLX uit de projectnaam, live), + een "bestaand project heropvragen op code"-veld (open-op-code via _managerOpenKamino). // v1.75.0 (22-08): betaalplein-invoer herwerkt tot één logische flow — 1) Project (factuur óf manueel: klant+adres→projectnaam, locatie/spanning, profiel/verbruik, aansluiting-kVA) 2) PV 3) Batterij (enkel kW/kWh, standaard 120/260, rest = standaard) 4) Laadpleinen → Bereken. Aparte tussenstappen (injectie/verzwaring) weg; alles één keer. // v1.74.0 (22-08): "extra kosten & werken" werkt nu LIVE door in totaal/investering/tvt/rendement (oninput i.p.v. enkel onchange/blur + volledige re-render die kon achterblijven); gerichte cel-update _bezUpdateTotals() behoudt de focus in de input. // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
+var SIM_VERSIE = 'v1.89.0';   // v1.88.0 (24-08): gebouwlijn raakt GEGARANDEERD de piek — top additief opgetild tot toegangsvermogen (geen ×1,4-limiet meer), vrije ruimte links/midden behouden. Vereist redeploy + opnieuw simuleren. // v1.87.0 (24-08): plafond duurkromme = toegangsvermogen (bestaande maandpiek); gebouwlijn erop verankerd, nieuwe afname geclampt eronder → rode lijn raakt de piek. // v1.86.0 (24-08): duurkromme via kwantiel-sampling + 300 punten → rode gebouwlijn eindigt op de ECHTE bestaande maandpiek (niet platgeslagen). // v1.85.0 (24-08): grafiek-review — Deel 1 gebouw als aparte duurkromme (niet verstopt); Deel 2 gebouw-afname als grijze ondergrond (spotkost.geb_cum), zelfde 3 componenten als Deel 1. Rapport v1.13.0. // v1.84.0 (24-08): rapport-hoofdstuk "Waarom uw kilometers zo goedkoop zijn" op ECHTE per-kwartier data (_lpChartData → duurkromme + spotkost uit de bewaarde geen/sturing-varianten); rapport v1.12.0. Geen wijziging aan server.js/simulator.py. // v1.83.0 (23-08): Laadplein-resultaat — TWEE klantrapport-knoppen: Jacops (rood) + Wattkraft (navy), zelfde data (_openLaadpleinRapport('jacops'|'wattkraft') → /apps/laadplein-rapport(-wattkraft).html). "Terug naar standaard" overal verwijderd (3 plekken: invoer-banner, scenario-rij, ontwerp-nav) — die bracht terug naar de gewone manuele wizard. // v1.82.0 (22-08): Laadplein-flow UI — stappenbalk 1.Input/2.Simulatie i.p.v. 11-staps wizard; "Terug naar standaard" naast de kabelplanner-knop; apart rapport/kabel-blok onderaan weg (Laadplein-rapportknop blijft in de scenario-rij). // v1.81.0 (22-08): laadprofiel-heatmap ook voor niet-betalende (wagenpark) pleinen in het klantrapport (gewonePleinen krijgt heat+piek_kw uit de sim). // v1.80.0 (22-08): standaardwaarden laadpleinen. Betalend: vensters 8-13/13-23; DC 15min/€500/MWh (2+2 sessies/paal), AC 30min/€330/MWh (1,5+3 sessies/paal); sessies/venster = factor×aantal palen (herschaalt bij paaltype/palen-wijziging). Wagenpark: standaard 4 wagens. // v1.79.1 (22-08): typfix laadscherm "zig met dispatch-optimalisatie" → "Bezig met dispatch-optimalisatie". // v1.79.0 (22-08): FIX extra kosten & werken — de inline oninput-handlers van de bezoekers-tabel resolveren in globale scope, maar het script draait in een IIFE → _bezSetExtra/_bezUpdateTotals waren niet bereikbaar (stil ReferenceError). Nu op window geëxposeerd → extra kosten tellen live mee in totaal + rendement. // v1.78.0 (22-08): zichtbare titels "Betalend laadplein" → "Laadplein" (banner, knoppen, ontwerp-sectie); id/flow ongewijzigd. // v1.77.0 (22-08): (1) manueel adres gaat nu mee naar de kabelplanner (STATE.adres als seed-fallback). (2) scenario's worden AUTO berekend op de resultatenpagina (simuleer/betaalplein-flow). (3) geen betalende pleinen → enkel scenario 1 (geen batt) + 2 (batt) met de gewone pleinen (server alleen_basis, 4 sims minder). // v1.76.0 (22-08): betaalplein Project-groep toont nu de PROJECTCODE (deterministisch FLX uit de projectnaam, live), + een "bestaand project heropvragen op code"-veld (open-op-code via _managerOpenKamino). // v1.75.0 (22-08): betaalplein-invoer herwerkt tot één logische flow — 1) Project (factuur óf manueel: klant+adres→projectnaam, locatie/spanning, profiel/verbruik, aansluiting-kVA) 2) PV 3) Batterij (enkel kW/kWh, standaard 120/260, rest = standaard) 4) Laadpleinen → Bereken. Aparte tussenstappen (injectie/verzwaring) weg; alles één keer. // v1.74.0 (22-08): "extra kosten & werken" werkt nu LIVE door in totaal/investering/tvt/rendement (oninput i.p.v. enkel onchange/blur + volledige re-render die kon achterblijven); gerichte cel-update _bezUpdateTotals() behoudt de focus in de input. // v1.73.0 (21-08): CREG-besparing gewoon plein overal NETTO + CONSTANT (scherm groen blok + rapport + scenariokolom gelijk): geleverd × (CREG-forfait − eigen laadkost basis). Geen bruto meer (dat telde dubbel met de factuur). Vóór scenario-berekening toont het groene blok enkel levering + verwijzing. // v1.72.0 (21-08): rapport-data draagt gewone_pleinen (niet-betalende/wagenpark) mee — naam, laadpunten, geladen MWh/km, CREG-besparing — zodat het klantrapport ze apart toont. // v1.71.0 (21-08): km-tekortblok nu coherent met de MWh-levering — geleverde km = gevraagde km × (geladen_mwh/gevraagd_mwh) per plein (HOOFDsim), niet meer de aansluiting-alléén-frac; blok wisselt van toon (echt tekort vs volledige levering via toegangsvermogen-overschrijding). // v1.70.0 (21-08): mix-coherentie — bezoekers-tabel toont bij een mix de gewone-pleinen levering (MWh/km) + CREG-besparing per rij; km-toelichting (betalend vs totaal); rapport-data draagt km_geleverd + wagenpark-velden + creg_eur_mwh mee.
 try{ var _vb=document.getElementById('fdsim-version'); if(_vb) _vb.textContent=SIM_VERSIE; }catch(e){}
 var SIM_MAX_WACHT_MS = 35*60*1000;   // v1.63.58: 35 min (was 20) — zware verzwaring/mix-zoektocht (tegel 4) kan lang duren; achtervang onder de 45-min Kamino-umbrella
 function _sim3Async(input){
@@ -10326,15 +10331,22 @@ function _laadpleinRapportData(){
   // pleinen (input + sim-output + heatmap)
   var simPleinen=((res.laadplein&&res.laadplein.pleinen)||[]).filter(function(p){return p.modus==='bezoekers';});
   var inPleinen=(STATE.laadpleinen||[]).filter(function(p){return String(p.type_plein||'').toLowerCase()==='bezoekers';});
-  var pleinen=inPleinen.map(function(p,i){
-    var sp=simPleinen[i]||{}; var gev=+sp.gevraagd_mwh||_bezGevraagdMwh(p), gel=+sp.geladen_mwh||0, tek=+sp.tekort_mwh||Math.max(0,gev-gel);
-    return { naam:p.naam||('Laadplein '+(i+1)), paaltype:p.paaltype||'AC22', paal_kw:_bezPaalKw(p),
+  // v1.89: itereer over het MAXIMUM van invoer- én sim-berekende pleinen, zodat GEEN berekend plein wegvalt
+  //   (bv. als de invoerlijst korter/stale is dan wat de sim effectief berekende). Ontbrekende invoervelden
+  //   worden uit de sim-output aangevuld (naam) of afgeleid.
+  var _nBez=Math.max(inPleinen.length, simPleinen.length), pleinen=[];
+  for(var _bi=0; _bi<_nBez; _bi++){
+    (function(i){
+    var p=inPleinen[i]||{}, sp=simPleinen[i]||{};
+    var gev=+sp.gevraagd_mwh||_bezGevraagdMwh(p), gel=+sp.geladen_mwh||0, tek=+sp.tekort_mwh||Math.max(0,gev-gel);
+    pleinen.push({ naam:p.naam||sp.naam||('Laadplein '+(i+1)), paaltype:p.paaltype||'AC22', paal_kw:_bezPaalKw(p),
       aantal_palen:Math.max(1,+p.aantal_palen||1), duur_min:+p.duur_min||0, dagen_per_week:+p.dagen_per_week||7,
       verkoopprijs_eur_mwh:(+p.opbrengst_eur_mwh||tarief),
       vensters:(p.vensters||[]).map(function(w){return {start:+w.start||0,eind:+w.eind||0,sessies:+w.sessies||0};}),
       gevraagd_mwh:gev, geleverd_mwh:gel, tekort_mwh:tek, gemist_pct:gev>0?(100*tek/gev):0, piek_kw:+sp.piek_kw||0,
-      heat:_laadpleinHeat(sp.load_kw) };
-  });
+      heat:_laadpleinHeat(sp.load_kw) });
+    })(_bi);
+  }
   // v1.4: GEWONE (niet-betalende / wagenpark) pleinen — apart in het rapport, met levering + CREG-besparing.
   //   Spiegelt het groene blok op het scherm (_renderLaadpleinResultaat): besparing = geladen × CREG-forfait.
   var cregMwh=(typeof _cregTarief==='function'?_cregTarief()*1000:cregEurMwh);
@@ -10346,16 +10358,23 @@ function _laadpleinRapportData(){
   function _palenSamenvatting(p){ var o={}; (p.laadpunten||[]).forEach(function(x){ var t=(x.type||'').toUpperCase(),n=+x.aantal||0; if(n<=0)return;
     var lab=(t==='DC160')?'DC 160 kW':(t==='DC300'||t==='DC400')?'DC 300 kW':'AC 22 kW'; o[lab]=(o[lab]||0)+n; });
     return Object.keys(o).map(function(k){return o[k]+'× '+k;}).join(' · '); }
-  var gewonePleinen=inGew.map(function(p,i){
-    var sp=simGew[i]||{}; var gev=+sp.gevraagd_mwh||(_lpEnergieMwh?_lpEnergieMwh(p):0), gel=+sp.geladen_mwh||0;
-    var gevKm=(typeof _lpKmJaar==='function')?_lpKmJaar(p):((+p.aantal||0)*(+p.km_per_jaar||0));
+  // v1.89: idem voor de wagenpark-pleinen — max(invoer, sim). Zo verschijnt elk berekend gewoon plein (met heatmap),
+  //   ook als de invoerlijst er minder telt. Km's uit de invoer; ontbreken die → afgeleid uit de energie (0,16 kWh/km).
+  var _nGew=Math.max(inGew.length, simGew.length), gewonePleinen=[];
+  for(var _gi=0; _gi<_nGew; _gi++){
+    (function(i){
+    var p=inGew[i]||{}, sp=simGew[i]||{};
+    var gev=+sp.gevraagd_mwh||(_lpEnergieMwh?_lpEnergieMwh(p):0), gel=+sp.geladen_mwh||0;
+    var gevKm=(typeof _lpKmJaar==='function' && (+p.aantal>0))?_lpKmJaar(p):((+p.aantal||0)*(+p.km_per_jaar||0));
+    if(!(gevKm>0)) gevKm = gev*1000/0.16;   // sim-only plein: km afleiden uit de gevraagde energie
     var deliv=(gev>1e-9)?Math.max(0,Math.min(1,gel/gev)):1;
-    return { naam:p.naam||('Laadplein '+(i+1)), voertuigtype:p.voertuigtype||'',
+    gewonePleinen.push({ naam:p.naam||sp.naam||('Laadplein '+(i+1)), voertuigtype:p.voertuigtype||'',
       laadpunten:_palenSamenvatting(p), aantal:+p.aantal||0, km_per_jaar:+p.km_per_jaar||0,
       gevraagd_mwh:gev, geleverd_mwh:gel, gevraagd_km:Math.round(gevKm), geleverd_km:Math.round(gevKm*deliv),
       piek_kw:+sp.piek_kw||0, heat:_laadpleinHeat(sp.load_kw),   // v1.8: laadprofiel-heatmap ook voor wagenpark-pleinen
-      besparing_eur:Math.round(Math.max(0, gel*(cregMwh-ownCostMwh))) };   // NETTO
-  });
+      besparing_eur:Math.round(Math.max(0, gel*(cregMwh-ownCostMwh))) });   // NETTO
+    })(_gi);
+  }
   // totaal exact uit de scenario-berekening (constante), anders som van de per-plein netto's.
   var gewoneTotBesparing=(bez && bez.besparing_wag_const_eur!=null)?(+bez.besparing_wag_const_eur)
     :gewonePleinen.reduce(function(s,p){return s+(+p.besparing_eur||0);},0);
