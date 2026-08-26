@@ -1,6 +1,20 @@
-// portal.js v1.5.0 — 2026-08-22 23:45 (Europe/Brussels) — 2e videoknop 'W' (Wattkraft) naast de info-i op de Laadplein-tegel (video2-veld)
+// portal.js v1.7.0 — 2026-08-26 (Europe/Brussels) — Fase 2b: partnermanager ziet automatisch ENKEL EnergieKompas
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
+// v1.7.0 — 2026-08-26 — Fase 2b (Johan-correctie). Nieuwe tegel 'energiekompas' (partner-gerichte schil,
+//          particulier|bedrijf). Een partnermanager krijgt van de proxy (v15.95.0) automatisch app-toegang
+//          tot ENKEL EnergieKompas → dat is de enige tool-tegel die hij ziet. De losse interne tools
+//          (simulator/laadplein/kamino/thuisladen) verschijnen NIET meer automatisch voor die rol.
+//          LET OP: /apps/energiekompas.html is de Fase 4-schil; er staat nu een holding-pagina zodat de
+//          tegel niet in een 404 loopt.
+// v1.6.0 — 2026-08-26 — Fase 2b (rollen & toegang). De launcher filtert nu expliciet op de nieuwe rollen:
+//          • manager        → alle tegels (ongewijzigd).
+//          • partnermanager → automatisch app-toegang via de proxy (komt via de gewone `verleend`-weg
+//            binnen). Gebruikers (managerOnly) + Fluctus-interne apps blijven verborgen.
+//          • adviseur       → zoals seller: enkel toegekende tools (grant-gebaseerd via user_app_access).
+//          • klant          → GEEN tool-tegels. Een klant hoort in de scoped project-deeplink (Fase 2c),
+//            niet in de tool-launcher; defensief tonen we hem enkel de 'altijd'-tegels (Academy).
+//          Additief: enkel de filter in toegankelijkeApps() kreeg de klant-uitsluiting; geen andere wijziging.
 // v1.5.0 — 2026-08-22 23:45 — Laadplein-tegel: 2e ronde knop 'W' (Wattkraft) links naast de bestaande info-'i'.
 //          i = Jacops-video, W = Wattkraft-video. Additief: velden video2/video2Label/video2Title in de catalog,
 //          extra knop-blok in renderLauncher() + .tile-info2-styling in ensureVideoUI(). i-logica ongewijzigd.
@@ -44,6 +58,10 @@ const APP_CATALOG = [
   // gedeelde marktdata bij die de simulator gebruikt.
   { id: 'energiemarkt', naam: 'Energiemarkt',    ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulator-data bij.', url: '/apps/energiemarkt.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan', ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
+  // EnergieKompas = de partner-gerichte schil (particulier | bedrijf, thema per partner). Een partnermanager
+  // krijgt van de proxy (v15.95.0) automatisch toegang tot ENKEL deze app_id → het is de enige tool die hij ziet.
+  // Managers zien ze impliciet; adviseurs/sellers enkel na toekenning. De onderliggende pagina is de Fase 4-schil.
+  { id: 'energiekompas', naam: 'EnergieKompas',  ico: '🔆', beschrijving: 'Uw energie-advies in één schil: particulier of bedrijf → besparing, rendement en advies.', url: '/apps/energiekompas.html' },
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
@@ -158,11 +176,15 @@ async function toegankelijkeApps(token) {
   }));
   // In catalogus-volgorde teruggeven: echte apps met toegang, altijd-apps,
   // en manager-only apps enkel voor managers.
+  // v1.6.0 (Fase 2b): een KLANT hoort niet in de tool-launcher (zijn pad = scoped
+  // project-deeplink, Fase 2c) → toon hem defensief enkel de 'altijd'-tegels, ook
+  // als er per ongeluk een app-grant op zijn account zou staan.
   return APP_CATALOG.filter((a) => {
     if (a.altijd) return true;
+    if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';
     if (a.gatedBy) return role === 'manager' || verleend.has(a.gatedBy);   // zelfde toegang als de gating-app
-    return verleend.has(a.id);
+    return verleend.has(a.id);   // partnermanager: de proxy verleent de klant-toolset → komt hier binnen
   });
 }
 
