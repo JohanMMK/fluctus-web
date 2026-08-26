@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================================
+     FLUCTUS THUISLADEN  v0.9.10  (2026-08-26, Fase 1)
+     v0.9.10: dropdown vulde niet bij verse load omdat _tlApiGet de token synchroon las (nog null → 401).
+              Nu eerst de token verzekeren (vernieuwNu) vóór de call → prefetch lukt meteen, geen dubbel-openen.
+     ---------------------------------------------------------------------------
      FLUCTUS THUISLADEN  v0.9.9  (2026-08-26, Fase 1)
      v0.9.9: dropdown proactief geladen met herpogingen tot de auth-token klaar is (opties staan er nu
              vóór je opent → geen dubbel-openen meer). onfocus vult enkel nog synchroon uit cache.
@@ -1091,8 +1095,19 @@ function _projectIdLokaal(project){
   code=code.slice(-7);
   return 'FLX-'+code.slice(0,3)+'-'+code.slice(3);
 }
-function _tlApiPost(path, body){ return fetch(API_BASE+path,{method:'POST',headers:tlHeaders(),body:JSON.stringify(body||{})}).then(function(r){ return r.json(); }); }
-function _tlApiGet(path){ return fetch(API_BASE+path,{headers:tlHeaders()}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
+// v0.9.10: token eerst verzekeren (bij verse load is FluctusAppAuth.token() nog null → 401). vernieuwNu() haalt/ververst 'm.
+function _tlEnsureToken(){
+  try{
+    if(window.FluctusAppAuth){
+      var t=window.FluctusAppAuth.token();
+      if(t) return Promise.resolve(t);
+      if(window.FluctusAppAuth.vernieuwNu) return window.FluctusAppAuth.vernieuwNu();
+    }
+  }catch(e){}
+  return Promise.resolve(null);
+}
+function _tlApiPost(path, body){ return _tlEnsureToken().then(function(){ return fetch(API_BASE+path,{method:'POST',headers:tlHeaders(),body:JSON.stringify(body||{})}).then(function(r){ return r.json(); }); }); }
+function _tlApiGet(path){ return _tlEnsureToken().then(function(){ return fetch(API_BASE+path,{headers:tlHeaders()}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }); }
 var _TL_INPUT_VELDEN=['_project','_klant','profiel','jaarverbruik_mwh','piek_kw','fasen','regio','bestaand_pv_kwp','bestaand_inj_mwh','referentiekost','wagens','max_pv_pan','max_budget','min_rend'];
 function _tlStateNaarInput(){ var o={_flow:'thuisladen'}; _TL_INPUT_VELDEN.forEach(function(k){ if(IN[k]!==undefined) o[k]=IN[k]; }); try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
 function _tlInputNaarState(inp){ if(!inp||typeof inp!=='object') return; _TL_INPUT_VELDEN.forEach(function(k){ if(inp[k]!==undefined) IN[k]=inp[k]; }); }
