@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================================
+     FLUCTUS THUISLADEN  v0.9.9  (2026-08-26, Fase 1)
+     v0.9.9: dropdown proactief geladen met herpogingen tot de auth-token klaar is (opties staan er nu
+             vóór je opent → geen dubbel-openen meer). onfocus vult enkel nog synchroon uit cache.
+     ---------------------------------------------------------------------------
      FLUCTUS THUISLADEN  v0.9.8  (2026-08-26, Fase 1)
      v0.9.8: terughaal-dropdown (her)laadt op onfocus → werkt meteen (de eerste fetch bij render faalde stil
              als de auth-token nog niet klaar was → dropdown pas na 'Project openen').
@@ -961,7 +965,7 @@ function renderSide(){
     '<label>Project / klant</label><input value="'+String(IN._project||'').replace(/"/g,'&quot;')+'" placeholder="bv. Van Oeckel" onchange="setProj(this.value)">'+
     '<div class="hint" style="margin:2px 0 6px">🔖 Projectcode: <b style="font-family:monospace">'+((IN._project||IN._klant)?_projectIdLokaal(IN._project||IN._klant):'—')+'</b> — bewaar deze code om later terug te vinden.</div>'+
     '<div class="row2"><div><label>… heropvragen (code)</label><input id="tlProjCode" placeholder="FLX-XXX-XXXX"></div>'+
-    '<div><label>… of op naam</label><select id="tlKaminoSel" onfocus="_tlVulDropdown(1)" onchange="_tlSelOpen(this.value)"><option value="">– kies project –</option></select></div></div>'+
+    '<div><label>… of op naam</label><select id="tlKaminoSel" onfocus="_tlVulDropdown()" onchange="_tlSelOpen(this.value)"><option value="">– kies project –</option></select></div></div>'+
     '<button class="btn ghost sm" style="width:100%;margin:2px 0 8px" onclick="_tlProjectOpen(document.getElementById(\'tlProjCode\').value)">Project openen</button>'+
     '<div id="tlProjMsg" class="hint" style="margin:0 0 8px"></div>'+
     '<div class="hint">Bij voorkeur via factuur inlezen. Manueel kan ook hieronder.</div>'+
@@ -985,7 +989,7 @@ function renderSide(){
     '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
     '<div style="margin-top:14px"><button class="btn g" style="width:100%;font-size:14px;padding:10px" onclick="rerun()">▶ Bereken heatmaps</button></div>'+
     '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar · 30 scenario’s worden op de server doorgerekend.</div>';
-  _tlVulDropdown();   // v0.9.7: vul de terughaal-dropdown ná innerHTML (render-timing-veilig)
+  if(_tlKaminoCache!==null){ _tlVulDropdown(); } else { _tlKaminoLaad(0); }   // v0.9.9: uit cache of retry-prefetch (token-timing-veilig)
 }
 window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; if(STATE.status==='klaar') STATE.status='idle'; renderSide(); render(); } };
 window.setCrate=function(v){ var n=+v; if(n>0) P.BATT_CRATE=n; };
@@ -1101,12 +1105,15 @@ function _tlProjectBewaar(){
 }
 var _tlKaminoCache=null;
 function _tlKortDatum(iso){ try{ var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1); }catch(e){ return ''; } }
-function _tlVulDropdown(force){
-  var sel=document.getElementById('tlKaminoSel'); if(!sel) return;
-  function vul(lijst){ var s=document.getElementById('tlKaminoSel'); if(!s) return; var keep=s.value; s.innerHTML='<option value="">– kies project –</option>';
-    (lijst||[]).filter(function(p){ return p.scenarioKey==='thuisladen'; }).forEach(function(p){ var dt=p.bijgewerkt?(' · '+_tlKortDatum(p.bijgewerkt)):''; var o=document.createElement('option'); o.value=p.id; o.textContent=(p.naam||p.id)+dt+' — '+p.id; s.appendChild(o); }); if(keep) s.value=keep; }
-  if(!force && _tlKaminoCache!==null){ vul(_tlKaminoCache); return; }   // force=1 (onfocus) → altijd vers, token dan gegarandeerd klaar
-  _tlApiGet('/api/kamino/projecten').then(function(r){ _tlKaminoCache=(r&&r.projecten)||[]; vul(_tlKaminoCache); }).catch(function(){});
+function _tlVulDropdown(){   // synchroon uit cache — geen async, dus geen dubbel-openen
+  var s=document.getElementById('tlKaminoSel'); if(!s) return;
+  var keep=s.value; s.innerHTML='<option value="">– kies project –</option>';
+  (_tlKaminoCache||[]).filter(function(p){ return p.scenarioKey==='thuisladen'; }).forEach(function(p){ var dt=p.bijgewerkt?(' · '+_tlKortDatum(p.bijgewerkt)):''; var o=document.createElement('option'); o.value=p.id; o.textContent=(p.naam||p.id)+dt+' — '+p.id; s.appendChild(o); }); if(keep) s.value=keep;
+}
+function _tlKaminoLaad(poging){   // proactief laden mét herpogingen tot de auth-token klaar is
+  poging=poging||0;
+  _tlApiGet('/api/kamino/projecten').then(function(r){ _tlKaminoCache=(r&&r.projecten)||[]; _tlVulDropdown(); })
+    .catch(function(){ if(poging<6) setTimeout(function(){ _tlKaminoLaad(poging+1); }, 700); });
 }
 window.setProj=function(v){ IN._project=v; if(!IN._klant) IN._klant=v; renderSide(); };
 window._tlSelOpen=function(v){ if(v){ var i=document.getElementById('tlProjCode'); if(i) i.value=v; window._tlProjectOpen(v); } };
