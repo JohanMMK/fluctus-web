@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ============================================================================
+     FLUCTUS THUISLADEN  v0.9.7  (2026-08-26, Fase 1 kern-persistentie)
+     v0.9.7: PROJECT/FLX-model + universele save + terughaal. Thuisladen bewaart nu een kamino-record
+             (POST /api/kamino/project, scenario 'thuisladen', input-snapshot) op 'Bereken heatmaps', en
+             kan een project heropvragen via code of naam-dropdown (/api/kamino/projecten, thuisladen-gescopt).
+             Zelfde FLX-berekening als de simulator/server. Projectnaam uit de factuur-klantnaam of manueel.
+     ---------------------------------------------------------------------------
      FLUCTUS THUISLADEN  v0.9.6  (2026-08-18 14:13 Europe/Brussels)
      v0.9.6: Batterij + extra PV zijn nu UITLEZINGEN (geen input): boven de heatmaps in KPI-formaat,
              bewegen mee met de muis over de heatmaps (updateHvals → rd_batt/rd_pv) en blijven op de
@@ -948,6 +954,12 @@ function renderSide(){
     '</div>'; }).join('');
   document.getElementById('side').innerHTML=
     '<h3>Invoer</h3>'+
+    '<label>Project / klant</label><input value="'+String(IN._project||'').replace(/"/g,'&quot;')+'" placeholder="bv. Van Oeckel" onchange="setProj(this.value)">'+
+    '<div class="hint" style="margin:2px 0 6px">🔖 Projectcode: <b style="font-family:monospace">'+((IN._project||IN._klant)?_projectIdLokaal(IN._project||IN._klant):'—')+'</b> — bewaar deze code om later terug te vinden.</div>'+
+    '<div class="row2"><div><label>… heropvragen (code)</label><input id="tlProjCode" placeholder="FLX-XXX-XXXX"></div>'+
+    '<div><label>… of op naam</label><select id="tlKaminoSel" onchange="_tlSelOpen(this.value)"><option value="">– kies project –</option></select></div></div>'+
+    '<button class="btn ghost sm" style="width:100%;margin:2px 0 8px" onclick="_tlProjectOpen(document.getElementById(\'tlProjCode\').value)">Project openen</button>'+
+    '<div id="tlProjMsg" class="hint" style="margin:0 0 8px"></div>'+
     '<div class="hint">Bij voorkeur via factuur inlezen. Manueel kan ook hieronder.</div>'+
     '<button class="btn" style="width:100%;margin:2px 0 6px" onclick="document.getElementById(\'tlFactuurInput\').click()">📄 Factuur inlezen (PDF)</button>'+
     '<input type="file" id="tlFactuurInput" accept="application/pdf" multiple style="display:none" onchange="tlFactuurUpload(this)">'+
@@ -969,13 +981,14 @@ function renderSide(){
     '<button class="btn ghost sm" style="width:100%;margin-top:6px" onclick="addWagen()">+ wagen toevoegen</button>'+
     '<div style="margin-top:14px"><button class="btn g" style="width:100%;font-size:14px;padding:10px" onclick="rerun()">▶ Bereken heatmaps</button></div>'+
     '<div class="hint" style="margin-top:6px">EV-laadvraag: '+fmtN(evMwh(),2)+' MWh/jaar · 30 scenario’s worden op de server doorgerekend.</div>';
+  _tlVulDropdown();   // v0.9.7: vul de terughaal-dropdown ná innerHTML (render-timing-veilig)
 }
 window.setIn=function(k,v){ IN[k]= (k==='fasen')?+v : (isNaN(+v)?v:+v); if(k==='fasen'){ STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; if(STATE.status==='klaar') STATE.status='idle'; renderSide(); render(); } };
 window.setCrate=function(v){ var n=+v; if(n>0) P.BATT_CRATE=n; };
 window.setW=function(i,k,v){ IN.wagens[i][k]= (k==='creg')?v : +v; };
 window.addWagen=function(){ IN.wagens.push({km:15000,kwhkm:0.16,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); renderSide(); };
 window.delWagen=function(i){ IN.wagens.splice(i,1); if(!IN.wagens.length) addWagen(); renderSide(); };
-window.rerun=function(){ fetchServerGrid(); };   // valideer input + reken de 30 scenario's op de server
+window.rerun=function(){ try{ _tlProjectBewaar(); }catch(e){} fetchServerGrid(); };   // v0.9.7: universele save + valideer input + reken de 30 scenario's
 
 // ============================ FACTUUR INLEZEN (/api/factuur-extract) ============================
 // Zelfde weg als de simulator: PDF('s) → base64 → /api/factuur-extract → baseCase.
@@ -1019,6 +1032,7 @@ window.tlFactuurUpload=function(input){
       var reg=regioVanPostcode(pc); if(reg) IN.regio=reg;
       // Fasen: enkel LS is relevant; laat de klant 2/3 fasen zelf kiezen (staat niet betrouwbaar op de factuur).
       try{ if(window.FluctusAppAuth) window.FluctusAppAuth.logActivity('thuisladen','factuur_geparseerd',{ klant_naam:bc.klantNaam||null, klant_btw:bc.klantBtw||null }); }catch(e){}
+      if(bc.klantNaam){ IN._klant=bc.klantNaam; if(!IN._project) IN._project=bc.klantNaam; }   // v0.9.7: klantnaam → projectnaam (FLX)
       var naam=bc.klantNaam?(' — '+bc.klantNaam):'';
       _tlZetMsg('✅ Factuur ingelezen'+naam+'. Verbruik '+fmtN(IN.jaarverbruik_mwh,2)+' MWh/jaar'+(tot>0?(', referentie '+fmtE(IN.referentiekost)):'')+(reg?(', regio '+REGIO_NAAM[reg]+' → CREG '+fmtE(cregTarief())+'/MWh'):'')+(dagen>0&&Math.abs(jf-1)>0.05?(' (naar jaar herrekend uit '+Math.round(dagen)+' dagen)'):'')+'. Controleer + vul fasen/wagens aan, klik dan “Bereken heatmaps”.');
       STATE.status='idle'; STATE.serverMode=false; render(); renderSide();
@@ -1057,6 +1071,55 @@ function tlHeaders(){
   try{ if(window.FluctusAppAuth){ var t = window.FluctusAppAuth.token(); if(t) h['Authorization']='Bearer '+t; } }catch(e){}
   return h;
 }
+
+// ─── v0.9.7 (Fase 1 kern-persistentie): project/FLX-model + universele save + terughaal ───────────
+// Zelfde kamino-record als de simulator (POST /api/kamino/project, scenario 'thuisladen').
+function _projectIdLokaal(project){
+  var s=String(project||'').trim().toLowerCase();
+  var h=0x811c9dc5>>>0;
+  for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  var code=h.toString(36).toUpperCase();
+  while(code.length<7) code='0'+code;
+  code=code.slice(-7);
+  return 'FLX-'+code.slice(0,3)+'-'+code.slice(3);
+}
+function _tlApiPost(path, body){ return fetch(API_BASE+path,{method:'POST',headers:tlHeaders(),body:JSON.stringify(body||{})}).then(function(r){ return r.json(); }); }
+function _tlApiGet(path){ return fetch(API_BASE+path,{headers:tlHeaders()}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
+var _TL_INPUT_VELDEN=['_project','_klant','profiel','jaarverbruik_mwh','piek_kw','fasen','regio','bestaand_pv_kwp','bestaand_inj_mwh','referentiekost','wagens','max_pv_pan','max_budget','min_rend'];
+function _tlStateNaarInput(){ var o={_flow:'thuisladen'}; _TL_INPUT_VELDEN.forEach(function(k){ if(IN[k]!==undefined) o[k]=IN[k]; }); try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
+function _tlInputNaarState(inp){ if(!inp||typeof inp!=='object') return; _TL_INPUT_VELDEN.forEach(function(k){ if(inp[k]!==undefined) IN[k]=inp[k]; }); }
+function _tlProjectBewaar(){
+  try{
+    var naam=IN._project||IN._klant||''; if(!naam) return;
+    _tlApiPost('/api/kamino/project',{ id:_projectIdLokaal(naam), naam:naam, scenario:'thuisladen', klant:{ naam:IN._klant||naam }, input:_tlStateNaarInput() })
+      .then(function(){ _tlKaminoCache=null; }).catch(function(){});
+  }catch(e){}
+}
+var _tlKaminoCache=null;
+function _tlKortDatum(iso){ try{ var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1); }catch(e){ return ''; } }
+function _tlVulDropdown(){
+  var sel=document.getElementById('tlKaminoSel'); if(!sel) return;
+  function vul(lijst){ var s=document.getElementById('tlKaminoSel'); if(!s) return; s.innerHTML='<option value="">– kies project –</option>';
+    (lijst||[]).filter(function(p){ return p.scenarioKey==='thuisladen'; }).forEach(function(p){ var dt=p.bijgewerkt?(' · '+_tlKortDatum(p.bijgewerkt)):''; var o=document.createElement('option'); o.value=p.id; o.textContent=(p.naam||p.id)+dt+' — '+p.id; s.appendChild(o); }); }
+  if(_tlKaminoCache!==null){ vul(_tlKaminoCache); return; }
+  _tlApiGet('/api/kamino/projecten').then(function(r){ _tlKaminoCache=(r&&r.projecten)||[]; vul(_tlKaminoCache); }).catch(function(){});
+}
+window.setProj=function(v){ IN._project=v; if(!IN._klant) IN._klant=v; renderSide(); };
+window._tlSelOpen=function(v){ if(v){ var i=document.getElementById('tlProjCode'); if(i) i.value=v; window._tlProjectOpen(v); } };
+window._tlProjectOpen=function(id){
+  id=String(id||'').trim().toUpperCase();
+  var m=document.getElementById('tlProjMsg'); var zet=function(k,t){ if(m){m.style.color=k;m.textContent=t;} };
+  if(!/^FLX-[A-Z0-9]{3}-[A-Z0-9]{3,4}$/.test(id)){ zet('#B23','Vul een geldig project-ID in (FLX-…).'); return; }
+  zet('#5A6577','Project ophalen…');
+  _tlApiGet('/api/kamino/project-get?id='+encodeURIComponent(id)+'&scenario=thuisladen').then(function(r){
+    var rec=(r&&r.project)||{};
+    if(!rec.input){ zet('#B23','Dit project heeft geen thuisladen-invoer om te laden.'); return; }
+    _tlInputNaarState(rec.input);
+    STATE.gemeten={}; STATE.sel=null; STATE.serverMode=false; if(STATE.status==='klaar') STATE.status='idle';
+    renderSide(); render();
+    zet('#0A6B2E','Project '+id+' geladen.');
+  }).catch(function(e){ var msg=(e&&e.message)||String(e); zet('#B23', /403/.test(msg)?'Geen toegang tot dit project.':('Kon niet openen: '+msg)); });
+};
 function cregDiesel(){
   var creg=0, diesel=0;
   IN.wagens.forEach(function(w){ var mwh=w.km*w.kwhkm/1000; if(w.creg) creg += mwh*cregTarief(); else diesel += (w.km/100)*P.DIESEL_100KM; });
