@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================================
-     FLUCTUS THUISLADEN  v0.9.11  (2026-08-26, Fase 2)
+     FLUCTUS THUISLADEN  v0.9.12  (2026-08-26, Fase 2c)
+     v0.9.12: klant-e-mailveld in de invoerkolom (renderSide) → gaat als klant.email mee in
+              _tlProjectBewaar (en in de input-snapshot via _TL_INPUT_VELDEN als _klantEmail). Geeft de
+              klant scoped toegang tot enkel dit project (login via e-mailcode op /apps/klant.html) +
+              triggert het auto klant-account server-side. Vereist server v15.96.0.
      v0.9.11: _tlProjectBewaar stuurt het partner-id (uit ?partner=) mee voor partnermanager-scoping.
      ---------------------------------------------------------------------------
      FLUCTUS THUISLADEN  v0.9.10  (2026-08-26, Fase 1)
@@ -971,6 +975,8 @@ function renderSide(){
     '<h3>Invoer</h3>'+
     '<label>Project / klant</label><input value="'+String(IN._project||'').replace(/"/g,'&quot;')+'" placeholder="bv. Van Oeckel" onchange="setProj(this.value)">'+
     '<div class="hint" style="margin:2px 0 6px">🔖 Projectcode: <b style="font-family:monospace">'+((IN._project||IN._klant)?_projectIdLokaal(IN._project||IN._klant):'—')+'</b> — bewaar deze code om later terug te vinden.</div>'+
+    '<label>Klant e-mail (klanttoegang)</label><input type="email" value="'+String(IN._klantEmail||'').replace(/"/g,'&quot;')+'" placeholder="klant@bedrijf.be" onchange="setKlantMail(this.value)">'+
+    '<div class="hint" style="margin:2px 0 6px">Optioneel — de klant kan hiermee enkel dit project openen (login via e-mailcode op /apps/klant.html).</div>'+
     '<div class="row2"><div><label>… heropvragen (code)</label><input id="tlProjCode" placeholder="FLX-XXX-XXXX"></div>'+
     '<div><label>… of op naam</label><select id="tlKaminoSel" onfocus="_tlVulDropdown()" onchange="_tlSelOpen(this.value)"><option value="">– kies project –</option></select></div></div>'+
     '<button class="btn ghost sm" style="width:100%;margin:2px 0 8px" onclick="_tlProjectOpen(document.getElementById(\'tlProjCode\').value)">Project openen</button>'+
@@ -1111,14 +1117,14 @@ function _tlEnsureToken(){
 }
 function _tlApiPost(path, body){ return _tlEnsureToken().then(function(){ return fetch(API_BASE+path,{method:'POST',headers:tlHeaders(),body:JSON.stringify(body||{})}).then(function(r){ return r.json(); }); }); }
 function _tlApiGet(path){ return _tlEnsureToken().then(function(){ return fetch(API_BASE+path,{headers:tlHeaders()}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }); }
-var _TL_INPUT_VELDEN=['_project','_klant','profiel','jaarverbruik_mwh','piek_kw','fasen','regio','bestaand_pv_kwp','bestaand_inj_mwh','referentiekost','wagens','max_pv_pan','max_budget','min_rend'];
+var _TL_INPUT_VELDEN=['_project','_klant','_klantEmail','profiel','jaarverbruik_mwh','piek_kw','fasen','regio','bestaand_pv_kwp','bestaand_inj_mwh','referentiekost','wagens','max_pv_pan','max_budget','min_rend'];
 function _tlStateNaarInput(){ var o={_flow:'thuisladen'}; _TL_INPUT_VELDEN.forEach(function(k){ if(IN[k]!==undefined) o[k]=IN[k]; }); try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
 function _tlInputNaarState(inp){ if(!inp||typeof inp!=='object') return; _TL_INPUT_VELDEN.forEach(function(k){ if(inp[k]!==undefined) IN[k]=inp[k]; }); }
 function _tlProjectBewaar(){
   try{
     var naam=IN._project||IN._klant||''; if(!naam) return;
     var _partner=''; try{ _partner=new URLSearchParams(location.search).get('partner')||''; }catch(e){}   // v0.9.11 (Fase 2): EPC/partner-id uit de schil
-    _tlApiPost('/api/kamino/project',{ id:_projectIdLokaal(naam), naam:naam, scenario:'thuisladen', partner:_partner, klant:{ naam:IN._klant||naam }, input:_tlStateNaarInput() })
+    _tlApiPost('/api/kamino/project',{ id:_projectIdLokaal(naam), naam:naam, scenario:'thuisladen', partner:_partner, klant:{ naam:IN._klant||naam, email:(IN._klantEmail||'').trim().toLowerCase() }, input:_tlStateNaarInput() })   // v0.9.12 (Fase 2c): klant-e-mail → scoped klanttoegang + auto-account server-side
       .then(function(){ _tlKaminoCache=null; }).catch(function(){});
   }catch(e){}
 }
@@ -1135,6 +1141,7 @@ function _tlKaminoLaad(poging){   // proactief laden mét herpogingen tot de aut
     .catch(function(){ if(poging<6) setTimeout(function(){ _tlKaminoLaad(poging+1); }, 700); });
 }
 window.setProj=function(v){ IN._project=v; if(!IN._klant) IN._klant=v; renderSide(); };
+window.setKlantMail=function(v){ IN._klantEmail=(v||'').trim(); };   // v0.9.12 (Fase 2c): klant-e-mail voor scoped klanttoegang
 window._tlSelOpen=function(v){ if(v){ var i=document.getElementById('tlProjCode'); if(i) i.value=v; window._tlProjectOpen(v); } };
 window._tlProjectOpen=function(id){
   id=String(id||'').trim().toUpperCase();
