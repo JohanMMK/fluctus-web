@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mandaten · Fluctus</title>
+<!-- mandaten.html v0.1.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
+     Leest GET /api/mandaat/wachtrij?status=<alle> en toont per EAN de status, beide adressen (factuur ↔ Fluvius),
+     adres-match, wie een mismatch bevestigde, referentienr en gemaskeerd titularis-mail — voor nazicht nadien.
+     Supabase-login (zelfde SSO als de andere apps); niet-managers krijgen een nette melding. Additief, read-only. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .wrap{ max-width:1240px; margin:0 auto; padding:18px 20px 60px; }
+  .bar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .chip{ border:1.5px solid var(--line); background:#fff; color:var(--navy2); border-radius:999px; padding:6px 13px; font-size:12.5px; cursor:pointer; font-weight:600; }
+  .chip.on{ background:var(--navy); color:#fff; border-color:var(--navy); }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .cnt{ font-size:12.5px; color:var(--muted); margin-left:auto; }
+  .tbl-wrap{ overflow-x:auto; background:#fff; border:1px solid var(--line); border-radius:12px; }
+  table{ border-collapse:collapse; width:100%; font-size:12.5px; min-width:1050px; }
+  th,td{ text-align:left; padding:9px 11px; border-bottom:1px solid #eef2f8; vertical-align:top; }
+  th{ background:#f7faff; color:var(--navy); font-weight:700; position:sticky; top:0; white-space:nowrap; }
+  tr.special{ background:#FFF7ED; }
+  .code{ font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .badge{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .b-wachtrij{ background:#FEF3C7; color:#92610a; }
+  .b-aangevraagd{ background:#DBEAFE; color:#1e40af; }
+  .b-actief{ background:#D1FAE5; color:#065f46; }
+  .b-geleverd{ background:#BBF7D0; color:#065f46; }
+  .b-adres_mismatch{ background:#FEE2E2; color:#991b1b; }
+  .b-geannuleerd{ background:#E5E7EB; color:#6b7280; }
+  .b-fout{ background:#FEE2E2; color:#991b1b; }
+  .match-ok{ color:#059669; font-weight:700; }
+  .match-no{ color:#dc2626; font-weight:700; }
+  .match-na{ color:#9ca3af; }
+  .adr{ max-width:230px; }
+  .sub{ color:var(--muted); font-size:11px; }
+  .mark{ display:inline-block; background:#1F3864; color:#fff; border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; margin-left:4px; }
+  .state{ padding:40px; text-align:center; color:var(--muted); }
+  .fout{ padding:40px; text-align:center; color:#b23; }
+  .legend{ font-size:11.5px; color:var(--muted); margin-top:10px; line-height:1.7; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>🗂️ Mandaten — overzicht</h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="who" id="who"></span>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="bar" id="bar" style="display:none">
+      <span style="font-size:12.5px;color:var(--navy);font-weight:700">Filter:</span>
+      <span class="chip on" data-f="alle">Alle</span>
+      <span class="chip" data-f="wachtrij">In wachtrij</span>
+      <span class="chip" data-f="adres_mismatch">Adres te bevestigen</span>
+      <span class="chip" data-f="aangevraagd">Aangevraagd</span>
+      <span class="chip" data-f="actief">Actief</span>
+      <span class="chip" data-f="geleverd">Geleverd</span>
+      <span class="chip" data-f="special">⚠ Te verifiëren</span>
+      <button class="btn ghost" id="ververs" style="margin-left:8px">↻ Ververs</button>
+      <span class="cnt" id="cnt"></span>
+    </div>
+    <div id="root"><div class="state">Laden…</div></div>
+    <div class="legend" id="legend" style="display:none">
+      <b>↻ Ververs</b> herleest wat er op de server staat. De <b>live Fluvius-status</b> (mandaten die er al staan of
+      in aanvraag zijn) wordt binnengetrokken door de <b>watchdog / een skill-run op je PC</b> (die schrijft ze via
+      sync terug); daarna toont een ververs ze hier. EAN’s die bij Fluvius bestaan maar (nog) geen project hebben,
+      staan als <b>“Fluvius — los (geen project)”</b> in de lijst.<br>
+      <b>⚠ Te verifiëren</b> = adres-mismatch die door de klant/adviseur werd <b>bevestigd</b> (badge “bevestigd”)
+      of nog op <b>adres te bevestigen</b> staat — hier doe je het manuele nazicht. Kolom <b>Adres-match</b>: ✓ = factuur en
+      Fluvius komen overeen, ✗ = wijkt af (bevestiging nodig), — = nog niet gecheckt.
+    </div>
+  </div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], FILT='alle';
+    var ALLE_STATUS = 'wachtrij,aangevraagd,actief,geleverd,adres_mismatch,geannuleerd,fout';
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function kort(iso){ try{ if(!iso) return ''; var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return ''; } }
+
+    async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+
+    async function initAuth(){
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d = await sb.auth.getSession(); SESSION = d.data.session;
+      if(!SESSION){ window.location.href='/portal.html'; return; }
+      $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      await laad();
+    }
+    async function authHeaders(){
+      var tok = SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function laad(){
+      $('root').innerHTML='<div class="state">Mandaten laden…</div>';
+      var r;
+      try{ r = await fetch(PROXY+'/api/mandaat/wachtrij?status='+encodeURIComponent(ALLE_STATUS), { headers: await authHeaders() }); }
+      catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+      if(r.status===403){ $('root').innerHTML='<div class="fout">Dit overzicht is enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a></div>'; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+      var j = await r.json(); ITEMS = (j.items||[]);
+      $('bar').style.display='flex'; $('legend').style.display='block';
+      render();
+    }
+
+    function isSpecial(it){ return it.status==='adres_mismatch' || it.adres_bevestigd===true; }
+    function gefilterd(){
+      if(FILT==='alle') return ITEMS;
+      if(FILT==='special') return ITEMS.filter(isSpecial);
+      return ITEMS.filter(function(it){ return it.status===FILT; });
+    }
+
+    function statusBadge(s){
+      var labels={ wachtrij:'in wachtrij', aangevraagd:'aangevraagd', actief:'actief', geleverd:'geleverd', adres_mismatch:'adres te bevestigen', geannuleerd:'geannuleerd', fout:'fout' };
+      return '<span class="badge b-'+esc(s)+'">'+esc(labels[s]||s)+'</span>';
+    }
+    function matchCel(it){
+      if(it.adres_match===true) return '<span class="match-ok">✓ komt overeen</span>';
+      if(it.adres_match===false) return '<span class="match-no">✗ wijkt af</span>'+(it.adres_bevestigd?'<span class="mark">bevestigd</span>':'');
+      return '<span class="match-na">— niet gecheckt</span>';
+    }
+
+    function render(){
+      var rows = gefilterd();
+      $('cnt').textContent = rows.length+' / '+ITEMS.length+' EAN'+(ITEMS.length===1?'':'’s');
+      if(!ITEMS.length){ $('root').innerHTML='<div class="state">Nog geen mandaat-aanvragen. Zodra iemand in de app een mandaat aanvraagt, verschijnt het hier.</div>'; return; }
+      if(!rows.length){ $('root').innerHTML='<div class="state">Geen resultaten voor dit filter.</div>'; return; }
+      var h='<div class="tbl-wrap"><table><thead><tr>'+
+        '<th>Project</th><th>EAN</th><th>Richting</th><th>Status</th><th>Adres-match</th>'+
+        '<th>Factuuradres</th><th>Fluvius-adres</th><th>Bevestigd door</th><th>Referentie / mail</th><th>Bijgewerkt</th>'+
+        '</tr></thead><tbody>';
+      rows.forEach(function(it){
+        var bev = it.bevestigd_door ? (esc(it.bevestigd_door.naam||it.bevestigd_door.email||'?')+(it.bevestigd_door.rol?(' <span class="sub">('+esc(it.bevestigd_door.rol)+')</span>'):'')+'<div class="sub">'+kort(it.bevestigd_op)+'</div>') : '<span class="sub">—</span>';
+        var laatste = it.actief_op || it.aangevraagd_op || it.in_wachtrij_sinds;
+        h+='<tr class="'+(isSpecial(it)?'special':'')+'">'+
+          '<td><b>'+esc(it.project_naam||it.project_id)+'</b><div class="sub code">'+esc(it.project_id)+(it.klant?(' · '+esc(it.klant)):'')+(it.meter_type?(' · '+esc(it.meter_type)):'')+'</div></td>'+
+          '<td class="code">'+esc(it.ean)+'</td>'+
+          '<td>'+esc(it.richting||'—')+'</td>'+
+          '<td>'+statusBadge(it.status)+'</td>'+
+          '<td>'+matchCel(it)+'</td>'+
+          '<td class="adr">'+esc(it.factuuradres||'—')+'</td>'+
+          '<td class="adr">'+esc(it.fluvius_adres||'—')+'</td>'+
+          '<td>'+bev+'</td>'+
+          '<td>'+(it.referentienummer?('<span class="code">'+esc(it.referentienummer)+'</span>'):'<span class="sub">—</span>')+(it.titularis_mail_masked?('<div class="sub">'+esc(it.titularis_mail_masked)+'</div>'):'')+(it.opmerking?('<div class="sub">“'+esc(it.opmerking)+'”</div>'):'')+'</td>'+
+          '<td class="sub">'+kort(laatste)+'</td>'+
+        '</tr>';
+      });
+      h+='</tbody></table></div>';
+      $('root').innerHTML=h;
+    }
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(c){
+        c.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); }); c.classList.add('on'); FILT=c.getAttribute('data-f'); render(); };
+      });
+      $('ververs').onclick=laad;
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+    });
+  </script>
+</body>
+</html>
