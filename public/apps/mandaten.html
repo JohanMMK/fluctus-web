@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.1.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
+<!-- mandaten.html v0.2.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
+     v0.2.0: bevestig/weiger-knoppen op adres_mismatch-rijen (POST /api/mandaat/bevestig-adres). v0.1.0 basis:
      Leest GET /api/mandaat/wachtrij?status=<alle> en toont per EAN de status, beide adressen (factuur ↔ Fluvius),
      adres-match, wie een mismatch bevestigde, referentienr en gemaskeerd titularis-mail — voor nazicht nadien.
      Supabase-login (zelfde SSO als de andere apps); niet-managers krijgen een nette melding. Additief, read-only. -->
@@ -41,6 +42,9 @@
   .match-ok{ color:#059669; font-weight:700; }
   .match-no{ color:#dc2626; font-weight:700; }
   .match-na{ color:#9ca3af; }
+  .mini{ border:1px solid var(--line); border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; cursor:pointer; background:#fff; }
+  .mini.ok{ border-color:#059669; color:#065f46; } .mini.ok:hover{ background:#ecfdf5; }
+  .mini.no{ border-color:#dc2626; color:#991b1b; } .mini.no:hover{ background:#fef2f2; }
   .adr{ max-width:230px; }
   .sub{ color:var(--muted); font-size:11px; }
   .mark{ display:inline-block; background:#1F3864; color:#fff; border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; margin-left:4px; }
@@ -152,7 +156,7 @@
           '<td><b>'+esc(it.project_naam||it.project_id)+'</b><div class="sub code">'+esc(it.project_id)+(it.klant?(' · '+esc(it.klant)):'')+(it.meter_type?(' · '+esc(it.meter_type)):'')+'</div></td>'+
           '<td class="code">'+esc(it.ean)+'</td>'+
           '<td>'+esc(it.richting||'—')+'</td>'+
-          '<td>'+statusBadge(it.status)+'</td>'+
+          '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+'</td>'+
           '<td>'+matchCel(it)+'</td>'+
           '<td class="adr">'+esc(it.factuuradres||'—')+'</td>'+
           '<td class="adr">'+esc(it.fluvius_adres||'—')+'</td>'+
@@ -165,6 +169,15 @@
       $('root').innerHTML=h;
     }
 
+    // v0.2.0 (Fase 3): manager bevestigt/weigert een adres-mismatch (mandaat/bevestig-adres).
+    window.mandBevestig = async function(pid, ean, akkoord){
+      if(!akkoord && !confirm('Adres weigeren voor EAN '+ean+'? De aanvraag wordt geannuleerd.')) return;
+      try{
+        var r = await fetch(PROXY+'/api/mandaat/bevestig-adres', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:pid, ean:ean, akkoord:!!akkoord }) });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
     window.addEventListener('DOMContentLoaded', async function(){
       Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(c){
         c.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); }); c.classList.add('on'); FILT=c.getAttribute('data-f'); render(); };

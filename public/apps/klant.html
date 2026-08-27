@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Uw project — Fluctus</title>
-<!-- klant.html v0.1.0 (2026-08-26, Fase 2c) — SCOPED klant-toegang tot ÉÉN project.
+<!-- klant.html v0.2.0 (2026-08-27, Fase 3) — SCOPED klant-toegang + adres-bevestiging bij mandaat-mismatch.
+     v0.2.0: toont adres_mismatch-EAN's met factuur↔Fluvius-adres + bevestig/weiger (POST /api/mandaat/bevestig-adres).
+     v0.1.0 (Fase 2c) — SCOPED klant-toegang tot ÉÉN project.
      Flow: ?project=FLX-XXX-XXXX → e-mail + 6-cijfercode (Supabase OTP, code-flow, geen redirect) →
      GET /api/kamino/project-get (server gate _magProjectOpenen: klant-e-mail moet op het record staan) →
      toont het project + bewaarde rapporten (signed PDF-URL's). Geen launcher, geen projectlijst.
@@ -187,6 +189,22 @@
         rows.forEach(function(kv){ html+='<div class="kv"><b>'+esc(kv[0])+'</b><span>'+esc(kv[1])+'</span></div>'; });
         html+='</div>';
       }
+      // v0.2.0 (Fase 3): adres-bevestiging bij mismatch (factuuradres ↔ Fluvius-adres).
+      var mism=((p.mandaat&&p.mandaat.eans)||[]).filter(function(e){ return e.status==='adres_mismatch'; });
+      if(mism.length){
+        html+='<h1 style="font-size:16px;margin-top:22px">Adres bevestigen</h1>';
+        html+='<p class="note">Voor onderstaande aansluiting(en) wijkt het adres op uw factuur af van het adres bij Fluvius. Controleer en bevestig, of weiger.</p>';
+        mism.forEach(function(e){
+          html+='<div class="rap" style="display:block">'+
+            '<div class="nm">EAN '+esc(e.ean)+'</div>'+
+            '<div class="kv"><b>Factuur</b><span>'+esc((p.mandaat&&p.mandaat.factuuradres)||inp.adres||'—')+'</span></div>'+
+            '<div class="kv"><b>Fluvius</b><span>'+esc(e.fluvius_adres||'—')+'</span></div>'+
+            '<div style="display:flex;gap:8px;margin-top:10px">'+
+              '<a class="linkbtn" href="javascript:void(0)" onclick="klantBevestig(\''+esc(e.ean)+'\',true)"><span class="btn" style="margin-top:0">Ja, klopt — bevestigen</span></a>'+
+              '<a class="linkbtn" href="javascript:void(0)" onclick="klantBevestig(\''+esc(e.ean)+'\',false)"><span class="btn ghost" style="margin-top:0">Nee, klopt niet</span></a>'+
+            '</div></div>';
+        });
+      }
       // rapporten (signed PDF-URL's uit project-get)
       var pdfs=(rap && rap.pdfs) || [];
       if(pdfs.length){
@@ -201,6 +219,16 @@
       }
       $('project-body').innerHTML=html;
     }
+
+    // v0.2.0 (Fase 3): klant bevestigt/weigert een adres-mismatch → mandaat/bevestig-adres.
+    window.klantBevestig = async function(ean, akkoord){
+      if(!akkoord && !confirm('Weigeren? De mandaataanvraag voor EAN '+ean+' wordt geannuleerd.')) return;
+      try{
+        var r = await fetch(PROXY+'/api/mandaat/bevestig-adres', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:PID, ean:ean, akkoord:!!akkoord }) });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        laadProject();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
 
     async function logout(){ try{ await sb.auth.signOut(); }catch(e){} SESSION=null; render(); }
 
