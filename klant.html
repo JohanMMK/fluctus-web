@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uw project — Fluctus</title>
+<!-- klant.html v0.2.0 (2026-08-27, Fase 3) — SCOPED klant-toegang + adres-bevestiging bij mandaat-mismatch.
+     v0.2.0: toont adres_mismatch-EAN's met factuur↔Fluvius-adres + bevestig/weiger (POST /api/mandaat/bevestig-adres).
+     v0.1.0 (Fase 2c) — SCOPED klant-toegang tot ÉÉN project.
+     Flow: ?project=FLX-XXX-XXXX → e-mail + 6-cijfercode (Supabase OTP, code-flow, geen redirect) →
+     GET /api/kamino/project-get (server gate _magProjectOpenen: klant-e-mail moet op het record staan) →
+     toont het project + bewaarde rapporten (signed PDF-URL's). Geen launcher, geen projectlijst.
+     Auth/keys via /api/config (same-origin). Additief: nieuwe pagina, raakt niets bestaands. -->
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --ok:#05B050; --err:#B23; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+        color:var(--ink); background:var(--bg); min-height:100vh; }
+  .wrap{ max-width:640px; margin:0 auto; padding:32px 20px 60px; }
+  .brand{ display:flex; align-items:center; gap:10px; color:var(--navy); font-weight:800; font-size:18px; letter-spacing:.3px; margin-bottom:20px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 36px rgba(18,49,94,.08); padding:26px 24px; margin-bottom:16px; }
+  h1{ color:var(--navy); font-size:22px; margin:0 0 4px; }
+  .sub{ color:var(--muted); font-size:14px; margin:0 0 18px; }
+  label{ display:block; font-size:13px; font-weight:600; color:var(--navy); margin:14px 0 5px; }
+  input[type=email],input[type=text]{ width:100%; border:1.5px solid var(--line); border-radius:9px; padding:11px 13px; font-size:15px; color:var(--ink); background:#fbfdff; }
+  input:focus{ outline:none; border-color:var(--navy); }
+  .btn{ display:inline-block; background:var(--navy); color:#fff; border:none; border-radius:9px; padding:12px 20px; font-size:14.5px; font-weight:700; cursor:pointer; margin-top:16px; transition:background .15s; }
+  .btn:hover{ background:var(--navy2); }
+  .btn[disabled]{ opacity:.55; cursor:default; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .btn.ghost:hover{ background:#f2f6fc; }
+  .msg{ font-size:13.5px; margin-top:12px; min-height:18px; }
+  .msg.err{ color:var(--err); }
+  .msg.ok{ color:#0a7a37; }
+  .hidden{ display:none !important; }
+  .code{ font-family:ui-monospace,Menlo,Consolas,monospace; letter-spacing:1px; }
+  .rap{ display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); border-radius:10px; padding:13px 15px; margin-top:10px; background:#fbfdff; }
+  .rap .nm{ font-size:14px; color:var(--navy); font-weight:600; }
+  .rap .dt{ font-size:12px; color:var(--muted); }
+  .kv{ display:flex; gap:10px; font-size:13.5px; padding:5px 0; border-bottom:1px dashed #e6ecf5; }
+  .kv b{ color:var(--navy2); min-width:130px; display:inline-block; }
+  .top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .who{ font-size:12.5px; color:var(--muted); }
+  a.linkbtn{ text-decoration:none; }
+  .note{ color:var(--muted); font-size:13px; margin-top:12px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">🔆 Fluctus</div>
+
+    <!-- LOGIN -->
+    <div class="card" id="login-card">
+      <h1>Uw project bekijken</h1>
+      <p class="sub" id="login-sub">Meld u aan met uw e-mailadres. U ontvangt een code per e-mail.</p>
+      <div id="stap-email">
+        <label for="email">E-mailadres</label>
+        <input type="email" id="email" placeholder="u@bedrijf.be" autocomplete="email">
+        <button class="btn" id="btn-code">Stuur mij een code</button>
+      </div>
+      <div id="stap-code" class="hidden">
+        <label for="code">Code uit uw e-mail</label>
+        <input type="text" id="code" class="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-cijfercode">
+        <div>
+          <button class="btn" id="btn-verify">Aanmelden</button>
+          <button class="btn ghost" id="btn-again">Ander e-mailadres</button>
+        </div>
+      </div>
+      <div class="msg" id="login-msg"></div>
+    </div>
+
+    <!-- PROJECT -->
+    <div class="card hidden" id="project-card">
+      <div class="top">
+        <span class="who" id="who"></span>
+        <button class="btn ghost" id="btn-logout" style="margin-top:0;padding:7px 13px;font-size:12.5px">Afmelden</button>
+      </div>
+      <div id="project-body"></div>
+    </div>
+  </div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='';
+    var PID='', SCENARIO='';
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function qp(k){ try{ return new URLSearchParams(location.search).get(k)||''; }catch(e){ return ''; } }
+
+    function injectSupabase(){
+      return new Promise(function(resolve,reject){
+        if(window.supabase) return resolve();
+        var s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        s.onload=resolve; s.onerror=function(){ reject(new Error('Aanmeldmodule kon niet laden.')); };
+        document.head.appendChild(s);
+      });
+    }
+
+    async function loadConfig(){
+      var r=await fetch('/api/config'); CFG=await r.json();
+      PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,'');
+    }
+
+    async function initAuth(){
+      await injectSupabase();
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ toonMsg('Aanmelden is nog niet geconfigureerd. Neem contact op met uw adviseur.','err'); return; }
+      sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d=await sb.auth.getSession(); SESSION=d.data.session;
+      sb.auth.onAuthStateChange(function(_e,s){ SESSION=s; render(); });
+      render();
+    }
+
+    function toonMsg(t,cls){ var m=$('login-msg'); m.className='msg'+(cls?(' '+cls):''); m.textContent=t||''; }
+    function toonCode(aan){ $('stap-code').classList.toggle('hidden',!aan); $('stap-email').classList.toggle('hidden',aan); }
+
+    async function sendCode(){
+      var email=$('email').value.trim();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toonMsg('Vul een geldig e-mailadres in.','err'); return; }
+      $('btn-code').disabled=true;
+      var res=await sb.auth.signInWithOtp({ email:email, options:{ shouldCreateUser:true } });
+      $('btn-code').disabled=false;
+      if(res.error){ toonMsg('Kon geen code sturen: '+res.error.message,'err'); return; }
+      toonCode(true); toonMsg('We hebben u een code gemaild. Vul ze hierboven in.','ok'); $('code').focus();
+    }
+
+    async function verifyCode(){
+      var email=$('email').value.trim(), token=$('code').value.trim();
+      if(!token){ toonMsg('Vul de code uit uw e-mail in.','err'); return; }
+      $('btn-verify').disabled=true;
+      var res=await sb.auth.verifyOtp({ email:email, token:token, type:'email' });
+      if(res.error) res=await sb.auth.verifyOtp({ email:email, token:token, type:'signup' });
+      $('btn-verify').disabled=false;
+      if(res.error){ toonMsg('Code klopt niet of is verlopen: '+res.error.message,'err'); return; }
+      toonMsg('',''); // onAuthStateChange → render()
+    }
+
+    function resetLogin(){ toonCode(false); $('code').value=''; toonMsg('',''); }
+
+    async function authHeaders(){
+      var tok=SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d && d.data && d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function render(){
+      var loggedIn=!!SESSION;
+      $('login-card').classList.toggle('hidden', loggedIn);
+      $('project-card').classList.toggle('hidden', !loggedIn);
+      if(!loggedIn) return;
+      $('who').textContent=(SESSION.user && SESSION.user.email) ? ('Aangemeld als '+SESSION.user.email) : '';
+      await laadProject();
+    }
+
+    async function laadProject(){
+      var body=$('project-body');
+      if(!/^FLX-[A-Z0-9]{3}-[A-Z0-9]{3,4}$/.test(PID)){
+        body.innerHTML='<h1>Geen project</h1><p class="sub">Deze link bevat geen geldig projectnummer. Vraag uw adviseur om de juiste link.</p>';
+        return;
+      }
+      body.innerHTML='<p class="sub">Uw project laden…</p>';
+      var url=PROXY+'/api/kamino/project-get?id='+encodeURIComponent(PID)+(SCENARIO?('&scenario='+encodeURIComponent(SCENARIO)):'');
+      var r;
+      try{ r=await fetch(url,{ headers:await authHeaders() }); }
+      catch(e){ body.innerHTML='<h1>Even niet bereikbaar</h1><p class="sub">De server is tijdelijk niet bereikbaar. Probeer straks opnieuw.</p>'; return; }
+      if(r.status===403){ body.innerHTML='<h1>Geen toegang</h1><p class="sub">Dit e-mailadres hoort niet bij dit project. Meld u aan met het adres dat uw adviseur registreerde, of neem contact op.</p>'; return; }
+      if(r.status===404){ body.innerHTML='<h1>Project niet gevonden</h1><p class="sub">Dit projectnummer bestaat niet (meer). Vraag uw adviseur om een nieuwe link.</p>'; return; }
+      if(r.status===401){ SESSION=null; render(); return; }
+      if(!r.ok){ body.innerHTML='<h1>Fout</h1><p class="sub">Kon het project niet ophalen ('+r.status+').</p>'; return; }
+      var j=await r.json();
+      renderProject(j.project||{}, (j.rapporten||{}));
+    }
+
+    function renderProject(p, rap){
+      var naam=p.naam || (p.klant && (p.klant.naam||p.klant.name)) || p.id || 'Uw project';
+      var adviseur=(p.adviseur && (p.adviseur.naam||p.adviseur.name||p.adviseur.email)) || '';
+      var html='<h1>'+esc(naam)+'</h1>';
+      html+='<p class="sub">Projectcode <b class="code">'+esc(p.id||PID)+'</b></p>';
+      // korte dossiersamenvatting (best-effort uit input/baseCase)
+      var inp=p.input||{}, bc=p.baseCase||{};
+      var rows=[];
+      if(bc.klantNaam||p.klant&&(p.klant.naam||p.klant.name)) rows.push(['Klant', bc.klantNaam||(p.klant.naam||p.klant.name)]);
+      if(inp.adres) rows.push(['Adres', inp.adres]);
+      if(inp.jaarverbruik) rows.push(['Jaarverbruik', inp.jaarverbruik+' kWh']);
+      if(inp.aansluitingKva) rows.push(['Aansluiting', inp.aansluitingKva+' kVA']);
+      if(adviseur) rows.push(['Uw adviseur', adviseur]);
+      if(rows.length){
+        html+='<div style="margin:16px 0">';
+        rows.forEach(function(kv){ html+='<div class="kv"><b>'+esc(kv[0])+'</b><span>'+esc(kv[1])+'</span></div>'; });
+        html+='</div>';
+      }
+      // v0.2.0 (Fase 3): adres-bevestiging bij mismatch (factuuradres ↔ Fluvius-adres).
+      var mism=((p.mandaat&&p.mandaat.eans)||[]).filter(function(e){ return e.status==='adres_mismatch'; });
+      if(mism.length){
+        html+='<h1 style="font-size:16px;margin-top:22px">Adres bevestigen</h1>';
+        html+='<p class="note">Voor onderstaande aansluiting(en) wijkt het adres op uw factuur af van het adres bij Fluvius. Controleer en bevestig, of weiger.</p>';
+        mism.forEach(function(e){
+          html+='<div class="rap" style="display:block">'+
+            '<div class="nm">EAN '+esc(e.ean)+'</div>'+
+            '<div class="kv"><b>Factuur</b><span>'+esc((p.mandaat&&p.mandaat.factuuradres)||inp.adres||'—')+'</span></div>'+
+            '<div class="kv"><b>Fluvius</b><span>'+esc(e.fluvius_adres||'—')+'</span></div>'+
+            '<div style="display:flex;gap:8px;margin-top:10px">'+
+              '<a class="linkbtn" href="javascript:void(0)" onclick="klantBevestig(\''+esc(e.ean)+'\',true)"><span class="btn" style="margin-top:0">Ja, klopt — bevestigen</span></a>'+
+              '<a class="linkbtn" href="javascript:void(0)" onclick="klantBevestig(\''+esc(e.ean)+'\',false)"><span class="btn ghost" style="margin-top:0">Nee, klopt niet</span></a>'+
+            '</div></div>';
+        });
+      }
+      // rapporten (signed PDF-URL's uit project-get)
+      var pdfs=(rap && rap.pdfs) || [];
+      if(pdfs.length){
+        html+='<h1 style="font-size:16px;margin-top:22px">Uw rapport'+(pdfs.length>1?'en':'')+'</h1>';
+        pdfs.forEach(function(f){
+          var dt=f.bijgewerkt?('bijgewerkt '+String(f.bijgewerkt).slice(0,10)):'';
+          html+='<div class="rap"><div><div class="nm">'+esc(f.naam||'Rapport')+'</div><div class="dt">'+esc(dt)+'</div></div>'+
+                (f.url?('<a class="linkbtn" href="'+esc(f.url)+'" target="_blank" rel="noopener"><span class="btn" style="margin-top:0">Bekijken</span></a>'):'<span class="dt">niet beschikbaar</span>')+'</div>';
+        });
+      } else {
+        html+='<p class="note">Er staat nog geen rapport klaar voor dit project. Zodra uw adviseur er een klaarzet, verschijnt het hier.</p>';
+      }
+      $('project-body').innerHTML=html;
+    }
+
+    // v0.2.0 (Fase 3): klant bevestigt/weigert een adres-mismatch → mandaat/bevestig-adres.
+    window.klantBevestig = async function(ean, akkoord){
+      if(!akkoord && !confirm('Weigeren? De mandaataanvraag voor EAN '+ean+' wordt geannuleerd.')) return;
+      try{
+        var r = await fetch(PROXY+'/api/mandaat/bevestig-adres', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:PID, ean:ean, akkoord:!!akkoord }) });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        laadProject();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
+
+    async function logout(){ try{ await sb.auth.signOut(); }catch(e){} SESSION=null; render(); }
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      PID=(qp('project')||qp('id')||'').trim().toUpperCase();
+      SCENARIO=(qp('scenario')||'').trim();
+      $('btn-code').onclick=sendCode;
+      $('btn-verify').onclick=verifyCode;
+      $('btn-again').onclick=resetLogin;
+      $('btn-logout').onclick=logout;
+      $('email').addEventListener('keydown',function(e){ if(e.key==='Enter' && $('stap-code').classList.contains('hidden')) sendCode(); });
+      $('code').addEventListener('keydown',function(e){ if(e.key==='Enter') verifyCode(); });
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ toonMsg('Kon niet initialiseren: '+e.message,'err'); }
+    });
+  </script>
+</body>
+</html>
