@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnergieKompas — Onderhandelingsnota</title>
+<!-- energiekompas-nota.html v0.2.1 (2026-08-27, Fase 4 slice D) — WHITE-LABEL: geen "Fluctus" zichtbaar, enkel
+     "EnergieKompas" + het installateur-merk. Default-thema = 'energiekompas' (neutraal, geen merk).
+     ── v0.2.0 (2026-08-27, Fase 4 slice D) — GRATIS particulier-onderhandelingsnota + THEMA-LAAG.
+     NIEUW v0.2.0: white-label thema-laag (§7). Eén rapport, merk = een style. Thema via ?thema= / ?partner= of
+     D.thema (edrive · jacops · wattkraft · energypro · fluctus). Merk-tokens: accent, ink, cover-bg/-foto, merklabel,
+     footer, badge. De heat-ramp wordt AFGELEID uit de accent → de heatmaps kleuren automatisch mee per installateur.
+     ── v0.1.0 (2026-08-27, Fase 4 slice D) — GRATIS particulier-onderhandelingsnota.
+     Model = onderhandelingsnota uit laadplein (§17): onderhandeling (Kamino-vraag 1) + injectie/SolarActive
+     (Kamino-vraag 2), gevoed vanuit de EnergieKompas-schil (particulier). Rekent NIETS opnieuw — spiegelt de data.
+     Data via sessionStorage['FLUCTUS_EK_NOTA'] (window-global of demo-fallback voor standalone preview).
+     Heatmap-component 1-op-1 uit laadplein-rapport.html (heatmapSvg + heatKleur, 24×365-kalender, groene ladder).
+     Particulier: injectie enkel curtail_neg (netto_injectie + bespaard_curtail), GEEN onbalans (anti-regressie). -->
+<style>
+  :root{ --navy:#1F3864; --groen:#05B050; --edg:#80C539; --charcoal:#3B4049; --panel:#3f444d;
+    --lijn:#DCE3EC; --grijs:#5A6577; --zwart:#1A1F2B; --zacht:#F5F8FD; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:#e9edf2; color:var(--zwart);
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:12px; line-height:1.45; }
+  .demo{ background:#FFF7EC; border-bottom:1px solid #E8A33D; color:#9E480E; font-size:12px;
+    padding:7px 14px; text-align:center; }
+  .a4{ width:210mm; min-height:297mm; background:#fff; margin:14px auto; padding:16mm 15mm;
+    box-shadow:0 2px 14px rgba(20,40,80,.12); position:relative; overflow:hidden; }
+  h1,h2,h3{ margin:0; }
+  .eyebrow{ color:var(--edg); font-weight:800; text-transform:uppercase; letter-spacing:.06em; font-size:11px; }
+  .h-sec{ color:var(--navy); font-weight:800; font-size:17px; margin:2px 0 10px; }
+  .lead{ color:var(--grijs); font-size:12.5px; margin:0 0 12px; }
+  .note{ color:var(--grijs); font-size:11px; font-style:italic; }
+  /* KPI-tegels */
+  .kpis{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0 14px; }
+  .kpi{ border:1px solid var(--lijn); border-radius:10px; padding:12px 14px; background:var(--zacht); }
+  .kpi.g{ background:#F3FBF5; border-color:#05B05033; }
+  .kpi .l{ font-size:11px; color:var(--grijs); font-weight:700; }
+  .kpi .v{ font-size:24px; font-weight:800; color:var(--navy); margin:3px 0; }
+  .kpi.g .v{ color:#048443; }
+  .kpi .s{ font-size:10.5px; color:var(--grijs); }
+  /* tabel */
+  table.spec{ width:100%; border-collapse:collapse; font-size:11.5px; margin:6px 0 10px; }
+  table.spec td{ padding:4px 6px; border-bottom:1px solid #EEF2F7; }
+  table.spec td.k{ color:var(--grijs); width:46%; }
+  table.spec td.v{ font-weight:700; color:var(--zwart); }
+  /* heatmap (uit laadplein-rapport.html) */
+  .hm-titel{ font-size:12.5px; font-weight:800; color:var(--navy); margin:12px 0 3px; }
+  .hm-titel .hm-sub{ font-weight:500; color:var(--grijs); font-size:11px; }
+  .heat-wrap{ margin:6px 0 4px; }
+  .heat-svg{ display:block; width:100%; height:34mm; border:1px solid var(--lijn); border-radius:4px; }
+  .heat-leg{ display:flex; align-items:center; gap:6px; font-size:10px; color:var(--grijs); margin-top:4px; flex-wrap:wrap; }
+  .heat-leg .bar{ height:9px; width:120px; border-radius:2px;
+    background:var(--rampgrad, linear-gradient(90deg,#EAF7EE,#9AD4A6,#05B050,#048443,#0B3D24)); }
+  /* cover */
+  .a4.cover{ padding:0; background:var(--charcoal); color:#fff; }
+  .cover-bg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .cover-in{ position:relative; padding:22mm 18mm; display:flex; flex-direction:column; height:297mm; }
+  .cover-in .brand{ color:var(--edg); font-weight:800; letter-spacing:.04em; font-size:15px; }
+  .cover-in .titel{ margin-top:auto; font-size:34px; font-weight:800; line-height:1.12; }
+  .cover-in .titel span{ color:var(--edg); }
+  .cover-in .subtitel{ color:#C7CCD1; font-size:14px; margin-top:8px; }
+  .cover-grid{ margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; max-width:120mm; }
+  .cover-grid .cf{ background:rgba(255,255,255,.06); border-left:3px solid var(--edg); border-radius:4px; padding:9px 12px; }
+  .cover-grid .cf .cl{ color:#9aa3ad; text-transform:uppercase; font-size:9px; letter-spacing:.05em; }
+  .cover-grid .cf .cv{ color:#fff; font-weight:800; font-size:19px; }
+  .cover-in .foot{ margin-top:22px; color:#9aa3ad; font-size:11px; }
+  /* slot */
+  .a4.slot{ background:var(--charcoal); color:#fff; }
+  .slot .eyebrow{ color:var(--edg); }
+  .slot h2{ font-size:26px; font-weight:800; line-height:1.18; margin:4px 0 10px; }
+  .slot h2 .g{ color:var(--edg); }
+  .slot .sub{ color:#C7CCD1; font-size:13px; }
+  .promise{ background:#fff; color:var(--zwart); border-radius:12px; padding:16px 18px; margin:16px 0; }
+  .promise .t{ color:#048443; font-weight:800; font-size:13px; margin-bottom:8px; }
+  .promise ul{ margin:0; padding:0; list-style:none; }
+  .promise li{ position:relative; padding:5px 0 5px 22px; font-size:12px; color:#33404f; border-top:1px solid #EAF3EC; }
+  .promise li:first-child{ border-top:none; }
+  .promise li:before{ content:'✓'; position:absolute; left:0; top:5px; color:#048443; font-weight:800; }
+  .cta{ background:var(--edg); color:#12240a; border-radius:10px; padding:14px 18px; font-weight:800; font-size:14px; }
+  .cta .s{ font-weight:500; color:#22350f; font-size:12px; margin-top:4px; }
+  .slot .footer{ margin-top:auto; display:flex; justify-content:space-between; align-items:center;
+    color:#9aa3ad; font-size:11px; padding-top:16px; }
+  .slot-jc{ background:#E8352A; color:#fff; font-weight:800; font-size:11px; letter-spacing:-.3px; padding:3px 7px; border-radius:3px; }
+  .disc{ color:var(--grijs); font-size:10.5px; margin-top:10px; }
+  @media print{ html,body{ background:#fff; } .a4{ margin:0; box-shadow:none; page-break-after:always; } .demo{ display:none; } }
+</style>
+</head>
+<body>
+<div id="demo-banner" class="demo" style="display:none">Voorbeeldweergave — deze nota toont demodata (geen sessie doorgegeven vanuit de EnergieKompas-schil).</div>
+<div id="root"></div>
+
+<script>
+(function(){
+  'use strict';
+  var $ = function(id){ return document.getElementById(id); };
+  function eur(v){ if(v==null||isNaN(v)) return '—'; return '€ '+Math.round(v).toLocaleString('nl-BE'); }
+  function num(v,d){ if(v==null||isNaN(v)) return '—'; var f=Math.pow(10,d||0); return (Math.round(v*f)/f).toLocaleString('nl-BE'); }
+
+  // ── Thema-laag (§7): merk = een style. Zelfde rapport, andere merk-tokens per gekozen installateur. ──
+  // Tokens: accent (kleur + heat-ramp), ink (titels), cover-achtergrond/-foto, merklabel, footer, badge.
+  // De heat-ramp wordt AFGELEID uit de accent → de heatmaps kleuren automatisch mee per merk.
+  // White-label: NERGENS "Fluctus" op de nota — enkel "EnergieKompas" + het merk van de gekozen installateur.
+  var THEMES = {
+    energiekompas:{ merk:'ENERGIEKOMPAS',          accent:'#05B050', ink:'#1F3864', coverBg:'#12263f', coverImg:'',                            footer:'EnergieKompas',              badge:'' },
+    edrive:    { merk:'E+DRIVE · ENERGIEKOMPAS',   accent:'#80C539', ink:'#3B4049', coverBg:'#3B4049', coverImg:'/apps/voorblad-simuleer.jpg', footer:'E+Drive · EnergieKompas',     badge:'JACOPS.' },
+    jacops:    { merk:'JACOPS · ENERGIEKOMPAS',    accent:'#E8352A', ink:'#1A1F2B', coverBg:'#1A1F2B', coverImg:'/apps/voorblad-simuleer.jpg', footer:'Jacops · EnergieKompas',      badge:'JACOPS.' },
+    wattkraft: { merk:'WATTKRAFT · ENERGIEKOMPAS', accent:'#0E7DB5', ink:'#12303f', coverBg:'#12303f', coverImg:'/apps/voorblad-wattkraft.jpg', footer:'Wattkraft · EnergieKompas',   badge:'' },
+    energypro: { merk:'ENERGYPRO · ENERGIEKOMPAS', accent:'#EF7D00', ink:'#2b2016', coverBg:'#2b2016', coverImg:'/apps/voorblad-energypro.jpg', footer:'EnergyPro · EnergieKompas',   badge:'' }
+  };
+  THEMES.fluctus = THEMES.energiekompas;   // alias: default toont enkel "EnergieKompas"
+  function hex2rgb(h){ h=String(h).replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+  function mix(a,b,t){ return [Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b[1]-a[1])*t),Math.round(a[2]+(b[2]-a[2])*t)]; }
+  function rampFromAccent(hex){ var a=hex2rgb(hex),W=[255,255,255],B=[16,32,20];
+    return [mix(a,W,0.90),mix(a,W,0.52),a,mix(a,B,0.40),mix(a,B,0.75)]; }
+  var RAMP = rampFromAccent('#05B050'), T = THEMES.fluctus;   // defaults; overschreven door applyTheme
+  function applyTheme(theme){
+    T = theme || THEMES.fluctus; RAMP = rampFromAccent(T.accent);
+    var st=document.documentElement.style;
+    st.setProperty('--edg',   T.accent);
+    st.setProperty('--navy',  T.ink);
+    st.setProperty('--groen', T.accent);
+    st.setProperty('--charcoal', T.coverBg);
+    var g=RAMP.map(function(s){ return 'rgb('+s[0]+','+s[1]+','+s[2]+')'; });
+    st.setProperty('--rampgrad','linear-gradient(90deg,'+g[0]+','+g[1]+','+g[2]+','+g[3]+','+g[4]+')');
+  }
+  function qp(n){ try{ return new URLSearchParams(location.search).get(n); }catch(e){ return null; } }
+  function kiesThema(D){
+    var k=(D&&(D.thema||D.partner)) || qp('thema') || qp('partner') || 'energiekompas';
+    return THEMES[String(k).toLowerCase()] || THEMES.energiekompas;
+  }
+
+  // ── Heatmap-component (1-op-1 uit laadplein-rapport.html) — ramp uit het actieve thema ──
+  function heatKleur(t){
+    if(t<=0) return '#F2F5F8';
+    var stops=RAMP;
+    var x=Math.min(1,t)*(stops.length-1), i=Math.floor(x), f=x-i,
+        a=stops[i], b=stops[Math.min(stops.length-1,i+1)];
+    var r=Math.round(a[0]+(b[0]-a[0])*f), g=Math.round(a[1]+(b[1]-a[1])*f), bl=Math.round(a[2]+(b[2]-a[2])*f);
+    return 'rgb('+r+','+g+','+bl+')';
+  }
+  function heatmapSvg(mat, piek){
+    if(!mat||!mat.length) return '<div class="note">Geen sessie-profiel beschikbaar.</div>';
+    var DAYS=mat[0].length, HRS=mat.length, W=728, H=200, padL=26, padB=16;
+    var cw=(W-padL)/DAYS, ch=(H-padB)/HRS, mx=piek||1;
+    mat.forEach(function(row){ row.forEach(function(v){ if(v>mx) mx=v; }); });
+    var s='<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    for(var h=0;h<HRS;h++){ for(var d=0;d<DAYS;d++){ var v=mat[h][d]||0; if(v<=0) continue;
+      s+='<rect x="'+(padL+d*cw).toFixed(1)+'" y="'+((HRS-1-h)*ch).toFixed(1)+'" width="'+(cw+0.6).toFixed(1)+'" height="'+(ch+0.4).toFixed(1)+'" fill="'+heatKleur(v/mx)+'"/>'; } }
+    [0,6,12,18].forEach(function(h){ s+='<text x="2" y="'+((HRS-1-h)*ch+ch*0.5+3).toFixed(1)+'" font-size="8" fill="#5A6577">'+h+'u</text>'; });
+    var mnd=['J','F','M','A','M','J','J','A','S','O','N','D'], cum=[0,31,59,90,120,151,181,212,243,273,304,334];
+    cum.forEach(function(c,i){ var x=padL+c*cw;
+      s+='<line x1="'+x.toFixed(1)+'" y1="0" x2="'+x.toFixed(1)+'" y2="'+(H-padB)+'" stroke="#ffffff" stroke-width="0.4" opacity="0.5"/>';
+      s+='<text x="'+(x+2).toFixed(1)+'" y="'+(H-4)+'" font-size="8" fill="#5A6577">'+mnd[i]+'</text>'; });
+    s+='</svg>'; return s;
+  }
+  // platte 24×365-array (cel = uur*365 + dag) → mat[uur][dag]
+  function mat24(flat, uren, dagen){ uren=uren||24; dagen=dagen||365;
+    if(!flat||!flat.length) return null; var m=[];
+    for(var u=0;u<uren;u++){ var row=[]; for(var d=0;d<dagen;d++){ row.push(+flat[u*dagen+d]||0); } m.push(row); }
+    return m; }
+  function heatBlok(titel, sub, flat, uren, dagen, legL, legR){
+    if(!flat||!flat.length) return '';
+    var m=mat24(flat, uren, dagen); if(!m) return '';
+    return '<div class="hm-titel">'+titel+(sub?(' <span class="hm-sub">— '+sub+'</span>'):'')+'</div>'+
+      '<div class="heat-wrap">'+heatmapSvg(m,0)+
+      '<div class="heat-leg"><span>'+legL+'</span><span class="bar"></span><span>'+legR+'</span>'+
+      '<span style="margin-left:auto">verticaal = uur (0u onder → 23u boven) · horizontaal = jan → dec</span></div></div>';
+  }
+
+  // ── Pagina's ──
+  function pCover(D){
+    var i=D.input||{}, c=D.combo||{};
+    return '<section class="a4 cover">'+
+      (T.coverImg?('<img class="cover-bg" src="'+T.coverImg+'" onerror="this.style.display=\'none\'">'):'')+
+      '<div class="cover-in">'+
+        '<div class="brand">'+T.merk+'</div>'+
+        '<div class="titel">Onderhandelings<span>nota</span></div>'+
+        '<div class="subtitel">Uw eerste, gratis indicatie — contract, injectie en het effect van PV + batterij op uw aansluiting.</div>'+
+        '<div class="cover-grid">'+
+          '<div class="cf"><div class="cl">Klant</div><div class="cv">'+(D.klant||'—')+'</div></div>'+
+          '<div class="cf"><div class="cl">Regio · profiel</div><div class="cv">'+(D.regio||'—')+' · '+(D.profiel||'standaard')+'</div></div>'+
+          '<div class="cf"><div class="cl">Jaarverbruik</div><div class="cv">'+num(i.afname_mwh,1)+' <span style="font-size:12px;color:#9aa3ad">MWh</span></div></div>'+
+          '<div class="cf"><div class="cl">Datum</div><div class="cv">'+(D.datum||'')+'</div></div>'+
+        '</div>'+
+        '<div class="foot">Indicatief, op '+(D.specifiek_profiel?'uw specifiek meetprofiel':'een standaard verbruiksprofiel')+'. De volledige studie draait op uw echte kwartierdata (na Fluvius-mandaat).</div>'+
+      '</div></section>';
+  }
+
+  function pOnderhandel(D){
+    var o=D.onderhandel||{}, hm=o.heatmaps||{};
+    var kpis='<div class="kpis">'+
+      '<div class="kpi"><div class="l">Uw energiekost vandaag</div><div class="v">'+(o.energiekost_nu_mwh!=null?('± '+eur(o.energiekost_nu_mwh)+'/MWh'):'—')+'</div><div class="s">op uw huidige contract</div></div>'+
+      '<div class="kpi g"><div class="l">Met een dynamisch contract</div><div class="v">'+(o.energiekost_dyn_mwh!=null?('± '+eur(o.energiekost_dyn_mwh)+'/MWh'):'—')+'</div><div class="s">zelfde verbruik, spot-gebaseerd</div></div>'+
+      '<div class="kpi g"><div class="l">Onderhandelingsmarge</div><div class="v">'+eur(o.marge_jaar)+'<span style="font-size:13px;color:#5A6577"> /jaar</span></div><div class="s">'+(o.besparing_pct!=null?(num(o.besparing_pct,1)+' % van uw energiefactuur'):'')+'</div></div>'+
+      '<div class="kpi"><div class="l">Verbruik</div><div class="v">'+num(o.volume_mwh,1)+' <span style="font-size:13px;color:#5A6577">MWh/j</span></div><div class="s">'+(D.specifiek_profiel?'uit uw meetprofiel':'standaardprofiel')+'</div></div>'+
+      '</div>';
+    var tv=''; var ta=o.toegangsvermogen_advies;
+    if(ta && ta.verlaagbaar){ tv='<div class="kpi g" style="margin:0 0 10px"><div class="l">Toegangsvermogen verlaagbaar</div><div class="v" style="font-size:18px">'+ta.huidig_kw+' → '+ta.verlaagbaar_naar_kw+' kW</div><div class="s">maandpiek 12 mnd = '+ta.maandpiek_12m_kw+' kW'+(ta.besparing_indicatie_eur_jaar!=null?(' · ± '+eur(ta.besparing_indicatie_eur_jaar)+'/j extra')+'':'')+'</div></div>'; }
+    var heats='';
+    heats+=heatBlok('Uw afname-profiel','wanneer u stroom trekt (kW gemiddeld)', hm.afname_kw, hm.uren, hm.dagen, 'weinig', 'veel afname');
+    heats+=heatBlok('De dynamische prijs','spot day-ahead (€/MWh) — donker = duur', hm.spot_eur_mwh, hm.uren, hm.dagen, 'goedkoop', 'duur');
+    heats+=heatBlok('Uw afnamekost per moment','afname × prijs (€) — waar uw factuur zwaar weegt', hm.afnamekost_eur, hm.uren, hm.dagen, 'laag', 'hoog');
+    return '<section class="a4">'+
+      '<div class="eyebrow">1 · Uw huidige situatie</div>'+
+      '<div class="h-sec">Kunt u beter onderhandelen?</div>'+
+      '<div class="lead">We spiegelen uw factuur aan een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik. Dit is een indicatie — geen offerte.</div>'+
+      kpis+tv+
+      (heats?('<div class="note" style="margin:14px 0 2px">De heatmaps tonen uw jaar in één oogopslag: 24 uur verticaal, 365 dagen horizontaal.</div>'+heats):'')+
+      '</section>';
+  }
+
+  function pCombo(D){
+    var c=D.combo||{}, i=D.input||{};
+    var tvt=(c.terugverdientijd!=null)?c.terugverdientijd:((c.besparing>0&&c.capex>0)?(Math.round(c.capex/c.besparing*10)/10):null);
+    var kpis='<div class="kpis">'+
+      '<div class="kpi g"><div class="l">Besparing per jaar</div><div class="v">'+eur(c.besparing)+'</div><div class="s">t.o.v. uw huidige jaarkost</div></div>'+
+      '<div class="kpi g"><div class="l">Rendement</div><div class="v">'+(c.rendement!=null?(num(c.rendement,1)+' %'):'—')+'</div><div class="s">'+(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw investering')+'</div></div>'+
+      '<div class="kpi"><div class="l">Jaarkost met deze combinatie</div><div class="v">'+eur(c.kost)+'</div><div class="s">'+(c.ref_kost!=null?('nu ± '+eur(c.ref_kost)+'/j'):'')+'</div></div>'+
+      '<div class="kpi"><div class="l">Investering</div><div class="v">'+eur(c.capex)+'</div><div class="s">PV + batterij incl. plaatsing (indicatief)</div></div>'+
+      '</div>';
+    var combo=((c.pv_kwp>0)?(num(c.pv_kwp,1)+' kWp PV'):'geen PV')+
+      ((c.batt_kwh>0)?(' + '+num(c.batt_kwh,0)+' kWh'+(c.batt_kw?(' / '+num(c.batt_kw,0)+' kW'):'')+' batterij'):' · geen batterij');
+    return '<section class="a4">'+
+      '<div class="eyebrow">2 · PV + batterij op uw aansluiting</div>'+
+      '<div class="h-sec">Wat levert de combinatie op die u koos?</div>'+
+      '<div class="lead">U koos op de interactieve heatmaps de combinatie <b>'+combo+'</b>. Deze cijfers draaien op dezelfde motor als de thuisladen-studie (indicatief op '+(D.specifiek_profiel?'uw meetprofiel':'het standaardprofiel')+').</div>'+
+      kpis+
+      '<table class="spec">'+
+        '<tr><td class="k">Aansluiting</td><td class="v">'+num(i.aansluiting_kva,0)+' kVA'+(i.fasen?(' · '+i.fasen+'-fasig'):'')+'</td></tr>'+
+        '<tr><td class="k">Jaarverbruik (afname)</td><td class="v">'+num(i.afname_mwh,1)+' MWh</td></tr>'+
+        (i.bestaand_pv_kwp>0?'<tr><td class="k">Bestaande PV</td><td class="v">'+num(i.bestaand_pv_kwp,1)+' kWp</td></tr>':'')+
+        (i.injectie_mwh>0?'<tr><td class="k">Injectie vandaag</td><td class="v">'+num(i.injectie_mwh,1)+' MWh/j</td></tr>':'')+
+        '<tr><td class="k">Voorgestelde PV</td><td class="v">'+((c.pv_kwp>0)?num(c.pv_kwp,1)+' kWp':'—')+'</td></tr>'+
+        '<tr><td class="k">Voorgestelde batterij</td><td class="v">'+((c.batt_kwh>0)?(num(c.batt_kwh,0)+' kWh / '+num(c.batt_kw,0)+' kW'):'geen')+'</td></tr>'+
+      '</table>'+
+      '<div class="note">De exacte combinatie kiest u zelf op de heatmaps in de EnergieKompas-schil; deze nota bevestigt de gekozen cel.</div>'+
+      '</section>';
+  }
+
+  function pInjectie(D){
+    var inj=D.injectie; if(!inj) return '';
+    var op=inj.opbrengst_jaar||{}, pb=inj.payback||{}, hm=inj.heatmaps||{};
+    var kpis='<div class="kpis">'+
+      '<div class="kpi"><div class="l">Injectie vandaag (spot)</div><div class="v">'+eur(op.vandaag_spot_eur)+'<span style="font-size:13px;color:#5A6577"> /j</span></div><div class="s">alles injecteren aan day-ahead</div></div>'+
+      '<div class="kpi g"><div class="l">Met slim afregelen</div><div class="v">'+eur(op.met_curtail_eur)+'<span style="font-size:13px;color:#5A6577"> /j</span></div><div class="s">niet injecteren bij negatieve prijs</div></div>'+
+      '<div class="kpi g"><div class="l">Meerwaarde curtailment</div><div class="v">'+eur(op.meerwaarde_curtail_eur)+'<span style="font-size:13px;color:#5A6577"> /j</span></div><div class="s">zuivere winst, zonder extra investering</div></div>'+
+      '<div class="kpi"><div class="l">Productie</div><div class="v">'+num((inj.energie_jaar||{}).productie_mwh,1)+' <span style="font-size:13px;color:#5A6577">MWh/j</span></div><div class="s">op uw PV-vermogen</div></div>'+
+      '</div>';
+    var heats='';
+    heats+=heatBlok('Injectie-opbrengst vandaag','netto €/kwartier, zonder sturing', hm.netto_injectie_eur, hm.uren, hm.dagen, 'weinig', 'veel');
+    heats+=heatBlok('Winst door af te regelen','meerwaarde curtailment bij negatieve prijzen', hm.bespaard_curtail_eur, hm.uren, hm.dagen, 'weinig', 'veel winst');
+    return '<section class="a4">'+
+      '<div class="eyebrow">3 · Meer uit uw injectie</div>'+
+      '<div class="h-sec">Solar op de spotmarkt</div>'+
+      '<div class="lead">U hebt PV en injecteert. Door slim af te regelen op negatieve prijzen haalt u meer uit dezelfde installatie — zonder extra investering.</div>'+
+      kpis+heats+
+      '<div class="hm-titel" style="margin-top:14px">Gesprekssuggesties voor uw leverancier</div>'+
+      '<table class="spec">'+
+        '<tr><td class="k">Injectie opwaarderen</td><td class="v">laat de flex van uw omvormer meetellen — afregelen bij negatieve prijzen is winst voor u én het net.</td></tr>'+
+        '<tr><td class="k">Dynamische injectievergoeding</td><td class="v">vraag een spot-gekoppelde injectieprijs i.p.v. een vast (laag) forfait.</td></tr>'+
+      '</table>'+
+      '<div class="note">Voor particulieren rekenen we enkel met afregelen op negatieve prijzen — geen onbalansmarkt.</div>'+
+      '</section>';
+  }
+
+  function pSlot(D){
+    var c=D.combo||{};
+    return '<section class="a4 slot"><div style="display:flex;flex-direction:column;height:100%">'+
+      '<div class="eyebrow">De volgende stap</div>'+
+      '<h2>Klaar om <span class="g">slim te besparen</span> op uw energiefactuur?</h2>'+
+      '<div class="sub">Deze nota is een gratis indicatie op een standaardprofiel. De volledige studie draait op uw <b>echte kwartierdata</b> (na een Fluvius-mandaat) en bevat de 4 heatmaps met sweep, het financieel plan en de exacte combinatie.</div>'+
+      '<div class="promise"><div class="t">Onze belofte — u neemt geen risico</div><ul>'+
+        '<li><b>Rendementsgarantie.</b> Tonen we geen rendement van minstens 10 % aan? Dan betalen we u de studie integraal terug.</li>'+
+        '<li><b>Wij begeleiden de uitvoering.</b> We staan uw installateur bij zodat u de berekende resultaten ook effectief haalt.</li>'+
+        '<li><b>Bij uitvoering kost ze u niets.</b> Ernstige installateurs betalen de studie terug bij uw eerste bestelling.</li>'+
+      '</ul></div>'+
+      '<div class="cta">Vraag uw volledige EnergieKompas-studie aan'+
+        '<div class="s">Met uw akkoord voor een mandaat op uw meetgegevens — daarna de exacte combinatie en het rapport.</div></div>'+
+      '<div class="disc">Alle bedragen zijn indicatief en berekend op een '+(D.specifiek_profiel?'gemeten':'standaard')+' verbruiksprofiel met actuele marktdata. Geen offerte.</div>'+
+      '<div class="footer"><span>'+T.footer+'</span>'+(T.badge?('<span class="slot-jc">'+T.badge+'</span>'):'')+'<span>'+(D.datum||'')+'</span></div>'+
+    '</div></section>';
+  }
+
+  function render(D){
+    var html = pCover(D) + pOnderhandel(D) + pCombo(D) + pInjectie(D) + pSlot(D);
+    $('root').innerHTML = html;
+  }
+
+  // ── Data: sessionStorage of demo ──
+  function demoHeat(kind){
+    var a=new Array(24*365), r=0;
+    for(var u=0;u<24;u++){ for(var d=0;d<365;d++){ var idx=u*365+d, v=0;
+      var seiz=0.6+0.4*Math.cos((d-172)/365*2*Math.PI);           // zomer-piek voor solar-achtig
+      if(kind==='afname') v=(u>=6&&u<=9)||(u>=17&&u<=21)?1:(u>=1&&u<=5?0.15:0.5);
+      else if(kind==='spot') v=(u>=17&&u<=20)?1:(u>=11&&u<=14?0.2:0.55);
+      else if(kind==='kost') v=((u>=17&&u<=21)?1:0.4)*((u>=6&&u<=9)||(u>=17&&u<=21)?1:0.5);
+      else if(kind==='inj') v=(u>=9&&u<=16)?seiz:0;
+      else if(kind==='curt') v=(u>=11&&u<=14)?seiz*0.5*(d%7<2?1:0.3):0;
+      a[idx]=Math.max(0, v*(0.8+0.4*Math.random()));
+    } }
+    return a;
+  }
+  function demo(){
+    return { klant:'Voorbeeld gezin', datum:new Date().toLocaleDateString('nl-BE'),
+      regio:'Vlaanderen', profiel:'residentieel', specifiek_profiel:false,
+      input:{ afname_mwh:6, injectie_mwh:2.4, aansluiting_kva:9.2, fasen:3, bestaand_pv_kwp:4, wagens:[{km:15000}] },
+      combo:{ pv_kwp:4.5, batt_kwh:5, batt_kw:5, besparing:891, rendement:17.0, kost:1645, ref_kost:2536, capex:5250, terugverdientijd:5.9 },
+      onderhandel:{ marge_jaar:210, marge_maand:18, besparing_pct:6.2, energiekost_nu_mwh:165, energiekost_dyn_mwh:150, volume_mwh:6,
+        toegangsvermogen_advies:{ verlaagbaar:false },
+        heatmaps:{ uren:24, dagen:365, afname_kw:demoHeat('afname'), spot_eur_mwh:demoHeat('spot'), afnamekost_eur:demoHeat('kost') } },
+      injectie:{ opbrengst_jaar:{ vandaag_spot_eur:120, met_curtail_eur:168, meerwaarde_curtail_eur:48, meerwaarde_onbalans_eur:0 },
+        energie_jaar:{ productie_mwh:3.6 }, payback:{},
+        heatmaps:{ uren:24, dagen:365, netto_injectie_eur:demoHeat('inj'), bespaard_curtail_eur:demoHeat('curt') } } };
+  }
+  var D=null;
+  try{ var raw=sessionStorage.getItem('FLUCTUS_EK_NOTA'); if(raw) D=JSON.parse(raw); }catch(e){}
+  if(!D && window.FLUCTUS_EK_NOTA) D=window.FLUCTUS_EK_NOTA;
+  if(!D){ D=demo(); $('demo-banner').style.display='block'; }
+  applyTheme(kiesThema(D));
+  render(D);
+})();
+</script>
+</body>
+</html>
