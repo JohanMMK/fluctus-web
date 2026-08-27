@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.8.0 (2026-08-27, Fase 4 — slice B+C: grove bedrijf-sweep + interpolatie-heatmap + klik-berekent-exact).
+<!-- energiekompas.html v0.8.1 (2026-08-27, Fase 4 — hover/tap-fix heatmap).
+     FIX v0.8.1: op de heatmap bewegen nu ZOWEL de KPI-nummers ALS de commentaarregel (#hm-detail) mee — op hover
+     (desktop) én op tap (mobiel, waar hover niet bestaat). Een tap toont eerst de geschatte waarden meteen en rekent
+     de exacte cel daarna op de achtergrond bij (voorheen bleef het bij een "⏳" tot de berekening klaar was, waardoor
+     op mobiel niets leek mee te bewegen). onmouseleave herstelt nu ook de commentaarregel naar de gekozen cel.
+     ── v0.8.0 (2026-08-27, Fase 4 — slice B+C: grove bedrijf-sweep + interpolatie-heatmap + klik-berekent-exact).
      NIEUW v0.8.0: de bedrijf-heatmap draait op een GROVE echte sweep (server ≤4×3, v15.104.0+) en toont een fijnere
      display-grid door bilineair te interpoleren tussen de doorgerekende ankers (besparing/capex/kost). Elke cel = een
      schatting; KLIK = een echte /api/energiekompas/bedrijf-cel-berekening van net die combinatie (±9 s), waarna de
@@ -588,20 +593,23 @@
       var T=$('hm-tabel'); T.innerHTML=html;
       Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){
         var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
-        td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a) toonKpisTL(a); };
+        // Hover (desktop): KPI-nummers ÉN de commentaarregel bewegen live mee.
+        td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a){ toonKpisTL(a); _hmDetail(a); } };
+        // Klik/tap (ook mobiel, waar hover niet bestaat): toon de (geschatte) waarden METEEN — nummer + commentaar —
+        // en reken de exacte cel daarna op de achtergrond bij.
         td.onclick=function(){
           var a=_cellAt(H,ry,cx); if(!a) return;
+          H.sel=a; toonKpisTL(a); _hmDetail(a); renderHeatmap();
           if(a._interp && !a._exact && H.compute){
-            td.classList.add('bezig'); $('hm-detail').innerHTML='⏳ Exacte berekening voor <b>'+comboLabel(a)+'</b>…';
+            $('hm-detail').innerHTML='± geschat voor <b>'+comboLabel(a)+'</b> — ⏳ exacte berekening…';
             H.compute(ry,cx,function(exact){
-              td.classList.remove('bezig');
-              if(exact){ H.sel=exact; toonKpisTL(exact); renderHeatmap(); _hmDetail(exact); }
-              else { $('hm-detail').innerHTML='Kon deze cel niet exact berekenen — de geschatte waarde blijft staan.'; }
+              if(exact){ H.sel=exact; toonKpisTL(exact); _hmDetail(exact); renderHeatmap(); }
+              else _hmDetail(a);
             });
-          } else { H.sel=a; toonKpisTL(a); _hmDetail(a); renderHeatmap(); }
+          }
         };
       });
-      T.onmouseleave=function(){ toonKpisTL(H.sel||H.best); };
+      T.onmouseleave=function(){ var a=H.sel||H.best; if(a){ toonKpisTL(a); _hmDetail(a); } };
       $('heatmap-blok').classList.remove('hidden');
     }
     // Bouw STATE.hm voor particulier (thuisladen-anchors: battKwh × pvPan). Dichte grid → geen interpolatie/klik-cel.
