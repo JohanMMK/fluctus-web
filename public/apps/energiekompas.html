@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.8.1 (2026-08-27, Fase 4 — hover/tap-fix heatmap).
+<!-- energiekompas.html v0.9.0 (2026-08-27, Fase 4 slice D — onderhandelingsnota-wiring).
+     NIEUW v0.9.0: knop "📄 Uw gratis onderhandelingsnota openen" (particulier). _openNota opent eerst een blanco
+     venster (user-gesture, geen popup-block), bouwt async de nota-data (_bouwNotaData: /api/kamino/onderhandel met
+     heatmaps:true op profiel 'Residentieel' + /api/injectie-optimalisatie bij bestaande PV + de gekozen heatmap-combo),
+     zet ze op window.__EK_NOTA (+ sessionStorage), en navigeert het venster naar /apps/energiekompas-nota.html?thema=<partner>.
+     Bedrijf gebruikt (voorlopig) het laadplein-rapport, dus de knop is enkel zichtbaar in particulier-modus.
+     ── v0.8.1 (2026-08-27, Fase 4 — hover/tap-fix heatmap).
      FIX v0.8.1: op de heatmap bewegen nu ZOWEL de KPI-nummers ALS de commentaarregel (#hm-detail) mee — op hover
      (desktop) én op tap (mobiel, waar hover niet bestaat). Een tap toont eerst de geschatte waarden meteen en rekent
      de exacte cel daarna op de achtergrond bij (voorheen bleef het bij een "⏳" tot de berekening klaar was, waardoor
@@ -243,6 +249,7 @@
       </div>
       <div class="fisc hidden" id="fisc-blok"></div>
       <div style="margin-top:18px">
+        <button class="btn hidden" type="button" id="btn-nota" style="margin-bottom:10px">📄 Uw gratis onderhandelingsnota openen</button>
         <button class="btn" type="button" id="btn-cta">Naar de volledige studie (heatmaps + rapport) →</button>
         <button class="btn ghost" type="button" id="btn-terug" style="margin-top:18px">← Aanpassen</button>
       </div>
@@ -436,6 +443,8 @@
       if(st==='ja'){ fb.classList.remove('hidden'); fb.innerHTML='<b style="color:#0a7a37">Fiscaal voordeel mogelijk</b><div class="hint" style="margin-top:4px">U valt onder de vennootschapsbelasting (of bent zelfstandige/eenmanszaak). Dan kan de <b>40 % thematische investeringsaftrek</b> tellen — nettovoordeel volgens uw tarief. Exact in de volledige studie (voorwaarden: TVT ≥ 3 j, IRR ≤ 13 %).</div>'; }
       else if(st==='weet_niet'){ fb.classList.remove('hidden'); fb.innerHTML='<b>Fiscaal voordeel: te bevestigen</b><div class="hint" style="margin-top:4px">Uw boekhouder bevestigt uw statuut; wij leiden het nooit af. In de volledige studie tonen we het voordeel zodra de status duidelijk is.</div>'; }
       else { fb.classList.add('hidden'); fb.innerHTML=''; }
+      // Gratis onderhandelingsnota: voorlopig enkel particulier (bedrijf gebruikt het laadplein-rapport).
+      var bn=$('btn-nota'); if(bn){ if(STATE.modus==='particulier'){ bn.classList.remove('hidden'); } else { bn.classList.add('hidden'); } }
       $('stap-resultaat').classList.remove('hidden'); $('stap-resultaat').scrollIntoView({behavior:'smooth', block:'start'});
     }
 
@@ -651,6 +660,57 @@
       STATE.hm=H; toonKpisTL(best); renderHeatmap();
       $('hm-detail').innerHTML='De heatmap toont geschatte combinaties (geïnterpoleerd tussen doorgerekende ankers). <b>Klik</b> een cel voor de exacte berekening.';
     }
+
+    // ── Gratis onderhandelingsnota (particulier) — spiegelt de schil-data + tegel 1/2. ──
+    function regioLabel(r){ return ({VL:'Vlaanderen',BR:'Brussel',WA:'Wallonië'})[r]||'België'; }
+    function _bouwNotaData(){
+      var inv=STATE.invoer||{}, sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest||null;
+      var afnameMwh=+inv.afname_mwh||0;
+      var refEurMwh=(inv.huidige_kost>0&&afnameMwh>0)?Math.round(inv.huidige_kost/afnameMwh):0;
+      // markt-periode (rolling 12m) → dagen≈365 zodat de onderhandel-marge op jaarbasis klopt
+      return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
+        var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
+        var baseCase={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.round(inv.aansluiting_kva||0),
+          spanningsniveau:'LS', postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
+        var ondBody={ baseCase:baseCase, profielNaam:'Residentieel', heatmaps:true };
+        if(refEurMwh>0) ondBody.referentie_eur_mwh=refEurMwh;
+        var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+        var pInj=Promise.resolve(null);
+        if((+inv.bestaand_pv_kwp||0)>0){
+          pInj=fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            profielNaam:'Residentieel', pv_kwp:+inv.bestaand_pv_kwp, injectie_mwh_jaar:+inv.injectie_mwh||0,
+            afname_mwh_jaar:afnameMwh, piek_kw:+inv.piek_kw||0, inverter_kva:Math.round((+inv.bestaand_pv_kwp||0)/1.3) })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+        }
+        return Promise.all([pOnd,pInj]).then(function(res){
+          var ond=res[0], inj=res[1];
+          var combo=sel?{ pv_kwp:anchorKwp(sel), batt_kwh:sel.battKwh||0, batt_kw:sel.battKw||0, besparing:sel.besparing,
+            rendement:sel.rendement, kost:sel.kost, ref_kost:sel.ref_kost, capex:sel.capex }:null;
+          var A=(inj&&inj.analyse)||null;
+          return {
+            klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:regioLabel(inv.regio), profiel:'Residentieel',
+            specifiek_profiel:false, thema:STATE.partner||'',
+            input:{ afname_mwh:afnameMwh, injectie_mwh:+inv.injectie_mwh||0, aansluiting_kva:+inv.aansluiting_kva||0,
+              fasen:+inv.fasen||0, bestaand_pv_kwp:+inv.bestaand_pv_kwp||0, wagens:inv.wagens||[] },
+            combo:combo,
+            onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
+              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
+              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps }:null,
+            injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null
+          };
+        });
+      });
+    }
+    function _openNota(){
+      var w; try{ w=window.open('','_blank'); if(w) w.document.write('<!doctype html><meta charset="utf-8"><title>Onderhandelingsnota…</title><body style="font:15px/1.5 Helvetica,Arial,sans-serif;color:#1F3864;padding:40px">Uw onderhandelingsnota wordt opgebouwd… <span id="d">·</span></body>'); }catch(e){}
+      $('cta-msg').style.color='var(--muted)'; $('cta-msg').textContent='⏳ Uw onderhandelingsnota wordt opgebouwd…';
+      _bouwNotaData().then(function(D){
+        window.__EK_NOTA=D;
+        try{ sessionStorage.setItem('FLUCTUS_EK_NOTA', JSON.stringify(D)); }catch(e){}
+        var url='/apps/energiekompas-nota.html'+(D.thema?('?thema='+encodeURIComponent(D.thema)):'');
+        $('cta-msg').textContent='';
+        if(w&&!w.closed){ w.location.href=url; } else { window.open(url,'_blank'); }
+      }).catch(function(){ $('cta-msg').style.color='#b00'; $('cta-msg').textContent='Kon de nota niet opbouwen — probeer opnieuw.'; if(w&&!w.closed) w.close(); });
+    }
     function toonKpisClient(inv){
       var toegang=inv.aansluiting_kva*0.9, gem=inv.afname_mwh*1000/8760;
       var restPct=toegang>0?Math.max(0,Math.min(95,Math.round((1-gem/toegang)*100))):null;
@@ -685,6 +745,7 @@
       }; });
       $('btn-terug').onclick=function(){ $('stap-invoer').scrollIntoView({behavior:'smooth', block:'start'}); };
       $('btn-cta').onclick=function(){ $('cta-msg').style.color='#0a7a37'; $('cta-msg').textContent='✔ De volledige studie (4 heatmaps met sweep + rapport) is de volgende stap in dit traject — daarvoor vragen we uw akkoord voor een mandaat op uw meetgegevens.'; $('btn-cta').setAttribute('disabled','disabled'); };
+      $('btn-nota').onclick=_openNota;
     });
   </script>
 </body>
