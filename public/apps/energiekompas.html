@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.9.0 (2026-08-27, Fase 4 slice D — onderhandelingsnota-wiring).
+<!-- energiekompas.html v0.9.2 (2026-08-27, Fase 4 slice D) — particulier aansluiting-kVA (Johan): standaard 5 kVA,
+     of 0,75 × kWp als er bestaande PV is (i.p.v. de ruwe piek/0,23-schatting). + omvormer-kVA = 0,75 × kWp.
+     ── v0.9.1 (2026-08-27, Fase 4 slice D) — omvormer-kVA = 0,75 × kWp (Johan) in de injectie-call.
+     ── v0.9.0 (2026-08-27, Fase 4 slice D — onderhandelingsnota-wiring).
      NIEUW v0.9.0: knop "📄 Uw gratis onderhandelingsnota openen" (particulier). _openNota opent eerst een blanco
      venster (user-gesture, geen popup-block), bouwt async de nota-data (_bouwNotaData: /api/kamino/onderhandel met
      heatmaps:true op profiel 'Residentieel' + /api/injectie-optimalisatie bij bestaande PV + de gekozen heatmap-combo),
@@ -404,9 +407,11 @@
     function gatherInvoer(st){
       var o={ modus:STATE.modus, herkomst:STATE.herkomst, partner:STATE.partner, status_vennb:st };
       if(STATE.modus==='particulier'){
-        o.afname_mwh=num('p-verbruik'); o.injectie_mwh=num('p-inj'); o.aansluiting_kva=num('p-piek')/0.23;   // ruwe kW→kVA-benadering voor restcap
+        o.afname_mwh=num('p-verbruik'); o.injectie_mwh=num('p-inj');
         o.piek_kw=num('p-piek'); o.huidige_kost=num('p-kost'); o.regio=($('p-regio')||{}).value; o.fasen=+($('p-fasen')||{}).value;
         o.bestaand_pv_kwp=num('p-pv'); o.laadkw=num('p-laadkw'); o.wagens=STATE.wagens.slice();
+        // Aansluiting-kVA (Johan): standaard 5, of 0,75 × kWp als er bestaande PV is.
+        o.aansluiting_kva = (o.bestaand_pv_kwp>0) ? (0.75*o.bestaand_pv_kwp) : 5;
         // Volledig thuisladen-compatibel input-object — zelfde logica/velden als thuisladen.html (IN + BATT_CRATE).
         o.in={ profiel:'residentieel', jaarverbruik_mwh:o.afname_mwh, piek_kw:o.piek_kw, fasen:o.fasen, regio:o.regio,
                bestaand_pv_kwp:o.bestaand_pv_kwp, bestaand_inj_mwh:o.injectie_mwh,
@@ -679,7 +684,7 @@
         if((+inv.bestaand_pv_kwp||0)>0){
           pInj=fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
             profielNaam:'Residentieel', pv_kwp:+inv.bestaand_pv_kwp, injectie_mwh_jaar:+inv.injectie_mwh||0,
-            afname_mwh_jaar:afnameMwh, piek_kw:+inv.piek_kw||0, inverter_kva:Math.round((+inv.bestaand_pv_kwp||0)/1.3) })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+            afname_mwh_jaar:afnameMwh, piek_kw:+inv.piek_kw||0, inverter_kva:Math.round((+inv.bestaand_pv_kwp||0)*0.75*10)/10 })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         }
         return Promise.all([pOnd,pInj]).then(function(res){
           var ond=res[0], inj=res[1];
