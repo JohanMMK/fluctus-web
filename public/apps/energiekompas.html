@@ -4,12 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.7.0 (2026-08-27, Fase 4 — slice B+C BEIDE modi op de echte engine + heatmap).
-     BEDRIJF draait nu /api/energiekompas/bedrijf-sweep (server v15.103.0+): een PV×batterij-sweep op de bedrijfslast
+<!-- energiekompas.html v0.8.0 (2026-08-27, Fase 4 — slice B+C: grove bedrijf-sweep + interpolatie-heatmap + klik-berekent-exact).
+     NIEUW v0.8.0: de bedrijf-heatmap draait op een GROVE echte sweep (server ≤4×3, v15.104.0+) en toont een fijnere
+     display-grid door bilineair te interpoleren tussen de doorgerekende ankers (besparing/capex/kost). Elke cel = een
+     schatting; KLIK = een echte /api/energiekompas/bedrijf-cel-berekening van net die combinatie (±9 s), waarna de
+     cel exact wordt gemarkeerd. Het getoonde optimum blijft een ECHT anker (snel + exact). Zo blijft de eerste sweep
+     snel (~30 s i.p.v. ~90 s) maar kan de klant elke combinatie exact laten narekenen. Particulier houdt zijn dichte
+     30-anker grid (geen interpolatie nodig).
+     ── v0.7.0 ──
+     BEDRIJF draait /api/energiekompas/bedrijf-sweep (server v15.103.0+): een PV×batterij-sweep op de bedrijfslast
      via de laadplein-engine. Assen (Johan): PV 0→1,25×afname (kWp) · batterij-kW 0→(generator-kVA + Σ laadplein-
      vermogen + toegangsvermogen). Sectorprofiel-keuze (b-profiel, uit /api/profielen-lijst) zoals de laadplein-app.
      Generieke heatmap voor beide modi (particulier kWh-batt/PV-panelen · bedrijf kW-batt/kWp). Graceful fallback op
-     de snelle markt-KPI zolang v15.103 niet gedeployed is. Geen apart heuristiek-model.
+     de snelle markt-KPI zolang de sweep niet live is. Geen apart heuristiek-model.
      ── v0.6.0 (particulier) ──
      energiekompas.html v0.6.0 (2026-08-27, Fase 4 — slice B+C: thuisladen-engine + interactieve heatmap (particulier)).
      Particulier draait /api/thuisladen (30-anker PV×batterij-sweep, zelfde engine + P-parameters als de thuisladen-
@@ -87,6 +94,10 @@
   table.hm td.cell:hover{ transform:scale(1.08); }
   table.hm td.cell.sel{ border-color:var(--navy); box-shadow:0 0 0 1px #fff inset; }
   table.hm td.cell.opt{ outline:2px dashed var(--navy); outline-offset:1px; }
+  table.hm td.cell.est{ font-weight:600; opacity:.72; }
+  table.hm td.cell.est::after{ content:'·'; position:absolute; }
+  table.hm td.cell.exact{ opacity:1; font-weight:700; box-shadow:0 0 0 1px #fff inset; }
+  table.hm td.cell.bezig{ opacity:.5; }
   .hmmetriek{ display:inline-flex; gap:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:8px; }
   .hmmetriek button{ border:none; background:#fbfdff; color:var(--navy); font-size:12px; font-weight:700; padding:6px 12px; cursor:pointer; }
   .hmmetriek button.on{ background:var(--accent); color:#fff; }
@@ -438,6 +449,7 @@
       var payload={ afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, spanning:inv.spanning,
         toegangsvermogen_kw:Math.round((inv.aansluiting_kva||0)*0.9), profielNaam:inv.profielNaam||'kantoor', grd:inv.grd||'', postcode:inv.postcode||'',
         pleinen:inv.pleinen||[], generator:inv.generator||{} };
+      STATE.bedrijfPayload=payload;   // hergebruikt door de klik-cel (/bedrijf-cel) voor exacte berekening
       var t0=Date.now(); msg.style.color='var(--muted)';
       function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen op uw bedrijfslast… ('+s+' s — kan tot ±1 min duren)'; }
       _tick(); var _iv=setInterval(_tick,1000);
@@ -521,48 +533,115 @@
       return 'rgb('+r+','+g+','+bl+')';
     }
     function hmFmt(v, mx){ if(v==null||!isFinite(v)) return ''; return mx==='rendement'?(Math.round(v)+'%'):(v>=1000?(Math.round(v/100)/10+'k'):Math.round(v)); }
-    function _hmZelfde(a,b){ return a&&b&&a._ry===b._ry&&a._cx===b._cx; }
+    // ── Interpolatie-hulp (grove ankers → fijne display-grid) ──
+    function _subdiv(axis){   // voegt één tussenpunt toe tussen elk opeenvolgend paar
+      var s=axis.slice().sort(function(a,b){return a-b;}), out=[];
+      for(var i=0;i<s.length;i++){ out.push(s[i]); if(i<s.length-1){ var m=Math.round((s[i]+s[i+1])/2); if(m>s[i]&&m<s[i+1]) out.push(m); } }
+      return out;
+    }
+    function _bracket(axis, v){   // {lo, hi, t} — omsluitende ankerwaarden + fractie
+      var s=axis.slice().sort(function(a,b){return a-b;}), lo=s[0], hi=s[s.length-1];
+      for(var i=0;i<s.length;i++){ if(s[i]<=v) lo=s[i]; }
+      for(var j=s.length-1;j>=0;j--){ if(s[j]>=v) hi=s[j]; }
+      return { lo:lo, hi:hi, t:(hi>lo)?((v-lo)/(hi-lo)):0 };
+    }
+    // Bilineaire interpolatie van besparing/capex/kost over de 4 omsluitende ankers; rendement = besp/capex.
+    function _interpCel(H, ry, cx){
+      var b=_bracket(H.realRows, ry), p=_bracket(H.realCols, cx);
+      var c00=H.realFind(b.lo,p.lo), c01=H.realFind(b.lo,p.hi), c10=H.realFind(b.hi,p.lo), c11=H.realFind(b.hi,p.hi);
+      if(!c00||!c01||!c10||!c11) return null;
+      function bil(f){ var a=f(c00)+(f(c01)-f(c00))*p.t, d=f(c10)+(f(c11)-f(c10))*p.t; return a+(d-a)*b.t; }
+      var besp=bil(function(c){return c.besparing||0;}), capex=bil(function(c){return c.capex||0;}), kost=bil(function(c){return c.kost||0;});
+      var rend=(capex>0)?(besp/capex*100):null;
+      return { _ry:ry, _cx:cx, _interp:true, pvKwp:cx, battKw:ry, battKwh:Math.round(ry*(H.crate||2)),
+        kost:Math.round(kost), capex:Math.round(capex), ref_kost:H.refKost,
+        besparing:Math.round(besp), rendement:(rend!=null?Math.round(rend*100)/100:null) };
+    }
+    // Cel op display-positie (ry,cx): exact-uit-klik > echt anker > geïnterpoleerd.
+    function _cellAt(H, ry, cx){
+      var key=ry+'|'+cx; if(H.computed[key]) return H.computed[key];
+      var real=H.realFind(ry,cx); if(real) return real;
+      return H.interp?_interpCel(H,ry,cx):null;
+    }
+    function _hmDetail(a){
+      if(!a){ $('hm-detail').innerHTML=''; return; }
+      var exact=(a._exact||!a._interp), tag=exact?'<span style="color:#0a7a37">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor exacte berekening';
+      $('hm-detail').innerHTML='Gekozen: <b>'+comboLabel(a)+'</b> — besparing '+eur(a.besparing)+'/j, rendement '+(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—')+'. '+tag;
+    }
     function renderHeatmap(){
-      var H=STATE.hm; if(!H||!H.anchors){ $('heatmap-blok').classList.add('hidden'); return; }
-      var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols, mx=STATE.hmMetric||'rendement';
-      var vals=H.anchors.map(function(a){return a[mx];}).filter(function(v){return v!=null&&isFinite(v);});
-      var min=Math.min.apply(null,vals), max=Math.max.apply(null,vals), best=H.best||{}, sel=H.sel||best;
+      var H=STATE.hm; if(!H||!H.real){ $('heatmap-blok').classList.add('hidden'); return; }
+      var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;}), mx=STATE.hmMetric||'rendement';
+      var cells=[]; rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); if(a) cells.push(a); }); });
+      var vals=cells.map(function(a){return a[mx];}).filter(function(v){return v!=null&&isFinite(v);});
+      var min=vals.length?Math.min.apply(null,vals):0, max=vals.length?Math.max.apply(null,vals):1, best=H.best||{}, sel=H.sel||best;
       var html='<tr><th></th>'+cols.map(function(c){return '<th>'+H.colLabel(c)+'</th>';}).join('')+'</tr>';
       rows.forEach(function(ry){
         html+='<tr><td class="axis">'+H.rowLabel(ry)+'</td>';
         cols.forEach(function(cx){
-          var a=H.find(ry,cx), v=a?a[mx]:null;
-          var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' opt':'');
+          var a=_cellAt(H,ry,cx), v=a?a[mx]:null;
+          var isEst=a&&a._interp&&!a._exact, isEx=a&&a._exact;
+          var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' opt':'')+(isEx?' exact':(isEst?' est':''));
           html+='<td class="'+cls+'" style="background:'+hmKleur(v,min,max)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+hmFmt(v,mx)+'</td>';
         });
         html+='</tr>';
       });
       var T=$('hm-tabel'); T.innerHTML=html;
       Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){
-        var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx'), a=H.find(ry,cx);
-        td.onmouseenter=function(){ if(a) toonKpisTL(a); };
-        td.onclick=function(){ if(a){ H.sel=a; toonKpisTL(a); $('hm-detail').innerHTML='Gekozen: <b>'+comboLabel(a)+'</b> — besparing '+eur(a.besparing)+'/j, rendement '+(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—')+'.'; renderHeatmap(); } };
+        var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
+        td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a) toonKpisTL(a); };
+        td.onclick=function(){
+          var a=_cellAt(H,ry,cx); if(!a) return;
+          if(a._interp && !a._exact && H.compute){
+            td.classList.add('bezig'); $('hm-detail').innerHTML='⏳ Exacte berekening voor <b>'+comboLabel(a)+'</b>…';
+            H.compute(ry,cx,function(exact){
+              td.classList.remove('bezig');
+              if(exact){ H.sel=exact; toonKpisTL(exact); renderHeatmap(); _hmDetail(exact); }
+              else { $('hm-detail').innerHTML='Kon deze cel niet exact berekenen — de geschatte waarde blijft staan.'; }
+            });
+          } else { H.sel=a; toonKpisTL(a); _hmDetail(a); renderHeatmap(); }
+        };
       });
       T.onmouseleave=function(){ toonKpisTL(H.sel||H.best); };
       $('heatmap-blok').classList.remove('hidden');
     }
-    // Bouw STATE.hm voor particulier (thuisladen-anchors: battKwh × pvPan).
+    // Bouw STATE.hm voor particulier (thuisladen-anchors: battKwh × pvPan). Dichte grid → geen interpolatie/klik-cel.
     function hmParticulier(tl){
       var A=tl.anchors.map(function(a){ return Object.assign({}, a, { _ry:a.battKwh, _cx:a.pvPan }); });
       var best=STATE.tlBest?A.find(function(x){return x._ry===STATE.tlBest.battKwh&&x._cx===STATE.tlBest.pvPan;}):null;
-      STATE.hm={ anchors:A, rows:(tl.grid.batt_kwh_as||[]), cols:(tl.grid.pv_pan_as||[]),
+      var rows=(tl.grid.batt_kwh_as||[]), cols=(tl.grid.pv_pan_as||[]);
+      STATE.hm={ real:A, rows:rows, cols:cols, realRows:rows, realCols:cols, computed:{}, interp:false, compute:null, refKost:tl.referentie_kost,
         rowLabel:function(v){return v>0?(v+' kWh'):'geen batt';}, colLabel:function(v){return _kwp(v)+' kWp';},
-        find:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best||A[0], sel:best||A[0] };
+        realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); },
+        best:best||A[0], sel:best||A[0] };
       renderHeatmap();
     }
-    // Bouw STATE.hm voor bedrijf (bedrijf-sweep-anchors: battKw × pvKwp).
+    // Bouw STATE.hm voor bedrijf (grove bedrijf-sweep-ankers: battKw × pvKwp). Fijne display-grid via interpolatie;
+    // klik op een geschatte cel → /api/energiekompas/bedrijf-cel voor de ECHTE berekening.
     function hmBedrijf(sw){
       var A=sw.anchors.map(function(a){ return Object.assign({}, a, { _ry:a.battKw, _cx:a.pvKwp }); });
-      var best=kiesBesteAnker(A); best=A.find(function(x){return x===best;})||best;
-      STATE.hm={ anchors:A, rows:(sw.grid.batt_kw_as||[]), cols:(sw.grid.pv_kwp_as||[]),
+      var best=kiesBesteAnker(A); best=A.find(function(x){return x===best;})||best;   // optimum uit de ECHTE ankers (snel + exact)
+      var realRows=(sw.grid.batt_kw_as||[]), realCols=(sw.grid.pv_kwp_as||[]);
+      var H={ real:A, rows:_subdiv(realRows), cols:_subdiv(realCols), realRows:realRows, realCols:realCols,
+        computed:{}, interp:true, crate:2, refKost:sw.referentie_kost,
         rowLabel:function(v){return v>0?(v+' kW'):'geen batt';}, colLabel:function(v){return v+' kWp';},
-        find:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
-      toonKpisTL(best); renderHeatmap();
+        realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); },
+        best:best, sel:best };
+      H.compute=function(ry,cx,done){
+        var key=ry+'|'+cx; if(H.computed[key]){ done&&done(H.computed[key]); return; }
+        var base=STATE.bedrijfPayload; if(!base){ done&&done(null); return; }
+        var body=Object.assign({}, base, { pv_kwp:cx, batt_kw:ry });
+        fetch(API+'/api/energiekompas/bedrijf-cel',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+          .then(function(r){return r.ok?r.json():null;})
+          .then(function(j){
+            if(j&&j.ok&&j.cel){ var c=j.cel, besp=(H.refKost!=null)?(H.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
+              var cell={ _ry:ry, _cx:cx, _interp:true, _exact:true, pvKwp:c.pvKwp, battKw:c.battKw, battKwh:c.battKwh, kost:c.kost, capex:c.capex, ref_kost:H.refKost,
+                besparing:(besp!=null?Math.round(besp):null), rendement:(rend!=null?Math.round(rend*100)/100:null) };
+              H.computed[key]=cell; done&&done(cell);
+            } else done&&done(null);
+          }).catch(function(){ done&&done(null); });
+      };
+      STATE.hm=H; toonKpisTL(best); renderHeatmap();
+      $('hm-detail').innerHTML='De heatmap toont geschatte combinaties (geïnterpoleerd tussen doorgerekende ankers). <b>Klik</b> een cel voor de exacte berekening.';
     }
     function toonKpisClient(inv){
       var toegang=inv.aansluiting_kva*0.9, gem=inv.afname_mwh*1000/8760;
