@@ -1,6 +1,9 @@
-// portal.js v1.7.0 — 2026-08-26 (Europe/Brussels) — Fase 2b: partnermanager ziet automatisch ENKEL EnergieKompas
+// portal.js v1.8.0 — 2026-08-27 (Europe/Brussels) — Fase 3: manager-tegel 'Mandaten' (mandaat-wachtrij-overzicht)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
+// v1.8.0 — 2026-08-27 — Fase 3: nieuwe managerOnly-tegel 'mandaten' (🗂️ Mandaten) → /apps/mandaten.html,
+//          manager-overzicht van de mandaat-wachtrij (status per EAN + adres-bevestigingen voor nazicht).
+//          Additief: enkel een catalogus-rij bij; RBAC-filter (managerOnly) ongewijzigd.
 // v1.7.0 — 2026-08-26 — Fase 2b (Johan-correctie). Nieuwe tegel 'energiekompas' (partner-gerichte schil,
 //          particulier|bedrijf). Een partnermanager krijgt van de proxy (v15.95.0) automatisch app-toegang
 //          tot ENKEL EnergieKompas → dat is de enige tool-tegel die hij ziet. De losse interne tools
@@ -70,6 +73,9 @@ const APP_CATALOG = [
   { id: 'betaalplein', naam: 'Laadplein', ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_JACOPS_EDrive.mp4', video2: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Laadplein_WATTKRAFT.mp4', video2Label: 'W', video2Title: 'Bekijk de Wattkraft-video' },   // 22-08: tegelnaam 'Betalend laadplein' → 'Laadplein' (Johan); id/flow ongewijzigd. 23-08: productvideo achter info-i (zoals thuisladen) + EIGEN toegangsrecht 'betaalplein' (gatedBy:'simulator' verwijderd) zodat de Gebruikers-app Laadplein apart kan toekennen. 22-08 (v1.5.0): 2e knop 'W' naast de i → Wattkraft-versie van de laadplein-video (video2)
   { id: 'thuisladen',  naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html', video: 'https://cdn.jsdelivr.net/gh/JohanMMK/jacops-presentatie@main/Thuisladen_JACOPS_EDrive.mp4' },
   { id: 'gebruikers',  naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
+  // v1.8.0 (Fase 3): manager-overzicht van de mandaat-wachtrij (rec.mandaat) — status per EAN + adres-mismatches
+  // die door klant/adviseur bevestigd zijn, voor manueel nazicht. Read-only, leest GET /api/mandaat/wachtrij.
+  { id: 'mandaten',    naam: 'Mandaten',         ico: '🗂️', beschrijving: 'Mandaatstatus per EAN + adres-bevestigingen om na te kijken.', url: '/apps/mandaten.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
 ];
