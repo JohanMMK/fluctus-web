@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.4.2 (2026-08-27, Fase 4 — slice A: volledige input in de schil).
+<!-- energiekompas.html v0.5.0 (2026-08-27, Fase 4 — slice B: ECHTE thuisladen-engine voor particulier).
+     Particulier draait nu /api/thuisladen (de 30-anker PV×batterij-sweep, zelfde engine + P-parameters als de
+     thuisladen-tegel), kiest automatisch de optimale (verborgen) combinatie en toont de thuisladen-inzichten:
+     besparing/jaar · rendement · jaarkost met PV+batterij · investering. Bedrijf houdt voorlopig de snelle
+     markt-KPI (/api/energiekompas/kpi) tot de laadplein-sim-engine erbij komt. Geen apart heuristiek-model.
+     ── slice A (ongewijzigd) ──
+     energiekompas.html v0.4.2 (2026-08-27, Fase 4 — slice A: volledige input in de schil).
      Particulier = thuisladen-LOGICA: gatherInvoer bouwt een thuisladen-compatibel in-object (profiel, jaarverbruik_mwh,
      piek_kw, fasen, regio, bestaand_pv_kwp, bestaand_inj_mwh, wagens[km,kwhkm,wd/we-venster,creg]) + BATT_CRATE.
      Bedrijf = laadplein-LOGICA: gatherInvoer bouwt volledige simulatie-klare plein-objecten (zelfde model als de
@@ -210,6 +216,20 @@
     // Paaltype-defaults — 1:1 met de laadplein-app (_bezTypeDefaults): duur/sessie, tarief, sessies-factor per venster.
     var PAALDEF={ AC22:{ paal_kw:22, duur_min:30, opbrengst_eur_mwh:330, f1:1.5, f2:3 }, DC160:{ paal_kw:160, duur_min:15, opbrengst_eur_mwh:500, f1:2, f2:2 } };
     var BET_VENSTERS=[{start:8,eind:13},{start:13,eind:23}];   // standaardvensters betalend plein
+    // Thuisladen-model-/procesparameters (P) — 1:1 uit thuisladen.html, zodat /api/thuisladen dezelfde
+    // engine + inzichten draait als de thuisladen-tegel (Johan: aanpak/code/inzichten hergebruiken).
+    var P_TL = {
+      MAX_KVA_2F:5, MAX_KVA_3F:25, LAADVERMOGEN_BASIS:4,
+      PANEEL_WP:450, PANEEL_M2:2, PV_KOST:500, PV_MIN:4, PV_MAX:40, PV_STAP:2,
+      RENDEMENT_MIN:10, INFLATIE:2, NETINDEX:2, DIESEL_100KM:9.0,
+      CREG_VL:322, CREG_BR:372, CREG_WA:378,
+      SPOT:95, NETKOST_MWH:70, HEFFING_MWH:35, CAPACITEIT_KW_JR:45, INJECTIE_MWH:40,
+      PV_YIELD:950, RTE:0.90, HORIZON:15, BATT_CRATE:2,
+      BATT:[ {kva:5,kwh:5,eur:3000},{kva:5,kwh:10,eur:5000},{kva:5,kwh:15,eur:7500},{kva:5,kwh:20,eur:10000},{kva:5,kwh:25,eur:12500},
+             {kva:10,kwh:10,eur:7000},{kva:10,kwh:15,eur:9500},{kva:10,kwh:20,eur:12000},{kva:10,kwh:25,eur:14500},
+             {kva:15,kwh:15,eur:11000},{kva:15,kwh:20,eur:14000},{kva:15,kwh:25,eur:16500} ]
+    };
+    function cregTL(regio){ return P_TL['CREG_'+(regio||'VL')] || P_TL.CREG_VL; }
 
     function qp(k){ try{ return new URLSearchParams(location.search).get(k)||''; }catch(e){ return ''; } }
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -374,7 +394,9 @@
       var st=statusWaarde(); if(!st){ msg.textContent='Beantwoord de statusvraag.'; return; }
       var inv=gatherInvoer(st); STATE.invoer=inv;
       if(!(inv.afname_mwh>0)){ msg.textContent='Vul minstens uw jaarverbruik afname (MWh) in.'; return; }
-      msg.textContent='Berekenen…'; $('btn-bereken').setAttribute('disabled','disabled');
+      msg.textContent='Berekenen… (de PV+batterij-combinatie wordt op de achtergrond gedimensioneerd)'; $('btn-bereken').setAttribute('disabled','disabled');
+      if(STATE.modus==='particulier'){ berekenParticulierTL(inv, st, msg); return; }   // slice B: echte thuisladen-engine
+      // Bedrijf: (interim) snelle markt-KPI; de laadplein-sim-engine volgt in de volgende stap.
       var payload={ modus:STATE.modus, afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens, km:inv._km };
       fetch(API+'/api/energiekompas/kpi',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
@@ -388,6 +410,41 @@
           toonResultaat(st);
         })
         .catch(function(){ $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; toonKpisClient(inv); toonResultaat(st); });
+    }
+
+    // ── Particulier: de ECHTE thuisladen-engine (30-anker PV×batterij-sweep), zelfde als de thuisladen-tegel.
+    // We draaien /api/thuisladen op het standaardprofiel, kiezen de optimale combinatie (verborgen) en tonen
+    // de thuisladen-inzichten (besparing/jaar · rendement · jaarkost · investering). De klant kiest de combinatie
+    // straks zelf op de 4 heatmaps (slice C). Zelfde in/params als thuisladen.html.
+    function berekenParticulierTL(inv, st, msg){
+      var IN = inv.in || {}; IN.regio = inv.regio || 'VL';
+      if(!(IN.referentiekost>0)) IN.referentiekost = inv.huidige_kost || 0;
+      var params = Object.assign({}, P_TL, { CREG: cregTL(IN.regio) });
+      fetch(API+'/api/thuisladen',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ in:IN, params:params }) })
+        .then(function(r){ return r.ok?r.json():null; })
+        .then(function(j){ $('btn-bereken').removeAttribute('disabled'); msg.textContent='';
+          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; var best=kiesBesteAnker(j.anchors); STATE.tlBest=best; toonKpisTL(best); }
+          else { toonKpisClient(inv); }
+          toonResultaat(st);
+        })
+        .catch(function(){ $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; toonKpisClient(inv); toonResultaat(st); });
+    }
+    // Optimale combinatie = hoogste rendement met positieve besparing; tiebreak = hoogste besparing.
+    function kiesBesteAnker(anchors){
+      var cand=anchors.filter(function(a){ return a && a.besparing>0 && a.rendement!=null && ((a.pvPan||0)>0 || (a.battKwh||0)>0); });
+      if(!cand.length) cand=anchors.filter(function(a){ return a && a.besparing>0; });
+      if(!cand.length) return anchors[0];
+      cand.sort(function(a,b){ return (b.rendement-a.rendement)||(b.besparing-a.besparing); });
+      return cand[0];
+    }
+    function toonKpisTL(a){
+      var tvt=(a.besparing>0 && a.capex>0)?(Math.round(a.capex/a.besparing*10)/10):null;
+      toonKpis([
+        { t:'Besparing per jaar', v:eur(a.besparing), s:'met PV + batterij (combinatie op de achtergrond gekozen)' },
+        { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw investering') },
+        { t:'Jaarkost met PV+batterij', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'na de investering') },
+        { t:'Investering', v:eur(a.capex), s:'PV + batterij incl. plaatsing (indicatief)' }
+      ]);
     }
     function toonKpisClient(inv){
       var toegang=inv.aansluiting_kva*0.9, gem=inv.afname_mwh*1000/8760;
