@@ -4,11 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.5.0 (2026-08-27, Fase 4 — slice B: ECHTE thuisladen-engine voor particulier).
-     Particulier draait nu /api/thuisladen (de 30-anker PV×batterij-sweep, zelfde engine + P-parameters als de
-     thuisladen-tegel), kiest automatisch de optimale (verborgen) combinatie en toont de thuisladen-inzichten:
-     besparing/jaar · rendement · jaarkost met PV+batterij · investering. Bedrijf houdt voorlopig de snelle
-     markt-KPI (/api/energiekompas/kpi) tot de laadplein-sim-engine erbij komt. Geen apart heuristiek-model.
+<!-- energiekompas.html v0.7.0 (2026-08-27, Fase 4 — slice B+C BEIDE modi op de echte engine + heatmap).
+     BEDRIJF draait nu /api/energiekompas/bedrijf-sweep (server v15.103.0+): een PV×batterij-sweep op de bedrijfslast
+     via de laadplein-engine. Assen (Johan): PV 0→1,25×afname (kWp) · batterij-kW 0→(generator-kVA + Σ laadplein-
+     vermogen + toegangsvermogen). Sectorprofiel-keuze (b-profiel, uit /api/profielen-lijst) zoals de laadplein-app.
+     Generieke heatmap voor beide modi (particulier kWh-batt/PV-panelen · bedrijf kW-batt/kWp). Graceful fallback op
+     de snelle markt-KPI zolang v15.103 niet gedeployed is. Geen apart heuristiek-model.
+     ── v0.6.0 (particulier) ──
+     energiekompas.html v0.6.0 (2026-08-27, Fase 4 — slice B+C: thuisladen-engine + interactieve heatmap (particulier)).
+     Particulier draait /api/thuisladen (30-anker PV×batterij-sweep, zelfde engine + P-parameters als de thuisladen-
+     tegel) met voortgangsteller, kiest automatisch de optimale (verborgen) combinatie (hoogste rendement met
+     positieve besparing) en toont de thuisladen-inzichten. NIEUW v0.6.0 (slice C): een interactieve HEATMAP over
+     de 30 ankers — hover = KPI's veranderen mee, klik = die combinatie vastzetten; togglebaar op rendement of
+     besparing; de aanbeveling is gestreept omrand. Elke cel is een echte dispatch (geen interpolatie).
+     Bedrijf houdt voorlopig de snelle markt-KPI (/api/energiekompas/kpi); de laadplein-SWEEP (batterij+PV, zoals
+     de Kamino-aansluiting-tegel) volgt — een kale sim geeft €0 meerwaarde als de aansluiting al past.
+     Geen apart heuristiek-model.
      ── slice A (ongewijzigd) ──
      energiekompas.html v0.4.2 (2026-08-27, Fase 4 — slice A: volledige input in de schil).
      Particulier = thuisladen-LOGICA: gatherInvoer bouwt een thuisladen-compatibel in-object (profiel, jaarverbruik_mwh,
@@ -64,6 +75,22 @@
   .fisc{ border:1px solid #d7e6d0; background:#f4f9f0; border-radius:12px; padding:14px 16px; margin-top:14px; }
   .radio{ display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; } .radio label{ display:flex; align-items:center; gap:6px; font-weight:600; color:var(--ink); margin:0; } .radio input{ width:auto; }
   .chk{ display:flex; align-items:center; gap:7px; font-weight:600; color:var(--ink); font-size:13.5px; margin-top:8px; } .chk input{ width:auto; }
+  /* ── Slice C: interactieve heatmap (particulier) ── */
+  .hmwrap{ margin-top:18px; }
+  .hmtitel{ font-weight:700; color:var(--navy); font-size:14px; margin-bottom:2px; }
+  .hmleg{ font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .hmscroll{ overflow-x:auto; }
+  table.hm{ border-collapse:separate; border-spacing:3px; }
+  table.hm th{ font-size:11px; font-weight:600; color:var(--muted); padding:2px 4px; white-space:nowrap; }
+  table.hm td.axis{ font-size:11px; font-weight:600; color:var(--muted); text-align:right; padding-right:6px; white-space:nowrap; }
+  table.hm td.cell{ width:40px; height:30px; border-radius:6px; cursor:pointer; text-align:center; font-size:10.5px; font-weight:700; color:#12315e; transition:transform .08s; border:2px solid transparent; }
+  table.hm td.cell:hover{ transform:scale(1.08); }
+  table.hm td.cell.sel{ border-color:var(--navy); box-shadow:0 0 0 1px #fff inset; }
+  table.hm td.cell.opt{ outline:2px dashed var(--navy); outline-offset:1px; }
+  .hmmetriek{ display:inline-flex; gap:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:8px; }
+  .hmmetriek button{ border:none; background:#fbfdff; color:var(--navy); font-size:12px; font-weight:700; padding:6px 12px; cursor:pointer; }
+  .hmmetriek button.on{ background:var(--accent); color:#fff; }
+  .hmdetail{ font-size:12.5px; color:var(--muted); margin-top:8px; min-height:16px; }
 </style>
 </head>
 <body>
@@ -131,8 +158,9 @@
           <div><label>Jaarinjectie (MWh)</label><input type="number" id="b-inj" step="1" min="0" value="0"></div>
           <div><label>Aansluitvermogen (kVA)</label><input type="number" id="b-kva" step="1" min="0" placeholder="bv. 250"></div>
         </div>
-        <div class="grid2">
+        <div class="grid3">
           <div><label>Spanning</label><select id="b-spanning"><option value="LS">Laagspanning</option><option value="MS">Middenspanning</option></select></div>
+          <div><label>Verbruiksprofiel (sector)</label><select id="b-profiel"><option value="kantoor">Kantoor</option></select></div>
           <div><label>Huidige energiekost (€/j) — optioneel</label><input type="number" id="b-kost" step="1" min="0" placeholder="referentie"></div>
         </div>
 
@@ -190,6 +218,13 @@
       <div style="font-weight:700;color:var(--navy);margin-bottom:4px">Uw EnergieKompas <span class="pill">indicatief</span></div>
       <p class="hint" style="margin:0 0 14px">Eerste inschatting met de <b>actuele markt</b> en een verborgen PV+batterij-combinatie. De precieze berekening — met de <b>4 heatmaps</b> waarin u zelf combinaties kiest — gebeurt op uw <b>werkelijke kwartierprofiel</b> (na een mandaat op uw meetgegevens).</p>
       <div class="kpis" id="kpi-host"></div>
+      <div class="hmwrap hidden" id="heatmap-blok">
+        <div class="hmtitel">Kies zelf uw combinatie</div>
+        <div class="hmleg">Beweeg over het rooster: de KPI's hierboven veranderen mee. Klik een vakje om die combinatie exact te berekenen. Het gestreepte vakje is onze aanbeveling.</div>
+        <div class="hmmetriek" id="hm-metriek"><button data-mx="rendement" class="on">Rendement</button><button data-mx="besparing">Besparing/jaar</button></div>
+        <div class="hmscroll"><table class="hm" id="hm-tabel"></table></div>
+        <div class="hmdetail" id="hm-detail"></div>
+      </div>
       <div class="fisc hidden" id="fisc-blok"></div>
       <div style="margin-top:18px">
         <button class="btn" type="button" id="btn-cta">Naar de volledige studie (heatmaps + rapport) →</button>
@@ -202,7 +237,7 @@
   <script>
     var API='https://lucid-amazement-production.up.railway.app';
     var $=function(id){return document.getElementById(id);};
-    var STATE={ modus:null, herkomst:'direct', partner:'', wagens:[], eigen:[], bet:[] };
+    var STATE={ modus:null, herkomst:'direct', partner:'', wagens:[], eigen:[], bet:[], hmMetric:'rendement', hmSel:null, tl:null, tlBest:null };
     // Voertuigtypes — 1:1 met de laadplein-app (simulator.html VOERTUIGTYPES): kwh_per_km + km_per_jaar
     // worden op de achtergrond meegegeven (in de schil tonen we ze niet, maar de echte sim heeft ze nodig).
     var VOERTUIGTYPES=[
@@ -357,7 +392,7 @@
         var totWagens=STATE.wagens.length, totKm=STATE.wagens.reduce(function(a,w){return a+(+w.km||0);},0);
         o._wagens=totWagens; o._km=totWagens>0?Math.round(totKm/totWagens):0;
       } else {
-        o.afname_mwh=num('b-verbruik'); o.injectie_mwh=num('b-inj'); o.aansluiting_kva=num('b-kva'); o.huidige_kost=num('b-kost'); o.spanning=($('b-spanning')||{}).value;
+        o.afname_mwh=num('b-verbruik'); o.injectie_mwh=num('b-inj'); o.aansluiting_kva=num('b-kva'); o.huidige_kost=num('b-kost'); o.spanning=($('b-spanning')||{}).value; o.profielNaam=($('b-profiel')||{}).value||'kantoor';
         o.componenten={ pv:$('c-pv').checked, eigen:$('c-eigen').checked, betalend:$('c-betalend').checked, generator:$('c-generator').checked };
         o.pv={ max_kwp:num('b-pvkwp'), bestaand_kwp:num('b-pvbestaand') };
         // Volledige, simulatie-klare plein-objecten — zelfde model als de laadplein-app (_laadpleinNieuw).
@@ -395,13 +430,33 @@
       var inv=gatherInvoer(st); STATE.invoer=inv;
       if(!(inv.afname_mwh>0)){ msg.textContent='Vul minstens uw jaarverbruik afname (MWh) in.'; return; }
       msg.textContent='Berekenen… (de PV+batterij-combinatie wordt op de achtergrond gedimensioneerd)'; $('btn-bereken').setAttribute('disabled','disabled');
-      if(STATE.modus==='particulier'){ berekenParticulierTL(inv, st, msg); return; }   // slice B: echte thuisladen-engine
-      // Bedrijf: (interim) snelle markt-KPI; de laadplein-sim-engine volgt in de volgende stap.
-      var payload={ modus:STATE.modus, afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens, km:inv._km };
+      if(STATE.modus==='particulier'){ berekenParticulierTL(inv, st, msg); return; }   // slice B/C: echte thuisladen-engine
+      berekenBedrijfSweep(inv, st, msg);   // slice B/C: echte laadplein-engine (PV×batterij-sweep)
+    }
+    // ── Bedrijf: de ECHTE laadplein-engine via de server-side PV×batterij-sweep (server v15.103.0+). ──
+    function berekenBedrijfSweep(inv, st, msg){
+      var payload={ afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, spanning:inv.spanning,
+        toegangsvermogen_kw:Math.round((inv.aansluiting_kva||0)*0.9), profielNaam:inv.profielNaam||'kantoor', grd:inv.grd||'', postcode:inv.postcode||'',
+        pleinen:inv.pleinen||[], generator:inv.generator||{} };
+      var t0=Date.now(); msg.style.color='var(--muted)';
+      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen op uw bedrijfslast… ('+s+' s — kan tot ±1 min duren)'; }
+      _tick(); var _iv=setInterval(_tick,1000);
+      function _klaar(){ clearInterval(_iv); $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; }
+      fetch(API+'/api/energiekompas/bedrijf-sweep',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
+        .then(function(r){ return r.ok?r.json():null; })
+        .then(function(sw){ _klaar();
+          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); }
+          else { bedrijfSnelleKpi(inv, st); }   // fallback zolang v15.103 niet gedeployed is
+        })
+        .catch(function(){ _klaar(); bedrijfSnelleKpi(inv, st); });
+    }
+    // Fallback: snelle markt-KPI (server v15.102) zolang de bedrijf-sweep niet live is.
+    function bedrijfSnelleKpi(inv, st){
+      $('heatmap-blok').classList.add('hidden');
+      var payload={ modus:'bedrijf', afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens, km:inv._km };
       fetch(API+'/api/energiekompas/kpi',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
-        .then(function(j){ $('btn-bereken').removeAttribute('disabled'); msg.textContent='';
-          if(j&&j.kpi){ var k=j.kpi,m=j.markt||{}; toonKpis([
+        .then(function(j){ if(j&&j.kpi){ var k=j.kpi,m=j.markt||{}; toonKpis([
             { t:'Kost van uw afname', v:eur(k.kost_afname_eur), s:inv.afname_mwh+' MWh/j'+(inv.huidige_kost>0?' (uit uw factuur)':' (actuele markt)') },
             { t:'Waarde van uw injectie', v:eur(k.waarde_injectie_eur), s:inv.injectie_mwh+' MWh/j × ± '+(m.injectiewaarde_eur_mwh||'?')+' €/MWh' },
             { t:'Restcapaciteit aansluiting', v:(k.restcapaciteit_pct==null?'—':(k.restcapaciteit_pct+' %')), s:'ruimte voor PV/batterij/laden' },
@@ -409,7 +464,7 @@
           ]); } else { toonKpisClient(inv); }
           toonResultaat(st);
         })
-        .catch(function(){ $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; toonKpisClient(inv); toonResultaat(st); });
+        .catch(function(){ toonKpisClient(inv); toonResultaat(st); });
     }
 
     // ── Particulier: de ECHTE thuisladen-engine (30-anker PV×batterij-sweep), zelfde als de thuisladen-tegel.
@@ -420,31 +475,94 @@
       var IN = inv.in || {}; IN.regio = inv.regio || 'VL';
       if(!(IN.referentiekost>0)) IN.referentiekost = inv.huidige_kost || 0;
       var params = Object.assign({}, P_TL, { CREG: cregTL(IN.regio) });
+      // Voortgangsteller — de volledige PV×batterij-sweep (thuisladen-engine) kan tot ~1 min duren.
+      var t0=Date.now(); msg.style.color='var(--muted)';
+      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen… ('+s+' s — dit kan tot ±1 min duren)'; }
+      _tick(); var _iv=setInterval(_tick,1000);
+      function _klaar(){ clearInterval(_iv); $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; }
       fetch(API+'/api/thuisladen',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ in:IN, params:params }) })
         .then(function(r){ return r.ok?r.json():null; })
-        .then(function(j){ $('btn-bereken').removeAttribute('disabled'); msg.textContent='';
-          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; var best=kiesBesteAnker(j.anchors); STATE.tlBest=best; toonKpisTL(best); }
-          else { toonKpisClient(inv); }
+        .then(function(j){ _klaar();
+          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); toonKpisTL(STATE.tlBest); hmParticulier(j); }
+          else { toonKpisClient(inv); $('heatmap-blok').classList.add('hidden'); }
           toonResultaat(st);
         })
-        .catch(function(){ $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; toonKpisClient(inv); toonResultaat(st); });
+        .catch(function(){ _klaar(); toonKpisClient(inv); toonResultaat(st); });
     }
     // Optimale combinatie = hoogste rendement met positieve besparing; tiebreak = hoogste besparing.
     function kiesBesteAnker(anchors){
-      var cand=anchors.filter(function(a){ return a && a.besparing>0 && a.rendement!=null && ((a.pvPan||0)>0 || (a.battKwh||0)>0); });
+      var cand=anchors.filter(function(a){ return a && a.besparing>0 && a.rendement!=null && (anchorKwp(a)>0 || (a.battKwh||0)>0); });
       if(!cand.length) cand=anchors.filter(function(a){ return a && a.besparing>0; });
       if(!cand.length) return anchors[0];
       cand.sort(function(a,b){ return (b.rendement-a.rendement)||(b.besparing-a.besparing); });
       return cand[0];
     }
+    function _kwp(pvPan){ return Math.round((pvPan||0)*P_TL.PANEEL_WP/1000*10)/10; }
+    function anchorKwp(a){ return (a.pvKwp!=null)?a.pvKwp:_kwp(a.pvPan); }
+    function comboLabel(a){
+      var pv=anchorKwp(a), kwh=a.battKwh||0, kw=a.battKw;
+      return (pv>0?(pv+' kWp PV'):'geen PV')+(kwh>0?(' + '+kwh+' kWh'+(kw?(' / '+kw+' kW'):'')+' batterij'):' · geen batterij');
+    }
     function toonKpisTL(a){
-      var tvt=(a.besparing>0 && a.capex>0)?(Math.round(a.capex/a.besparing*10)/10):null;
+      if(!a) return; var tvt=(a.besparing>0 && a.capex>0)?(Math.round(a.capex/a.besparing*10)/10):null;
       toonKpis([
-        { t:'Besparing per jaar', v:eur(a.besparing), s:'met PV + batterij (combinatie op de achtergrond gekozen)' },
+        { t:'Besparing per jaar', v:eur(a.besparing), s:comboLabel(a) },
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw investering') },
-        { t:'Jaarkost met PV+batterij', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'na de investering') },
+        { t:'Jaarkost met deze combinatie', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'na de investering') },
         { t:'Investering', v:eur(a.capex), s:'PV + batterij incl. plaatsing (indicatief)' }
       ]);
+    }
+    // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
+    // STATE.hm = { anchors, rows:[rawY], cols:[rawX], rowLabel(v), colLabel(v), find(rowRaw,colRaw), best, sel }.
+    function hmKleur(v, min, max){
+      if(v==null || !isFinite(v)) return '#eef2f8';
+      var t=(max>min)?((v-min)/(max-min)):0.5; t=Math.max(0,Math.min(1,t));
+      var r=Math.round(238-(238-26)*t), g=Math.round(246-(246-140)*t), bl=Math.round(238-(238-64)*t);
+      return 'rgb('+r+','+g+','+bl+')';
+    }
+    function hmFmt(v, mx){ if(v==null||!isFinite(v)) return ''; return mx==='rendement'?(Math.round(v)+'%'):(v>=1000?(Math.round(v/100)/10+'k'):Math.round(v)); }
+    function _hmZelfde(a,b){ return a&&b&&a._ry===b._ry&&a._cx===b._cx; }
+    function renderHeatmap(){
+      var H=STATE.hm; if(!H||!H.anchors){ $('heatmap-blok').classList.add('hidden'); return; }
+      var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols, mx=STATE.hmMetric||'rendement';
+      var vals=H.anchors.map(function(a){return a[mx];}).filter(function(v){return v!=null&&isFinite(v);});
+      var min=Math.min.apply(null,vals), max=Math.max.apply(null,vals), best=H.best||{}, sel=H.sel||best;
+      var html='<tr><th></th>'+cols.map(function(c){return '<th>'+H.colLabel(c)+'</th>';}).join('')+'</tr>';
+      rows.forEach(function(ry){
+        html+='<tr><td class="axis">'+H.rowLabel(ry)+'</td>';
+        cols.forEach(function(cx){
+          var a=H.find(ry,cx), v=a?a[mx]:null;
+          var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' opt':'');
+          html+='<td class="'+cls+'" style="background:'+hmKleur(v,min,max)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+hmFmt(v,mx)+'</td>';
+        });
+        html+='</tr>';
+      });
+      var T=$('hm-tabel'); T.innerHTML=html;
+      Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){
+        var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx'), a=H.find(ry,cx);
+        td.onmouseenter=function(){ if(a) toonKpisTL(a); };
+        td.onclick=function(){ if(a){ H.sel=a; toonKpisTL(a); $('hm-detail').innerHTML='Gekozen: <b>'+comboLabel(a)+'</b> — besparing '+eur(a.besparing)+'/j, rendement '+(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—')+'.'; renderHeatmap(); } };
+      });
+      T.onmouseleave=function(){ toonKpisTL(H.sel||H.best); };
+      $('heatmap-blok').classList.remove('hidden');
+    }
+    // Bouw STATE.hm voor particulier (thuisladen-anchors: battKwh × pvPan).
+    function hmParticulier(tl){
+      var A=tl.anchors.map(function(a){ return Object.assign({}, a, { _ry:a.battKwh, _cx:a.pvPan }); });
+      var best=STATE.tlBest?A.find(function(x){return x._ry===STATE.tlBest.battKwh&&x._cx===STATE.tlBest.pvPan;}):null;
+      STATE.hm={ anchors:A, rows:(tl.grid.batt_kwh_as||[]), cols:(tl.grid.pv_pan_as||[]),
+        rowLabel:function(v){return v>0?(v+' kWh'):'geen batt';}, colLabel:function(v){return _kwp(v)+' kWp';},
+        find:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best||A[0], sel:best||A[0] };
+      renderHeatmap();
+    }
+    // Bouw STATE.hm voor bedrijf (bedrijf-sweep-anchors: battKw × pvKwp).
+    function hmBedrijf(sw){
+      var A=sw.anchors.map(function(a){ return Object.assign({}, a, { _ry:a.battKw, _cx:a.pvKwp }); });
+      var best=kiesBesteAnker(A); best=A.find(function(x){return x===best;})||best;
+      STATE.hm={ anchors:A, rows:(sw.grid.batt_kw_as||[]), cols:(sw.grid.pv_kwp_as||[]),
+        rowLabel:function(v){return v>0?(v+' kW'):'geen batt';}, colLabel:function(v){return v+' kWp';},
+        find:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
+      toonKpisTL(best); renderHeatmap();
     }
     function toonKpisClient(inv){
       var toegang=inv.aansluiting_kva*0.9, gem=inv.afname_mwh*1000/8760;
@@ -457,8 +575,14 @@
       ]);
     }
 
+    function laadProfielen(){
+      fetch(API+'/api/profielen-lijst').then(function(r){return r.ok?r.json():null;}).then(function(j){
+        var lijst=(j&&j.profielen)||[]; if(!lijst.length) return; var sel=$('b-profiel'); if(!sel) return;
+        sel.innerHTML=lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+(String(n).toLowerCase()==='kantoor'?' selected':'')+'>'+esc(n)+'</option>'; }).join('');
+      }).catch(function(){});
+    }
     window.addEventListener('DOMContentLoaded', function(){
-      pasThema();
+      pasThema(); laadProfielen();
       Array.prototype.forEach.call(document.querySelectorAll('.mode'), function(el){ el.onclick=function(){ kiesModus(el.getAttribute('data-modus')); }; });
       ['c-pv','c-eigen','c-betalend','c-generator'].forEach(function(id){ $(id).onchange=syncBedrijfComp; });
       $('p-addwagen').onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
@@ -467,6 +591,11 @@
       $('btn-factuur').onclick=function(){ $('factuur-input').click(); };
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
       $('btn-bereken').onclick=bereken;
+      Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(bt){ bt.onclick=function(){
+        STATE.hmMetric=bt.getAttribute('data-mx');
+        Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(x){ x.classList.toggle('on', x===bt); });
+        if(STATE.hm) renderHeatmap();
+      }; });
       $('btn-terug').onclick=function(){ $('stap-invoer').scrollIntoView({behavior:'smooth', block:'start'}); };
       $('btn-cta').onclick=function(){ $('cta-msg').style.color='#0a7a37'; $('cta-msg').textContent='✔ De volledige studie (4 heatmaps met sweep + rapport) is de volgende stap in dit traject — daarvoor vragen we uw akkoord voor een mandaat op uw meetgegevens.'; $('btn-cta').setAttribute('disabled','disabled'); };
     });
