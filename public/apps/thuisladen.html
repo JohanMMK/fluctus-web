@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================================
+     FLUCTUS THUISLADEN  v0.9.13  (2026-08-27, Fase 3)
+     v0.9.13: "📶 Fluvius-mandaat aanvragen"-blok in de invoerkolom — EAN('s) (voorgevuld uit de factuur
+              via IN._eans) → POST /api/mandaat/aanvraag; de manager ziet ze in de Mandaten-app. Vereist
+              server v15.98.0+. Zelfde gedrag als de simulator (v1.95.0).
+     ---------------------------------------------------------------------------
      FLUCTUS THUISLADEN  v0.9.12  (2026-08-26, Fase 2c)
      v0.9.12: klant-e-mailveld in de invoerkolom (renderSide) → gaat als klant.email mee in
               _tlProjectBewaar (en in de input-snapshot via _TL_INPUT_VELDEN als _klantEmail). Geeft de
@@ -976,6 +981,11 @@ function renderSide(){
     '<label>Project / klant</label><input value="'+String(IN._project||'').replace(/"/g,'&quot;')+'" placeholder="bv. Van Oeckel" onchange="setProj(this.value)">'+
     '<div class="hint" style="margin:2px 0 6px">🔖 Projectcode: <b style="font-family:monospace">'+((IN._project||IN._klant)?_projectIdLokaal(IN._project||IN._klant):'—')+'</b> — bewaar deze code om later terug te vinden.</div>'+
     '<label>Klant e-mail (klanttoegang)</label><input type="email" value="'+String(IN._klantEmail||'').replace(/"/g,'&quot;')+'" placeholder="klant@bedrijf.be" onchange="setKlantMail(this.value)">'+
+    // v0.9.13 (Fase 3): Fluvius-mandaat aanvragen — EAN('s) (voorgevuld uit de factuur) in de wachtrij zetten.
+    '<label>Fluvius-mandaat — EAN(’s), 18 cijfers, komma-gescheiden</label>'+
+    '<input type="text" id="tlMandaatEan" placeholder="5414…" value="'+String((IN._eans||[]).join(', ')).replace(/"/g,'&quot;')+'">'+
+    '<button class="btn ghost sm" style="width:100%;margin:2px 0 6px" onclick="mandaatAanvraagTL()">📶 Mandaat aanvragen</button>'+
+    '<div id="tlMandaatMsg" class="hint" style="margin:0 0 8px">De manager ziet de aanvraag in de Mandaten-app. (Project eerst berekenen.)</div>'+
     '<div class="hint" style="margin:2px 0 6px">Optioneel — de klant kan hiermee enkel dit project openen (login via e-mailcode op /apps/klant.html).</div>'+
     '<div class="row2"><div><label>… heropvragen (code)</label><input id="tlProjCode" placeholder="FLX-XXX-XXXX"></div>'+
     '<div><label>… of op naam</label><select id="tlKaminoSel" onfocus="_tlVulDropdown()" onchange="_tlSelOpen(this.value)"><option value="">– kies project –</option></select></div></div>'+
@@ -1038,6 +1048,8 @@ window.tlFactuurUpload=function(input){
       var r=res.j;
       if(res.status!==200 || !r || !r.ok || !r.baseCase){ _tlZetMsg('⚠️ Kon de factuur niet lezen'+((r&&r.error)?(': '+r.error):'')+'. Vul manueel in.'); return; }
       var bc=r.baseCase;
+      // v0.9.13 (Fase 3): EAN('s) + leveringsadres uit de factuur bewaren voor de mandaat-aanvraag.
+      try{ IN._eans=((bc.eanBlokken||[]).map(function(b){return String((b&&b.ean)||'').replace(/\s/g,'');}).filter(function(e){return /^\d{18}$/.test(e);})); IN._factuuradres=bc.leveringsadres||''; }catch(e){}
       // Jaarrekenen op de factuurperiode (voor een jaarafrekening ≈ ×1).
       var dagen=_tlDagen(bc.periodeVan, bc.periodeTot); var jf=(dagen>0)?(365/dagen):1;
       var afnKwh=+bc.afnameKwh||0;
@@ -1142,6 +1154,20 @@ function _tlKaminoLaad(poging){   // proactief laden mét herpogingen tot de aut
 }
 window.setProj=function(v){ IN._project=v; if(!IN._klant) IN._klant=v; renderSide(); };
 window.setKlantMail=function(v){ IN._klantEmail=(v||'').trim(); };   // v0.9.12 (Fase 2c): klant-e-mail voor scoped klanttoegang
+window.mandaatAanvraagTL=function(){   // v0.9.13 (Fase 3): Fluvius-mandaat aanvragen → EAN('s) in de wachtrij
+  var el=document.getElementById('tlMandaatMsg');
+  var naam=IN._project||IN._klant||''; if(!naam){ if(el)el.textContent='Vul eerst een project/klant in.'; return; }
+  var pid=_projectIdLokaal(naam);
+  var ruw=((document.getElementById('tlMandaatEan')||{}).value)||'';
+  var eans=String(ruw).split(/[^0-9]+/).map(function(s){return s.trim();}).filter(function(s){return /^\d{18}$/.test(s);});
+  eans=eans.filter(function(e,i){return eans.indexOf(e)===i;});
+  if(!eans.length){ if(el)el.textContent='Geen geldig EAN (18 cijfers) gevonden.'; return; }
+  if(el)el.textContent='Bezig…';
+  _tlApiPost('/api/mandaat/aanvraag',{ project_id:pid, eans:eans.map(function(e){return {ean:e};}), factuuradres:(IN._factuuradres||''), meter_type:(eans.length>1?'AMR':'SMR') })
+    .then(function(r){ if(r&&r.ok){ var nw=r.nieuw||0, gk=r.gekoppeld||0; if(el)el.textContent='✔ verwerkt: '+nw+' nieuw in wachtrij'+(gk?(' + '+gk+' gekoppeld uit bestaande Fluvius-mandaten'):'')+' (project '+pid+'). Zie Mandaten-app.'; }
+      else { var m=(r&&r.error)||'onbekende fout'; if(el)el.textContent=/gevonden/.test(m)?'Bewaar het project eerst (klik “Bereken heatmaps”), daarna kan je het mandaat aanvragen.':('Kon niet: '+m); } })
+    .catch(function(e){ if(el)el.textContent='Fout: '+((e&&e.message)||e); });
+};
 window._tlSelOpen=function(v){ if(v){ var i=document.getElementById('tlProjCode'); if(i) i.value=v; window._tlProjectOpen(v); } };
 window._tlProjectOpen=function(id){
   id=String(id||'').trim().toUpperCase();
