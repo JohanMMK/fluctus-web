@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.9.2 (2026-08-27, Fase 4 slice D) — particulier aansluiting-kVA (Johan): standaard 5 kVA,
+<!-- energiekompas.html v0.10.0 (2026-08-27, Fase 4) — BEDRIJF-nota-wiring: de nota-knop werkt nu ook in bedrijf-modus.
+     _bouwNotaDataBedrijf voedt de nota (mode:'bedrijf') uit de bedrijf-sweep (dimensionering + generator-blok/heatmap +
+     gekozen combo) + /api/kamino/onderhandel (bedrijf-profiel, heatmaps:true) + /api/injectie-optimalisatie (bij
+     bestaande PV). Zo krijgt bedrijf het generator-hoofdstuk + onbalans-injectie; particulier ongewijzigd.
+     ── v0.9.2 (2026-08-27, Fase 4 slice D) — particulier aansluiting-kVA (Johan): standaard 5 kVA,
      of 0,75 × kWp als er bestaande PV is (i.p.v. de ruwe piek/0,23-schatting). + omvormer-kVA = 0,75 × kWp.
      ── v0.9.1 (2026-08-27, Fase 4 slice D) — omvormer-kVA = 0,75 × kWp (Johan) in de injectie-call.
      ── v0.9.0 (2026-08-27, Fase 4 slice D — onderhandelingsnota-wiring).
@@ -448,8 +452,8 @@
       if(st==='ja'){ fb.classList.remove('hidden'); fb.innerHTML='<b style="color:#0a7a37">Fiscaal voordeel mogelijk</b><div class="hint" style="margin-top:4px">U valt onder de vennootschapsbelasting (of bent zelfstandige/eenmanszaak). Dan kan de <b>40 % thematische investeringsaftrek</b> tellen — nettovoordeel volgens uw tarief. Exact in de volledige studie (voorwaarden: TVT ≥ 3 j, IRR ≤ 13 %).</div>'; }
       else if(st==='weet_niet'){ fb.classList.remove('hidden'); fb.innerHTML='<b>Fiscaal voordeel: te bevestigen</b><div class="hint" style="margin-top:4px">Uw boekhouder bevestigt uw statuut; wij leiden het nooit af. In de volledige studie tonen we het voordeel zodra de status duidelijk is.</div>'; }
       else { fb.classList.add('hidden'); fb.innerHTML=''; }
-      // Gratis onderhandelingsnota: voorlopig enkel particulier (bedrijf gebruikt het laadplein-rapport).
-      var bn=$('btn-nota'); if(bn){ if(STATE.modus==='particulier'){ bn.classList.remove('hidden'); } else { bn.classList.add('hidden'); } }
+      // Gratis onderhandelingsnota — beide modi (particulier + bedrijf; bedrijf krijgt het generator-hoofdstuk).
+      var bn=$('btn-nota'); if(bn) bn.classList.remove('hidden');
       $('stap-resultaat').classList.remove('hidden'); $('stap-resultaat').scrollIntoView({behavior:'smooth', block:'start'});
     }
 
@@ -692,7 +696,7 @@
             rendement:sel.rendement, kost:sel.kost, ref_kost:sel.ref_kost, capex:sel.capex }:null;
           var A=(inj&&inj.analyse)||null;
           return {
-            klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:regioLabel(inv.regio), profiel:'Residentieel',
+            mode:'particulier', klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:regioLabel(inv.regio), profiel:'Residentieel',
             specifiek_profiel:false, thema:STATE.partner||'',
             input:{ afname_mwh:afnameMwh, injectie_mwh:+inv.injectie_mwh||0, aansluiting_kva:+inv.aansluiting_kva||0,
               fasen:+inv.fasen||0, bestaand_pv_kwp:+inv.bestaand_pv_kwp||0, wagens:inv.wagens||[] },
@@ -705,10 +709,49 @@
         });
       });
     }
+    // Bedrijf: dezelfde nota, gevoed uit de bedrijf-sweep (dimensionering + generator + gekozen combo) + tegel 1/2.
+    function _bouwNotaDataBedrijf(){
+      var inv=STATE.invoer||{}, sw=STATE.tl||{}, sel=(STATE.hm&&STATE.hm.sel)||null;
+      var afnameMwh=+inv.afname_mwh||0;
+      var refEurMwh=(inv.huidige_kost>0&&afnameMwh>0)?Math.round(inv.huidige_kost/afnameMwh):0;
+      var profiel=inv.profielNaam||'kantoor';
+      var bestPv=(inv.pv&&+inv.pv.bestaand_kwp)||0;
+      return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
+        var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
+        var baseCase={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.round(+inv.aansluiting_kva||0),
+          spanningsniveau:(inv.spanning==='MS'||inv.spanning==='LS')?inv.spanning:'LS', postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
+        var ondBody={ baseCase:baseCase, profielNaam:profiel, heatmaps:true }; if(refEurMwh>0) ondBody.referentie_eur_mwh=refEurMwh;
+        var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+        var pInj=Promise.resolve(null);
+        if(bestPv>0){
+          pInj=fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            profielNaam:profiel, pv_kwp:bestPv, injectie_mwh_jaar:+inv.injectie_mwh||0,
+            afname_mwh_jaar:afnameMwh, piek_kw:Math.round((+inv.aansluiting_kva||0)*0.9), inverter_kva:Math.round(bestPv*0.75*10)/10 })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+        }
+        return Promise.all([pOnd,pInj]).then(function(res){
+          var ond=res[0], inj=res[1], A=(inj&&inj.analyse)||null;
+          var combo=sel?{ pv_kwp:anchorKwp(sel), batt_kwh:sel.battKwh||0, batt_kw:sel.battKw||0, besparing:sel.besparing,
+            rendement:sel.rendement, kost:sel.kost, ref_kost:sel.ref_kost, capex:sel.capex }:null;
+          return {
+            mode:'bedrijf', klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:'', profiel:profiel,
+            specifiek_profiel:false, thema:STATE.partner||'',
+            input:{ afname_mwh:afnameMwh, injectie_mwh:+inv.injectie_mwh||0, aansluiting_kva:+inv.aansluiting_kva||0,
+              spanning:inv.spanning||'', bestaand_pv_kwp:bestPv, pleinen:inv.pleinen||[] },
+            combo:combo,
+            onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
+              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
+              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps }:null,
+            injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null,
+            generator: sw.generator||null
+          };
+        });
+      });
+    }
     function _openNota(){
       var w; try{ w=window.open('','_blank'); if(w) w.document.write('<!doctype html><meta charset="utf-8"><title>Onderhandelingsnota…</title><body style="font:15px/1.5 Helvetica,Arial,sans-serif;color:#1F3864;padding:40px">Uw onderhandelingsnota wordt opgebouwd… <span id="d">·</span></body>'); }catch(e){}
       $('cta-msg').style.color='var(--muted)'; $('cta-msg').textContent='⏳ Uw onderhandelingsnota wordt opgebouwd…';
-      _bouwNotaData().then(function(D){
+      var bouw=(STATE.modus==='bedrijf')?_bouwNotaDataBedrijf:_bouwNotaData;
+      bouw().then(function(D){
         window.__EK_NOTA=D;
         try{ sessionStorage.setItem('FLUCTUS_EK_NOTA', JSON.stringify(D)); }catch(e){}
         var url='/apps/energiekompas-nota.html'+(D.thema?('?thema='+encodeURIComponent(D.thema)):'');
