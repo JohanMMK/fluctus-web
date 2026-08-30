@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.12.6 (2026-08-30, Fase 4 — €/km ALL-IN + km-tooltip, Johan): de €/km toont nu de ALL-IN kost
+<!-- energiekompas.html v0.12.8 (2026-08-30, Fase 4 — SCHIL→KAMINO-HANDOFF, Johan): de lead-POST stuurt nu ook een
+     `kamino`-seed mee (baseCase + profielNaam + modus + pv{kwp,injectie} + kVA + spanning). De server (v15.112) maakt
+     daaruit een studieklaar Kamino-project → de volledige cyclus schil → nota → volledige studie + rapport. Vereist
+     server v15.112.0. ── v0.12.7 (2026-08-30, Fase 4 — MOBILITEIT KWALITATIEF, Johan): niet het (enorme) km-getal
+     headlinen. "Ruimte voor mobiliteit" = "Ruim voldoende" (aansluiting kan binnen het piekvermogen ruim laden, geen
+     zwaardere aansluiting nodig); €/km = "zeer laag — vanaf …" (veel lager dan diesel). Het capaciteitsplafond in km
+     staat enkel nog in de ⓘ. Nieuwe note: de exacte km + €/km volgen uit het echte profiel + reële wagenpark/laadplein-
+     inschatting; deze eerste indicatie wijst op mooie winst. ── v0.12.6 (2026-08-30, Fase 4 — €/km ALL-IN + km-tooltip, Johan): de €/km toont nu de ALL-IN kost
      achter de meter (energiecomponent + netkosten/heffingen, server v15.111) i.p.v. enkel de commodity (die gaf ~0,006).
      De km-KPI krijgt een ⓘ-tooltip: het is een BOVENGRENS = de energie die de aansluiting nog aankan binnen het
      bestaande piekvermogen, omgerekend naar km. Vereist server v15.111.0.
@@ -295,6 +302,7 @@
       <div class="msg" id="res-msg"></div>
       <div class="kpis" id="kpi-host"></div>
       <div class="kpis" id="extra-kpi"></div>
+      <p class="note" id="mob-note" style="margin-top:6px"></p>
       <p class="note" id="rendement-disclaimer" style="margin-top:10px"><b>Indicatief — bewust voorzichtig.</b> Deze besparing en dit rendement zijn een <b>ondergrens</b> uit een snelle inschatting. De volledige studie optimaliseert PV + opslag op uw echte kwartierprofiel en komt doorgaans <b>hoger</b> uit; ze rekent het rendement ook netto (na onderhoud/verzekering).</p>
       <div class="hmwrap hidden" id="heatmap-blok">
         <div class="hmtitel">Kies zelf uw combinatie</div>
@@ -1062,8 +1070,13 @@
         try{ sessionStorage.setItem('FLUCTUS_EK_NOTA',JSON.stringify(D)); }catch(e){} window.__EK_NOTA=D;   // fallback voor het venster (opener)
         var s={ afname_marge_jaar:(STATE.ondAfname&&STATE.ondAfname.marge_jaar)||0, injectie_marge_jaar:_injMargeJaar(),
           energiekost_nu_mwh:(STATE.ondAfname&&STATE.ondAfname.energiekost_nu_mwh)||0, energiekost_dyn_mwh:(STATE.ondAfname&&STATE.ondAfname.energiekost_dyn_mwh)||0 };
+        var km={ baseCase:STATE.baseCase||null, modus:STATE.modus,
+          profielNaam:(STATE.modus==='bedrijf'?(($('b-profiel')||{}).value||'kantoor'):'Residentieel'),
+          pv:{ kwp:+STATE.pvKwp||0, injectie_mwh_jaar:+STATE.injMwh||0 },
+          aansluiting_kva:(STATE.modus==='bedrijf'?num('b-kva'):num('p-piek')),
+          spanning:(STATE.modus==='bedrijf'?(($('b-spanning')||{}).value||'LS'):'LS') };
         return fetch(API+'/api/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          mail:mail, tel:tel, naam:naam, partner:STATE.partner||'', herkomst:STATE.herkomst||'direct', data:D, samenvatting:s })})
+          mail:mail, tel:tel, naam:naam, partner:STATE.partner||'', herkomst:STATE.herkomst||'direct', data:D, samenvatting:s, kamino:km })})
           .then(function(r){return r.ok?r.json():null;}).then(function(res){
             $('btn-lead-go').removeAttribute('disabled'); msg.textContent='';
             STATE.leadToken=(res&&res.token)||''; var url=_notaUrl(); STATE.notaUrl=url;
@@ -1107,14 +1120,16 @@
         .then(function(r){return r.ok?r.json():null;}).then(function(j){
           if(!j||!j.kpi) return; var k=j.kpi, m=j.markt||{};
           var toegangKw=(+inv.aansluiting_kva||0)*0.9, restKw=toegangKw*((k.restcapaciteit_pct||0)/100);
-          var kmJaar=(restKw>0)?Math.round(restKw*8760*0.85/0.16):null;   // beschikbare kW × uren × benuttbaar / 0,16 kWh/km
+          var kmJaar=(restKw>0)?Math.round(restKw*8760*0.85/0.16):null;   // capaciteitsplafond (intern, voor de ⓘ)
           var energieKm=(k.kilometerkost_energie_eur_per_km!=null)?kmKostTxt(k.kilometerkost_energie_eur_per_km):null;
+          var ruim=(k.restcapaciteit_pct==null)||(k.restcapaciteit_pct>=20);   // aansluiting heeft ruim capaciteit?
           extraKpiPush([
-            { t:'Km beschikbaar in uw aansluiting', v:(kmJaar!=null?('tot '+kmJaar.toLocaleString('nl-BE')+' km/j'):'—'), s:'binnen uw bestaande piekvermogen · 0,16 kWh/km',
-              info:'Dit is een BOVENGRENS: de hoeveelheid energie die uw aansluiting nog kan binnenhalen zonder uw bestaande piekvermogen te overstijgen (vrije capaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+'), omgerekend naar km aan 0,16 kWh/km. De reële km hangt af van uw laadvenster en wagenpark.' },
-            { t:'Energiekost per km', v:'vanaf '+kmKostTxt(k.kilometerkost_eur_per_km||0), s:'all-in achter de meter — bij slim laden op de goedkoopste uren',
-              info:'All-in achter de meter = energiecomponent (goedkoopste ~30% spot)'+(energieKm?(' ≈ '+energieKm):'')+' + netkosten/heffingen ('+(m.net_heffing_eur_mwh||90)+' €/MWh). De reële kost hangt af van uw wagenpark & opslag.' }
+            { t:'Ruimte voor mobiliteit', v:(ruim?'Ruim voldoende':'Beperkt'), s:'binnen uw bestaande piekvermogen — geen zwaardere aansluiting nodig',
+              info:'Uw aansluiting kan binnen het bestaande piekvermogen nog veel energie binnenhalen (vrije capaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+')'+(kmJaar!=null?(' — ruwweg tot '+kmJaar.toLocaleString('nl-BE')+' km/j als plafond'):'')+'. Hoeveel km u écht haalt, hangt af van uw laadvenster en wagenpark — dat rekenen we exact in de volledige analyse.' },
+            { t:'Energiekost per km', v:'zeer laag — vanaf '+kmKostTxt(k.kilometerkost_eur_per_km||0), s:'all-in achter de meter · veel lager dan diesel (± 0,12 €/km)',
+              info:'All-in achter de meter = energiecomponent (goedkoopste ~30% spot)'+(energieKm?(' ≈ '+energieKm):'')+' + netkosten/heffingen ('+(m.net_heffing_eur_mwh||90)+' €/MWh). De exacte €/km hangt af van uw wagenpark & opslag.' }
           ]);
+          $('mob-note').innerHTML='<b>Uw aansluiting heeft ruim genoeg en de kost per km kan zeer laag.</b> Hoeveel km en tegen welke exacte €/km u haalt, rekenen we met uw <b>echte verbruiksprofiel</b> én een reële inschatting van uw <b>wagenpark en laadplein</b>. Deze eerste indicatie wijst al op mooie winst.';
         }).catch(function(){});
     }
     function extraKpiPush(kpis){ var h=$('extra-kpi'); if(!h) return; h.innerHTML += kpis.map(function(k){
