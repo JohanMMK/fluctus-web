@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Onderhandelingsnota</title>
-<!-- energiekompas-nota.html v0.4.1 (2026-08-27, Fase 4) — "Bewaar als PDF"-knop (window.print(); print-CSS met
+<!-- energiekompas-nota.html v0.5.1 (2026-08-28, Fase 4) — onderhandel-luik toont de BRON: bij een ingelezen factuur
+     "identiek aan tegel 1" (energiepost + factuurperiode), anders "indicatief op handmatige invoer".
+     ── v0.5.0 (2026-08-27, Fase 4 — CONCEPT-CORRECTIE onderhandelingsnota, Johan): de gratis
+     onderhandelingsnota gaat over een BETERE DEAL voor afname (tegel 1) + injectie (tegel 2: afregelen + onbalans)
+     ZONDER extra investering. De PV+batterij-combinatie én het generator-hoofdstuk zijn INVESTERINGEN → verhuisd naar
+     de volledige studie (enkel getoond bij D.volledig). Slot toont "winst zonder investering" = afname-marge +
+     injectie-meerwaarde. Preview volledige studie: ?volledig=1.
+     ── v0.4.1 (2026-08-27, Fase 4) — "Bewaar als PDF"-knop (window.print(); print-CSS met
      A4-paginabreaks was er al; knop verborgen in print). Thema-gekleurd.
      ── v0.4.0 (2026-08-27, Fase 4) — MODE-AWARE (particulier | bedrijf). Bedrijf toont het
      onbalans-luik in de injectie (3e heatmap) en het generator-hoofdstuk; particulier enkel curtail_neg. Preview:
@@ -187,7 +194,7 @@
       '<div class="cover-in">'+
         '<div class="brand">'+T.merk+'</div>'+
         '<div class="titel">Onderhandelings<span>nota</span></div>'+
-        '<div class="subtitel">Uw eerste, gratis indicatie — contract, injectie en het effect van PV + batterij op uw aansluiting.</div>'+
+        '<div class="subtitel">Uw eerste, gratis indicatie — een betere deal voor uw <b>afname</b> én uw <b>injectie</b> (afregelen + onbalans), <b>zonder extra investeringen</b>.</div>'+
         '<div class="cover-grid">'+
           '<div class="cf"><div class="cl">Klant</div><div class="cv">'+(D.klant||'—')+'</div></div>'+
           '<div class="cf"><div class="cl">Regio · profiel</div><div class="cv">'+(D.regio||'—')+' · '+(D.profiel||'standaard')+'</div></div>'+
@@ -215,13 +222,15 @@
     return '<section class="a4">'+
       '<div class="eyebrow">1 · Uw huidige situatie</div>'+
       '<div class="h-sec">Kunt u beter onderhandelen?</div>'+
-      '<div class="lead">We spiegelen uw factuur aan een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik. Dit is een indicatie — geen offerte.</div>'+
+      '<div class="lead">We spiegelen uw '+((o.bron==='factuur')?'<b>ingelezen factuur</b> (energiepost + factuurperiode)':'invoer')+' aan een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik.'+((o.bron==='factuur')?' Dezelfde berekening als de contractevaluatie (tegel 1).':' Indicatief op uw handmatige invoer — laad uw factuur op voor een exacte analyse.')+' Geen offerte.</div>'+
       kpis+tv+
       (heats?('<div class="note" style="margin:14px 0 2px">De heatmaps tonen uw jaar in één oogopslag: 24 uur verticaal, 365 dagen horizontaal.</div>'+heats):'')+
       '</section>';
   }
 
+  // PV+batterij-combinatie = een INVESTERING → hoort in de volledige studie, NIET in de gratis onderhandelingsnota.
   function pCombo(D){
+    if(!D.volledig) return '';
     var c=D.combo||{}, i=D.input||{};
     var tvt=(c.terugverdientijd!=null)?c.terugverdientijd:((c.besparing>0&&c.capex>0)?(Math.round(c.capex/c.besparing*10)/10):null);
     var kpis='<div class="kpis">'+
@@ -266,7 +275,7 @@
     heats+=heatBlok('Winst door af te regelen','meerwaarde curtailment bij negatieve prijzen', hm.bespaard_curtail_eur, hm.uren, hm.dagen, 'weinig', 'veel winst');
     if(bedrijf) heats+=heatBlok('Winst op de onbalansmarkt','passieve respons (imbalance settlement)', hm.verdiend_onbalans_eur, hm.uren, hm.dagen, 'weinig', 'veel winst');
     return '<section class="a4">'+
-      '<div class="eyebrow">3 · Meer uit uw injectie</div>'+
+      '<div class="eyebrow">'+(D.volledig?'3':'2')+' · Meer uit uw injectie</div>'+
       '<div class="h-sec">Solar op de spotmarkt</div>'+
       '<div class="lead">U hebt PV en injecteert. Door slim af te regelen'+(bedrijf?' én passief op onbalans te reageren':' op negatieve prijzen')+' haalt u meer uit dezelfde installatie — zonder extra investering.</div>'+
       kpis+heats+
@@ -280,7 +289,9 @@
   }
 
   // ── Generator-hoofdstuk (bedrijf): de dieselgenerator elektrisch vervangen (§3). ──
+  // Ook dit is een INVESTERING (batterij) → enkel in de volledige studie, niet in de gratis onderhandelingsnota.
   function pGenerator(D){
+    if(!D.volledig) return '';
     var g=D.generator; if(!g) return '';
     var hm=g.heatmap||{}, ven=g.venster||[7,18];
     var seed=num(g.batterij_seed_kw,0)+' kW / '+num(g.batterij_seed_kwh,0)+' kWh';
@@ -302,18 +313,26 @@
   }
 
   function pSlot(D){
-    var c=D.combo||{};
+    var ond=D.onderhandel||{}, injop=(D.injectie&&D.injectie.opbrengst_jaar)||{};
+    var winstAfname=+ond.marge_jaar||0;
+    var winstInjectie=(+injop.meerwaarde_curtail_eur||0)+((D.mode==='bedrijf')?(+injop.meerwaarde_onbalans_eur||0):0);
+    var totaal=Math.round(winstAfname+winstInjectie);
+    var samenvatting=(!D.volledig && (winstAfname>0||winstInjectie>0))
+      ? '<div class="cta" style="margin-bottom:14px">Uw winst zonder één euro te investeren: ± '+eur(totaal)+' /jaar'+
+        '<div class="s">beter onderhandelen op uw afname ('+eur(winstAfname)+') + slimmer injecteren — afregelen'+((D.mode==='bedrijf')?' en onbalans':'')+' ('+eur(winstInjectie)+') — op uw <b>huidige installatie</b>.</div></div>'
+      : '';
     return '<section class="a4 slot"><div style="display:flex;flex-direction:column;height:100%">'+
       '<div class="eyebrow">De volgende stap</div>'+
-      '<h2>Klaar om <span class="g">slim te besparen</span> op uw energiefactuur?</h2>'+
-      '<div class="sub">Deze nota is een gratis indicatie op een standaardprofiel. De volledige studie draait op uw <b>echte kwartierdata</b> (na een Fluvius-mandaat) en bevat de 4 heatmaps met sweep, het financieel plan en de exacte combinatie.</div>'+
+      '<h2>'+(D.volledig?'Klaar om <span class="g">slim te besparen</span> op uw energiefactuur?':'Een <span class="g">betere deal</span> — zonder te investeren.')+'</h2>'+
+      '<div class="sub">Deze onderhandelingsnota toont wat u wint door uw <b>afname en injectie</b> beter te regelen, zonder één euro te investeren. Wilt u méér? De <b>volledige studie</b> voegt PV, batterij'+((D.mode==='bedrijf')?' (en generatorvervanging)':'')+' toe — met de 4 heatmaps, het financieel plan en de exacte combinatie, op uw <b>echte kwartierdata</b> (na een Fluvius-mandaat).</div>'+
+      samenvatting+
       '<div class="promise"><div class="t">Onze belofte — u neemt geen risico</div><ul>'+
         '<li><b>Rendementsgarantie.</b> Tonen we geen rendement van minstens 10 % aan? Dan betalen we u de studie integraal terug.</li>'+
         '<li><b>Wij begeleiden de uitvoering.</b> We staan uw installateur bij zodat u de berekende resultaten ook effectief haalt.</li>'+
         '<li><b>Bij uitvoering kost ze u niets.</b> Ernstige installateurs betalen de studie terug bij uw eerste bestelling.</li>'+
       '</ul></div>'+
       '<div class="cta">Vraag uw volledige EnergieKompas-studie aan'+
-        '<div class="s">Met uw akkoord voor een mandaat op uw meetgegevens — daarna de exacte combinatie en het rapport.</div></div>'+
+        '<div class="s">Met uw akkoord voor een mandaat op uw meetgegevens — daarna PV + batterij, de exacte combinatie en het rapport.</div></div>'+
       '<div class="disc">Alle bedragen zijn indicatief en berekend op een '+(D.specifiek_profiel?'gemeten':'standaard')+' verbruiksprofiel met actuele marktdata. Geen offerte.</div>'+
       '<div class="footer"><span>'+T.footer+'</span>'+(T.badge?('<span class="slot-jc">'+T.badge+'</span>'):'')+'<span>'+(D.datum||'')+'</span></div>'+
     '</div></section>';
@@ -374,6 +393,7 @@
   // sessionStorage wordt dan niet gekopieerd → lees de data van de opener (zelfde origin).
   try{ if(!D && window.opener && window.opener.__EK_NOTA) D=window.opener.__EK_NOTA; }catch(e){}
   if(!D){ D=demo(qp('mode')); $('demo-banner').style.display='block'; }
+  if(D && qp('volledig')==='1') D.volledig=true;   // preview-toggle: volledige studie (mét PV/batterij/generator)
   applyTheme(kiesThema(D));
   render(D);
 })();

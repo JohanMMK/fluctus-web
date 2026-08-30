@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.10.0 (2026-08-27, Fase 4) — BEDRIJF-nota-wiring: de nota-knop werkt nu ook in bedrijf-modus.
+<!-- energiekompas.html v0.11.0 (2026-08-28, Fase 4 — COHERENTIE onderhandel ↔ Kamino tegel 1): _ondBody voedt onderhandel
+     met de INGELEZEN factuur-baseCase (energiepost + factuurperiode + DNB, uit STATE.baseCase) wanneer beschikbaar →
+     identiek aan tegel 1. Zonder factuur = jaarinvoer + all-in referentie (indicatief). D.onderhandel.bron = factuur|indicatief.
+     ── v0.10.0 (2026-08-27, Fase 4) — BEDRIJF-nota-wiring: de nota-knop werkt nu ook in bedrijf-modus.
      _bouwNotaDataBedrijf voedt de nota (mode:'bedrijf') uit de bedrijf-sweep (dimensionering + generator-blok/heatmap +
      gekozen combo) + /api/kamino/onderhandel (bedrijf-profiel, heatmaps:true) + /api/injectie-optimalisatie (bij
      bestaande PV). Zo krijgt bedrijf het generator-hoofdstuk + onbalans-injectie; particulier ongewijzigd.
@@ -672,6 +675,21 @@
 
     // ── Gratis onderhandelingsnota (particulier) — spiegelt de schil-data + tegel 1/2. ──
     function regioLabel(r){ return ({VL:'Vlaanderen',BR:'Brussel',WA:'Wallonië'})[r]||'België'; }
+    // Onderhandel-body (coherentie met Kamino tegel 1). Bij een INGELEZEN factuur → de echte factuur-baseCase
+    // (energiepost + factuurperiode + DNB), zodat de nota IDENTIEK is aan tegel 1. Zonder factuur → jaarinvoer +
+    // all-in referentie (indicatief; kan afwijken van een factuurscan — zie coherentie-analyse 28-08).
+    function _factuurBasis(){ var bc=STATE.baseCase; return !!(bc && (+bc.totaalEnergieExclBtw>0) && bc.periodeVan && bc.periodeTot); }
+    function _ondBody(profiel, afnameMwh, refEurMwh, kva, spanning, pVan, pTot){
+      if(_factuurBasis()){
+        var b2=Object.assign({}, STATE.baseCase); if(!b2.spanningsniveau) b2.spanningsniveau=spanning;
+        return { baseCase:b2, profielNaam:profiel, heatmaps:true };
+      }
+      var baseCase={ klantNaam:'', afnameKwh:Math.round((+afnameMwh||0)*1000), aansluitVermogenKva:Math.round(+kva||0),
+        spanningsniveau:spanning, postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
+      var body={ baseCase:baseCase, profielNaam:profiel, heatmaps:true };
+      if(refEurMwh>0) body.referentie_eur_mwh=refEurMwh;
+      return body;
+    }
     function _bouwNotaData(){
       var inv=STATE.invoer||{}, sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest||null;
       var afnameMwh=+inv.afname_mwh||0;
@@ -679,10 +697,7 @@
       // markt-periode (rolling 12m) → dagen≈365 zodat de onderhandel-marge op jaarbasis klopt
       return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
         var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
-        var baseCase={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.round(inv.aansluiting_kva||0),
-          spanningsniveau:'LS', postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
-        var ondBody={ baseCase:baseCase, profielNaam:'Residentieel', heatmaps:true };
-        if(refEurMwh>0) ondBody.referentie_eur_mwh=refEurMwh;
+        var ondBody=_ondBody('Residentieel', afnameMwh, refEurMwh, inv.aansluiting_kva, 'LS', pVan, pTot);
         var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         var pInj=Promise.resolve(null);
         if((+inv.bestaand_pv_kwp||0)>0){
@@ -703,7 +718,7 @@
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
               energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
-              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps }:null,
+              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null
           };
         });
@@ -718,9 +733,8 @@
       var bestPv=(inv.pv&&+inv.pv.bestaand_kwp)||0;
       return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
         var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
-        var baseCase={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.round(+inv.aansluiting_kva||0),
-          spanningsniveau:(inv.spanning==='MS'||inv.spanning==='LS')?inv.spanning:'LS', postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
-        var ondBody={ baseCase:baseCase, profielNaam:profiel, heatmaps:true }; if(refEurMwh>0) ondBody.referentie_eur_mwh=refEurMwh;
+        var spanning=(inv.spanning==='MS'||inv.spanning==='LS')?inv.spanning:'LS';
+        var ondBody=_ondBody(profiel, afnameMwh, refEurMwh, inv.aansluiting_kva, spanning, pVan, pTot);
         var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         var pInj=Promise.resolve(null);
         if(bestPv>0){
@@ -740,7 +754,7 @@
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
               energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
-              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps }:null,
+              toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null,
             generator: sw.generator||null
           };
