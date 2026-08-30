@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.11.0 (2026-08-28, Fase 4 — COHERENTIE onderhandel ↔ Kamino tegel 1): _ondBody voedt onderhandel
+<!-- energiekompas.html v0.12.0 (2026-08-30, Fase 4 — PROGRESSIEVE LEAD-FUNNEL, Johan): de schil is herbouwd tot een
+     progressieve funnel i.p.v. één groot invoerformulier. Flow: (1) factuur opladen (of kort manueel) → we lezen enkel
+     het verbruiksprofiel; (2) meteen de ONDERHANDELINGSMARGE OP AFNAME (Kamino tegel 1, coherent, GEEN techniekkeuze);
+     (3) heeft u PV? — overgeslagen als de factuur al injectie toonde — dan de INJECTIE-MARGE (curtail + onbalans);
+     (4) mail + tel → we bewaren de lead, mailen de klant de nota-link (/api/lead) en tonen de nota-knop; (5) upsell-
+     radiobuttons (besparing/rendement · mobiliteit km + €/km · generator vervangen) starten de DIEPTE-ANALYSE op de
+     bestaande engines → KPI's; (6) "wil u weten hoe?" → warme lead (/api/lead-interesse). De oude modus-keuze + het grote
+     formulier zijn nu VERBORGEN (#legacy); de funnel vult die velden en hergebruikt gatherInvoer + de sweep- en nota-
+     bouwers ongewijzigd. Modus wordt afgeleid uit de aansluiting (MS of >25 kVA ⇒ bedrijf). Vereist server v15.110.0
+     (/api/lead*). ── v0.11.0 (2026-08-28, Fase 4 — COHERENTIE onderhandel ↔ Kamino tegel 1): _ondBody voedt onderhandel
      met de INGELEZEN factuur-baseCase (energiepost + factuurperiode + DNB, uit STATE.baseCase) wanneer beschikbaar →
      identiek aan tegel 1. Zonder factuur = jaarinvoer + all-in referentie (indicatief). D.onderhandel.bron = factuur|indicatief.
      ── v0.10.0 (2026-08-27, Fase 4) — BEDRIJF-nota-wiring: de nota-knop werkt nu ook in bedrijf-modus.
@@ -123,35 +132,139 @@
   .hmmetriek button{ border:none; background:#fbfdff; color:var(--navy); font-size:12px; font-weight:700; padding:6px 12px; cursor:pointer; }
   .hmmetriek button.on{ background:var(--accent); color:#fff; }
   .hmdetail{ font-size:12.5px; color:var(--muted); margin-top:8px; min-height:16px; }
+  /* ── Funnel (v0.12.0) ── */
+  .stapkop{ display:flex; align-items:center; gap:10px; font-weight:800; color:var(--navy); font-size:16px; margin-bottom:6px; }
+  .stapnr{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:999px; background:var(--accent); color:#fff; font-size:13px; font-weight:800; flex:0 0 auto; }
+  .linkbtn{ background:none; border:none; color:var(--accent); font-weight:700; font-size:13px; cursor:pointer; padding:0; margin-top:12px; text-decoration:underline; }
+  .manueelbox{ margin-top:12px; border-left:3px solid var(--line); padding-left:14px; }
+  .kpi.g{ background:#F3FBF5; border-color:#05B05033; } .kpi.g .v{ color:#048443; }
+  .radio.big label{ font-size:15px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; background:#fbfdff; cursor:pointer; }
+  .opt{ display:block; border:1.5px solid var(--line); border-radius:12px; padding:13px 15px 13px 40px; margin:10px 0; background:#fbfdff; cursor:pointer; position:relative; font-weight:600; color:var(--navy); }
+  .opt input{ position:absolute; left:14px; top:15px; width:auto; }
+  .opt b{ color:var(--navy); } .opt span{ display:block; font-weight:500; color:var(--muted); font-size:12.5px; margin-top:3px; }
+  .opt .nieuw{ display:inline-block; background:#05B050; color:#fff; font-size:10px; font-weight:800; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle; }
+  .chk{ display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:600; color:var(--ink); margin-top:14px; } .chk input{ width:auto; margin-top:2px; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="brand">🔆 EnergieKompas<span class="p" id="partnerlbl"></span></div>
     <h1>Wat is uw energie waard?</h1>
-    <p class="lead">Laad uw afrekening op of vul in, en zie meteen de waarde: uw besparing, wat uw injectie waard is, en hoe goedkoop u kan rijden. De technische keuzes (PV + batterij) rekenen wij op de achtergrond.</p>
+    <p class="lead">Laad uw energiefactuur op en zie meteen wat er te onderhandelen valt — op uw afname én uw injectie — <b>zonder één euro te investeren</b>. We hebben enkel uw verbruiksprofiel nodig.</p>
 
-    <!-- MODUS -->
-    <div class="card" id="stap-modus">
-      <div style="font-weight:700;color:var(--navy);margin-bottom:12px">Voor wie is dit?</div>
-      <div class="modes">
-        <div class="mode" data-modus="particulier"><div class="ic">🏠</div><b>Particulier</b><span>Woning: verbruik, zonnepanelen en (thuis)laden van uw wagen(s).</span></div>
-        <div class="mode" data-modus="bedrijf"><div class="ic">🏢</div><b>Bedrijf</b><span>Site: afname, injectie, restcapaciteit, laadplein en generator.</span></div>
+    <!-- STAP 1 — FACTUUR -->
+    <div class="card" id="stap-start">
+      <div class="stapkop"><span class="stapnr">1</span> Uw energiefactuur</div>
+      <p class="hint">Laad uw afrekening (PDF) op — we lezen uw verbruik, aansluiting en periode automatisch. Afname- én injectiefactuur mag samen (max 2 PDF's).</p>
+      <div class="filerow">
+        <button class="btn" type="button" id="btn-factuur">📄 Factuur opladen</button>
+        <input type="file" id="factuur-input" accept="application/pdf" multiple class="hidden">
+      </div>
+      <div class="msg" id="factuur-msg"></div>
+      <button class="linkbtn" type="button" id="btn-manueel">Geen factuur bij de hand? Vul kort in →</button>
+      <div id="manueel" class="hidden manueelbox">
+        <div class="grid3">
+          <div><label>Jaarverbruik afname (MWh)</label><input type="number" id="m-afname" step="1" min="0" placeholder="bv. 120"></div>
+          <div><label>Aansluitvermogen (kVA)</label><input type="number" id="m-kva" step="1" min="0" placeholder="bv. 100"></div>
+          <div><label>Spanning</label><select id="m-spanning"><option value="LS">Laagspanning</option><option value="MS">Middenspanning</option></select></div>
+        </div>
+        <div class="grid3">
+          <div><label>Jaarinjectie (MWh) — 0 = geen PV</label><input type="number" id="m-inj" step="1" min="0" value="0"></div>
+          <div><label>Huidige energiekost (€/j) — optioneel</label><input type="number" id="m-kost" step="1" min="0" placeholder="referentie"></div>
+          <div><label>Verbruiksprofiel</label><select id="m-profiel"><option value="">automatisch</option></select></div>
+        </div>
+        <button class="btn" type="button" id="btn-manueel-go">Bereken mijn onderhandelingsmarge →</button>
       </div>
     </div>
 
-    <!-- INVOER -->
-    <div class="card hidden" id="stap-invoer">
-      <div style="font-weight:700;color:var(--navy)">Uw gegevens <span class="pill" id="moduspill"></span></div>
+    <!-- STAP 2 — AFNAME-MARGE -->
+    <div class="card hidden" id="stap-afname">
+      <div class="stapkop"><span class="stapnr">2</span> Wat valt er te onderhandelen op uw afname?</div>
+      <p class="hint" id="afname-sub">We vergelijken uw huidige factuur met een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik — zonder investering.</p>
+      <div class="kpis" id="afname-kpi"></div>
+      <div class="msg" id="afname-msg"></div>
+      <button class="btn hidden" type="button" id="btn-na-afname">Volgende: uw injectie →</button>
+    </div>
 
-      <label>Energiefactuur (PDF) — optioneel, vult alles automatisch in</label>
-      <div class="filerow">
-        <button class="btn ghost sm" type="button" id="btn-factuur" style="margin-top:0">📄 Factuur opladen</button>
-        <input type="file" id="factuur-input" accept="application/pdf" multiple class="hidden">
-        <span class="hint" id="factuur-msg">Afname- én injectiefactuur mag samen (max 2 PDF's).</span>
+    <!-- STAP 3 — PV / INJECTIE -->
+    <div class="card hidden" id="stap-pv">
+      <div class="stapkop"><span class="stapnr">3</span> Heeft u zonnepanelen?</div>
+      <div id="pv-vraag">
+        <div class="radio big">
+          <label><input type="radio" name="heeftpv" value="ja"> Ja, ik heb PV</label>
+          <label><input type="radio" name="heeftpv" value="nee"> Nee</label>
+        </div>
+        <div id="pv-velden" class="hidden manueelbox">
+          <div class="grid2">
+            <div><label>Vermogen PV (kWp)</label><input type="number" id="pv-kwp" step="0.1" min="0" placeholder="bv. 12"></div>
+            <div><label>Jaarinjectie (MWh)</label><input type="number" id="pv-inj" step="0.1" min="0" placeholder="bv. 4"></div>
+          </div>
+          <button class="btn" type="button" id="btn-pv-go">Bereken injectie-marge →</button>
+        </div>
       </div>
+      <p class="hint hidden" id="pv-auto"></p>
+      <div class="kpis" id="inj-kpi"></div>
+      <div class="msg" id="pv-msg"></div>
+      <button class="btn hidden" type="button" id="btn-na-pv">Volgende: uw nota →</button>
+    </div>
 
-      <!-- ===== PARTICULIER (thuisladen-stijl) ===== -->
+    <!-- STAP 4 — LEAD -->
+    <div class="card hidden" id="stap-lead">
+      <div class="stapkop"><span class="stapnr">4</span> Uw onderhandelingsnota is klaar</div>
+      <p class="hint">Waar mogen we ze naartoe sturen? U krijgt de nota meteen op het scherm én in uw mailbox.</p>
+      <div class="grid3">
+        <div><label>Naam (optioneel)</label><input type="text" id="ld-naam" placeholder="uw naam of bedrijf"></div>
+        <div><label>E-mail *</label><input type="email" id="ld-mail" placeholder="u@voorbeeld.be"></div>
+        <div><label>Telefoon</label><input type="tel" id="ld-tel" placeholder="0470 12 34 56"></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="ld-akkoord"> Ik ga akkoord dat EnergieKompas mij hierover mag contacteren.</label>
+      <button class="btn" type="button" id="btn-lead-go">📄 Bekijk mijn onderhandelingsnota →</button>
+      <div class="msg" id="lead-msg"></div>
+      <div id="lead-klaar" class="hidden">
+        <button class="btn" type="button" id="btn-nota">📄 Open mijn onderhandelingsnota</button>
+        <p class="hint" id="lead-bevestig"></p>
+      </div>
+    </div>
+
+    <!-- STAP 5 — MEER (upsell) -->
+    <div class="card hidden" id="stap-meer">
+      <div class="stapkop"><span class="stapnr">5</span> Zit er méér in uw aansluiting?</div>
+      <p class="hint">Zonder extra aansluitvermogen zit er vaak nog ruimte. Wat wilt u laten berekenen?</p>
+      <label class="opt"><input type="checkbox" id="q-besparing" checked> <b>Besparing &amp; rendement</b><span>Heeft mijn aansluiting nog besparing en rendement in petto (slim laden/opslaan)?</span></label>
+      <label class="opt"><input type="checkbox" id="q-mobiliteit"> <b>Elektrische mobiliteit</b><span>Hoeveel km kan ik laden op mijn bestaande aansluiting, en hoe goedkoop wordt de energiekost per km?</span></label>
+      <label class="opt"><input type="checkbox" id="q-generator"> <b>Generator vervangen</b> <span class="nieuw">nieuw</span><span>Kan ik een brandstofgenerator vervangen door goedkope stroom en vermogen uit mijn bestaande aansluiting?</span></label>
+      <div id="gen-velden" class="hidden manueelbox">
+        <div class="grid2">
+          <div><label>Vermogen generator (kVA)</label><input type="number" id="g-kva" step="1" min="0" placeholder="bv. 100"></div>
+          <div><label>Brandstofverbruik (l/jaar)</label><input type="number" id="g-liter" step="100" min="0" placeholder="bv. 3000"></div>
+        </div>
+      </div>
+      <button class="btn" type="button" id="btn-meer-go">Start mijn analyse →</button>
+      <div class="msg" id="meer-msg"></div>
+    </div>
+
+    <!-- STAP 6 — RESULTAAT -->
+    <div class="card hidden" id="stap-resultaat">
+      <div class="stapkop"><span class="stapnr">6</span> Uw EnergieKompas <span class="pill">indicatief</span></div>
+      <p class="hint" style="margin:0 0 14px">Eerste inschatting met de <b>actuele markt</b> en een verborgen PV+batterij-combinatie. De precieze berekening — met de heatmap waarin u zelf combinaties kiest — gebeurt op uw <b>werkelijke kwartierprofiel</b> (na een mandaat op uw meetgegevens).</p>
+      <div class="kpis" id="kpi-host"></div>
+      <div class="kpis" id="extra-kpi"></div>
+      <div class="hmwrap hidden" id="heatmap-blok">
+        <div class="hmtitel">Kies zelf uw combinatie</div>
+        <div class="hmleg">Beweeg over het rooster: de KPI's hierboven veranderen mee. Klik een vakje om die combinatie exact te berekenen. Het gestreepte vakje is onze aanbeveling.</div>
+        <div class="hmmetriek" id="hm-metriek"><button data-mx="rendement" class="on">Rendement</button><button data-mx="besparing">Besparing/jaar</button></div>
+        <div class="hmscroll"><table class="hm" id="hm-tabel"></table></div>
+        <div class="hmdetail" id="hm-detail"></div>
+      </div>
+      <div class="fisc hidden" id="fisc-blok"></div>
+      <div style="margin-top:18px">
+        <button class="btn" type="button" id="btn-hoe">Wil u weten hoe? Laat u contacteren →</button>
+        <div class="msg" id="hoe-msg"></div>
+      </div>
+    </div>
+
+    <!-- LEGACY-INVOER (verborgen) — de funnel vult deze velden; de bestaande engine- en nota-functies lezen ze. -->
+    <div id="legacy" class="hidden" aria-hidden="true">
       <div id="form-particulier" class="hidden">
         <h3>Woning</h3>
         <div class="grid3">
@@ -243,27 +356,6 @@
 
       <button class="btn" type="button" id="btn-bereken">Toon mijn EnergieKompas →</button>
       <div class="msg" id="invoer-msg"></div>
-    </div>
-
-    <!-- RESULTAAT -->
-    <div class="card hidden" id="stap-resultaat">
-      <div style="font-weight:700;color:var(--navy);margin-bottom:4px">Uw EnergieKompas <span class="pill">indicatief</span></div>
-      <p class="hint" style="margin:0 0 14px">Eerste inschatting met de <b>actuele markt</b> en een verborgen PV+batterij-combinatie. De precieze berekening — met de <b>4 heatmaps</b> waarin u zelf combinaties kiest — gebeurt op uw <b>werkelijke kwartierprofiel</b> (na een mandaat op uw meetgegevens).</p>
-      <div class="kpis" id="kpi-host"></div>
-      <div class="hmwrap hidden" id="heatmap-blok">
-        <div class="hmtitel">Kies zelf uw combinatie</div>
-        <div class="hmleg">Beweeg over het rooster: de KPI's hierboven veranderen mee. Klik een vakje om die combinatie exact te berekenen. Het gestreepte vakje is onze aanbeveling.</div>
-        <div class="hmmetriek" id="hm-metriek"><button data-mx="rendement" class="on">Rendement</button><button data-mx="besparing">Besparing/jaar</button></div>
-        <div class="hmscroll"><table class="hm" id="hm-tabel"></table></div>
-        <div class="hmdetail" id="hm-detail"></div>
-      </div>
-      <div class="fisc hidden" id="fisc-blok"></div>
-      <div style="margin-top:18px">
-        <button class="btn hidden" type="button" id="btn-nota" style="margin-bottom:10px">📄 Uw gratis onderhandelingsnota openen</button>
-        <button class="btn" type="button" id="btn-cta">Naar de volledige studie (heatmaps + rapport) →</button>
-        <button class="btn ghost" type="button" id="btn-terug" style="margin-top:18px">← Aanpassen</button>
-      </div>
-      <div class="msg" id="cta-msg"></div>
     </div>
   </div>
 
@@ -400,14 +492,11 @@
         var r=await fetch(API+'/api/factuur-extract',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ files:b64.map(function(b,ix){ return {base64:b,mediaType:'application/pdf',fileName:pdfs[ix].name}; }) }) });
         var j=await r.json();
         if(!r.ok || !j || !j.baseCase){ $('factuur-msg').textContent='Kon de factuur niet lezen — vul manueel in.'; return; }
-        var bc=j.baseCase; STATE.baseCase=bc; var d=_dagen(bc.periodeVan,bc.periodeTot), jf=(d>0?365/d:1);
-        var afnMwh = bc.afnameKwh?Math.round(bc.afnameKwh/1000*jf*100)/100:0;
-        var injMwh = bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
-        var kost = bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0;
-        if(STATE.modus==='particulier'){ if(afnMwh)$('p-verbruik').value=afnMwh; if(bc.aansluitVermogenKva)$('p-piek').value=Math.round(bc.aansluitVermogenKva*10)/10; if(injMwh)$('p-inj').value=injMwh; if(bc.pvKwpAanwezig)$('p-pv').value=bc.pvKwpAanwezig; if(kost)$('p-kost').value=kost; }
-        else { if(afnMwh)$('b-verbruik').value=afnMwh; if(injMwh)$('b-inj').value=injMwh; if(bc.aansluitVermogenKva)$('b-kva').value=bc.aansluitVermogenKva; if(kost)$('b-kost').value=kost; }
-        $('factuur-msg').textContent='✔ Factuur gelezen'+(bc.klantNaam?(' — '+esc(bc.klantNaam)):'')+'. Controleer de velden.';
-      }catch(e){ $('factuur-msg').textContent='Kon de factuur niet lezen — vul manueel in.'; }
+        var bc=j.baseCase; STATE.baseCase=bc;
+        $('factuur-msg').style.color='#0a7a37';
+        $('factuur-msg').textContent='✔ Factuur gelezen'+(bc.klantNaam?(' — '+esc(bc.klantNaam)):'')+'. We berekenen uw onderhandelingsmarge…';
+        naFactuur(bc);
+      }catch(e){ $('factuur-msg').style.color='#b00'; $('factuur-msg').textContent='Kon de factuur niet lezen — vul manueel in.'; }
     }
 
     function statusWaarde(){ var el=document.querySelector('input[name="vennb"]:checked'); return el?el.value:''; }
@@ -483,7 +572,7 @@
       fetch(API+'/api/energiekompas/bedrijf-sweep',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
         .then(function(sw){ _klaar();
-          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); }
+          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); toonGeneratorKpi(); }
           else { bedrijfSnelleKpi(inv, st); }   // fallback zolang v15.103 niet gedeployed is
         })
         .catch(function(){ _klaar(); bedrijfSnelleKpi(inv, st); });
@@ -784,30 +873,227 @@
       ]);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // PROGRESSIEVE FUNNEL (Fase 4 — v0.12.0). factuur → afname-marge → PV/injectie →
+    // mail+tel (lead + nota-mail) → upsell-analyse (KPI's) → "wil u weten hoe?".
+    // De funnel vult de VERBORGEN legacy-velden (#legacy) en hergebruikt de bestaande
+    // engines (bedrijf-sweep / thuisladen) + nota-bouwers ongewijzigd.
+    // ══════════════════════════════════════════════════════════════════════════
+    function toon(id){ var el=$(id); if(!el) return; el.classList.remove('hidden'); el.scrollIntoView({behavior:'smooth', block:'start'}); }
+    function renderKpisIn(hostId, kpis){ var h=$(hostId); if(!h) return; h.innerHTML=kpis.map(function(k){ return '<div class="kpi'+(k.g?' g':'')+'"><div class="t">'+esc(k.t)+'</div><div class="v">'+k.v+'</div><div class="s">'+esc(k.s)+'</div></div>'; }).join(''); }
+    // Modus afleiden uit de factuur/aansluiting: middenspanning of >25 kVA ⇒ bedrijf.
+    function detecteerModus(kva, spanning){ return (spanning==='MS' || (+kva||0)>25) ? 'bedrijf' : 'particulier'; }
+    // Zet modus zonder de (verwijderde) stap-invoer te scrollen.
+    function zetModus(m){
+      STATE.modus=m;
+      $('form-particulier').classList.toggle('hidden', m!=='particulier');
+      $('form-bedrijf').classList.toggle('hidden', m!=='bedrijf');
+      $('statusq').textContent=(m==='particulier')?'Bent u zelfstandige of heeft u een eenmanszaak?':'Bent u onderworpen aan de vennootschapsbelasting?';
+      if(m==='particulier' && !STATE.wagens.length){ STATE.wagens=[nieuweWagen()]; renderWagens(); }
+      if(m==='bedrijf') syncBedrijfComp();
+    }
+    function _profielOnderhandel(){ return STATE.modus==='bedrijf'?(($('b-profiel')||{}).value||'kantoor'):'Residentieel'; }
+    function _marktPeriode(){ return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){ var mp=(root&&root.markt_periode)||{}; return {van:mp.van||'',tot:mp.tot||''}; }); }
+    // ── Na factuur: modus + legacy-velden vullen, dan afname-marge ──
+    function naFactuur(bc){
+      var d=_dagen(bc.periodeVan,bc.periodeTot), jf=(d>0?365/d:1);
+      var afnMwh=bc.afnameKwh?Math.round(bc.afnameKwh/1000*jf*100)/100:0;
+      var injMwh=bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
+      var kost=bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0;
+      var kva=bc.aansluitVermogenKva||0, spann=(bc.spanningsniveau==='MS')?'MS':'LS';
+      var m=detecteerModus(kva, spann); zetModus(m);
+      if(m==='particulier'){ if(afnMwh)$('p-verbruik').value=afnMwh; if(kva)$('p-piek').value=Math.round(kva*10)/10; if(injMwh)$('p-inj').value=injMwh; if(bc.pvKwpAanwezig)$('p-pv').value=bc.pvKwpAanwezig; if(kost)$('p-kost').value=kost; }
+      else { if(afnMwh)$('b-verbruik').value=afnMwh; if(injMwh)$('b-inj').value=injMwh; if(kva)$('b-kva').value=kva; if(kost)$('b-kost').value=kost; $('b-spanning').value=spann; }
+      STATE.injGezien=(injMwh>0); STATE.pvKwpFactuur=+bc.pvKwpAanwezig||0; STATE.injMwhFactuur=injMwh;
+      berekenAfnameMarge();
+    }
+    // ── Manueel (geen factuur): minimale invoer → modus + legacy → afname-marge ──
+    function manueelGo(){
+      var afn=num('m-afname'), kva=num('m-kva'), spann=($('m-spanning')||{}).value||'LS', inj=num('m-inj'), kost=num('m-kost');
+      if(!(afn>0)){ $('factuur-msg').style.color='#b00'; $('factuur-msg').textContent='Vul minstens uw jaarverbruik afname (MWh) in.'; return; }
+      STATE.baseCase=null;   // geen factuur → indicatief
+      var m=detecteerModus(kva, spann); zetModus(m);
+      if(m==='particulier'){ $('p-verbruik').value=afn; if(kva)$('p-piek').value=kva; if(inj)$('p-inj').value=inj; if(kost)$('p-kost').value=kost; }
+      else { $('b-verbruik').value=afn; if(inj)$('b-inj').value=inj; if(kva)$('b-kva').value=kva; if(kost)$('b-kost').value=kost; $('b-spanning').value=spann; var mp=($('m-profiel')||{}).value; if(mp)$('b-profiel').value=mp; }
+      STATE.injGezien=(inj>0); STATE.pvKwpFactuur=0; STATE.injMwhFactuur=inj;
+      berekenAfnameMarge();
+    }
+    // ── Stap 2: afname-onderhandelingsmarge (Kamino tegel 1, coherent) ──
+    function berekenAfnameMarge(){
+      toon('stap-afname');
+      var msg=$('afname-msg'); msg.style.color='var(--muted)'; msg.textContent='⏳ Onderhandelingsmarge berekenen…';
+      var afnameMwh=STATE.modus==='bedrijf'?num('b-verbruik'):num('p-verbruik');
+      var kva=STATE.modus==='bedrijf'?num('b-kva'):num('p-piek');
+      var spanning=STATE.modus==='bedrijf'?(($('b-spanning')||{}).value||'LS'):'LS';
+      var kost=STATE.modus==='bedrijf'?num('b-kost'):num('p-kost');
+      var refEurMwh=(kost>0&&afnameMwh>0)?Math.round(kost/afnameMwh):0;
+      _marktPeriode().then(function(mp){
+        var body=_ondBody(_profielOnderhandel(), afnameMwh, refEurMwh, kva, spanning, mp.van, mp.tot); body.heatmaps=false;
+        return fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.ok?r.json():null;});
+      }).then(function(ond){
+        msg.textContent='';
+        if(!ond){ msg.style.color='#b00'; msg.textContent='Kon de marge niet berekenen — probeer opnieuw of vul manueel in.'; return; }
+        STATE.ondAfname=ond; var bron=_factuurBasis();
+        renderKpisIn('afname-kpi',[
+          { t:'Uw energiekost vandaag', v:(bron&&ond.energiekost_nu_mwh>0)?(Math.round(ond.energiekost_nu_mwh)+' €/MWh'):'—', s:bron?'uit uw factuur':'laad uw factuur op' },
+          { t:'Met een dynamisch contract', v:(ond.energiekost_dyn_mwh>0?('± '+Math.round(ond.energiekost_dyn_mwh)+' €/MWh'):'—'), s:'spot day-ahead, zelfde verbruik' },
+          { g:true, t:'Onderhandelingsmarge', v:(ond.marge_jaar>0?eur(ond.marge_jaar):'—')+(ond.marge_jaar>0?'/j':''), s:bron?(ond.besparing_pct?('± '+Math.round(ond.besparing_pct)+'% goedkoper'):'zonder investering'):'indicatief — laad uw factuur voor exact' }
+        ]);
+        $('btn-na-afname').classList.remove('hidden');
+      });
+    }
+    // ── Stap 3: PV-vraag / injectie-marge ──
+    function naarPv(){
+      toon('stap-pv');
+      if(STATE.injGezien){
+        $('pv-vraag').classList.add('hidden'); $('pv-auto').classList.remove('hidden');
+        $('pv-auto').innerHTML='We zagen <b>injectie</b> op uw factuur — u heeft dus PV. We berekenen meteen wat uw injectie waard is met een beter contract.';
+        berekenInjectieMarge(STATE.pvKwpFactuur||0, STATE.injMwhFactuur||0);
+      } else { $('pv-vraag').classList.remove('hidden'); $('pv-auto').classList.add('hidden'); }
+    }
+    function _injMargeJaar(){ var A=STATE.injAnalyse; if(!A) return 0; var o=A.opbrengst_jaar||{}; return (o.meerwaarde_curtail_eur||0)+((STATE.modus==='bedrijf')?(o.meerwaarde_onbalans_eur||0):0); }
+    function berekenInjectieMarge(kwp, injMwh){
+      if(STATE.modus==='bedrijf'){ $('b-pvbestaand').value=kwp||0; if(injMwh)$('b-inj').value=injMwh; }
+      else { $('p-pv').value=kwp||0; if(injMwh)$('p-inj').value=injMwh; }
+      STATE.pvKwp=kwp||0; STATE.injMwh=injMwh||0;
+      var msg=$('pv-msg');
+      if(!(kwp>0)){ $('inj-kpi').innerHTML=''; STATE.injAnalyse=null; $('btn-na-pv').classList.remove('hidden'); return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Injectie-marge berekenen…';
+      var profiel=_profielOnderhandel();
+      var afnameMwh=STATE.modus==='bedrijf'?num('b-verbruik'):num('p-verbruik');
+      var piek=STATE.modus==='bedrijf'?Math.round(num('b-kva')*0.9):num('p-piek');
+      fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        profielNaam:profiel, pv_kwp:kwp, injectie_mwh_jaar:injMwh, afname_mwh_jaar:afnameMwh, piek_kw:piek, inverter_kva:Math.round(kwp*0.75*10)/10 })})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          msg.textContent=''; var A=(j&&j.analyse)||null; STATE.injAnalyse=A;
+          if(A){ var o=A.opbrengst_jaar||{}, isB=(STATE.modus==='bedrijf');
+            renderKpisIn('inj-kpi',[
+              { t:'Injectie vandaag', v:eur(o.vandaag_spot_eur||0)+'/j', s:'alles aan day-ahead' },
+              { t:'Met slim afregelen', v:eur(o.met_curtail_eur||0)+'/j', s:'niet injecteren bij negatieve prijs' },
+              { g:true, t:'Meerwaarde injectie', v:eur((o.meerwaarde_curtail_eur||0)+(isB?(o.meerwaarde_onbalans_eur||0):0))+'/j', s:isB?'afregelen + onbalans':'afregelen (curtailment)' }
+            ]);
+          } else { $('inj-kpi').innerHTML=''; }
+          $('btn-na-pv').classList.remove('hidden');
+        }).catch(function(){ msg.textContent=''; STATE.injAnalyse=null; $('btn-na-pv').classList.remove('hidden'); });
+    }
+    // ── Stap 4: lead-capture + nota-mail ──
+    function leadGo(){
+      var mail=($('ld-mail').value||'').trim(), tel=($('ld-tel').value||'').trim(), naam=($('ld-naam').value||'').trim();
+      var msg=$('lead-msg');
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ msg.style.color='#b00'; msg.textContent='Vul een geldig e-mailadres in.'; return; }
+      if(!$('ld-akkoord').checked){ msg.style.color='#b00'; msg.textContent='Vink het akkoord aan om verder te gaan.'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Uw onderhandelingsnota opbouwen…'; $('btn-lead-go').setAttribute('disabled','disabled');
+      var bouw=(STATE.modus==='bedrijf')?_bouwNotaDataBedrijf:_bouwNotaData;
+      bouw().then(function(D){
+        D.klant=naam||D.klant||''; STATE.notaData=D;
+        var s={ afname_marge_jaar:(STATE.ondAfname&&STATE.ondAfname.marge_jaar)||0, injectie_marge_jaar:_injMargeJaar(),
+          energiekost_nu_mwh:(STATE.ondAfname&&STATE.ondAfname.energiekost_nu_mwh)||0, energiekost_dyn_mwh:(STATE.ondAfname&&STATE.ondAfname.energiekost_dyn_mwh)||0 };
+        return fetch(API+'/api/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          mail:mail, tel:tel, naam:naam, partner:STATE.partner||'', herkomst:STATE.herkomst||'direct', data:D, samenvatting:s })})
+          .then(function(r){return r.ok?r.json():null;}).then(function(res){
+            $('btn-lead-go').removeAttribute('disabled'); msg.textContent='';
+            STATE.leadToken=(res&&res.token)||''; STATE.notaUrl=(res&&res.nota_url)||'';
+            $('lead-klaar').classList.remove('hidden');
+            $('lead-bevestig').innerHTML=(res&&res.mail_klant)?('✔ We hebben uw nota ook naar <b>'+esc(mail)+'</b> gestuurd.'):('U kan uw nota hieronder openen. We sturen ze ook naar '+esc(mail)+'.');
+            toon('stap-meer');
+          });
+      }).catch(function(){ $('btn-lead-go').removeAttribute('disabled'); msg.style.color='#b00'; msg.textContent='Kon de nota niet opbouwen — probeer opnieuw.'; });
+    }
+    function openNotaLead(){
+      if(STATE.notaData){ try{ sessionStorage.setItem('FLUCTUS_EK_NOTA',JSON.stringify(STATE.notaData)); }catch(e){} window.__EK_NOTA=STATE.notaData; }
+      var url=STATE.notaUrl || ('/apps/energiekompas-nota.html'+(STATE.partner?('?thema='+encodeURIComponent(STATE.partner)):''));
+      window.open(url,'_blank');
+    }
+    // ── Stap 5→6: diepte-analyse (bestaande engines) + extra KPI's ──
+    function meerGo(){
+      STATE.interesses=[];
+      if($('q-besparing').checked) STATE.interesses.push('besparing & rendement');
+      if($('q-mobiliteit').checked) STATE.interesses.push('elektrische mobiliteit');
+      if($('q-generator').checked) STATE.interesses.push('generator vervangen');
+      if(!STATE.interesses.length){ $('meer-msg').style.color='#b00'; $('meer-msg').textContent='Kies minstens één analyse.'; return; }
+      if(STATE.modus==='bedrijf'){
+        $('c-pv').checked=true; $('c-generator').checked=$('q-generator').checked;
+        if($('q-generator').checked){ $('b-gen-kva').value=num('g-kva')||0; $('b-gen-liter').value=num('g-liter')||0; if(!num('b-gen-starts'))$('b-gen-starts').value=1; }
+        syncBedrijfComp();
+      }
+      STATE.wilMobiliteit=$('q-mobiliteit').checked;
+      var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
+      $('extra-kpi').innerHTML=''; $('meer-msg').style.color='var(--muted)'; $('meer-msg').textContent='';
+      toon('stap-resultaat');
+      if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('meer-msg'));
+      else berekenBedrijfSweep(inv, st, $('meer-msg'));
+      if(STATE.wilMobiliteit) haalMobiliteitKpi(inv);
+    }
+    // Extra KPI's (km beschikbaar · €/km · generator-rendement) — apart blok onder de hoofd-KPI's.
+    function haalMobiliteitKpi(inv){
+      fetch(API+'/api/energiekompas/kpi',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        modus:STATE.modus, afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens||0, km:inv._km||0 }) })
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          if(!j||!j.kpi) return; var k=j.kpi, m=j.markt||{};
+          var toegangKw=(+inv.aansluiting_kva||0)*0.9, restKw=toegangKw*((k.restcapaciteit_pct||0)/100);
+          var kmJaar=(restKw>0)?Math.round(restKw*8760*0.85/0.16):null;   // beschikbare kW × uren × benuttbaar / 0,16 kWh/km
+          extraKpiPush([
+            { t:'Km beschikbaar in uw aansluiting', v:(kmJaar!=null?(kmJaar.toLocaleString('nl-BE')+' km/j'):'—'), s:'restcapaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+' · 0,16 kWh/km' },
+            { t:'Energiekost per km', v:kmKostTxt(k.kilometerkost_eur_per_km||0), s:'slim laden (± '+(m.dyn_laadkost_eur_mwh||'?')+' €/MWh)' }
+          ]);
+        }).catch(function(){});
+    }
+    function extraKpiPush(kpis){ var h=$('extra-kpi'); if(!h) return; h.innerHTML += kpis.map(function(k){ return '<div class="kpi"><div class="t">'+esc(k.t)+'</div><div class="v">'+k.v+'</div><div class="s">'+esc(k.s)+'</div></div>'; }).join(''); }
+    // Generator-rendement na de sweep (bedrijf) — sw.generator komt uit de bedrijf-sweep.
+    function toonGeneratorKpi(){
+      if(!($('q-generator')&&$('q-generator').checked)) return; var g=(STATE.tl&&STATE.tl.generator)||null; if(!g) return;
+      var verm=(g.diesel_vermeden_eur_jaar||0), inv=(g.batterij_seed_kw?g.batterij_seed_kw:0);
+      extraKpiPush([{ t:'Generator vervangen — vermeden diesel', v:eur(verm)+'/j', s:(g.egen_kwh_jaar?(Math.round(g.egen_kwh_jaar/1000)+' MWh/j uit uw aansluiting'):'goedkope stroom i.p.v. diesel') }]);
+    }
+    // ── Stap 6: "wil u weten hoe?" → warme lead ──
+    function hoeGo(){
+      var msg=$('hoe-msg');
+      if(!STATE.leadToken){ msg.style.color='var(--muted)'; msg.textContent='✔ We nemen contact met u op via de gegevens die u eerder invulde.'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Bezig…'; $('btn-hoe').setAttribute('disabled','disabled');
+      fetch(API+'/api/lead-interesse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ token:STATE.leadToken, interesses:STATE.interesses||[], wil_contact:true })})
+        .then(function(r){return r.ok?r.json():null;}).then(function(){ msg.style.color='#0a7a37'; msg.textContent='✔ Dank u — wij nemen binnenkort contact op om u te tonen hoe. Uw analyse blijft hierboven staan.'; })
+        .catch(function(){ $('btn-hoe').removeAttribute('disabled'); msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet versturen — probeer opnieuw.'; });
+    }
+
     function laadProfielen(){
       fetch(API+'/api/profielen-lijst').then(function(r){return r.ok?r.json():null;}).then(function(j){
-        var lijst=(j&&j.profielen)||[]; if(!lijst.length) return; var sel=$('b-profiel'); if(!sel) return;
-        sel.innerHTML=lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+(String(n).toLowerCase()==='kantoor'?' selected':'')+'>'+esc(n)+'</option>'; }).join('');
+        var lijst=(j&&j.profielen)||[]; if(!lijst.length) return;
+        [['b-profiel',true],['m-profiel',false]].forEach(function(t){ var sel=$(t[0]); if(!sel) return;
+          var opts=(t[1]?'':'<option value="">automatisch</option>')+lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+((t[1]&&String(n).toLowerCase()==='kantoor')?' selected':'')+'>'+esc(n)+'</option>'; }).join('');
+          sel.innerHTML=opts;
+        });
       }).catch(function(){});
     }
     window.addEventListener('DOMContentLoaded', function(){
       pasThema(); laadProfielen();
-      Array.prototype.forEach.call(document.querySelectorAll('.mode'), function(el){ el.onclick=function(){ kiesModus(el.getAttribute('data-modus')); }; });
-      ['c-pv','c-eigen','c-betalend','c-generator'].forEach(function(id){ $(id).onchange=syncBedrijfComp; });
-      $('p-addwagen').onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
-      $('b-eigen-add').onclick=function(){ STATE.eigen.push(nieuwEigen()); renderEigen(); };
-      $('b-bet-add').onclick=function(){ STATE.bet.push(nieuwBet()); renderBet(); };
+      // Legacy-componenten (verborgen) — nodig voor de engines/nota.
+      ['c-pv','c-eigen','c-betalend','c-generator'].forEach(function(id){ var e=$(id); if(e) e.onchange=syncBedrijfComp; });
+      var pa=$('p-addwagen'); if(pa) pa.onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
+      var ea=$('b-eigen-add'); if(ea) ea.onclick=function(){ STATE.eigen.push(nieuwEigen()); renderEigen(); };
+      var ba=$('b-bet-add'); if(ba) ba.onclick=function(){ STATE.bet.push(nieuwBet()); renderBet(); };
+      // ── Funnel-bediening ──
       $('btn-factuur').onclick=function(){ $('factuur-input').click(); };
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
-      $('btn-bereken').onclick=bereken;
+      $('btn-manueel').onclick=function(){ $('manueel').classList.toggle('hidden'); };
+      $('btn-manueel-go').onclick=manueelGo;
+      $('btn-na-afname').onclick=naarPv;
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="heeftpv"]'), function(r){ r.onchange=function(){
+        var ja=(document.querySelector('input[name=\"heeftpv\"]:checked')||{}).value==='ja';
+        $('pv-velden').classList.toggle('hidden', !ja);
+        if(!ja){ berekenInjectieMarge(0,0); }
+      }; });
+      $('btn-pv-go').onclick=function(){ berekenInjectieMarge(num('pv-kwp'), num('pv-inj')); };
+      $('btn-na-pv').onclick=function(){ toon('stap-lead'); };
+      $('btn-lead-go').onclick=leadGo;
+      $('btn-nota').onclick=openNotaLead;
+      $('q-generator').onchange=function(){ $('gen-velden').classList.toggle('hidden', !this.checked); };
+      $('btn-meer-go').onclick=meerGo;
+      $('btn-hoe').onclick=hoeGo;
       Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(bt){ bt.onclick=function(){
         STATE.hmMetric=bt.getAttribute('data-mx');
         Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(x){ x.classList.toggle('on', x===bt); });
         if(STATE.hm) renderHeatmap();
       }; });
-      $('btn-terug').onclick=function(){ $('stap-invoer').scrollIntoView({behavior:'smooth', block:'start'}); };
-      $('btn-cta').onclick=function(){ $('cta-msg').style.color='#0a7a37'; $('cta-msg').textContent='✔ De volledige studie (4 heatmaps met sweep + rapport) is de volgende stap in dit traject — daarvoor vragen we uw akkoord voor een mandaat op uw meetgegevens.'; $('btn-cta').setAttribute('disabled','disabled'); };
-      $('btn-nota').onclick=_openNota;
     });
   </script>
 </body>
