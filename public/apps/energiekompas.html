@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.12.5 (2026-08-30, Fase 4 — CX-fixes funnel, Johan): (1) type-toggle particulier/bedrijf na de
+<!-- energiekompas.html v0.12.6 (2026-08-30, Fase 4 — €/km ALL-IN + km-tooltip, Johan): de €/km toont nu de ALL-IN kost
+     achter de meter (energiecomponent + netkosten/heffingen, server v15.111) i.p.v. enkel de commodity (die gaf ~0,006).
+     De km-KPI krijgt een ⓘ-tooltip: het is een BOVENGRENS = de energie die de aansluiting nog aankan binnen het
+     bestaande piekvermogen, omgerekend naar km. Vereist server v15.111.0.
+     ── v0.12.5 (2026-08-30, Fase 4 — CX-fixes funnel, Johan): (1) type-toggle particulier/bedrijf na de
      factuur (aanpasbaar → zie wat dezelfde factuur in de particulier-flow geeft); sector-dropdown enkel bij bedrijf.
      (2) Nota: ÉÉN actie i.p.v. twee knoppen — "Bekijk" opent meteen de nota-tab (blanco venster op user-gesture →
      navigatie na opbouw); "opnieuw openen" is nu een kleine link. (3) Nota-URL is RELATIEF (?lead / opener) → geen
@@ -169,6 +173,7 @@
   .opt b{ color:var(--navy); } .opt span{ display:block; font-weight:500; color:var(--muted); font-size:12.5px; margin-top:3px; }
   .opt .nieuw{ display:inline-block; background:#05B050; color:#fff; font-size:10px; font-weight:800; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle; }
   .chk{ display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:600; color:var(--ink); margin-top:14px; } .chk input{ width:auto; margin-top:2px; }
+  .ikpi{ display:inline-block; color:var(--accent); cursor:help; font-size:12px; font-weight:700; }
 </style>
 </head>
 <body>
@@ -1103,13 +1108,18 @@
           if(!j||!j.kpi) return; var k=j.kpi, m=j.markt||{};
           var toegangKw=(+inv.aansluiting_kva||0)*0.9, restKw=toegangKw*((k.restcapaciteit_pct||0)/100);
           var kmJaar=(restKw>0)?Math.round(restKw*8760*0.85/0.16):null;   // beschikbare kW × uren × benuttbaar / 0,16 kWh/km
+          var energieKm=(k.kilometerkost_energie_eur_per_km!=null)?kmKostTxt(k.kilometerkost_energie_eur_per_km):null;
           extraKpiPush([
-            { t:'Km beschikbaar in uw aansluiting', v:(kmJaar!=null?('tot '+kmJaar.toLocaleString('nl-BE')+' km/j'):'—'), s:'maximaal op uw vrije aansluitcapaciteit ('+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+') · 0,16 kWh/km' },
-            { t:'Energiekost per km', v:'vanaf '+kmKostTxt(k.kilometerkost_eur_per_km||0), s:'theoretische ondergrens bij slim laden — de echte kost hangt af van uw wagenpark & opslag' }
+            { t:'Km beschikbaar in uw aansluiting', v:(kmJaar!=null?('tot '+kmJaar.toLocaleString('nl-BE')+' km/j'):'—'), s:'binnen uw bestaande piekvermogen · 0,16 kWh/km',
+              info:'Dit is een BOVENGRENS: de hoeveelheid energie die uw aansluiting nog kan binnenhalen zonder uw bestaande piekvermogen te overstijgen (vrije capaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+'), omgerekend naar km aan 0,16 kWh/km. De reële km hangt af van uw laadvenster en wagenpark.' },
+            { t:'Energiekost per km', v:'vanaf '+kmKostTxt(k.kilometerkost_eur_per_km||0), s:'all-in achter de meter — bij slim laden op de goedkoopste uren',
+              info:'All-in achter de meter = energiecomponent (goedkoopste ~30% spot)'+(energieKm?(' ≈ '+energieKm):'')+' + netkosten/heffingen ('+(m.net_heffing_eur_mwh||90)+' €/MWh). De reële kost hangt af van uw wagenpark & opslag.' }
           ]);
         }).catch(function(){});
     }
-    function extraKpiPush(kpis){ var h=$('extra-kpi'); if(!h) return; h.innerHTML += kpis.map(function(k){ return '<div class="kpi"><div class="t">'+esc(k.t)+'</div><div class="v">'+k.v+'</div><div class="s">'+esc(k.s)+'</div></div>'; }).join(''); }
+    function extraKpiPush(kpis){ var h=$('extra-kpi'); if(!h) return; h.innerHTML += kpis.map(function(k){
+      var info=k.info?(' <span class="ikpi" title="'+esc(k.info)+'">ⓘ</span>'):'';
+      return '<div class="kpi"><div class="t">'+esc(k.t)+info+'</div><div class="v">'+k.v+'</div><div class="s">'+esc(k.s)+'</div></div>'; }).join(''); }
     // Generator-rendement na de sweep (bedrijf) — sw.generator komt uit de bedrijf-sweep.
     function toonGeneratorKpi(){
       if(!($('q-generator')&&$('q-generator').checked)) return; var g=(STATE.tl&&STATE.tl.generator)||null; if(!g) return;
