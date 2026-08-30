@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.12.2 (2026-08-30, Fase 4 — INDICATIEF-LABEL tegel 3, Johan): coherentie-check schil ↔ Kamino
+<!-- energiekompas.html v0.12.3 (2026-08-30, Fase 4 — HOE NOG VERBERGEN in stap 6, Johan): stap 6 mag de "hoe" nog niet
+     tonen (dat komt pas na "wil u weten hoe?"). Weggehaald: de Investering-KPI, de combinatie-grootte in de KPI-subtitels
+     én in de detailregel onder de heatmap. De heatmap toont nu ENKEL de % (geen kWp/kWh-assen); de grootte staat enkel
+     als MAX-bijschrift ("tot max … kWp PV en … kW opslag · rechts = meer PV, hoger = meer opslag"). Enkel weergave.
+     ── v0.12.2 (2026-08-30, Fase 4 — INDICATIEF-LABEL tegel 3, Johan): coherentie-check schil ↔ Kamino
      tegels. Tegel 3 (aansluiting) is een grove indicatieve proxy vs de volle nominatie-sim-3; het rendement ligt lager
      (grovere grid + bruto vs netto). Keuze Johan: indicatief houden + scherper label → stap 6 toont nu dat besparing/
      rendement een bewust voorzichtige ONDERGRENS zijn en de volledige studie doorgaans hoger uitkomt. Geen rekenwijziging.
@@ -269,7 +273,8 @@
       <p class="note" id="rendement-disclaimer" style="margin-top:10px"><b>Indicatief — bewust voorzichtig.</b> Deze besparing en dit rendement zijn een <b>ondergrens</b> uit een snelle inschatting. De volledige studie optimaliseert PV + opslag op uw echte kwartierprofiel en komt doorgaans <b>hoger</b> uit; ze rekent het rendement ook netto (na onderhoud/verzekering).</p>
       <div class="hmwrap hidden" id="heatmap-blok">
         <div class="hmtitel">Kies zelf uw combinatie</div>
-        <div class="hmleg">Beweeg over het rooster: de KPI's hierboven veranderen mee. Klik een vakje om die combinatie exact te berekenen. Het gestreepte vakje is onze aanbeveling.</div>
+        <div class="hmleg">Beweeg over het rooster: het rendement hierboven verandert mee. Klik een vakje voor de exacte berekening. Het gestreepte vakje is onze aanbeveling.</div>
+        <div class="hmleg" id="hm-max" style="margin-top:-4px;font-weight:600;color:var(--navy)"></div>
         <div class="hmmetriek" id="hm-metriek"><button data-mx="rendement" class="on">Rendement</button><button data-mx="besparing">Besparing/jaar</button></div>
         <div class="hmscroll"><table class="hm" id="hm-tabel"></table></div>
         <div class="hmdetail" id="hm-detail"></div>
@@ -649,12 +654,13 @@
       return (pv>0?(pv+' kWp PV'):'geen PV')+(kwh>0?(' + '+kwh+' kWh'+(kw?(' / '+kw+' kW'):'')+' batterij'):' · geen batterij');
     }
     function toonKpisTL(a){
+      // Stap 6 = ENKEL de uitkomst (verleidt); NIET de "hoe" (investering + exacte PV/batterij-grootte).
+      // Die komen pas na "wil u weten hoe?". Daarom: geen investering-KPI en geen combo in de subtitels.
       if(!a) return; var tvt=(a.besparing>0 && a.capex>0)?(Math.round(a.capex/a.besparing*10)/10):null;
       toonKpis([
-        { t:'Besparing per jaar', v:eur(a.besparing), s:comboLabel(a) },
-        { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw investering') },
-        { t:'Jaarkost met deze combinatie', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'na de investering') },
-        { t:'Investering', v:eur(a.capex), s:'PV + batterij incl. plaatsing (indicatief)' }
+        { t:'Besparing per jaar', v:eur(a.besparing), s:'op uw bestaande aansluiting' },
+        { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
+        { t:'Jaarkost daarna', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'') }
       ]);
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
@@ -697,9 +703,10 @@
       return H.interp?_interpCel(H,ry,cx):null;
     }
     function _hmDetail(a){
+      // Verklapt NIETS over de selectie (grootte = de "hoe"). De KPI's hierboven bewegen mee; hier enkel de status.
       if(!a){ $('hm-detail').innerHTML=''; return; }
-      var exact=(a._exact||!a._interp), tag=exact?'<span style="color:#0a7a37">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor exacte berekening';
-      $('hm-detail').innerHTML='Gekozen: <b>'+comboLabel(a)+'</b> — besparing '+eur(a.besparing)+'/j, rendement '+(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—')+'. '+tag;
+      var exact=(a._exact||!a._interp);
+      $('hm-detail').innerHTML=exact?'<span style="color:#0a7a37">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening';
     }
     function renderHeatmap(){
       var H=STATE.hm; if(!H||!H.real){ $('heatmap-blok').classList.add('hidden'); return; }
@@ -707,9 +714,10 @@
       var cells=[]; rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); if(a) cells.push(a); }); });
       var vals=cells.map(function(a){return a[mx];}).filter(function(v){return v!=null&&isFinite(v);});
       var min=vals.length?Math.min.apply(null,vals):0, max=vals.length?Math.max.apply(null,vals):1, best=H.best||{}, sel=H.sel||best;
-      var html='<tr><th></th>'+cols.map(function(c){return '<th>'+H.colLabel(c)+'</th>';}).join('')+'</tr>';
+      // GEEN as-groottes (kWp/kWh) tonen — enkel de %. De grootte staat enkel als MAX in het bijschrift.
+      var html='';
       rows.forEach(function(ry){
-        html+='<tr><td class="axis">'+H.rowLabel(ry)+'</td>';
+        html+='<tr>';
         cols.forEach(function(cx){
           var a=_cellAt(H,ry,cx), v=a?a[mx]:null;
           var isEst=a&&a._interp&&!a._exact, isEx=a&&a._exact;
@@ -719,6 +727,11 @@
         html+='</tr>';
       });
       var T=$('hm-tabel'); T.innerHTML=html;
+      // Grootte enkel als max-bijschrift (units via de bestaande label-functies, enkel op de max toegepast).
+      var hmMax=$('hm-max'); if(hmMax){ try{
+        var maxC=H.colLabel(Math.max.apply(null,cols)), maxR=H.rowLabel(Math.max.apply(null,rows));
+        hmMax.textContent='Grootte tot max '+maxC+' PV en '+maxR+' opslag · rechts = meer PV, hoger = meer opslag.';
+      }catch(e){} }
       Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){
         var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
         // Hover (desktop): KPI-nummers ÉN de commentaarregel bewegen live mee.
@@ -729,7 +742,7 @@
           var a=_cellAt(H,ry,cx); if(!a) return;
           H.sel=a; toonKpisTL(a); _hmDetail(a); renderHeatmap();
           if(a._interp && !a._exact && H.compute){
-            $('hm-detail').innerHTML='± geschat voor <b>'+comboLabel(a)+'</b> — ⏳ exacte berekening…';
+            $('hm-detail').innerHTML='± geschat — ⏳ exacte berekening…';
             H.compute(ry,cx,function(exact){
               if(exact){ H.sel=exact; toonKpisTL(exact); _hmDetail(exact); renderHeatmap(); }
               else _hmDetail(a);
