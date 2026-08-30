@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.12.0 (2026-08-30, Fase 4 — PROGRESSIEVE LEAD-FUNNEL, Johan): de schil is herbouwd tot een
+<!-- energiekompas.html v0.12.1 (2026-08-30, Fase 4 — VERBRUIKSPROFIEL = EXPLICIETE KEUZE, Johan): het profiel staat
+     NIET op de factuur en bepaalt de marge → na het inlezen tonen we een profiel-blok met een VOORSTEL (particulier vs
+     bedrijf-sector, geraden uit de aansluiting) dat de klant kan AANPASSEN. De keuze bepaalt meteen particulier
+     (Residentieel) vs bedrijf (sector) én de profielNaam die naar onderhandel/injectie/sweep gaat. Stap 2 toont de
+     conclusie "Profiel: … — pas aan als het niet klopt". Manueel: idem via m-profiel (verplicht). Zo niet langer een
+     stille kVA-heuristiek + hardcoded 'kantoor'. ── v0.12.0 (2026-08-30, Fase 4 — PROGRESSIEVE LEAD-FUNNEL, Johan): de schil is herbouwd tot een
      progressieve funnel i.p.v. één groot invoerformulier. Flow: (1) factuur opladen (of kort manueel) → we lezen enkel
      het verbruiksprofiel; (2) meteen de ONDERHANDELINGSMARGE OP AFNAME (Kamino tegel 1, coherent, GEEN techniekkeuze);
      (3) heeft u PV? — overgeslagen als de factuur al injectie toonde — dan de INJECTIE-MARGE (curtail + onbalans);
@@ -174,6 +179,13 @@
           <div><label>Verbruiksprofiel</label><select id="m-profiel"><option value="">automatisch</option></select></div>
         </div>
         <button class="btn" type="button" id="btn-manueel-go">Bereken mijn onderhandelingsmarge →</button>
+      </div>
+      <!-- Verbruiksprofiel (verschijnt na de factuur) — dit staat NIET op de factuur en bepaalt de marge + particulier/bedrijf. -->
+      <div id="profiel-blok" class="hidden manueelbox">
+        <label>Uw verbruiksprofiel <span class="hint" style="display:inline;font-weight:400">— dit lezen we niet van uw factuur; kies wat het best past</span></label>
+        <select id="ek-profiel"></select>
+        <p class="hint" id="profiel-hint"></p>
+        <button class="btn" type="button" id="btn-profiel-go">Toon mijn onderhandelingsmarge →</button>
       </div>
     </div>
 
@@ -897,30 +909,41 @@
     // ── Na factuur: modus + legacy-velden vullen, dan afname-marge ──
     function naFactuur(bc){
       var d=_dagen(bc.periodeVan,bc.periodeTot), jf=(d>0?365/d:1);
-      var afnMwh=bc.afnameKwh?Math.round(bc.afnameKwh/1000*jf*100)/100:0;
-      var injMwh=bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
-      var kost=bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0;
-      var kva=bc.aansluitVermogenKva||0, spann=(bc.spanningsniveau==='MS')?'MS':'LS';
-      var m=detecteerModus(kva, spann); zetModus(m);
-      if(m==='particulier'){ if(afnMwh)$('p-verbruik').value=afnMwh; if(kva)$('p-piek').value=Math.round(kva*10)/10; if(injMwh)$('p-inj').value=injMwh; if(bc.pvKwpAanwezig)$('p-pv').value=bc.pvKwpAanwezig; if(kost)$('p-kost').value=kost; }
-      else { if(afnMwh)$('b-verbruik').value=afnMwh; if(injMwh)$('b-inj').value=injMwh; if(kva)$('b-kva').value=kva; if(kost)$('b-kost').value=kost; $('b-spanning').value=spann; }
-      STATE.injGezien=(injMwh>0); STATE.pvKwpFactuur=+bc.pvKwpAanwezig||0; STATE.injMwhFactuur=injMwh;
-      berekenAfnameMarge();
+      STATE.factuur={
+        afnMwh: bc.afnameKwh?Math.round(bc.afnameKwh/1000*jf*100)/100:0,
+        injMwh: bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0,
+        kost:   bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0,
+        kva:    bc.aansluitVermogenKva||0,
+        spann:  (bc.spanningsniveau==='MS')?'MS':'LS',
+        pvKwp:  +bc.pvKwpAanwezig||0 };
+      STATE.injGezien=(STATE.factuur.injMwh>0); STATE.pvKwpFactuur=STATE.factuur.pvKwp; STATE.injMwhFactuur=STATE.factuur.injMwh;
+      // Verbruiksprofiel is NIET af te leiden uit de factuur → laat de klant kiezen/bevestigen.
+      // We doen een voorstel (particulier/bedrijf) op basis van de aansluiting; de klant kan het aanpassen.
+      preselectProfiel(detecteerModus(STATE.factuur.kva, STATE.factuur.spann)==='bedrijf');
+      updateProfielHint();
+      var pb=$('profiel-blok'); pb.classList.remove('hidden'); pb.scrollIntoView({behavior:'smooth', block:'center'});
     }
     // ── Manueel (geen factuur): minimale invoer → modus + legacy → afname-marge ──
     function manueelGo(){
       var afn=num('m-afname'), kva=num('m-kva'), spann=($('m-spanning')||{}).value||'LS', inj=num('m-inj'), kost=num('m-kost');
-      if(!(afn>0)){ $('factuur-msg').style.color='#b00'; $('factuur-msg').textContent='Vul minstens uw jaarverbruik afname (MWh) in.'; return; }
+      var prof=($('m-profiel')||{}).value;
+      var msg=$('factuur-msg');
+      if(!(afn>0)){ msg.style.color='#b00'; msg.textContent='Vul minstens uw jaarverbruik afname (MWh) in.'; return; }
+      if(!prof){ msg.style.color='#b00'; msg.textContent='Kies uw verbruiksprofiel (particulier of een sector).'; return; }
       STATE.baseCase=null;   // geen factuur → indicatief
-      var m=detecteerModus(kva, spann); zetModus(m);
+      var m=_modusVanProfiel(prof); zetModus(m); if(m==='bedrijf') $('b-profiel').value=prof;
       if(m==='particulier'){ $('p-verbruik').value=afn; if(kva)$('p-piek').value=kva; if(inj)$('p-inj').value=inj; if(kost)$('p-kost').value=kost; }
-      else { $('b-verbruik').value=afn; if(inj)$('b-inj').value=inj; if(kva)$('b-kva').value=kva; if(kost)$('b-kost').value=kost; $('b-spanning').value=spann; var mp=($('m-profiel')||{}).value; if(mp)$('b-profiel').value=mp; }
+      else { $('b-verbruik').value=afn; if(inj)$('b-inj').value=inj; if(kva)$('b-kva').value=kva; if(kost)$('b-kost').value=kost; $('b-spanning').value=spann; }
       STATE.injGezien=(inj>0); STATE.pvKwpFactuur=0; STATE.injMwhFactuur=inj;
       berekenAfnameMarge();
     }
+    // Factuurpad: profiel bevestigd → toepassen + marge berekenen.
+    function profielGo(){ _pasProfielToe(($('ek-profiel')||{}).value); berekenAfnameMarge(); }
     // ── Stap 2: afname-onderhandelingsmarge (Kamino tegel 1, coherent) ──
     function berekenAfnameMarge(){
       toon('stap-afname');
+      var pLbl=(STATE.modus==='bedrijf')?('bedrijf · '+(($('b-profiel')||{}).value||'sector')):'particulier (woning)';
+      $('afname-sub').innerHTML='Profiel: <b>'+esc(pLbl)+'</b> — pas het hierboven aan als het niet klopt. We vergelijken uw factuur met een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik, zonder investering.';
       var msg=$('afname-msg'); msg.style.color='var(--muted)'; msg.textContent='⏳ Onderhandelingsmarge berekenen…';
       var afnameMwh=STATE.modus==='bedrijf'?num('b-verbruik'):num('p-verbruik');
       var kva=STATE.modus==='bedrijf'?num('b-kva'):num('p-piek');
@@ -1055,14 +1078,30 @@
         .catch(function(){ $('btn-hoe').removeAttribute('disabled'); msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet versturen — probeer opnieuw.'; });
     }
 
+    function _sectorOpts(lijst, sel){ return lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+((sel&&String(n).toLowerCase()===sel)?' selected':'')+'>'+esc(n)+'</option>'; }).join(''); }
     function laadProfielen(){
       fetch(API+'/api/profielen-lijst').then(function(r){return r.ok?r.json():null;}).then(function(j){
-        var lijst=(j&&j.profielen)||[]; if(!lijst.length) return;
-        [['b-profiel',true],['m-profiel',false]].forEach(function(t){ var sel=$(t[0]); if(!sel) return;
-          var opts=(t[1]?'':'<option value="">automatisch</option>')+lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+((t[1]&&String(n).toLowerCase()==='kantoor')?' selected':'')+'>'+esc(n)+'</option>'; }).join('');
-          sel.innerHTML=opts;
-        });
+        var lijst=(j&&j.profielen)||[]; if(!lijst.length) return; STATE.profielen=lijst;
+        var b=$('b-profiel'); if(b) b.innerHTML=_sectorOpts(lijst,'kantoor');                                    // intern (sector-waarde)
+        var ek=$('ek-profiel'); if(ek) ek.innerHTML='<option value="__res__">Residentieel — woning (particulier)</option>'+_sectorOpts(lijst);
+        var m=$('m-profiel'); if(m) m.innerHTML='<option value="">— kies uw verbruiksprofiel —</option><option value="__res__">Residentieel — woning (particulier)</option>'+_sectorOpts(lijst);
       }).catch(function(){});
+    }
+    // Profiel-keuze bepaalt modus (Residentieel ⇒ particulier, sector ⇒ bedrijf) én profielNaam.
+    function _modusVanProfiel(val){ return (val==='__res__'||!val)?'particulier':'bedrijf'; }
+    function preselectProfiel(preferBedrijf){
+      var ek=$('ek-profiel'); if(!ek||!ek.options.length) return;
+      if(preferBedrijf){ for(var i=0;i<ek.options.length;i++){ if(ek.options[i].value!=='__res__'){ ek.value=ek.options[i].value; break; } } }
+      else ek.value='__res__';
+    }
+    function updateProfielHint(){ var val=($('ek-profiel')||{}).value, m=_modusVanProfiel(val);
+      $('profiel-hint').textContent = (m==='particulier')?'→ particulier (woning)':('→ bedrijf · sector: '+val); }
+    // Pas de gekozen profiel toe: modus zetten + legacy-velden vullen uit STATE.factuur.
+    function _pasProfielToe(val){
+      var m=_modusVanProfiel(val); zetModus(m); if(m==='bedrijf') $('b-profiel').value=val;
+      var f=STATE.factuur||{};
+      if(m==='particulier'){ if(f.afnMwh)$('p-verbruik').value=f.afnMwh; if(f.kva)$('p-piek').value=Math.round(f.kva*10)/10; if(f.injMwh)$('p-inj').value=f.injMwh; if(f.pvKwp)$('p-pv').value=f.pvKwp; if(f.kost)$('p-kost').value=f.kost; }
+      else { if(f.afnMwh)$('b-verbruik').value=f.afnMwh; if(f.injMwh)$('b-inj').value=f.injMwh; if(f.kva)$('b-kva').value=f.kva; if(f.kost)$('b-kost').value=f.kost; $('b-spanning').value=f.spann||'LS'; }
     }
     window.addEventListener('DOMContentLoaded', function(){
       pasThema(); laadProfielen();
@@ -1076,6 +1115,8 @@
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
       $('btn-manueel').onclick=function(){ $('manueel').classList.toggle('hidden'); };
       $('btn-manueel-go').onclick=manueelGo;
+      $('btn-profiel-go').onclick=profielGo;
+      $('ek-profiel').onchange=updateProfielHint;
       $('btn-na-afname').onclick=naarPv;
       Array.prototype.forEach.call(document.querySelectorAll('input[name="heeftpv"]'), function(r){ r.onchange=function(){
         var ja=(document.querySelector('input[name=\"heeftpv\"]:checked')||{}).value==='ja';
