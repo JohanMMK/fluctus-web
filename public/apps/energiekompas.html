@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.17.0 (2026-08-31, Fase 5 — ONTDEKKINGSREIS, Johan): (a) wacht-carrousel FluctusWait
+<!-- energiekompas.html v0.18.0 (2026-08-31, Fase 5b — HARDWARE-BRUG, Johan): exacte studie toont nu een concrete
+     shoppinglist (welke PV/batterij/palen + prijs + payback via /api/hardware-voorstel) als de stap het dichtst
+     bij een bestelling; 7bis vragen voorgevuld uit de vision-pass (panelen) als die draait; injectie_mwh mee
+     naar de locatiescan voor de PV-kruiscontrole.
+     ── v0.17.0 (2026-08-31, Fase 5 — ONTDEKKINGSREIS, Johan): (a) wacht-carrousel FluctusWait
      (factuur-scan 3 beats + sweep 4 beats piek→spot→onbalans) — nooit dode tijd; (b) hefboom-zin op PV-dekking +
      spreiden-vraag in stap-hoe; (c) locatiescan async gestart bij factuur → scherm 7bis "Dit zien wij op uw
      locatie" (foto + vaststellingen + vragen, niet-blokkerend, terugval op leeg formulier) → vult stap 8 voor;
@@ -429,6 +433,8 @@
         <div class="hmdetail" id="hm-detail"></div>
       </div>
       <div class="fisc hidden" id="fisc-blok"></div>
+      <!-- Hardware-brug (H2): concrete shoppinglist — welke PV/batterij/palen + prijs + payback. -->
+      <div id="hardware-voorstel" class="hidden" style="margin-top:16px"></div>
       <!-- Groeistap-CTA (Ontwerp §14.6): warmste lead-signaal — verschijnt na de exacte studie. -->
       <div id="groeistap-cta" class="hidden" style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:10px;padding:12px 14px;margin-top:16px">
         <div style="font-weight:700;color:#1F3864;margin-bottom:4px">Eén stap tegelijk</div>
@@ -1521,7 +1527,7 @@
       var adres=bc&&bc.leveringsadres; if(!adres||STATE.scanId) return;
       var ean=(bc.ean||(bc.eanNrs&&bc.eanNrs[0])||'')+'';
       fetch(API+'/api/locatiescan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        adres:adres, btw:bc.klantBtw||'', bedrijfsnaam:bc.klantNaam||'', ean:ean.replace(/\D/g,'')
+        adres:adres, btw:bc.klantBtw||'', bedrijfsnaam:bc.klantNaam||'', ean:ean.replace(/\D/g,''), injectie_mwh:(bc.injectieKwh?bc.injectieKwh/1000:0)
       })}).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(j&&j.scan_id){ STATE.scanId=j.scan_id; pollScan(0); }
       }).catch(function(){});
@@ -1550,16 +1556,45 @@
       if(sc.dak&&sc.dak.opp_m2) v.push('Dakoppervlak: ± <b>'+num2(sc.dak.opp_m2)+' m²</b>');
       if(sc.omgeving&&sc.omgeving.laadpunten_5km){ var o=sc.omgeving.laadpunten_5km; v.push('Laadpunten in de buurt (5 km): <b>'+((o.ac||0)+(o.dc||0))+'</b> — waartegen uw eigen laden straks afgezet wordt'); }
       $('scan-vaststellingen').innerHTML = v.length? ('<ul style="margin:2px 0 0;padding-left:18px;color:#33404f;font-size:13px">'+v.map(function(x){return '<li style="margin:2px 0">'+x+'</li>';}).join('')+'</ul>') : '<p class="hint">We konden nog geen details van uw dak ophalen — vul ze hieronder even aan.</p>';
-      // vragen (foto zegt niets over aantallen → klant vult in)
+      // vragen — met vision (fase 2) voorgevuld, anders leeg; de klant bevestigt/corrigeert.
+      var pvPrefill=(sc.dak&&sc.dak.pv_panelen_geteld)?(' value="'+(+sc.dak.pv_panelen_geteld)+'"'):'';
+      var wgPrefill=(sc.parking&&sc.parking.plaatsen_totaal)?(' placeholder="± '+(+sc.parking.plaatsen_totaal)+' plaatsen gezien"'):' placeholder="bv. 5"';
       $('scan-vragen').innerHTML =
         '<div class="grid2">'+
-        '<div><label>Hoeveel zonnepanelen liggen er ongeveer?</label><input type="number" id="scan-q-pv" min="0" step="1" placeholder="bv. 40"></div>'+
-        '<div><label>Hoeveel wagens staan er \'s ochtends?</label><input type="number" id="scan-q-wagens" min="0" step="1" placeholder="bv. 5"></div>'+
-        '</div>';
+        '<div><label>Hoeveel zonnepanelen liggen er ongeveer?</label><input type="number" id="scan-q-pv" min="0" step="1" placeholder="bv. 40"'+pvPrefill+'></div>'+
+        '<div><label>Hoeveel wagens staan er \'s ochtends?</label><input type="number" id="scan-q-wagens" min="0" step="1"'+wgPrefill+'></div>'+
+        '</div>'+((sc.dak&&sc.dak.pv_panelen_geteld)?'<p class="hint" style="margin:6px 0 0">Wij telden er ongeveer <b>'+(+sc.dak.pv_panelen_geteld)+'</b> op uw dak — pas gerust aan.</p>':'');
+      if(sc.dak&&sc.dak.pv_panelen_geteld) STATE.scanPanelen=+sc.dak.pv_panelen_geteld;
       if($('scan-q-pv')) $('scan-q-pv').onchange=function(){ STATE.scanPanelen=+this.value||0; _leadUpdate({ event:'scan_gecorrigeerd:panelen' }); };
       if($('scan-q-wagens')) $('scan-q-wagens').onchange=function(){ STATE.scanWagens=+this.value||0; _leadUpdate({ event:'scan_gecorrigeerd:wagens' }); };
     }
     function num2(n){ try{ return Math.round(+n).toLocaleString('nl-BE'); }catch(e){ return String(n); } }
+    function num3(n){ try{ return (Math.round(n*10)/10).toLocaleString('nl-BE'); }catch(e){ return String(n); } }
+    // H2 — hardware-brug: de gekozen combo → concrete shoppinglist (welke PV/batterij/palen + prijs + payback).
+    function renderHardware(){
+      var el=$('hardware-voorstel'); if(!el||!STATE.exact) return;
+      var sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest||null; if(!sel){ el.classList.add('hidden'); return; }
+      var pv=anchorKwp(sel)||0, kwh=sel.battKwh||0, besp=sel.besparing||0;
+      var wagens=0; (STATE.eigen||[]).forEach(function(g){ wagens+=(+g.aantal||0); });
+      var punten=Math.ceil(0.5*wagens), acPalen=Math.max(0,Math.ceil(punten/2));
+      fetch(API+'/api/hardware-voorstel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        pv_kwp:pv, batt_kwh:kwh, ac_dubbel:acPalen, besparing_j:besp, load_balancer:(acPalen>=1)
+      })}).then(function(r){return r.ok?r.json():null;}).then(function(j){
+        var v=j&&j.voorstel;
+        if(!v||!v.items.length){ el.classList.add('hidden'); return; }
+        var td='padding:8px 12px;border-bottom:1px solid #E4EAF1;vertical-align:top';
+        var rows=v.items.map(function(it){ return '<tr><td style="'+td+'">'+esc(it.naam)+(it.geschat?' <span style="color:#9E480E;font-size:11px">(richtprijs)</span>':'')+'<div style="color:#5A6577;font-size:12px">'+esc(it.detail)+'</div></td><td style="'+td+';text-align:right;white-space:nowrap">'+eur(it.capex)+(it.recurring_j?('<div style="color:#5A6577;font-size:12px">+ '+eur(it.recurring_j)+'/j</div>'):'')+'</td></tr>'; }).join('');
+        el.innerHTML='<div style="border:1px solid #A9CDB4;border-radius:10px;overflow:hidden">'+
+          '<div style="background:#1F3864;color:#fff;padding:10px 14px;font-weight:700">Uw concrete voorstel — welke PV, batterij en palen</div>'+
+          '<table style="width:100%;border-collapse:collapse;font-size:13.5px;color:#1F3864"><tbody>'+rows+
+          '<tr style="border-top:2px solid #1F3864"><td style="'+td+'"><b>Totale investering</b></td><td style="'+td+';text-align:right"><b>'+eur(v.capex_totaal)+'</b>'+(v.recurring_totaal_j?('<div style="color:#5A6577;font-size:12px">+ '+eur(v.recurring_totaal_j)+'/j</div>'):'')+'</td></tr>'+
+          (v.payback_j?('<tr><td style="'+td+'">Terugverdientijd</td><td style="'+td+';text-align:right"><b>± '+num3(v.payback_j)+' jaar</b></td></tr>'):'')+
+          '</tbody></table>'+
+          '<div style="color:#5A6577;font-size:12px;padding:8px 14px">Richtprijzen (Jacops/E+Drive), afschrijving '+v.afschrijf_jaar+' j. De exacte kostprijs per kWh — en dus uw payback — komt uit de studie op uw echte meetgegevens (mandaat).</div>'+
+        '</div>';
+        el.classList.remove('hidden');
+      }).catch(function(){});
+    }
     // Stap 8: laadpleinen-invoer + rapport-keuze. Reuse renderEigen/renderBet via aparte hosts.
     function naarHoe(){
       STATE.eigenHost='hoe-eigen-lijst'; STATE.betHost='hoe-bet-lijst';
@@ -1615,6 +1650,7 @@
       var pill=document.querySelector('#stap-resultaat .stapkop .pill'); if(pill){ pill.textContent='exacte studie'; pill.style.background='#05B050'; }
       var g=$('groeistap-cta'); if(g) g.classList.remove('hidden');   // warmste lead-signaal beschikbaar
       STATE.eventGroeiGetoond=true;
+      renderHardware();   // H2 — concrete shoppinglist (welke PV/batterij/palen + prijs)
       var best=(STATE.hm&&STATE.hm.best)||null, ref=(STATE.tl&&STATE.tl.referentie_kost)||0;
       if(best && ref>0 && best.besparing!=null){
         var pct=Math.round(best.besparing/ref*1000)/10;
