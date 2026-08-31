@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.14.0 (2026-08-31, Fase 4 — PARTNER-KEUZE + MANDAAT-PARALLEL, Johan): (a) stap-partner
+<!-- energiekompas.html v0.15.0 (2026-08-31, Fase 4 — SELF-SERVICE MANDAAT-INTAKE, Johan): na factuur-upload een
+     entry "Mandaat opzetten" (stap-mandaat): rol klant/adviseur (+ partner voor adviseur, supermanager corrigeert
+     nadien) → identiteit naam/mail/tel → OTP-bevestiging (magic link, /api/mandaat/self-identiteit + verify) → EAN
+     + factuuradres → /api/mandaat/self-aanvraag (in losse wachtrij; back-office doet Fluvius-crosscheck) → status
+     (self-status) met titularis-mail + adres-mismatch-bevestiging (self-bevestig-adres). Early registrar.
+     ── v0.14.0 (2026-08-31, Fase 4 — PARTNER-KEUZE + MANDAAT-PARALLEL, Johan): (a) stap-partner
      vooraan: klant/adviseur kiest het rapportformat (Jacops/E+Drive · Wattkraft · EnergyPro · neutrale Fluctus)
      → thema-token op de hele flow + nota. (b) stap-hoe: optioneel mandaat-akkoord (+ EAN) → /api/lead-mandaat:
      wij organiseren het Fluvius-mandaat parallel en mailen de exacte studie zodra de echte kwartierdata binnen is.
@@ -250,6 +255,59 @@
         <p class="hint" id="profiel-hint"></p>
         <button class="btn" type="button" id="btn-profiel-go">Toon mijn onderhandelingsmarge →</button>
       </div>
+      <!-- Self-service mandaat: zodra er een factuur is, kan men meteen een Fluvius-mandaat opzetten op de EAN. -->
+      <button class="linkbtn hidden" type="button" id="btn-mandaat-open" style="margin-top:6px">🔐 Of: zet meteen een mandaat op uw meetgegevens op (exacte studie) →</button>
+    </div>
+
+    <!-- STAP M — SELF-SERVICE MANDAAT-INTAKE -->
+    <div class="card hidden" id="stap-mandaat">
+      <div class="stapkop"><span class="stapnr">M</span> Mandaat op uw meetgegevens</div>
+      <p class="hint">Met een mandaat halen we uw <b>echte kwartierprofiel</b> bij Fluvius, zodat uw studie exact wordt. We vragen eerst wie u bent (bevestiging per e-mail), daarna uw EAN.</p>
+      <!-- 1) rol + identiteit -->
+      <div id="mand-id">
+        <label>U bent</label>
+        <div class="radio big" id="mand-rol">
+          <label><input type="radio" name="mandrol" value="klant" checked> 👤 Klant</label>
+          <label><input type="radio" name="mandrol" value="adviseur"> 🧑‍💼 Adviseur</label>
+        </div>
+        <div id="mand-partner-wrap" class="hidden" style="margin:2px 0 8px">
+          <label>Partner / rapportformat <span class="hint" style="display:inline;font-weight:400">— de supermanager kan dit nadien corrigeren</span></label>
+          <select class="inp" id="mand-partner" style="max-width:280px">
+            <option value="">— kies —</option>
+            <option value="jacops">Jacops / E+Drive</option>
+            <option value="wattkraft">Wattkraft</option>
+            <option value="energypro">EnergyPro</option>
+            <option value="fluctus">Fluctus (neutraal)</option>
+          </select>
+        </div>
+        <div class="grid3">
+          <div><label>Naam</label><input type="text" id="mand-naam" placeholder="uw naam of bedrijf"></div>
+          <div><label>E-mail *</label><input type="email" id="mand-mail" placeholder="u@voorbeeld.be"></div>
+          <div><label>Telefoon</label><input type="tel" id="mand-tel" placeholder="0470 12 34 56"></div>
+        </div>
+        <button class="btn" type="button" id="btn-mand-id">Stuur mij een bevestigingscode →</button>
+      </div>
+      <!-- 2) OTP -->
+      <div id="mand-otp" class="hidden manueelbox">
+        <p class="hint">We stuurden een code naar <b id="mand-otp-mail">uw e-mail</b>. Vul ze in om te bevestigen.</p>
+        <div class="grid2">
+          <div><label>Code (6 cijfers)</label><input class="inp" id="mand-code" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+          <div style="align-self:end"><button class="btn" type="button" id="btn-mand-code">Bevestig →</button> <button class="linkbtn" type="button" id="btn-mand-resend">opnieuw sturen</button></div>
+        </div>
+      </div>
+      <!-- 3) EAN + adres -->
+      <div id="mand-ean" class="hidden manueelbox">
+        <p class="hint">✔ E-mail bevestigd. Vul nu de EAN in die u wil laten mandateren (18 cijfers, staat op uw factuur, begint met 54144).</p>
+        <div class="grid2">
+          <div><label>EAN-code</label><input class="inp" id="mand-eannr" inputmode="numeric" maxlength="18" placeholder="541448…"></div>
+          <div><label>Adres op uw factuur</label><input class="inp" id="mand-adres" placeholder="straat nr, postcode gemeente"></div>
+        </div>
+        <p class="hint">We vergelijken dit adres nadien met het adres dat Fluvius bij de EAN toont. Wijkt het af, dan vragen we u dat te bevestigen vóór we het mandaat indienen.</p>
+        <button class="btn" type="button" id="btn-mand-aanvraag">Vraag het mandaat aan →</button>
+      </div>
+      <!-- 4) status -->
+      <div id="mand-status" class="hidden manueelbox"></div>
+      <div class="msg" id="mand-msg"></div>
     </div>
 
     <!-- STAP 2 — AFNAME-MARGE -->
@@ -1038,6 +1096,8 @@
       preselectProfiel(detecteerModus(STATE.factuur.kva, STATE.factuur.spann)==='bedrijf');
       updateProfielHint();
       var pb=$('profiel-blok'); pb.classList.remove('hidden'); pb.scrollIntoView({behavior:'smooth', block:'center'});
+      STATE.factuurAdres = bc.leveringsadres || null; STATE.factuurEan = (bc.ean || bc.eanAfname || '') ? String(bc.ean || bc.eanAfname).replace(/\D/g,'') : '';
+      var mo=$('btn-mandaat-open'); if(mo) mo.classList.remove('hidden');   // self-service mandaat kan nu
     }
     // ── Manueel (geen factuur): minimale invoer → modus + legacy → afname-marge ──
     function manueelGo(){
@@ -1240,6 +1300,91 @@
           else { msg.style.color='#b00'; msg.textContent=(res.j&&res.j.error)||'Onjuiste code.'; }
         }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de code niet controleren — probeer opnieuw.'; });
     }
+    // ── SELF-SERVICE MANDAAT-INTAKE (stap-mandaat) ──────────────────────────────────────────────
+    // Identiteit (rol klant/adviseur + naam/mail/tel) → OTP-bevestiging → EAN + factuuradres → aanvraag.
+    // De back-office (fluvius-mandaat-flow) doet de Fluvius-lookup/crosscheck; wij tonen de status.
+    function mandOpen(){
+      // prefill uit de factuur
+      if(STATE.factuurAdres && !$('mand-adres').value) $('mand-adres').value=STATE.factuurAdres;
+      if(STATE.factuurEan && !$('mand-eannr').value) $('mand-eannr').value=STATE.factuurEan;
+      if(STATE.partner && $('mand-partner')){ $('mand-partner').value=STATE.partner; }
+      // al geverifieerd via de nota-flow? sla identiteit over.
+      if(STATE.leadVerified && STATE.leadToken){ STATE.mandToken=STATE.leadToken; $('mand-id').classList.add('hidden'); $('mand-otp').classList.add('hidden'); $('mand-ean').classList.remove('hidden'); }
+      toon('stap-mandaat');
+    }
+    function mandRolChange(){ var rol=(document.querySelector('input[name=mandrol]:checked')||{}).value; $('mand-partner-wrap').classList.toggle('hidden', rol!=='adviseur'); }
+    function mandIdGo(){
+      var msg=$('mand-msg'), mail=($('mand-mail').value||'').trim();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ msg.style.color='#b00'; msg.textContent='Vul een geldig e-mailadres in.'; return; }
+      var rol=(document.querySelector('input[name=mandrol]:checked')||{}).value||'klant';
+      var partner=(rol==='adviseur'&&$('mand-partner'))?($('mand-partner').value||''):(STATE.partner||'');
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Identiteit registreren…';
+      fetch(API+'/api/mandaat/self-identiteit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        naam:($('mand-naam').value||'').trim(), mail:mail, tel:($('mand-tel').value||'').trim(), rol:rol, partner:partner, leveringsadres:($('mand-adres').value||STATE.factuurAdres||'')
+      })}).then(function(r){return r.ok?r.json():null;}).then(function(j){
+        if(!j||!j.token){ msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet starten — probeer opnieuw.'; return; }
+        STATE.mandToken=j.token; msg.textContent='';
+        $('mand-otp-mail').textContent=mail; $('mand-otp').classList.remove('hidden');
+        mandVerifySend();
+      }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet starten — probeer opnieuw.'; });
+    }
+    function mandVerifySend(){
+      if(!STATE.mandToken) return; var msg=$('mand-msg');
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Code versturen…';
+      fetch(API+'/api/lead-verify-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.mandToken})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          if(j&&j.sent){ msg.style.color='#0a7a37'; msg.textContent='✔ Code verstuurd. Vul ze hierboven in.'; }
+          else { msg.style.color='#9E480E'; msg.textContent='⚠ De code kon (nog) niet gemaild worden — vraag Fluctus de code of probeer later.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de code niet versturen.'; });
+    }
+    function mandVerifyCheck(){
+      var msg=$('mand-msg'), code=($('mand-code').value||'').trim();
+      if(!/^[0-9]{6}$/.test(code)){ msg.style.color='#b00'; msg.textContent='Vul de 6-cijferige code in.'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Controleren…';
+      fetch(API+'/api/lead-verify-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.mandToken, code:code})})
+        .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+          if(res.ok && res.j && res.j.verified){ STATE.mandVerified=true; msg.style.color='#0a7a37'; msg.textContent='✔ E-mail bevestigd.'; $('mand-id').classList.add('hidden'); $('mand-otp').classList.add('hidden'); $('mand-ean').classList.remove('hidden'); }
+          else { msg.style.color='#b00'; msg.textContent=(res.j&&res.j.error)||'Onjuiste code.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de code niet controleren.'; });
+    }
+    function mandAanvraag(){
+      var msg=$('mand-msg'), ean=($('mand-eannr').value||'').replace(/\D/g,'');
+      if(!/^\d{18}$/.test(ean)){ msg.style.color='#b00'; msg.textContent='Een EAN heeft 18 cijfers (begint met 54144).'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Mandaat aanvragen…';
+      fetch(API+'/api/mandaat/self-aanvraag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.mandToken, ean:ean, factuur_adres:($('mand-adres').value||'').trim()})})
+        .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+          if(!res.ok||!res.j||!res.j.ok){ msg.style.color='#b00'; msg.textContent=(res.j&&res.j.error)||'Kon het mandaat niet aanvragen.'; return; }
+          msg.textContent=''; STATE.mandEan=ean; $('mand-ean').classList.add('hidden'); mandRenderStatus(res.j);
+          mandPollStatus();
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon het mandaat niet aanvragen — probeer opnieuw.'; });
+    }
+    function mandRenderStatus(j){
+      var h=$('mand-status'); h.classList.remove('hidden');
+      var st=j.status||'wachtrij';
+      var label={wachtrij:'in behandeling — we vragen het mandaat aan bij Fluvius', aangevraagd:'aangevraagd — de titularis kreeg een goedkeuringsmail', actief:'✅ actief — uw meetgegevens zijn beschikbaar', adres_mismatch:'⚠ adres wijkt af — bevestig hieronder', geannuleerd:'geannuleerd', geleverd:'✅ verwerkt', fout:'er ging iets mis — Fluctus kijkt na'}[st]||st;
+      var extra='';
+      if(j.already) extra+='<div class="hint">Er liep al een aanvraag/mandaat voor deze EAN.</div>';
+      if(j.titularis_mail_masked) extra+='<div class="hint">Goedkeuringsmail ging naar: <b>'+esc(j.titularis_mail_masked)+'</b></div>';
+      if(j.fluvius_adres) extra+='<div class="hint">Adres bij Fluvius: '+esc(j.fluvius_adres)+'</div>';
+      if(st==='adres_mismatch'){
+        extra+='<div style="margin-top:8px"><b>Klopt dit adres met uw aansluiting?</b><div style="margin-top:6px"><button class="btn sm" type="button" id="mand-adres-ok">Ja, klopt — ga door</button> <button class="btn ghost sm" type="button" id="mand-adres-nok">Nee, klopt niet</button></div></div>';
+      }
+      h.innerHTML='<div><b>Mandaat '+esc(STATE.mandEan||'')+'</b> — '+label+'</div>'+extra;
+      if(st==='adres_mismatch'){
+        $('mand-adres-ok').onclick=function(){ mandBevestigAdres(true); };
+        $('mand-adres-nok').onclick=function(){ mandBevestigAdres(false); };
+      }
+    }
+    function mandBevestigAdres(akkoord){
+      var msg=$('mand-msg'); msg.style.color='var(--muted)'; msg.textContent='⏳ Doorsturen…';
+      fetch(API+'/api/mandaat/self-bevestig-adres',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.mandToken, ean:STATE.mandEan, akkoord:akkoord})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){ msg.textContent=''; if(j&&j.ok){ mandPollStatus(); } }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon niet doorsturen.'; });
+    }
+    function mandPollStatus(){
+      if(!STATE.mandToken||!STATE.mandEan) return;
+      fetch(API+'/api/mandaat/self-status?token='+encodeURIComponent(STATE.mandToken)+'&ean='+encodeURIComponent(STATE.mandEan))
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){ if(j&&j.ok&&j.gevonden){ mandRenderStatus(j); } }).catch(function(){});
+    }
     // Stap 8: laadpleinen-invoer + rapport-keuze. Reuse renderEigen/renderBet via aparte hosts.
     function naarHoe(){
       STATE.eigenHost='hoe-eigen-lijst'; STATE.betHost='hoe-bet-lijst';
@@ -1345,6 +1490,13 @@
       $('hoe-bet-add').onclick=function(){ STATE.betHost='hoe-bet-lijst'; STATE.bet.push(nieuwBet()); renderBet(); };
       $('btn-exact-go').onclick=berekenExact;
       if($('hoe-mandaat')) $('hoe-mandaat').onchange=function(){ $('hoe-ean-blok').classList.toggle('hidden', !this.checked); };
+      // Self-service mandaat-intake
+      if($('btn-mandaat-open')) $('btn-mandaat-open').onclick=mandOpen;
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="mandrol"]'), function(r){ r.onchange=mandRolChange; });
+      if($('btn-mand-id')) $('btn-mand-id').onclick=mandIdGo;
+      if($('btn-mand-code')) $('btn-mand-code').onclick=mandVerifyCheck;
+      if($('btn-mand-resend')) $('btn-mand-resend').onclick=mandVerifySend;
+      if($('btn-mand-aanvraag')) $('btn-mand-aanvraag').onclick=mandAanvraag;
       Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(bt){ bt.onclick=function(){
         STATE.hmMetric=bt.getAttribute('data-mx');
         Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(x){ x.classList.toggle('on', x===bt); });

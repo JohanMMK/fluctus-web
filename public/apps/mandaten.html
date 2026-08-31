@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.2.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
+<!-- mandaten.html v0.3.0 (2026-08-31, Fase 4) — SELF-SERVICE: losse entries tonen aanvrager (naam/mail/rol) +
+     bron; supermanager kan rol (klant/adviseur) én partner corrigeren via /api/mandaat/los-patch.
+     mandaten.html v0.2.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
      v0.2.0: bevestig/weiger-knoppen op adres_mismatch-rijen (POST /api/mandaat/bevestig-adres). v0.1.0 basis:
      Leest GET /api/mandaat/wachtrij?status=<alle> en toont per EAN de status, beide adressen (factuur ↔ Fluvius),
      adres-match, wie een mismatch bevestigde, referentienr en gemaskeerd titularis-mail — voor nazicht nadien.
@@ -152,8 +154,20 @@
       rows.forEach(function(it){
         var bev = it.bevestigd_door ? (esc(it.bevestigd_door.naam||it.bevestigd_door.email||'?')+(it.bevestigd_door.rol?(' <span class="sub">('+esc(it.bevestigd_door.rol)+')</span>'):'')+'<div class="sub">'+kort(it.bevestigd_op)+'</div>') : '<span class="sub">—</span>';
         var laatste = it.actief_op || it.aangevraagd_op || it.in_wachtrij_sinds;
+        var projCel = '<b>'+esc(it.project_naam||it.project_id)+'</b><div class="sub code">'+esc(it.project_id)+(it.klant?(' · '+esc(it.klant)):'')+(it.meter_type?(' · '+esc(it.meter_type)):'')+'</div>';
+        if(it.los){
+          var av = it.aanvrager||{}; var rol = (av.rol||it.rol||'klant'); var partner = it.partner||'';
+          projCel += '<div class="sub">'+(av.naam?esc(av.naam):'—')+(av.mail?(' · '+esc(av.mail)):'')+(it.aangevraagd_via?(' · '+esc(it.aangevraagd_via)):'')+'</div>';
+          // supermanager-correctie: rol + partner
+          var rolOpt=['klant','adviseur'].map(function(x){return '<option value="'+x+'"'+(x===rol?' selected':'')+'>'+x+'</option>';}).join('');
+          var partOpt=['','jacops','wattkraft','energypro','fluctus'].map(function(x){return '<option value="'+x+'"'+(x===partner?' selected':'')+'>'+(x||'— partner —')+'</option>';}).join('');
+          projCel += '<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">'+
+            '<select class="mini" onchange="mandLosPatch(\''+esc(it.ean)+'\',{rol:this.value})">'+rolOpt+'</select>'+
+            '<select class="mini" onchange="mandLosPatch(\''+esc(it.ean)+'\',{partner:this.value})">'+partOpt+'</select>'+
+            (it.gecorrigeerd_door?('<span class="sub">✎ '+esc(it.gecorrigeerd_door.naam||'')+'</span>'):'')+'</div>';
+        }
         h+='<tr class="'+(isSpecial(it)?'special':'')+'">'+
-          '<td><b>'+esc(it.project_naam||it.project_id)+'</b><div class="sub code">'+esc(it.project_id)+(it.klant?(' · '+esc(it.klant)):'')+(it.meter_type?(' · '+esc(it.meter_type)):'')+'</div></td>'+
+          '<td>'+projCel+'</td>'+
           '<td class="code">'+esc(it.ean)+'</td>'+
           '<td>'+esc(it.richting||'—')+'</td>'+
           '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+'</td>'+
@@ -174,6 +188,14 @@
       if(!akkoord && !confirm('Adres weigeren voor EAN '+ean+'? De aanvraag wordt geannuleerd.')) return;
       try{
         var r = await fetch(PROXY+'/api/mandaat/bevestig-adres', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:pid, ean:ean, akkoord:!!akkoord }) });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
+    // v0.3.0: supermanager corrigeert een losse-lijst-entry (rol/partner) → /api/mandaat/los-patch.
+    window.mandLosPatch = async function(ean, patch){
+      try{
+        var r = await fetch(PROXY+'/api/mandaat/los-patch', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ ean:ean, patch:patch }) });
         if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
         laad();
       }catch(e){ alert('Fout: '+e.message); }
