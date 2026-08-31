@@ -1,4 +1,9 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.15 (31-08, Fase 5b): CABINE-SEED (§12.6a). seed.cabines[] (uit de locatiescan) →
+           vaste, niet-sleepbare oranje markers (naam · afstand · rest_kVA). Ligt de dichtste cabine ≤150 m,
+           dan wordt zij het aansluitpunt van het tracé i.p.v. het standaard-ontkoppelbord → echte kabeltrace-
+           afstand. Cabines tonen ook zonder laadplein in het ontwerp. Seed-writer (Kamino-sim) moet
+           `cabines: scan.locatiescan.netaansluiting.cabines` meegeven in fluctus_kbl_seed.
      FLUCTUS KABELPLANNER  v1.14 (Johan 22-08): POINTER-OFFSET NA ROTATIE — OPGELOST + diagnose verwijderd.
            Fix (v1.13) bevestigd op het echte scherm: bij bearing 321.8° pant de kaart niet meer bij het kiezen
            van een object (diagnose toonde "map moves sinds klik: 0", scaleX 1.0000). Oorzaak was autoPanOnFocus
@@ -858,6 +863,30 @@ function _fkLocatieFlow(onPlaced){
   ov.querySelector('#fk-m-skip').onclick=function(){ sluit(); if(typeof onPlaced==='function') onPlaced(null); };
   setTimeout(function(){ try{ inp.focus(); inp.select(); }catch(e){} },60);
 }
+// §12.6a — Fluvius-cabines uit de locatiescan: VASTE, niet-sleepbare oranje markers (het zijn metingen, geen
+// ontwerpkeuze). Label: naam · afstand · rest_kVA. Ligt de dichtste cabine ≤150 m van de site, dan wordt zij het
+// aansluitpunt van het tracé i.p.v. het standaard-ontkoppelbord → de teruggestuurde kabeltrace_eur is de ECHTE
+// afstand tot het net. Toon de cabine ook als er geen laadplein in het ontwerp zit.
+var _fkCabines=[];
+function _fkRenderCabines(cabines){
+  _fkCabines=[];
+  (cabines||[]).forEach(function(c){
+    var lat=(c.lat!=null?c.lat:c.latitude), lon=(c.lon!=null?c.lon:c.longitude);
+    if(lat==null||lon==null) return;
+    var kva=(c.rest_kva_afname!=null?c.rest_kva_afname:c.restcapaciteit_afname_kva);
+    var ll=L.latLng(lat,lon);
+    var icon=L.divIcon({className:"fk-pin",html:'<div>'+icRect(ORANGE)+'</div>',iconSize:[30,30],iconAnchor:[15,15]});
+    var m=L.marker(ll,{icon:icon,draggable:false,zIndexOffset:500}).addTo(map);
+    var lbl=(c.naam||'MS-cabine')+(c.afstand_m!=null?(' · '+c.afstand_m+' m'):'')+(kva!=null?(' · '+kva+' kVA vrij'):'');
+    m.bindTooltip(lbl,{direction:'top',offset:[0,-14]});
+    _fkCabines.push({ll:ll, naam:(c.naam||'MS-cabine'), kva:kva});
+  });
+}
+function _fkNaasteCabine(center, maxM){
+  var best=null,bd=Infinity;
+  _fkCabines.forEach(function(c){ try{ var d=center.distanceTo(c.ll); if(d<bd){bd=d;best=c;} }catch(e){} });
+  return (best&&bd<=maxM)?{cabine:best,afstand:Math.round(bd)}:null;
+}
 (function(){
   var raw; try{ raw=localStorage.getItem(KBL_SEED_KEY); }catch(e){ _fkLocatieFlow(function(){}); return; }
   if(!raw){ _fkLocatieFlow(function(){}); return; }
@@ -866,6 +895,7 @@ function _fkLocatieFlow(onPlaced){
   if(!seed) return;
   var TMAP={AC22:'ac', DC160:'dc', DC300:'sdc'};   // simulator-laadpunt -> planner-type (indicatief)
   if(seed.adres) $('fk-addr').value=seed.adres;
+  if(seed.cabines && seed.cabines.length){ try{ _fkRenderCabines(seed.cabines); }catch(e){} }   // §12.6a
   // v1.6: heeft de simulator een eerder ONTWERP meegegeven? Dan herstellen we dat exact zodat de klant
   // verder werkt op wat hij het laatst doorstuurde (i.p.v. opnieuw te beginnen met auto-plaatsing).
   if(seed.restore && typeof seed.restore==='object'){
@@ -882,7 +912,10 @@ function _fkLocatieFlow(onPlaced){
   function plaats(center){
     var c=center||map.getCenter(), i=0;
     function pos(){ var row=Math.floor(i/6), col=i%6; i++; return L.latLng(c.lat+0.00012-row*0.00006, c.lng-0.00018+col*0.00006); }
-    addObject('ontk', L.latLng(c.lat, c.lng));
+    // §12.6a: cabine ≤150 m → aansluitpunt op de cabine (echte tracé-afstand) i.p.v. het standaard-ontkoppelbord.
+    var _nc=_fkNaasteCabine(L.latLng(c.lat,c.lng),150);
+    addObject('ontk', _nc ? _nc.cabine.ll : L.latLng(c.lat, c.lng));
+    if(_nc) setTimeout(function(){ toast('MS-cabine op '+_nc.afstand+' m'+(_nc.cabine.kva!=null?(' ('+_nc.cabine.kva+' kVA vrij)'):'')+' → als aansluitpunt gebruikt'); }, 1200);
     (seed.laadpunten||[]).forEach(function(l){ var t=TMAP[l.type]||'dc'; for(var q=0;q<(+l.aantal||0);q++) addObject(t, pos()); });
     if(seed.batterij && +seed.batterij.aantal>0) for(var b=0;b<+seed.batterij.aantal;b++) addObject('bat', pos(), null, {kwh: seed.batterij.kwh||260});
     recalc(); try{ autoTrace(); }catch(e){}
