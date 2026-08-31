@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.12.8 (2026-08-30, Fase 4 — SCHIL→KAMINO-HANDOFF, Johan): de lead-POST stuurt nu ook een
+<!-- energiekompas.html v0.13.0 (2026-08-31, Fase 4 — SELF-SERVICE na HOE, Johan): "Wil u weten hoe?" start nu de
+     self-service: (7) e-mailverificatie via OTP-code (/api/lead-verify-send + -check) → zeker welk adres werkt;
+     (8) klant definieert wagenpark + betalend laadplein (reuse renderEigen/renderBet via aparte hosts) + kiest een
+     rapport-tier (direct|later|view) — dit venster is meteen het laadscherm; dan draait de EXACTE studie (sweep op
+     profiel + laadpleinen) en werkt het resultaat bij: label "exacte studie" + extra KPI's "Energie gewonnen" (%
+     besparing/energiekost) en "Verdiensten betalend laadplein" (client-schatting). Tier + laadpleinen + engagement-
+     events → /api/lead-update (lead-scoring). Vereist server v15.113.0. Mandaat-parallel + betaalprovider = later.
+     ── v0.12.8 (2026-08-30, Fase 4 — SCHIL→KAMINO-HANDOFF, Johan): de lead-POST stuurt nu ook een
      `kamino`-seed mee (baseCase + profielNaam + modus + pv{kwp,injectie} + kVA + spanning). De server (v15.112) maakt
      daaruit een studieklaar Kamino-project → de volledige cyclus schil → nota → volledige studie + rapport. Vereist
      server v15.112.0. ── v0.12.7 (2026-08-30, Fase 4 — MOBILITEIT KWALITATIEF, Johan): niet het (enorme) km-getal
@@ -313,9 +320,42 @@
       </div>
       <div class="fisc hidden" id="fisc-blok"></div>
       <div style="margin-top:18px">
-        <button class="btn" type="button" id="btn-hoe">Wil u weten hoe? Laat u contacteren →</button>
+        <button class="btn" type="button" id="btn-hoe">Wil u weten hoe? → maak mijn exacte studie</button>
         <div class="msg" id="hoe-msg"></div>
       </div>
+    </div>
+
+    <!-- STAP 7 — E-MAILVERIFICATIE (magic code) -->
+    <div class="card hidden" id="stap-verify">
+      <div class="stapkop"><span class="stapnr">7</span> Bevestig uw e-mail</div>
+      <p class="hint">Om uw <b>exacte studie</b> te maken (op uw echte profiel + uw laadpleinen) bevestigen we eerst uw e-mail. We sturen een code naar <b id="verify-mail">uw adres</b>.</p>
+      <button class="btn" type="button" id="btn-verify-send">Stuur mij de code →</button>
+      <div id="verify-code-blok" class="hidden manueelbox">
+        <div class="grid2"><div><label>Code (6 cijfers)</label><input type="text" id="verify-code" inputmode="numeric" maxlength="6" placeholder="123456"></div></div>
+        <button class="btn" type="button" id="btn-verify-check">Bevestig →</button>
+        <button class="linkbtn" type="button" id="btn-verify-resend">Geen code ontvangen? Opnieuw sturen</button>
+      </div>
+      <div class="msg" id="verify-msg"></div>
+    </div>
+
+    <!-- STAP 8 — LAADPLEINEN + RAPPORT-KEUZE (laadvenster voor de exacte studie) -->
+    <div class="card hidden" id="stap-hoe">
+      <div class="stapkop"><span class="stapnr">8</span> Uw laadpleinen &amp; rapport</div>
+      <p class="hint">Definieer uw wagenpark en (eventueel) een betalend laadplein — hoe completer, hoe scherper uw studie. Kies daarna hoe u het rapport wilt; ondertussen rekenen we uw <b>exacte heatmap</b>.</p>
+      <h3>🚚 Eigen wagenpark</h3>
+      <div class="hint">Per type: aantal + laadvenster. Km/jaar en kWh/km rekenen we op de achtergrond.</div>
+      <div id="hoe-eigen-lijst"></div>
+      <button class="btn ghost sm" type="button" id="hoe-eigen-add">+ laadgroep toevoegen</button>
+      <h3>🔌 Betalend laadplein <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
+      <div class="hint">Enkel als u derden tegen betaling laat laden.</div>
+      <div id="hoe-bet-lijst"></div>
+      <button class="btn ghost sm" type="button" id="hoe-bet-add">+ laadplein toevoegen</button>
+      <h3>Uw rapport</h3>
+      <label class="opt"><input type="radio" name="tier" value="direct"> <b>Nu ontvangen</b><span>Ik wil het volledige rapport meteen — bekijken én downloaden.</span></label>
+      <label class="opt"><input type="radio" name="tier" value="later" checked> <b>Later beslissen</b><span>Ik bekijk het nu; downloaden kan later — of gratis als ik via de installateur bestel.</span></label>
+      <label class="opt"><input type="radio" name="tier" value="view"> <b>Enkel bekijken</b><span>Ik wil het enkel op het scherm zien, niet downloaden.</span></label>
+      <button class="btn" type="button" id="btn-exact-go">Bereken mijn exacte studie →</button>
+      <div class="msg" id="hoe-msg2"></div>
     </div>
 
     <!-- LEGACY-INVOER (verborgen) — de funnel vult deze velden; de bestaande engine- en nota-functies lezen ze. -->
@@ -481,7 +521,7 @@
     // ---- Bedrijf: eigen laadplein (type wagen · aantal · laadvenster) ----
     function nieuwEigen(){ return { type:'personenwagen', aantal:4, start:19, eind:7 }; }
     function renderEigen(){
-      var host=$('b-eigen-lijst'); host.innerHTML='';
+      var host=$(STATE.eigenHost||'b-eigen-lijst'); if(!host) return; host.innerHTML='';
       STATE.eigen.forEach(function(g,i){
         var opts=VOERTUIGTYPES.map(function(t){ return '<option value="'+t.key+'"'+(g.type===t.key?' selected':'')+'>'+t.naam+'</option>'; }).join('');
         var d=document.createElement('div'); d.className='wagen';
@@ -499,7 +539,7 @@
     // ---- Bedrijf: betalend laadplein (meerdere) ----
     function nieuwBet(){ return { type:'ac22', palen:2, sessies:4 }; }
     function renderBet(){
-      var host=$('b-bet-lijst'); host.innerHTML='';
+      var host=$(STATE.betHost||'b-bet-lijst'); if(!host) return; host.innerHTML='';
       STATE.bet.forEach(function(g,i){
         var d=document.createElement('div'); d.className='wagen';
         d.innerHTML='<button class="del" data-i="'+i+'">✕</button><div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:6px">Laadplein '+(i+1)+'</div>'+
@@ -627,7 +667,7 @@
       fetch(API+'/api/energiekompas/bedrijf-sweep',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
         .then(function(sw){ _klaar();
-          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); toonGeneratorKpi(); }
+          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); toonGeneratorKpi(); if(STATE.exact) toonExactExtra(); }
           else { bedrijfSnelleKpi(inv, st); }   // fallback zolang v15.103 niet gedeployed is
         })
         .catch(function(){ _klaar(); bedrijfSnelleKpi(inv, st); });
@@ -1141,14 +1181,71 @@
       var verm=(g.diesel_vermeden_eur_jaar||0), inv=(g.batterij_seed_kw?g.batterij_seed_kw:0);
       extraKpiPush([{ t:'Generator vervangen — vermeden diesel', v:eur(verm)+'/j', s:(g.egen_kwh_jaar?(Math.round(g.egen_kwh_jaar/1000)+' MWh/j uit uw aansluiting'):'goedkope stroom i.p.v. diesel') }]);
     }
-    // ── Stap 6: "wil u weten hoe?" → warme lead ──
-    function hoeGo(){
-      var msg=$('hoe-msg');
-      if(!STATE.leadToken){ msg.style.color='var(--muted)'; msg.textContent='✔ We nemen contact met u op via de gegevens die u eerder invulde.'; return; }
-      msg.style.color='var(--muted)'; msg.textContent='⏳ Bezig…'; $('btn-hoe').setAttribute('disabled','disabled');
-      fetch(API+'/api/lead-interesse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ token:STATE.leadToken, interesses:STATE.interesses||[], wil_contact:true })})
-        .then(function(r){return r.ok?r.json():null;}).then(function(){ msg.style.color='#0a7a37'; msg.textContent='✔ Dank u — wij nemen binnenkort contact op om u te tonen hoe.'; })
-        .catch(function(){ $('btn-hoe').removeAttribute('disabled'); msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet versturen — probeer opnieuw.'; });
+    // ── Stap 6→7: "wil u weten hoe?" → self-service (verificatie → laadpleinen/tier → exacte studie) ──
+    function _leadUpdate(body){ if(!STATE.leadToken) return Promise.resolve(null); body.token=STATE.leadToken;
+      return fetch(API+'/api/lead-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}); }
+    function naarVerify(){
+      _leadUpdate({ event:'hoe_clicked' });
+      if(STATE.leadVerified){ naarHoe(); return; }   // al geverifieerd → sla over
+      $('verify-mail').textContent = ($('ld-mail').value||'uw adres');
+      $('verify-code-blok').classList.add('hidden'); $('verify-msg').textContent='';
+      toon('stap-verify');
+    }
+    function verifySend(){
+      var msg=$('verify-msg');
+      if(!STATE.leadToken){ msg.style.color='#b00'; msg.textContent='Geen lead gevonden — open eerst uw nota (stap 4).'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Code versturen…';
+      fetch(API+'/api/lead-verify-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          $('verify-code-blok').classList.remove('hidden');
+          if(j&&j.sent){ msg.style.color='#0a7a37'; msg.textContent='✔ Code verstuurd naar '+esc($('ld-mail').value||'uw mailbox')+'. Vul ze hieronder in.'; }
+          else { msg.style.color='#9E480E'; msg.textContent='⚠ De code kon (nog) niet gemaild worden (server-mail staat mogelijk uit). Vraag Fluctus de code of probeer later.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de code niet versturen — probeer opnieuw.'; });
+    }
+    function verifyCheck(){
+      var msg=$('verify-msg'), code=($('verify-code').value||'').trim();
+      if(!/^[0-9]{6}$/.test(code)){ msg.style.color='#b00'; msg.textContent='Vul de 6-cijferige code in.'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Controleren…';
+      fetch(API+'/api/lead-verify-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, code:code})})
+        .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+          if(res.ok && res.j && res.j.verified){ STATE.leadVerified=true; msg.style.color='#0a7a37'; msg.textContent='✔ E-mail bevestigd.'; naarHoe(); }
+          else { msg.style.color='#b00'; msg.textContent=(res.j&&res.j.error)||'Onjuiste code.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon de code niet controleren — probeer opnieuw.'; });
+    }
+    // Stap 8: laadpleinen-invoer + rapport-keuze. Reuse renderEigen/renderBet via aparte hosts.
+    function naarHoe(){
+      STATE.eigenHost='hoe-eigen-lijst'; STATE.betHost='hoe-bet-lijst';
+      if(!STATE.eigen.length) STATE.eigen=[nieuwEigen()];
+      renderEigen(); renderBet();
+      toon('stap-hoe');
+    }
+    function berekenExact(){
+      var tier=(document.querySelector('input[name=tier]:checked')||{}).value||'later'; STATE.tier=tier;
+      // laadpleinen aanzetten zodat de sweep ze meeneemt
+      if(STATE.modus==='bedrijf'){ $('c-eigen').checked=(STATE.eigen&&STATE.eigen.length>0); $('c-betalend').checked=(STATE.bet&&STATE.bet.length>0); syncBedrijfComp(); }
+      STATE.exact=true;
+      _leadUpdate({ tier:tier, laadpleinen:{ eigen:STATE.eigen||[], betalend:STATE.bet||[] }, event:'exact_gestart' });
+      var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
+      $('extra-kpi').innerHTML=''; $('mob-note').innerHTML=''; $('hoe-msg2').textContent='';
+      toon('stap-resultaat');
+      $('kpi-host').innerHTML='<div class="kpi" style="grid-column:1/-1"><div class="t">Uw exacte studie</div><div class="v" style="font-size:17px">⏳ wordt berekend…</div><div class="s">op uw profiel + uw laadpleinen — dit kan tot ±1 min duren</div></div>';
+      if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('res-msg'));
+      else berekenBedrijfSweep(inv, st, $('res-msg'));
+      if($('q-mobiliteit').checked || (STATE.eigen&&STATE.eigen.length)) haalMobiliteitKpi(inv);
+    }
+    // Extra KPI's van de EXACTE studie: % energie gewonnen + verdiensten betalend laadplein.
+    function toonExactExtra(){
+      // relabel: indicatief → exact
+      var pill=document.querySelector('#stap-resultaat .stapkop .pill'); if(pill){ pill.textContent='exacte studie'; pill.style.background='#05B050'; }
+      var best=(STATE.hm&&STATE.hm.best)||null, ref=(STATE.tl&&STATE.tl.referentie_kost)||0;
+      if(best && ref>0 && best.besparing!=null){
+        var pct=Math.round(best.besparing/ref*1000)/10;
+        extraKpiPush([{ t:'Energie gewonnen', v:pct+' %', s:'aandeel van uw energiekost dat u wint met de opstelling', info:'Berekend als besparing/jaar ('+eur(best.besparing)+') gedeeld door uw huidige energiekost ('+eur(ref)+'). Op uw profiel + laadpleinen.' }]);
+      }
+      // verdiensten betalend laadplein (client-schatting uit de plein-definitie)
+      var omzet=0; (STATE.bet||[]).forEach(function(g){ var d=PAALDEF[g.type==='dc160'?'DC160':'AC22']; var kwhSes=d.paal_kw*(d.duur_min/60);
+        var sesJaar=(+g.sessies||0)*(+g.palen||0)*365; omzet += sesJaar*kwhSes/1000*d.opbrengst_eur_mwh; });
+      if(omzet>0){ extraKpiPush([{ t:'Verdiensten betalend laadplein', v:eur(omzet)+'/j', s:'omzet uit laadsessies van derden (indicatief)', info:'Σ per plein: sessies/jaar × kWh/sessie × verkoopprijs. Indicatief — de exacte omzet volgt uit de volledige studie.' }]); }
     }
 
     function _sectorOpts(lijst, sel){ return lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+((sel&&String(n).toLowerCase()===sel)?' selected':'')+'>'+esc(n)+'</option>'; }).join(''); }
@@ -1205,7 +1302,13 @@
       $('btn-nota').onclick=openNotaLead;
       $('q-generator').onchange=function(){ $('gen-velden').classList.toggle('hidden', !this.checked); };
       $('btn-meer-go').onclick=meerGo;
-      $('btn-hoe').onclick=hoeGo;
+      $('btn-hoe').onclick=naarVerify;
+      $('btn-verify-send').onclick=verifySend;
+      $('btn-verify-resend').onclick=verifySend;
+      $('btn-verify-check').onclick=verifyCheck;
+      $('hoe-eigen-add').onclick=function(){ STATE.eigenHost='hoe-eigen-lijst'; STATE.eigen.push(nieuwEigen()); renderEigen(); };
+      $('hoe-bet-add').onclick=function(){ STATE.betHost='hoe-bet-lijst'; STATE.bet.push(nieuwBet()); renderBet(); };
+      $('btn-exact-go').onclick=berekenExact;
       Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(bt){ bt.onclick=function(){
         STATE.hmMetric=bt.getAttribute('data-mx');
         Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(x){ x.classList.toggle('on', x===bt); });
