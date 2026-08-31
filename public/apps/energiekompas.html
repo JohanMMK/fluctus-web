@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.13.0 (2026-08-31, Fase 4 — SELF-SERVICE na HOE, Johan): "Wil u weten hoe?" start nu de
+<!-- energiekompas.html v0.14.0 (2026-08-31, Fase 4 — PARTNER-KEUZE + MANDAAT-PARALLEL, Johan): (a) stap-partner
+     vooraan: klant/adviseur kiest het rapportformat (Jacops/E+Drive · Wattkraft · EnergyPro · neutrale Fluctus)
+     → thema-token op de hele flow + nota. (b) stap-hoe: optioneel mandaat-akkoord (+ EAN) → /api/lead-mandaat:
+     wij organiseren het Fluvius-mandaat parallel en mailen de exacte studie zodra de echte kwartierdata binnen is.
+     ── v0.13.0 (2026-08-31, Fase 4 — SELF-SERVICE na HOE, Johan): "Wil u weten hoe?" start nu de
      self-service: (7) e-mailverificatie via OTP-code (/api/lead-verify-send + -check) → zeker welk adres werkt;
      (8) klant definieert wagenpark + betalend laadplein (reuse renderEigen/renderBet via aparte hosts) + kiest een
      rapport-tier (direct|later|view) — dit venster is meteen het laadscherm; dan draait de EXACTE studie (sweep op
@@ -196,6 +200,18 @@
     <h1>Wat is uw energie waard?</h1>
     <p class="lead">Laad uw energiefactuur op en zie meteen wat er te onderhandelen valt — op uw afname én uw injectie — <b>zonder één euro te investeren</b>. We hebben enkel uw verbruiksprofiel nodig.</p>
 
+    <!-- PARTNER / RAPPORTFORMAT -->
+    <div class="card" id="stap-partner">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:8px">Rapportformat</div>
+      <div class="radio big" id="partner-kies">
+        <label><input type="radio" name="partnerkeuze" value="jacops"> Jacops / E+Drive</label>
+        <label><input type="radio" name="partnerkeuze" value="wattkraft"> Wattkraft</label>
+        <label><input type="radio" name="partnerkeuze" value="energypro"> EnergyPro</label>
+        <label><input type="radio" name="partnerkeuze" value="fluctus" checked> Fluctus (neutraal)</label>
+      </div>
+      <div class="hint">Bepaalt de huisstijl van de nota en het rapport. U kan dit later nog wijzigen.</div>
+    </div>
+
     <!-- STAP 1 — FACTUUR -->
     <div class="card" id="stap-start">
       <div class="stapkop"><span class="stapnr">1</span> Uw energiefactuur</div>
@@ -354,6 +370,9 @@
       <label class="opt"><input type="radio" name="tier" value="direct"> <b>Nu ontvangen</b><span>Ik wil het volledige rapport meteen — bekijken én downloaden.</span></label>
       <label class="opt"><input type="radio" name="tier" value="later" checked> <b>Later beslissen</b><span>Ik bekijk het nu; downloaden kan later — of gratis als ik via de installateur bestel.</span></label>
       <label class="opt"><input type="radio" name="tier" value="view"> <b>Enkel bekijken</b><span>Ik wil het enkel op het scherm zien, niet downloaden.</span></label>
+      <h3>Exact op uw echte meetgegevens <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
+      <label class="opt"><input type="checkbox" id="hoe-mandaat"> <b>Ja, organiseer het mandaat op mijn meetgegevens</b><span>Dan herberekenen we uw studie op uw <b>werkelijke kwartierprofiel</b> (via Fluvius) en mailen we u automatisch het exacte resultaat. De indicatieve studie krijgt u nu al.</span></label>
+      <div id="hoe-ean-blok" class="hidden" style="margin:2px 0 8px"><input class="inp" id="hoe-ean" inputmode="numeric" placeholder="EAN-nummer (18 cijfers, optioneel — mag later)" style="max-width:340px"></div>
       <button class="btn" type="button" id="btn-exact-go">Bereken mijn exacte studie →</button>
       <div class="msg" id="hoe-msg2"></div>
     </div>
@@ -492,11 +511,20 @@
     function eur(n){ try{ return '€ '+Math.round(n).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(n); } }
     function kmKostTxt(v){ return (Math.round(v*1000)/1000).toFixed(3).replace('.',',')+' €/km'; }
 
-    var THEMES={ jacops:'#C0161D', wattkraft:'#12315E', energypro:'#0a7a37' };
+    // Partner/rapportformat → accent (huisstijl). 'fluctus' = neutraal (navy). jacops-chip = Jacops/E+Drive.
+    var THEMES={ jacops:'#C0161D', edrive:'#80C539', wattkraft:'#12315E', energypro:'#EF7D00', fluctus:'#1F3864' };
+    var PARTNERLABEL={ jacops:'Jacops / E+Drive', edrive:'E+Drive', wattkraft:'Wattkraft', energypro:'EnergyPro', fluctus:'' };
+    function zetPartner(p){
+      p=(p||'fluctus').toLowerCase(); if(!THEMES[p]) p='fluctus';
+      STATE.partner=(p==='fluctus'?'':p);   // leeg = neutrale nota-thema
+      document.documentElement.style.setProperty('--accent', THEMES[p]);
+      $('partnerlbl').textContent = PARTNERLABEL[p] ? ('voor '+PARTNERLABEL[p]) : '';
+      var r=document.querySelector('input[name="partnerkeuze"][value="'+p+'"]'); if(r) r.checked=true;
+    }
     function pasThema(){
-      STATE.partner=(qp('partner')||'').toLowerCase(); STATE.herkomst=(qp('bron')||'direct').toLowerCase();
-      if(THEMES[STATE.partner]) document.documentElement.style.setProperty('--accent', THEMES[STATE.partner]);
-      $('partnerlbl').textContent = STATE.partner ? ('voor '+STATE.partner.charAt(0).toUpperCase()+STATE.partner.slice(1)) : '';
+      STATE.herkomst=(qp('bron')||'direct').toLowerCase();
+      var p=(qp('partner')||qp('thema')||'fluctus').toLowerCase();
+      zetPartner(p);
     }
 
     // ---- Particulier: wagens (thuisladen-stijl) ----
@@ -1225,6 +1253,12 @@
       if(STATE.modus==='bedrijf'){ $('c-eigen').checked=(STATE.eigen&&STATE.eigen.length>0); $('c-betalend').checked=(STATE.bet&&STATE.bet.length>0); syncBedrijfComp(); }
       STATE.exact=true;
       _leadUpdate({ tier:tier, laadpleinen:{ eigen:STATE.eigen||[], betalend:STATE.bet||[] }, event:'exact_gestart' });
+      // Optioneel mandaat-akkoord: klant laat het mandaat op zijn echte meetgegevens organiseren (parallel).
+      if($('hoe-mandaat') && $('hoe-mandaat').checked && STATE.leadToken){
+        var ean=($('hoe-ean')&&$('hoe-ean').value||'').replace(/[^0-9]/g,'');
+        fetch(API+'/api/lead-mandaat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, ean:ean})}).catch(function(){});
+        STATE.mandaat=true;
+      }
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('mob-note').innerHTML=''; $('hoe-msg2').textContent='';
       toon('stap-resultaat');
@@ -1277,6 +1311,7 @@
     }
     window.addEventListener('DOMContentLoaded', function(){
       pasThema(); laadProfielen();
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="partnerkeuze"]'), function(r){ r.onchange=function(){ zetPartner(r.value); }; });
       // Legacy-componenten (verborgen) — nodig voor de engines/nota.
       ['c-pv','c-eigen','c-betalend','c-generator'].forEach(function(id){ var e=$(id); if(e) e.onchange=syncBedrijfComp; });
       var pa=$('p-addwagen'); if(pa) pa.onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
@@ -1309,6 +1344,7 @@
       $('hoe-eigen-add').onclick=function(){ STATE.eigenHost='hoe-eigen-lijst'; STATE.eigen.push(nieuwEigen()); renderEigen(); };
       $('hoe-bet-add').onclick=function(){ STATE.betHost='hoe-bet-lijst'; STATE.bet.push(nieuwBet()); renderBet(); };
       $('btn-exact-go').onclick=berekenExact;
+      if($('hoe-mandaat')) $('hoe-mandaat').onchange=function(){ $('hoe-ean-blok').classList.toggle('hidden', !this.checked); };
       Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(bt){ bt.onclick=function(){
         STATE.hmMetric=bt.getAttribute('data-mx');
         Array.prototype.forEach.call(document.querySelectorAll('#hm-metriek button'), function(x){ x.classList.toggle('on', x===bt); });

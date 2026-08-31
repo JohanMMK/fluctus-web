@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="nl">
+<!-- leads.html v1.0.1 (2026-08-31, Fase 4) — kolom "Mandaat" (mandaat-akkoord/herberekend) toegevoegd.
+     leads.html v1.0.0 (2026-08-31, Fase 4) — SUPERMANAGER-DASHBOARD EnergieKompas-leads.
+     Manager-only. Leest GET /api/leads (proxy, Bearer-token via Supabase-sessie, zelfde patroon als gebruikers.html):
+     alle leads met warmte-score, tier, e-mailverificatie, time-to-open, marges en het geseede Kamino-project.
+     Gesorteerd op score (heetste bovenaan) → routing naar accountmanagers. Filters op partner/tier/geverifieerd.
+     Per lead: open nota (?lead=), open Kamino-project, mail/bel. Zuiver frontend op een bestaand endpoint. -->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnergieKompas — Leads</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --ink:#2A3140; --muted:#5A6577; --line:#dbe3ef; --bg:#F4F7FB; --accent:#1F3864;
+    --heet:#05B050; --warm:#E8A33D; --koel:#9aa3ad; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap{ max-width:1180px; margin:0 auto; padding:22px 18px 60px; }
+  .top{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .brand{ color:var(--navy); font-weight:800; font-size:20px; }
+  .who{ margin-left:auto; color:var(--muted); font-size:13px; }
+  a.back{ color:var(--navy); font-size:13px; text-decoration:none; font-weight:600; }
+  h1{ color:var(--navy); font-size:22px; margin:14px 0 2px; }
+  .sub{ color:var(--muted); font-size:13.5px; margin:0 0 16px; }
+  .kpirow{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .kpi{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 16px; min-width:120px; }
+  .kpi .v{ font-size:22px; font-weight:800; color:var(--navy); } .kpi .l{ font-size:11.5px; color:var(--muted); }
+  .filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .filters input,.filters select{ border:1.5px solid var(--line); border-radius:9px; padding:8px 11px; font-size:13.5px; background:#fff; color:var(--ink); }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th{ text-align:left; color:var(--muted); font-weight:700; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; padding:10px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td{ padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:middle; }
+  tr:hover td{ background:#fbfdff; }
+  .score{ display:inline-flex; align-items:center; justify-content:center; width:40px; height:26px; border-radius:8px; font-weight:800; color:#fff; font-size:13px; }
+  .naam{ font-weight:700; color:var(--navy); }
+  .mail{ color:var(--muted); font-size:12px; }
+  .badge{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+  .b-direct{ background:#F3FBF5; color:#048443; border:1px solid #05B05033; }
+  .b-later{ background:#FFF7EC; color:#9E480E; border:1px solid #E8A33D55; }
+  .b-view{ background:#eef2f7; color:#5A6577; }
+  .b-none{ color:#9aa3ad; }
+  .chk{ color:#05B050; font-weight:800; } .nochk{ color:#c2c9d4; }
+  .acts a{ display:inline-block; margin-right:8px; color:var(--navy); font-size:12px; font-weight:600; text-decoration:none; border:1px solid var(--line); border-radius:7px; padding:3px 8px; background:#fbfdff; }
+  .acts a:hover{ border-color:var(--navy); }
+  .muted{ color:var(--muted); } .center{ text-align:center; }
+  .status{ padding:40px; text-align:center; color:var(--muted); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <span class="brand">🔆 EnergieKompas — Leads</span>
+      <a class="back" href="/portal.html">← Mijn Fluctus</a>
+      <span class="who" id="who"></span>
+    </div>
+    <h1>Binnenkomende leads</h1>
+    <p class="sub">Gesorteerd op warmte-score. De heetste (geverifieerd · veel ingevuld · hoge marge · snel bekeken) staan bovenaan — die eerst opvolgen.</p>
+    <div class="kpirow" id="kpirow"></div>
+    <div class="filters">
+      <input id="f-q" placeholder="zoek naam / mail / tel…" style="min-width:220px">
+      <select id="f-partner"><option value="">alle partners</option></select>
+      <select id="f-tier"><option value="">alle tiers</option><option value="direct">direct</option><option value="later">later</option><option value="view">enkel bekijken</option></select>
+      <select id="f-verified"><option value="">geverifieerd: alle</option><option value="1">enkel geverifieerd</option><option value="0">niet geverifieerd</option></select>
+    </div>
+    <div class="card"><div id="tabhost"><div class="status" id="status">Laden…</div></div></div>
+  </div>
+<script>
+(function(){
+  "use strict";
+  var CFG=null, sb=null, SESSION=null, PROXY='', LEADS=[];
+  var FILT={ q:'', partner:'', tier:'', verified:'' };
+  var $=function(id){return document.getElementById(id);};
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function eur(n){ try{ return '€ '+Math.round(+n||0).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(+n||0); } }
+  function scoreKleur(s){ return s>=70?'var(--heet)':(s>=40?'var(--warm)':'var(--koel)'); }
+  function tijdGeleden(ms){ if(!ms) return '—'; var m=Math.round(ms/60000); if(m<60) return m+' min'; var u=Math.round(m/60); if(u<48) return u+' u'; return Math.round(u/24)+' d'; }
+
+  async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||CFG.proxyUrl||'').replace(/\/+$/,''); }
+  async function initAuth(){
+    if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('status').innerHTML='Supabase niet geconfigureerd op de server.'; return false; }
+    sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+    var d=await sb.auth.getSession(); SESSION=d.data.session;
+    if(!SESSION){ window.location.href='/portal.html'; return false; }
+    $('who').textContent=(SESSION.user&&SESSION.user.email)||'';
+    return true;
+  }
+  async function authHeaders(){ var tok=SESSION&&SESSION.access_token;
+    try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } }catch(e){}
+    return { 'Authorization':'Bearer '+tok }; }
+
+  async function laad(){
+    $('status').textContent='Leads laden…';
+    var r; try{ r=await fetch(PROXY+'/api/leads',{headers:await authHeaders()}); }
+    catch(e){ $('status').textContent='Kan de server niet bereiken: '+e.message; return; }
+    if(r.status===401){ $('status').innerHTML='Enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a>'; return; }
+    if(!r.ok){ $('status').textContent='Fout bij ophalen ('+r.status+').'; return; }
+    var j=await r.json(); LEADS=(j&&j.leads)||[];
+    var partners=Array.from(new Set(LEADS.map(function(l){return l.partner||'';}).filter(Boolean)));
+    $('f-partner').innerHTML='<option value="">alle partners</option>'+partners.map(function(p){return '<option value="'+esc(p)+'">'+esc(p)+'</option>';}).join('');
+    kpis(); render();
+  }
+  function kpis(){
+    var n=LEADS.length, heet=LEADS.filter(function(l){return l.score>=70;}).length, geverif=LEADS.filter(function(l){return l.verified;}).length;
+    var marge=LEADS.reduce(function(a,l){return a+(+l.afname_marge_jaar||0)+(+l.injectie_marge_jaar||0);},0);
+    $('kpirow').innerHTML=[
+      {l:'Leads',v:n},{l:'Heet (≥70)',v:heet},{l:'Geverifieerd',v:geverif},{l:'Totale marge/j',v:eur(marge)}
+    ].map(function(k){return '<div class="kpi"><div class="v">'+k.v+'</div><div class="l">'+k.l+'</div></div>';}).join('');
+  }
+  function render(){
+    var q=FILT.q.toLowerCase();
+    var rows=LEADS.filter(function(l){
+      if(FILT.partner && (l.partner||'')!==FILT.partner) return false;
+      if(FILT.tier && (l.tier||'')!==FILT.tier) return false;
+      if(FILT.verified==='1' && !l.verified) return false;
+      if(FILT.verified==='0' && l.verified) return false;
+      if(q){ var hay=((l.naam||'')+' '+(l.mail||'')+' '+(l.tel||'')).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+      return true;
+    });
+    if(!rows.length){ $('tabhost').innerHTML='<div class="status">Geen leads die aan de filter voldoen.</div>'; return; }
+    var notaBase=location.pathname.replace(/[^/]*$/, 'energiekompas-nota.html');
+    var html='<table><thead><tr><th>Score</th><th>Klant</th><th>Partner</th><th>Tier</th><th>Mandaat</th><th>✔</th><th>Afname/j</th><th>Injectie/j</th><th>Bekeken na</th><th>Kamino</th><th>Acties</th></tr></thead><tbody>';
+    rows.forEach(function(l){
+      var tierB = l.tier==='direct'?'<span class="badge b-direct">direct</span>':(l.tier==='later'?'<span class="badge b-later">later</span>':(l.tier==='view'?'<span class="badge b-view">bekijken</span>':'<span class="b-none">—</span>'));
+      var manB = l.mandaat?('<span class="badge b-direct" title="mandaat-akkoord — echte data volgt">'+(l.herberekend?'herberekend':esc(l.mandaat))+'</span>'):'<span class="b-none">—</span>';
+      var notaUrl=notaBase+'?lead='+encodeURIComponent(l.token)+(l.partner?('&thema='+encodeURIComponent(l.partner)):'');
+      html+='<tr>'+
+        '<td><span class="score" style="background:'+scoreKleur(l.score)+'">'+l.score+'</span></td>'+
+        '<td><div class="naam">'+esc(l.naam||'—')+'</div><div class="mail">'+esc(l.mail||'')+(l.tel?(' · '+esc(l.tel)):'')+'</div></td>'+
+        '<td class="muted">'+esc(l.partner||'—')+'</td>'+
+        '<td>'+tierB+'</td>'+
+        '<td>'+manB+'</td>'+
+        '<td class="center">'+(l.verified?'<span class="chk">✔</span>':'<span class="nochk">—</span>')+'</td>'+
+        '<td>'+(l.afname_marge_jaar?eur(l.afname_marge_jaar):'—')+'</td>'+
+        '<td>'+(l.injectie_marge_jaar?eur(l.injectie_marge_jaar):'—')+'</td>'+
+        '<td class="muted">'+tijdGeleden(l.time_to_open_ms)+'</td>'+
+        '<td class="muted">'+(l.kamino_project_id?esc(l.kamino_project_id):'—')+'</td>'+
+        '<td class="acts"><a href="'+notaUrl+'" target="_blank">nota</a>'+
+          (l.kamino_project_id?('<a href="/apps/kamino.html" target="_blank">Kamino</a>'):'')+
+          (l.mail?('<a href="mailto:'+esc(l.mail)+'">mail</a>'):'')+
+          (l.tel?('<a href="tel:'+esc(l.tel)+'">bel</a>'):'')+'</td>'+
+        '</tr>';
+    });
+    html+='</tbody></table>';
+    $('tabhost').innerHTML=html;
+  }
+  ['f-q','f-partner','f-tier','f-verified'].forEach(function(id){ var k=id.slice(2); $(id).oninput=$(id).onchange=function(){ FILT[k==='q'?'q':(k==='verified'?'verified':k)]=this.value; render(); }; });
+
+  (async function(){ try{ await loadConfig(); if(await initAuth()) await laad(); }catch(e){ $('status').textContent='Fout: '+e.message; } })();
+})();
+</script>
+</body>
+</html>
