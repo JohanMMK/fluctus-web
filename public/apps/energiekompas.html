@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.20.0 (2026-09-01, Fase 6 — UX-batch Johan): manuele invoer weg als hoofdpad (factuur =
+<!-- energiekompas.html v0.21.0 (2026-09-01, Fase 6 — DIESEL/CREG-brug): het funnel-wagenpark (stap 8, STATE.eigen)
+     stuurt nu de particulier-berekening. Nieuwe brug _syncWagensVanEigen() klapt elke laadgroep uit naar wagens
+     (km/kWh uit voertuigtype, laadvenster, tegemoetkoming) → STATE.wagens → IN.wagens van /api/thuisladen. Per
+     laadgroep een toggle "Werkgever vergoedt (CREG-tarief); anders diesel-benchmark" (creg-vlag, enkel particulier):
+     creg=true → CREG-inkomen (geen dieselbesparing); creg=false → vermeden dieselkost. De server-engine past de
+     regel toe (bestond al in thuisladen). Bedrijf ongewijzigd (betaald-laadplein-pad).
+     ── v0.20.0 (2026-09-01, Fase 6 — UX-batch Johan): manuele invoer weg als hoofdpad (factuur =
      minimale drempel); knoplabel "Volgende →" i.p.v. "Volgende: uw injectie"; OTP-uitleg "zodat we zeker zijn dat
      u het bent"; particulier: geen "generator vervangen" maar wél kwalificatie-bullets (warmtepomp/boiler/zwembad/
      jacuzzi, lead-verrijking via /api/lead-update), geen betalend-laadplein-blok, geen rapport-tier, titel "Uw
@@ -643,6 +649,19 @@
       { key:'bus',           naam:'Bus',                kwh_per_km:1.40, km_per_jaar:50000 }
     ];
     function voertuig(k){ for(var i=0;i<VOERTUIGTYPES.length;i++){ if(VOERTUIGTYPES[i].key===k) return VOERTUIGTYPES[i]; } return VOERTUIGTYPES[0]; }
+    // v0.21.0 (Johan): brug funnel-laadgroepen (STATE.eigen, stap 8) → STATE.wagens (thuisladen-engine, particulier).
+    // Elke laadgroep wordt uitgeklapt in `aantal` wagens met km/kWh uit het voertuigtype, laadvenster uit de groep en
+    // de tegemoetkoming-keuze (creg). Zo stuurt de klant-invoer de mobiliteitsbesparing én past de diesel/CREG-regel
+    // per wagen toe: creg=true → CREG-inkomen (geen dieselbesparing); creg=false → vermeden dieselkost (benchmark).
+    function _syncWagensVanEigen(){
+      if(STATE.modus==='bedrijf' || !STATE.eigen || !STATE.eigen.length) return;
+      var arr=[];
+      STATE.eigen.forEach(function(g){
+        var v=voertuig(g.type), n=Math.max(0, Math.round(+g.aantal||0));
+        for(var j=0;j<n;j++) arr.push({ km:v.km_per_jaar, kwhkm:v.kwh_per_km, wd_start:+g.start||0, wd_eind:+g.eind||0, we_start:0, we_eind:24, creg:!!g.creg });
+      });
+      if(arr.length) STATE.wagens=arr;   // leeg (alle aantallen 0) → houd de default-wagen
+    }
     // Paaltype-defaults — 1:1 met de laadplein-app (_bezTypeDefaults): duur/sessie, tarief, sessies-factor per venster.
     var PAALDEF={ AC22:{ paal_kw:22, duur_min:30, opbrengst_eur_mwh:330, f1:1.5, f2:3 }, DC160:{ paal_kw:160, duur_min:15, opbrengst_eur_mwh:500, f1:2, f2:2 } };
     var BET_VENSTERS=[{start:8,eind:13},{start:13,eind:23}];   // standaardvensters betalend plein
@@ -725,7 +744,7 @@
     }
 
     // ---- Bedrijf: eigen laadplein (type wagen · aantal · laadvenster) ----
-    function nieuwEigen(){ return { type:'personenwagen', aantal:4, start:19, eind:7 }; }
+    function nieuwEigen(){ return { type:'personenwagen', aantal:4, start:19, eind:7, creg:true }; }   // creg: werkgever vergoedt (CREG) i.p.v. diesel-benchmark
     function renderEigen(){
       var host=$(STATE.eigenHost||'b-eigen-lijst'); if(!host) return; host.innerHTML='';
       STATE.eigen.forEach(function(g,i){
@@ -733,11 +752,14 @@
         var d=document.createElement('div'); d.className='wagen';
         d.innerHTML='<button class="del" data-i="'+i+'">✕</button><div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:6px">Laadgroep '+(i+1)+'</div>'+
           '<div class="row2"><div><label>Type wagen</label><select data-e="'+i+'" data-k="type">'+opts+'</select></div><div><label>Aantal</label><input type="number" min="0" step="1" data-e="'+i+'" data-k="aantal" value="'+g.aantal+'"></div></div>'+
-          '<label>Laadvenster (uur start → eind)</label><div class="row2"><input type="number" min="0" max="24" data-e="'+i+'" data-k="start" value="'+g.start+'"><input type="number" min="0" max="24" data-e="'+i+'" data-k="eind" value="'+g.eind+'"></div>';
+          '<label>Laadvenster (uur start → eind)</label><div class="row2"><input type="number" min="0" max="24" data-e="'+i+'" data-k="start" value="'+g.start+'"><input type="number" min="0" max="24" data-e="'+i+'" data-k="eind" value="'+g.eind+'"></div>'+
+          // v0.21.0 (Johan): per laadgroep de tegemoetkoming-keuze — enkel particulier. Werkgever vergoedt (CREG-tarief)
+          // → geen dieselbesparing maar CREG-inkomen; anders diesel-benchmark (vermeden dieselkost).
+          ((STATE.modus!=='bedrijf') ? ('<label class="chk" style="display:block;margin-top:6px;font-size:12.5px;color:var(--navy)"><input type="checkbox" data-e="'+i+'" data-k="creg" '+(g.creg?'checked':'')+'> Werkgever vergoedt deze wagen(s) (CREG-tarief); anders diesel-benchmark</label>') : '');
         host.appendChild(d);
       });
       Array.prototype.forEach.call(host.querySelectorAll('[data-e]'), function(inp){
-        inp.onchange=function(){ var i=+inp.getAttribute('data-e'), k=inp.getAttribute('data-k'); STATE.eigen[i][k]=(k==='type')?inp.value:(+inp.value); };
+        inp.onchange=function(){ var i=+inp.getAttribute('data-e'), k=inp.getAttribute('data-k'); STATE.eigen[i][k]=(k==='type')?inp.value:(k==='creg')?inp.checked:(+inp.value); };
       });
       Array.prototype.forEach.call(host.querySelectorAll('.del'), function(b){ b.onclick=function(){ STATE.eigen.splice(+b.getAttribute('data-i'),1); if(!STATE.eigen.length) STATE.eigen.push(nieuwEigen()); renderEigen(); }; });
     }
@@ -807,6 +829,7 @@
     function gatherInvoer(st){
       var o={ modus:STATE.modus, herkomst:STATE.herkomst, partner:STATE.partner, status_vennb:st };
       if(STATE.modus==='particulier'){
+        _syncWagensVanEigen();   // v0.21.0: funnel-wagenpark (stap 8) stuurt de particulier-berekening (met tegemoetkoming/diesel)
         o.afname_mwh=num('p-verbruik'); o.injectie_mwh=num('p-inj');
         o.piek_kw=num('p-piek'); o.huidige_kost=num('p-kost'); o.regio=($('p-regio')||{}).value; o.fasen=+($('p-fasen')||{}).value;
         o.bestaand_pv_kwp=num('p-pv'); o.laadkw=num('p-laadkw'); o.wagens=STATE.wagens.slice();
