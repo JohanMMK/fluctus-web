@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.23.0 (2026-09-01, Fase 6 — MANDAAT-SCHERM + DETAIL-GATE, Johan/S4): (1) het mandaat is
+<!-- energiekompas.html v0.24.0 (2026-09-01, Fase 6 — OFFERTE SECOND OPINION, Johan): in het resultaatscherm kan de
+     klant een offerte (eigen of concurrent) opladen (PDF/foto) → POST /api/offerte-heranalyse (server v15.130) leest
+     ze via Claude-vision en zet ze af tegen deze studie: wat de offerte biedt, terugverdientijd op óns jaarvoordeel,
+     wat Fluctus toevoegt (spot-arbitrage + passieve onbalansrespons) en aandachtspunten. Geen financieel advies —
+     objectieve vergelijking. Knop "Heeft u al een offerte?" + paneel #offerte-panel. Additief.
+     ── v0.23.0 (2026-09-01, Fase 6 — MANDAAT-SCHERM + DETAIL-GATE, Johan/S4): (1) het mandaat is
      geen checkbox meer in stap 8 maar een aparte volwaardige intake (stap-mandaat: rol → e-mailbevestiging → EAN →
      status) — knop "Mandaat opzetten (apart scherm)". (2) DETAIL-GATE in het resultaat: de studie is gratis binnen
      dit traject, maar het EXACTE detail op het werkelijke Fluvius-kwartierprofiel ontgrendelt pas ná een bevestigd
@@ -493,6 +498,11 @@
         <button class="btn" type="button" id="btn-hoe">Wil u weten hoe? → maak mijn exacte studie</button>
         <!-- v0.23.0 (Johan, S4): onderhandelingsnota heropenen per project — altijd terug te vinden. -->
         <button class="linkbtn hidden" type="button" id="btn-nota-heropen" style="margin-top:8px">📄 Onderhandelingsnota heropenen →</button>
+        <!-- v0.24.0 (Johan): offerte-upload → second opinion. Klant laadt een eigen of concurrent-offerte op; de
+             server (v15.130) leest ze (Claude-vision) en zet ze af tegen deze studie. -->
+        <button class="linkbtn hidden" type="button" id="btn-offerte" style="margin-top:6px">📎 Heeft u al een offerte? Laad ze op voor een gratis second opinion →</button>
+        <input type="file" id="offerte-input" accept="application/pdf,image/*" multiple class="hidden">
+        <div id="offerte-panel" class="hidden" style="margin-top:12px;border:1px solid #D6E0EC;border-radius:10px;padding:12px 14px;background:#F4F7FB;font-size:13px;color:#1F3864"></div>
         <div class="msg" id="hoe-msg"></div>
       </div>
     </div>
@@ -1500,7 +1510,7 @@
       try{ _leadUpdate({ event:'interesses', interesses:STATE.interesses, kwalificaties:STATE.kwalificaties }); }catch(e){}   // v0.20.0: lead-verrijking
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('meer-msg').textContent='';
-      toon('stap-resultaat'); _toonNotaHeropen();
+      toon('stap-resultaat'); _toonNotaHeropen(); _toonOfferteKnop();
       // Zichtbare voortgang IN stap 6 (de sweep duurt ~1 min; anders lijkt het of er niets gebeurt).
       FluctusWait.start('kpi-host','We rekenen uw aansluiting door… (tot ±1 min)', WAIT_SWEEP);
       if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('res-msg'));
@@ -1788,7 +1798,7 @@
       // stap-mandaat-scherm (btn-hoe-mandaat / de detail-gate). Zo blijft één volwaardige mandaat-flow over.
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('mob-note').innerHTML=''; $('hoe-msg2').textContent='';
-      toon('stap-resultaat'); _toonNotaHeropen(); _detailGate();
+      toon('stap-resultaat'); _toonNotaHeropen(); _toonOfferteKnop(); _detailGate();
       FluctusWait.start('kpi-host','We berekenen uw exacte studie… (tot ±1 min)', WAIT_SWEEP);
       if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('res-msg'));
       else berekenBedrijfSweep(inv, st, $('res-msg'));
@@ -1814,11 +1824,39 @@
     }
     // v0.23.0 (Johan, S4): onderhandelingsnota heropenen per project — zichtbaar zodra er een nota is.
     function _toonNotaHeropen(){ var b=$('btn-nota-heropen'); if(b && (STATE.notaData||STATE.leadToken)) b.classList.remove('hidden'); }
+    // v0.24.0 (Johan): offerte-upload voor een second opinion — beschikbaar zodra het resultaat er is.
+    function _toonOfferteKnop(){ var b=$('btn-offerte'); if(b) b.classList.remove('hidden'); }
+    async function offerteUpload(files){
+      var lijst=[]; for(var i=0;i<files.length;i++){ var t=files[i].type; if(t==='application/pdf'||/^image\//.test(t)) lijst.push(files[i]); }
+      var panel=$('offerte-panel'); panel.classList.remove('hidden');
+      if(!lijst.length){ panel.innerHTML='Enkel PDF of foto\'s van de offerte.'; return; }
+      panel.innerHTML='⏳ We lezen uw offerte en vergelijken ze met uw studie… (±20-40s)';
+      try{
+        var payload=await Promise.all(lijst.slice(0,6).map(function(f){ return fileToB64(f).then(function(b){ return {base64:b, mediaType:f.type, fileName:f.name}; }); }));
+        var r=await fetch(API+'/api/offerte-heranalyse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ token:STATE.leadToken||'', files:payload })});
+        var j=await r.json();
+        if(!r.ok||!j||!j.ok){ panel.innerHTML='Kon de offerte niet lezen — probeer een duidelijkere PDF/foto.'; return; }
+        _renderHeranalyse(j.heranalyse, j.offerte);
+      }catch(e){ panel.innerHTML='Kon de offerte niet verwerken — probeer opnieuw.'; }
+    }
+    function _renderHeranalyse(h, off){
+      var panel=$('offerte-panel'); if(!panel||!h) return;
+      var H=[];
+      H.push('<div style="font-weight:800;font-size:14px;margin-bottom:6px">📎 Second opinion op uw offerte'+(h.installateur?(' — '+esc(h.installateur)):'')+(h.is_concurrent?' <span style="background:#9E480E;color:#fff;padding:1px 7px;border-radius:5px;font-size:11px">andere aanbieder</span>':'')+'</div>');
+      if(h.samenvatting_biedt && h.samenvatting_biedt!=='onbepaald') H.push('<div style="margin-bottom:6px"><b>Wat de offerte biedt:</b> '+esc(h.samenvatting_biedt)+'</div>');
+      if(h.vergelijking&&h.vergelijking.length){ H.push('<table style="width:100%;border-collapse:collapse;margin:6px 0">'+h.vergelijking.map(function(v){return '<tr><td style="padding:2px 8px 2px 0;color:#5A6577">'+esc(v.label)+'</td><td style="padding:2px 0;font-weight:700;text-align:right">'+esc(v.waarde)+'</td></tr>';}).join('')+'</table>'); }
+      if(h.payback_studie_jaar!=null) H.push('<div style="margin:6px 0;padding:6px 10px;background:#EAF3EC;border-radius:7px"><b>Terugverdientijd op uw EnergieKompas-studie:</b> ± '+h.payback_studie_jaar+' jaar</div>');
+      if(h.meerwaarde&&h.meerwaarde.length){ H.push('<div style="margin:8px 0 2px;font-weight:700;color:#0a7a37">Wat Fluctus toevoegt</div><ul style="margin:2px 0;padding-left:18px">'+h.meerwaarde.map(function(m){return '<li style="margin:3px 0">'+esc(m)+'</li>';}).join('')+'</ul>'); }
+      if(h.aandacht&&h.aandacht.length){ H.push('<div style="margin:8px 0 2px;font-weight:700;color:#9E480E">Aandachtspunten</div><ul style="margin:2px 0;padding-left:18px">'+h.aandacht.map(function(a){return '<li style="margin:3px 0">'+esc(a)+'</li>';}).join('')+'</ul>'); }
+      if(h.oordeel) H.push('<div style="margin-top:8px;padding-top:8px;border-top:1px solid #D6E0EC">'+esc(h.oordeel)+'</div>');
+      H.push('<div class="hint" style="margin-top:8px">Een objectieve vergelijking, geen financieel advies — u beslist zelf. Een adviseur kan de offerte samen met u doornemen.</div>');
+      panel.innerHTML=H.join('');
+    }
     function toonExactExtra(){
       // v0.23.0 (Johan, S4): pas "exacte studie" claimen zodra het mandaat bevestigd is; anders eerlijk labelen.
       var pill=document.querySelector('#stap-resultaat .stapkop .pill');
       if(pill){ if(STATE.mandaatBevestigd){ pill.textContent='exacte studie'; pill.style.background='#05B050'; } else { pill.textContent='op ingeschat profiel'; pill.style.background='#C99A3A'; } }
-      _detailGate(); _toonNotaHeropen();
+      _detailGate(); _toonNotaHeropen(); _toonOfferteKnop();
       var g=$('groeistap-cta'); if(g) g.classList.remove('hidden');   // warmste lead-signaal beschikbaar
       STATE.eventGroeiGetoond=true;
       renderHardware();   // H2 — concrete shoppinglist (welke PV/batterij/palen + prijs)
@@ -1903,6 +1941,8 @@
       };
       if($('btn-hoe-mandaat')) $('btn-hoe-mandaat').onclick=mandOpen;   // v0.23.0 (S4): mandaat in apart scherm
       if($('btn-nota-heropen')) $('btn-nota-heropen').onclick=openNotaLead;   // v0.23.0 (S4): nota heropenen per project
+      if($('btn-offerte')) $('btn-offerte').onclick=function(){ $('offerte-input').click(); };   // v0.24.0: offerte second opinion
+      if($('offerte-input')) $('offerte-input').onchange=function(){ if(this.files&&this.files.length) offerteUpload(this.files); };
       // Voorschotfactuur-gate
       if($('btn-vs-afrekening')) $('btn-vs-afrekening').onclick=function(){ $('factuur-input').click(); };
       if($('btn-vs-raming')) $('btn-vs-raming').onclick=function(){ $('vs-raming').classList.remove('hidden'); $('vs-raming').scrollIntoView({behavior:'smooth',block:'center'}); };
