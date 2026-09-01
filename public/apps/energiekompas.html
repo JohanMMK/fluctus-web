@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.21.0 (2026-09-01, Fase 6 — DIESEL/CREG-brug): het funnel-wagenpark (stap 8, STATE.eigen)
+<!-- energiekompas.html v0.22.0 (2026-09-01, Fase 6 — EKI + factuur-bevestiging): (1) EnergieKompasImpact-blok in de
+     resultaat: BTW op factuur → vennootschap; zit dat nr in de NBB (scan.financieel) → EKI = energiekost/jaar ÷ winst
+     vóór belasting × 100; zonder NBB-cijfers een kwalitatieve reminder (geen forfait). (2) "Dit lazen we uit uw
+     factuur"-blok (naam/BTW/adres/EAN/periode/energiepost) ter bevestiging na de upload.
+     ── v0.21.0 (2026-09-01, Fase 6 — DIESEL/CREG-brug): het funnel-wagenpark (stap 8, STATE.eigen)
      stuurt nu de particulier-berekening. Nieuwe brug _syncWagensVanEigen() klapt elke laadgroep uit naar wagens
      (km/kWh uit voertuigtype, laadvenster, tegemoetkoming) → STATE.wagens → IN.wagens van /api/thuisladen. Per
      laadgroep een toggle "Werkgever vergoedt (CREG-tarief); anders diesel-benchmark" (creg-vlag, enkel particulier):
@@ -257,6 +261,8 @@
         <input type="file" id="factuur-input" accept="application/pdf" multiple class="hidden">
       </div>
       <div class="msg" id="factuur-msg"></div>
+      <!-- v0.22.0 (Johan): tonen wat we uit de factuur lazen (naam, adres, EAN, periode, energiepost) ter bevestiging. -->
+      <div id="factuur-lezen" class="hidden" style="margin:8px 0;padding:10px 12px;background:#F4F7FB;border:1px solid #D6E0EC;border-radius:9px;font-size:12.5px;color:#1F3864"></div>
       <!-- v0.20.0 (Johan): manuele invoer weg als hoofdpad — een factuur is de minimale drempel (zekere EAN/adres).
            Knop verborgen; code blijft voor evt. intern gebruik. -->
       <button class="linkbtn" type="button" id="btn-manueel" style="display:none">Geen factuur bij de hand? Vul kort in →</button>
@@ -451,6 +457,9 @@
       <div class="msg" id="res-msg"></div>
       <div class="kpis" id="kpi-host"></div>
       <div class="kpis" id="extra-kpi"></div>
+      <!-- v0.22.0 (Johan): EnergieKompasImpact (EKI) — energie t.o.v. winst vóór belasting (NBB), of een kwalitatieve
+           reminder zonder cijfers. Nooit een forfait: energiekost uit de factuur, winst uit de jaarrekening. -->
+      <div id="eki-blok" class="hidden" style="margin:10px 0 0;padding:11px 13px;background:#EAF3EC;border:1px solid #A9CDB4;border-radius:9px;font-size:13px;color:#1F3864"></div>
       <p class="note" id="mob-note" style="margin-top:6px"></p>
       <p class="note" id="rendement-disclaimer" style="margin-top:10px"><b>Indicatief — bewust voorzichtig.</b> Deze besparing en dit rendement zijn een <b>ondergrens</b> uit een snelle inschatting. De volledige studie optimaliseert PV + opslag op uw echte kwartierprofiel en komt doorgaans <b>hoger</b> uit; ze rekent het rendement ook netto (na onderhoud/verzekering).</p>
       <div class="hmwrap hidden" id="heatmap-blok">
@@ -816,6 +825,7 @@
         var j=await r.json();
         if(!r.ok || !j || !j.baseCase){ $('factuur-msg').textContent='Kon de factuur niet lezen — vul manueel in.'; return; }
         var bc=j.baseCase; STATE.baseCase=bc;
+        _toonFactuurLezen(bc);  // v0.22.0: bevestig wat we lazen (naam/adres/EAN/periode/energiepost)
         startLocatiescan(bc);   // async, niet-blokkerend — klaar tegen stap 7bis
         // VOORSCHOTFACTUUR-GATE: geen verbruik/netkosten → NIET annualiseren, maar de gate tonen.
         if(bc.is_voorschot){ STATE.raming=false; $('factuur-msg').style.color='#9E480E'; $('factuur-msg').textContent='⚠ Dit lijkt een voorschotfactuur.'; toonVoorschotGate(bc); return; }
@@ -825,6 +835,22 @@
       }catch(e){ $('factuur-msg').style.color='#b00'; $('factuur-msg').textContent='Kon de factuur niet lezen — vul manueel in.'; }
     }
 
+    // v0.22.0 (Johan): toon wat we uit de factuur lazen (naam/BTW/adres/EAN/periode/energiepost) ter bevestiging.
+    function _toonFactuurLezen(bc){
+      var el=$('factuur-lezen'); if(!el||!bc) return;
+      var rijen=[];
+      if(bc.klantNaam) rijen.push(['Klant', bc.klantNaam]);
+      if(bc.klantBtw) rijen.push(['BTW', bc.klantBtw]);
+      if(bc.leveringsadres) rijen.push(['Adres', bc.leveringsadres]);
+      var eans=(bc.eanNrs&&bc.eanNrs.length)?bc.eanNrs:((bc.eanBlokken||[]).map(function(b){return b&&b.ean;}).filter(Boolean));
+      if(eans&&eans.length) rijen.push(['EAN', eans.join(', ')]);
+      if(bc.periodeVan&&bc.periodeTot) rijen.push(['Periode', bc.periodeVan+' → '+bc.periodeTot]);
+      if(+bc.totaalEnergieExclBtw>0) rijen.push(['Energiepost', eur(bc.totaalEnergieExclBtw)+' (excl. btw)']);
+      if(!rijen.length){ el.classList.add('hidden'); return; }
+      el.innerHTML='<div style="font-weight:700;margin-bottom:4px">Dit lazen we uit uw factuur:</div>'+
+        rijen.map(function(r){ return '<div><span style="color:#5A6577">'+esc(r[0])+':</span> <b>'+esc(r[1])+'</b></div>'; }).join('');
+      el.classList.remove('hidden');
+    }
     function statusWaarde(){ var el=document.querySelector('input[name="vennb"]:checked'); return el?el.value:''; }
     function gatherInvoer(st){
       var o={ modus:STATE.modus, herkomst:STATE.herkomst, partner:STATE.partner, status_vennb:st };
@@ -873,7 +899,38 @@
       else { fb.classList.add('hidden'); fb.innerHTML=''; }
       // Gratis onderhandelingsnota — beide modi (particulier + bedrijf; bedrijf krijgt het generator-hoofdstuk).
       var bn=$('btn-nota'); if(bn) bn.classList.remove('hidden');
+      _ekiBlok();   // v0.22.0: EnergieKompasImpact
       $('stap-resultaat').classList.remove('hidden'); $('stap-resultaat').scrollIntoView({behavior:'smooth', block:'start'});
+    }
+    // v0.22.0 (Johan): EnergieKompasImpact (EKI). Detectie: BTW-nr op de factuur → vennootschap; zit dat nr in de NBB
+    // (STATE.scan.financieel aanwezig) → EKI = jaarlijkse energiekost ÷ winst vóór belasting × 100. Zonder NBB-cijfers:
+    // een kwalitatieve reminder (geen getallen). Particulier zonder BTW → geen EKI (niet relevant).
+    function _energiekostJaar(){
+      var bc=STATE.baseCase||{};
+      return (+bc.totaalEnergieExclBtw>0)?+bc.totaalEnergieExclBtw
+           : ((STATE.invoer&&+STATE.invoer.huidige_kost>0)?+STATE.invoer.huidige_kost:0);
+    }
+    function _heeftBtw(){ var bc=STATE.baseCase||{}; return !!(bc.klantBtw||bc.btw||STATE.modus==='bedrijf'); }
+    // STATE.scan is het envelope {status, scan, confidence}; de scan-data (incl. financieel) zit op STATE.scan.scan.
+    function _scanFin(){ return (STATE.scan && STATE.scan.scan && STATE.scan.scan.financieel) || null; }
+    function _ekiBlok(){
+      var el=$('eki-blok'); if(!el) return;
+      var fin=_scanFin(), wvb=fin&&+fin.winst_voor_belasting, ek=_energiekostJaar();
+      if(fin && wvb>0 && ek>0){
+        var eki=Math.round(ek/wvb*100);
+        el.innerHTML='📊 <b>EnergieKompasImpact:</b> uw energie kost ± <b>'+eki+'%</b> van uw winst vóór belasting. '+
+          'Elke euro die u hier bespaart, gaat rechtstreeks naar uw resultaat.'+
+          '<div style="font-size:11.5px;color:#5A6577;margin-top:3px">Energiekost uit uw factuur, winst uit uw neergelegde jaarrekening (NBB) — geen forfait.</div>';
+        el.classList.remove('hidden'); return;
+      }
+      if(_heeftBtw()){
+        el.innerHTML='📊 <b>Energie is een grote hefboom op uw resultaat.</b> Doet u niets, dan kan een stijgende '+
+          'energiekost — door een minder goed ontwerp of sturing — uw resultaat opeten, richting verlies'+
+          (STATE.modus==='bedrijf'?' of budgetoverschrijding':'')+'. Net daarom dit studietraject.'+
+          '<div style="font-size:11.5px;color:#5A6577;margin-top:3px">Met uw neergelegde jaarrekening drukken we dit exact uit als % van uw winst.</div>';
+        el.classList.remove('hidden'); return;
+      }
+      el.classList.add('hidden'); el.innerHTML='';
     }
 
     function bereken(){
@@ -1179,7 +1236,7 @@
               toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null,
             generator: sw.generator||null,
-            financieel: (STATE.scan&&STATE.scan.financieel)||null   // v0.19.0 — winstcijfers uit de NBB-jaarrekening (winst-noemer in de nota); null zolang er geen NBB-key is
+            financieel: _scanFin()   // v0.22.0 fix: STATE.scan.scan.financieel (envelope) — winstcijfers uit de NBB-jaarrekening; null zolang er geen NBB-key is
           };
         });
       });
@@ -1593,6 +1650,7 @@
         if(!j){ return; }
         if(j.status==='bezig'){ setTimeout(function(){ pollScan(n+1); },3000); return; }
         STATE.scan=j;   // 'klaar' of 'leeg'
+        try{ if($('eki-blok') && !$('stap-resultaat').classList.contains('hidden')) _ekiBlok(); }catch(e){}   // v0.22.0: ververs EKI zodra de NBB-cijfers binnen zijn
       }).catch(function(){});
     }
     function naar7bis(){
