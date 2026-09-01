@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.18.0 (2026-08-31, Fase 5b — HARDWARE-BRUG, Johan): exacte studie toont nu een concrete
+<!-- energiekompas.html v0.20.0 (2026-09-01, Fase 6 — UX-batch Johan): manuele invoer weg als hoofdpad (factuur =
+     minimale drempel); knoplabel "Volgende →" i.p.v. "Volgende: uw injectie"; OTP-uitleg "zodat we zeker zijn dat
+     u het bent"; particulier: geen "generator vervangen" maar wél kwalificatie-bullets (warmtepomp/boiler/zwembad/
+     jacuzzi, lead-verrijking via /api/lead-update), geen betalend-laadplein-blok, geen rapport-tier, titel "Uw
+     laadpaal & rapport"; kilometerkost-sublabel expliciet "laadvraag ± X MWh/j". Reeds correct in code (bevestigd):
+     injectie-kWh wordt al gevraagd bij "ik heb PV"; onbalans-sturing op injectie zit al enkel bij bedrijf.
+     ── v0.19.0 (2026-08-31, Fase 5c — WINST-NOEMER): _bouwNotaDataBedrijf geeft nu D.financieel
+     mee (STATE.scan.financieel = winstcijfers uit de NBB-jaarrekening), zodat de nota de besparing kan uitdrukken
+     als % van de winst. Null zolang er geen NBB-key is → geen regressie.
+     ── v0.18.0 (2026-08-31, Fase 5b — HARDWARE-BRUG, Johan): exacte studie toont nu een concrete
      shoppinglist (welke PV/batterij/palen + prijs + payback via /api/hardware-voorstel) als de stap het dichtst
      bij een bestelling; 7bis vragen voorgevuld uit de vision-pass (panelen) als die draait; injectie_mwh mee
      naar de locatiescan voor de PV-kruiscontrole.
@@ -209,6 +218,8 @@
   .opt input{ position:absolute; left:14px; top:15px; width:auto; }
   .opt b{ color:var(--navy); } .opt span{ display:block; font-weight:500; color:var(--muted); font-size:12.5px; margin-top:3px; }
   .opt .nieuw{ display:inline-block; background:#05B050; color:#fff; font-size:10px; font-weight:800; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle; }
+  .optmini{ display:inline-flex; align-items:center; gap:6px; margin:0 14px 6px 0; font-size:13px; font-weight:600; color:var(--navy); cursor:pointer; white-space:nowrap; }
+  .optmini input{ position:static; width:auto; margin:0; }
   .chk{ display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:600; color:var(--ink); margin-top:14px; } .chk input{ width:auto; margin-top:2px; }
   .ikpi{ display:inline-block; color:var(--accent); cursor:help; font-size:12px; font-weight:700; }
 </style>
@@ -240,7 +251,9 @@
         <input type="file" id="factuur-input" accept="application/pdf" multiple class="hidden">
       </div>
       <div class="msg" id="factuur-msg"></div>
-      <button class="linkbtn" type="button" id="btn-manueel">Geen factuur bij de hand? Vul kort in →</button>
+      <!-- v0.20.0 (Johan): manuele invoer weg als hoofdpad — een factuur is de minimale drempel (zekere EAN/adres).
+           Knop verborgen; code blijft voor evt. intern gebruik. -->
+      <button class="linkbtn" type="button" id="btn-manueel" style="display:none">Geen factuur bij de hand? Vul kort in →</button>
       <div id="manueel" class="hidden manueelbox">
         <div class="grid3">
           <div><label>Jaarverbruik afname (MWh)</label><input type="number" id="m-afname" step="1" min="0" placeholder="bv. 120"></div>
@@ -356,7 +369,7 @@
       <p class="hint" id="afname-sub">We vergelijken uw huidige factuur met een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik — zonder investering.</p>
       <div class="kpis" id="afname-kpi"></div>
       <div class="msg" id="afname-msg"></div>
-      <button class="btn hidden" type="button" id="btn-na-afname">Volgende: uw injectie →</button>
+      <button class="btn hidden" type="button" id="btn-na-afname">Volgende →</button>
     </div>
 
     <!-- STAP 3 — PV / INJECTIE -->
@@ -405,7 +418,16 @@
       <p class="hint">Zonder extra aansluitvermogen zit er vaak nog ruimte. Wat wilt u laten berekenen?</p>
       <label class="opt"><input type="checkbox" id="q-besparing" checked> <b>Besparing &amp; rendement</b><span>Heeft mijn aansluiting nog besparing en rendement in petto (slim laden/opslaan)?</span></label>
       <label class="opt"><input type="checkbox" id="q-mobiliteit"> <b>Elektrische mobiliteit</b><span>Hoeveel km kan ik laden op mijn bestaande aansluiting, en hoe goedkoop wordt de energiekost per km?</span></label>
-      <label class="opt"><input type="checkbox" id="q-generator"> <b>Generator vervangen</b> <span class="nieuw">nieuw</span><span>Kan ik een brandstofgenerator vervangen door goedkope stroom en vermogen uit mijn bestaande aansluiting?</span></label>
+      <label class="opt" id="opt-generator"><input type="checkbox" id="q-generator"> <b>Generator vervangen</b> <span class="nieuw">nieuw</span><span>Kan ik een brandstofgenerator vervangen door goedkope stroom en vermogen uit mijn bestaande aansluiting?</span></label>
+      <!-- v0.20.0 (Johan): kwalificatie-bullets — enkel particulier. Niet in de berekening, wel om de lead te
+           kwalificeren (hoe meer elektrisch, hoe relevanter een batterij). -->
+      <div id="q-kwalificatie" class="hidden" style="margin:4px 0 8px">
+        <p class="hint" style="margin:0 0 4px">Heeft u al één van deze? (helpt ons uw profiel beter inschatten)</p>
+        <label class="optmini"><input type="checkbox" class="q-kwal" value="warmtepomp"> Warmtepomp</label>
+        <label class="optmini"><input type="checkbox" class="q-kwal" value="elektrische boiler"> Elektrische boiler</label>
+        <label class="optmini"><input type="checkbox" class="q-kwal" value="zwembad"> Zwembad</label>
+        <label class="optmini"><input type="checkbox" class="q-kwal" value="jacuzzi"> Jacuzzi</label>
+      </div>
       <div id="gen-velden" class="hidden manueelbox">
         <div class="grid2">
           <div><label>Vermogen generator (kVA)</label><input type="number" id="g-kva" step="1" min="0" placeholder="bv. 100"></div>
@@ -451,7 +473,7 @@
     <!-- STAP 7 — E-MAILVERIFICATIE (magic code) -->
     <div class="card hidden" id="stap-verify">
       <div class="stapkop"><span class="stapnr">7</span> Bevestig uw e-mail</div>
-      <p class="hint">Om uw <b>exacte studie</b> te maken (op uw echte profiel + uw laadpleinen) bevestigen we eerst uw e-mail. We sturen een code naar <b id="verify-mail">uw adres</b>.</p>
+      <p class="hint">Om uw <b>exacte studie</b> te maken (op uw echte profiel) bevestigen we eerst uw e-mail — <b>zo weten we zeker dat u het zelf bent</b> die dit aanvraagt. We sturen een code naar <b id="verify-mail">uw adres</b>.</p>
       <button class="btn" type="button" id="btn-verify-send">Stuur mij de code →</button>
       <div id="verify-code-blok" class="hidden manueelbox">
         <div class="grid2"><div><label>Code (6 cijfers)</label><input type="text" id="verify-code" inputmode="numeric" maxlength="6" placeholder="123456"></div></div>
@@ -473,7 +495,7 @@
 
     <!-- STAP 8 — LAADPLEINEN + RAPPORT-KEUZE (laadvenster voor de exacte studie) -->
     <div class="card hidden" id="stap-hoe">
-      <div class="stapkop"><span class="stapnr">8</span> Uw laadpleinen &amp; rapport</div>
+      <div class="stapkop"><span class="stapnr">8</span> <span id="hoe-titel">Uw laadpleinen &amp; rapport</span></div>
       <!-- Hefboom-zin (Ontwerp trede 4): één zin op PV-dekking die naar de volgende hefboom wijst. Post-HOE. -->
       <div id="hoe-hefboom" class="hidden" style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#1F3864;margin:0 0 10px"></div>
       <!-- Spreiden-vraag (Ontwerp trede 5 / §14.7): bepaalt sturing vs batterij. -->
@@ -485,19 +507,25 @@
         </div>
         <p class="hint" id="spreiden-hint" style="margin:2px 0 0"></p>
       </div>
-      <p class="hint">Definieer uw wagenpark en (eventueel) een betalend laadplein — hoe completer, hoe scherper uw studie. Kies daarna hoe u het rapport wilt; ondertussen rekenen we uw <b>exacte heatmap</b>.</p>
+      <p class="hint" id="hoe-intro">Definieer uw wagenpark en (eventueel) een betalend laadplein — hoe completer, hoe scherper uw studie. Kies daarna hoe u het rapport wilt; ondertussen rekenen we uw <b>exacte heatmap</b>.</p>
       <h3>🚚 Eigen wagenpark</h3>
       <div class="hint">Per type: aantal + laadvenster. Km/jaar en kWh/km rekenen we op de achtergrond.</div>
       <div id="hoe-eigen-lijst"></div>
       <button class="btn ghost sm" type="button" id="hoe-eigen-add">+ laadgroep toevoegen</button>
-      <h3>🔌 Betalend laadplein <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
-      <div class="hint">Enkel als u derden tegen betaling laat laden.</div>
-      <div id="hoe-bet-lijst"></div>
-      <button class="btn ghost sm" type="button" id="hoe-bet-add">+ laadplein toevoegen</button>
-      <h3>Uw rapport</h3>
-      <label class="opt"><input type="radio" name="tier" value="direct"> <b>Nu ontvangen</b><span>Ik wil het volledige rapport meteen — bekijken én downloaden.</span></label>
-      <label class="opt"><input type="radio" name="tier" value="later" checked> <b>Later beslissen</b><span>Ik bekijk het nu; downloaden kan later — of gratis als ik via de installateur bestel.</span></label>
-      <label class="opt"><input type="radio" name="tier" value="view"> <b>Enkel bekijken</b><span>Ik wil het enkel op het scherm zien, niet downloaden.</span></label>
+      <div id="hoe-betalend-blok">
+        <h3>🔌 Betalend laadplein <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
+        <div class="hint">Enkel als u derden tegen betaling laat laden.</div>
+        <div id="hoe-bet-lijst"></div>
+        <button class="btn ghost sm" type="button" id="hoe-bet-add">+ laadplein toevoegen</button>
+      </div>
+      <!-- v0.20.0 (Johan): rapport-tier NIET tonen voor particulier (niet relevant). Voor bedrijf blijft de keuze;
+           welke tiers + prijzen getoond worden komt later uit context.html. -->
+      <div id="hoe-tier-blok">
+        <h3>Uw rapport</h3>
+        <label class="opt"><input type="radio" name="tier" value="direct"> <b>Nu ontvangen</b><span>Ik wil het volledige rapport meteen — bekijken én downloaden.</span></label>
+        <label class="opt"><input type="radio" name="tier" value="later" checked> <b>Later beslissen</b><span>Ik bekijk het nu; downloaden kan later — of gratis als ik via de installateur bestel.</span></label>
+        <label class="opt"><input type="radio" name="tier" value="view"> <b>Enkel bekijken</b><span>Ik wil het enkel op het scherm zien, niet downloaden.</span></label>
+      </div>
       <h3>Exact op uw echte meetgegevens <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
       <label class="opt"><input type="checkbox" id="hoe-mandaat"> <b>Ja, organiseer het mandaat op mijn meetgegevens</b><span>Dan herberekenen we uw studie op uw <b>werkelijke kwartierprofiel</b> (via Fluvius) en mailen we u automatisch het exacte resultaat. De indicatieve studie krijgt u nu al.</span></label>
       <div id="hoe-ean-blok" class="hidden" style="margin:2px 0 8px"><input class="inp" id="hoe-ean" inputmode="numeric" placeholder="EAN-nummer (18 cijfers, optioneel — mag later)" style="max-width:340px"></div>
@@ -1127,7 +1155,8 @@
               energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
               toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null,
-            generator: sw.generator||null
+            generator: sw.generator||null,
+            financieel: (STATE.scan&&STATE.scan.financieel)||null   // v0.19.0 — winstcijfers uit de NBB-jaarrekening (winst-noemer in de nota); null zolang er geen NBB-key is
           };
         });
       });
@@ -1151,7 +1180,7 @@
         { t:'Kost van uw afname', v:eur(inv.huidige_kost>0?inv.huidige_kost:inv.afname_mwh*140), s:inv.afname_mwh+' MWh/j (indicatief)' },
         { t:'Waarde van uw injectie', v:eur(inv.injectie_mwh*60), s:inv.injectie_mwh+' MWh/j' },
         { t:'Restcapaciteit aansluiting', v:(restPct==null?'—':(restPct+' %')), s:'ruimte voor PV/batterij/laden' },
-        { t:'Kilometerkost (slim laden)', v:kmKostTxt(0.032), s:(inv._wagens*inv._km*0.16/1000>0?(Math.round(inv._wagens*inv._km*0.16/1000*10)/10+' MWh/j'):'≈ 0,16 kWh/km') }
+        { t:'Kilometerkost (slim laden)', v:kmKostTxt(0.032), s:(inv._wagens*inv._km*0.16/1000>0?('laadvraag ± '+Math.round(inv._wagens*inv._km*0.16/1000*10)/10+' MWh/j'):'≈ 0,16 kWh/km') }
       ]);
     }
 
@@ -1348,6 +1377,7 @@
             if(w&&!w.closed){ w.location.href=url; } else { window.open(url,'_blank'); }   // navigeer het reeds geopende venster
             $('lead-klaar').classList.remove('hidden');
             $('lead-bevestig').innerHTML=(res&&res.mail_klant)?('✔ Uw nota opent in een nieuwe tab — en is ook naar <b>'+esc(mail)+'</b> gemaild.'):('✔ Uw nota opent in een nieuwe tab.');
+            _pasMeerAanModus();
             toon('stap-meer');
           });
       }).catch(function(){ if(w&&!w.closed) w.close(); $('btn-lead-go').removeAttribute('disabled'); msg.style.color='#b00'; msg.textContent='Kon de nota niet opbouwen — probeer opnieuw.'; });
@@ -1362,6 +1392,7 @@
       if($('q-besparing').checked) STATE.interesses.push('besparing & rendement');
       if($('q-mobiliteit').checked) STATE.interesses.push('elektrische mobiliteit');
       if($('q-generator').checked) STATE.interesses.push('generator vervangen');
+      STATE.kwalificaties=_kwalificaties();   // v0.20.0: particulier-kwalificatie (warmtepomp/boiler/…) — lead-verrijking
       if(!STATE.interesses.length){ $('meer-msg').style.color='#b00'; $('meer-msg').textContent='Kies minstens één analyse.'; return; }
       if(STATE.modus==='bedrijf'){
         $('c-pv').checked=true; $('c-generator').checked=$('q-generator').checked;
@@ -1369,6 +1400,7 @@
         syncBedrijfComp();
       }
       STATE.wilMobiliteit=$('q-mobiliteit').checked;
+      try{ _leadUpdate({ event:'interesses', interesses:STATE.interesses, kwalificaties:STATE.kwalificaties }); }catch(e){}   // v0.20.0: lead-verrijking
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('meer-msg').textContent='';
       toon('stap-resultaat');
@@ -1605,8 +1637,30 @@
       if(STATE.scanWagens>0 && STATE.eigen[0] && !STATE.eigen[0]._klantGezet){ STATE.eigen[0].aantal=STATE.scanWagens; }
       renderHefboom();               // trede 4: PV-dekking-hefboomzin
       var sp=$('hoe-spreiden'); if(sp) sp.classList.toggle('hidden', STATE.modus!=='bedrijf');   // trede 5: enkel bedrijf
+      _pasHoeAanModus();             // v0.20.0: particulier = laadpaal (geen laadplein), geen rapport-tier
       toon('stap-hoe');
     }
+    // v0.20.0 (Johan): particulier spreekt over 1 laadpaal (niet "laadpleinen"), toont geen betalend-laadplein-blok
+    // en geen rapport-tier (nu/later/nooit is niet relevant). Bedrijf houdt alles.
+    function _pasHoeAanModus(){
+      var part=(STATE.modus!=='bedrijf');
+      var t=$('hoe-titel'); if(t) t.innerHTML = part ? 'Uw laadpaal &amp; rapport' : 'Uw laadpleinen &amp; rapport';
+      var intro=$('hoe-intro'); if(intro) intro.innerHTML = part
+        ? 'Definieer uw wagens en laadpaal — hoe completer, hoe scherper uw studie. Ondertussen rekenen we uw <b>exacte heatmap</b>.'
+        : 'Definieer uw wagenpark en (eventueel) een betalend laadplein — hoe completer, hoe scherper uw studie. Kies daarna hoe u het rapport wilt; ondertussen rekenen we uw <b>exacte heatmap</b>.';
+      var bet=$('hoe-betalend-blok'); if(bet) bet.classList.toggle('hidden', part);
+      var tier=$('hoe-tier-blok'); if(tier) tier.classList.toggle('hidden', part);
+    }
+    // v0.20.0 (Johan): in de diepte-analyse (stap 5) toont particulier GEEN "generator vervangen" maar WEL de
+    // kwalificatie-bullets (warmtepomp/boiler/zwembad/jacuzzi). Bedrijf omgekeerd.
+    function _pasMeerAanModus(){
+      var part=(STATE.modus!=='bedrijf');
+      var g=$('opt-generator'); if(g) g.classList.toggle('hidden', part);
+      if(part && $('q-generator')){ $('q-generator').checked=false; var gv=$('gen-velden'); if(gv) gv.classList.add('hidden'); }
+      var kw=$('q-kwalificatie'); if(kw) kw.classList.toggle('hidden', !part);
+    }
+    // Verzamelt de aangevinkte kwalificatie-bullets (particulier) — voor lead-kwalificatie, niet voor de berekening.
+    function _kwalificaties(){ return Array.prototype.filter.call(document.querySelectorAll('.q-kwal'), function(c){return c.checked;}).map(function(c){return c.value;}); }
     // Trede 4 — de hefboom-zin op PV-dekking. Post-HOE (oplossingsfase), dus anti-spoiler is al gelift.
     function renderHefboom(){
       var el=$('hoe-hefboom'); if(!el) return;
