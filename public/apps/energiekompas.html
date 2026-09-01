@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.22.0 (2026-09-01, Fase 6 — EKI + factuur-bevestiging): (1) EnergieKompasImpact-blok in de
+<!-- energiekompas.html v0.23.0 (2026-09-01, Fase 6 — MANDAAT-SCHERM + DETAIL-GATE, Johan/S4): (1) het mandaat is
+     geen checkbox meer in stap 8 maar een aparte volwaardige intake (stap-mandaat: rol → e-mailbevestiging → EAN →
+     status) — knop "Mandaat opzetten (apart scherm)". (2) DETAIL-GATE in het resultaat: de studie is gratis binnen
+     dit traject, maar het EXACTE detail op het werkelijke Fluvius-kwartierprofiel ontgrendelt pas ná een bevestigd
+     mandaat (= toegang profieldata). Zonder bevestiging labelt de pill eerlijk "op ingeschat profiel"; bij mandaat
+     actief/geleverd → "exacte studie" + groene gate. (3) Knop "Onderhandelingsnota heropenen" per project in het
+     resultaatscherm (hergebruikt de opgeslagen nota-data / relatieve lead-URL). Additief — geen KPI/berekening gewijzigd.
+     ── v0.22.0 (2026-09-01, Fase 6 — EKI + factuur-bevestiging): (1) EnergieKompasImpact-blok in de
      resultaat: BTW op factuur → vennootschap; zit dat nr in de NBB (scan.financieel) → EKI = energiekost/jaar ÷ winst
      vóór belasting × 100; zonder NBB-cijfers een kwalitatieve reminder (geen forfait). (2) "Dit lazen we uit uw
      factuur"-blok (naam/BTW/adres/EAN/periode/energiepost) ter bevestiging na de upload.
@@ -479,8 +486,13 @@
         <button class="btn" type="button" id="btn-groeistap">👍 Ja, met de eerste stap wil ik verder</button>
         <div class="msg" id="groeistap-msg"></div>
       </div>
+      <!-- v0.23.0 (Johan, S4): detail-gate — de studie is gratis binnen dit traject; het EXACTE detail op het
+           werkelijke Fluvius-kwartierprofiel ontgrendelt pas na een bevestigd mandaat (= toegang profieldata). -->
+      <div id="detail-gate" class="hidden" style="margin-top:16px;border-radius:10px;padding:12px 14px"></div>
       <div style="margin-top:18px">
         <button class="btn" type="button" id="btn-hoe">Wil u weten hoe? → maak mijn exacte studie</button>
+        <!-- v0.23.0 (Johan, S4): onderhandelingsnota heropenen per project — altijd terug te vinden. -->
+        <button class="linkbtn hidden" type="button" id="btn-nota-heropen" style="margin-top:8px">📄 Onderhandelingsnota heropenen →</button>
         <div class="msg" id="hoe-msg"></div>
       </div>
     </div>
@@ -542,8 +554,13 @@
         <label class="opt"><input type="radio" name="tier" value="view"> <b>Enkel bekijken</b><span>Ik wil het enkel op het scherm zien, niet downloaden.</span></label>
       </div>
       <h3>Exact op uw echte meetgegevens <span class="hint" style="display:inline;font-weight:400">— optioneel</span></h3>
-      <label class="opt"><input type="checkbox" id="hoe-mandaat"> <b>Ja, organiseer het mandaat op mijn meetgegevens</b><span>Dan herberekenen we uw studie op uw <b>werkelijke kwartierprofiel</b> (via Fluvius) en mailen we u automatisch het exacte resultaat. De indicatieve studie krijgt u nu al.</span></label>
-      <div id="hoe-ean-blok" class="hidden" style="margin:2px 0 8px"><input class="inp" id="hoe-ean" inputmode="numeric" placeholder="EAN-nummer (18 cijfers, optioneel — mag later)" style="max-width:340px"></div>
+      <!-- v0.23.0 (Johan, S4): mandaat niet langer een checkbox hier, maar een aparte volwaardige intake
+           (stap-mandaat: rol → e-mailbevestiging → EAN → status). Mandaat = echt rapport in apart scherm. -->
+      <div class="opt" style="cursor:default">
+        <b>Wilt u de exacte studie op uw werkelijke kwartierprofiel?</b>
+        <span>Dan zet u een <b>mandaat op uw meetgegevens</b> op — in een <b>apart scherm</b>, met e-mailbevestiging. We halen uw echte Fluvius-profiel op en herberekenen uw studie exact. De indicatieve studie krijgt u nu al.</span>
+        <div style="margin-top:8px"><button class="btn ghost sm" type="button" id="btn-hoe-mandaat">🔐 Mandaat opzetten (apart scherm) →</button></div>
+      </div>
       <button class="btn" type="button" id="btn-exact-go">Bereken mijn exacte studie →</button>
       <div class="msg" id="hoe-msg2"></div>
     </div>
@@ -1483,7 +1500,7 @@
       try{ _leadUpdate({ event:'interesses', interesses:STATE.interesses, kwalificaties:STATE.kwalificaties }); }catch(e){}   // v0.20.0: lead-verrijking
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('meer-msg').textContent='';
-      toon('stap-resultaat');
+      toon('stap-resultaat'); _toonNotaHeropen();
       // Zichtbare voortgang IN stap 6 (de sweep duurt ~1 min; anders lijkt het of er niets gebeurt).
       FluctusWait.start('kpi-host','We rekenen uw aansluiting door… (tot ±1 min)', WAIT_SWEEP);
       if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('res-msg'));
@@ -1610,6 +1627,8 @@
     function mandRenderStatus(j){
       var h=$('mand-status'); h.classList.remove('hidden');
       var st=j.status||'wachtrij';
+      // v0.23.0 (Johan, S4): mandaat actief/geleverd = bevestigd → ontgrendelt het exacte detail in het resultaat.
+      if(st==='actief'||st==='geleverd'){ STATE.mandaatBevestigd=true; try{ _detailGate(); var _p=document.querySelector('#stap-resultaat .stapkop .pill'); if(_p && STATE.exact){ _p.textContent='exacte studie'; _p.style.background='#05B050'; } }catch(e){} }
       var label={wachtrij:'in behandeling — we vragen het mandaat aan bij Fluvius', aangevraagd:'aangevraagd — de titularis kreeg een goedkeuringsmail', actief:'✅ actief — uw meetgegevens zijn beschikbaar', adres_mismatch:'⚠ adres wijkt af — bevestig hieronder', geannuleerd:'geannuleerd', geleverd:'✅ verwerkt', fout:'er ging iets mis — Fluctus kijkt na'}[st]||st;
       var extra='';
       if(j.already) extra+='<div class="hint">Er liep al een aanvraag/mandaat voor deze EAN.</div>';
@@ -1765,24 +1784,41 @@
       if(STATE.modus==='bedrijf'){ $('c-eigen').checked=(STATE.eigen&&STATE.eigen.length>0); $('c-betalend').checked=(STATE.bet&&STATE.bet.length>0); syncBedrijfComp(); }
       STATE.exact=true;
       _leadUpdate({ tier:tier, laadpleinen:{ eigen:STATE.eigen||[], betalend:STATE.bet||[] }, event:'exact_gestart' });
-      // Optioneel mandaat-akkoord: klant laat het mandaat op zijn echte meetgegevens organiseren (parallel).
-      if($('hoe-mandaat') && $('hoe-mandaat').checked && STATE.leadToken){
-        var ean=($('hoe-ean')&&$('hoe-ean').value||'').replace(/[^0-9]/g,'');
-        fetch(API+'/api/lead-mandaat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, ean:ean})}).catch(function(){});
-        STATE.mandaat=true;
-      }
+      // v0.23.0 (Johan, S4): het mandaat loopt niet meer via een checkbox hier, maar via het aparte
+      // stap-mandaat-scherm (btn-hoe-mandaat / de detail-gate). Zo blijft één volwaardige mandaat-flow over.
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('mob-note').innerHTML=''; $('hoe-msg2').textContent='';
-      toon('stap-resultaat');
+      toon('stap-resultaat'); _toonNotaHeropen(); _detailGate();
       FluctusWait.start('kpi-host','We berekenen uw exacte studie… (tot ±1 min)', WAIT_SWEEP);
       if(STATE.modus==='particulier') berekenParticulierTL(inv, st, $('res-msg'));
       else berekenBedrijfSweep(inv, st, $('res-msg'));
       if($('q-mobiliteit').checked || (STATE.eigen&&STATE.eigen.length)) haalMobiliteitKpi(inv);
     }
     // Extra KPI's van de EXACTE studie: % energie gewonnen + verdiensten betalend laadplein.
+    // v0.23.0 (Johan, S4): detail-gate — toont of het exacte detail al ontgrendeld is (mandaat bevestigd op
+    // Fluvius-mail) of nog niet. De studie zelf is gratis; het exacte profieldata-detail is de "betaling" = mandaat.
+    function _detailGate(){
+      var el=$('detail-gate'); if(!el) return;
+      if(!STATE.exact){ el.classList.add('hidden'); return; }
+      if(STATE.mandaatBevestigd){
+        el.style.background='#EAF3EC'; el.style.border='1px solid #A9CDB4';
+        el.innerHTML='<b style="color:#1F3864">✅ Mandaat bevestigd — exact detail ontgrendeld.</b> <span class="hint">Uw studie draait nu op uw <b>werkelijke Fluvius-kwartierprofiel</b>: dit is uw exacte resultaat, geen inschatting meer.</span>';
+        el.classList.remove('hidden'); return;
+      }
+      el.style.background='#FBF3E7'; el.style.border='1px solid #E3C99A';
+      el.innerHTML='<b style="color:#1F3864">🔒 Dit is uw gratis studie op een ingeschat profiel.</b> '+
+        '<span class="hint">Het <b>exacte detail</b> — berekend op uw <b>werkelijke Fluvius-kwartierprofiel</b> — ontgrendelt zodra uw <b>mandaat</b> bevestigd is (bevestiging per e-mail). Dat mandaat is meteen uw toegang tot de exacte profieldata.</span>'+
+        '<div style="margin-top:8px"><button class="btn sm" type="button" id="btn-gate-mandaat">🔐 Mandaat opzetten (apart scherm) →</button></div>';
+      el.classList.remove('hidden');
+      var b=$('btn-gate-mandaat'); if(b) b.onclick=mandOpen;
+    }
+    // v0.23.0 (Johan, S4): onderhandelingsnota heropenen per project — zichtbaar zodra er een nota is.
+    function _toonNotaHeropen(){ var b=$('btn-nota-heropen'); if(b && (STATE.notaData||STATE.leadToken)) b.classList.remove('hidden'); }
     function toonExactExtra(){
-      // relabel: indicatief → exact
-      var pill=document.querySelector('#stap-resultaat .stapkop .pill'); if(pill){ pill.textContent='exacte studie'; pill.style.background='#05B050'; }
+      // v0.23.0 (Johan, S4): pas "exacte studie" claimen zodra het mandaat bevestigd is; anders eerlijk labelen.
+      var pill=document.querySelector('#stap-resultaat .stapkop .pill');
+      if(pill){ if(STATE.mandaatBevestigd){ pill.textContent='exacte studie'; pill.style.background='#05B050'; } else { pill.textContent='op ingeschat profiel'; pill.style.background='#C99A3A'; } }
+      _detailGate(); _toonNotaHeropen();
       var g=$('groeistap-cta'); if(g) g.classList.remove('hidden');   // warmste lead-signaal beschikbaar
       STATE.eventGroeiGetoond=true;
       renderHardware();   // H2 — concrete shoppinglist (welke PV/batterij/palen + prijs)
@@ -1865,7 +1901,8 @@
         $('btn-groeistap').setAttribute('disabled','disabled');
         $('groeistap-msg').style.color='#0a7a37'; $('groeistap-msg').textContent='✔ Genoteerd — een adviseur neemt contact op om de eerste stap concreet te maken.';
       };
-      if($('hoe-mandaat')) $('hoe-mandaat').onchange=function(){ $('hoe-ean-blok').classList.toggle('hidden', !this.checked); };
+      if($('btn-hoe-mandaat')) $('btn-hoe-mandaat').onclick=mandOpen;   // v0.23.0 (S4): mandaat in apart scherm
+      if($('btn-nota-heropen')) $('btn-nota-heropen').onclick=openNotaLead;   // v0.23.0 (S4): nota heropenen per project
       // Voorschotfactuur-gate
       if($('btn-vs-afrekening')) $('btn-vs-afrekening').onclick=function(){ $('factuur-input').click(); };
       if($('btn-vs-raming')) $('btn-vs-raming').onclick=function(){ $('vs-raming').classList.remove('hidden'); $('vs-raming').scrollIntoView({behavior:'smooth',block:'center'}); };
