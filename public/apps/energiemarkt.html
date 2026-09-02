@@ -1,4 +1,9 @@
 <!doctype html>
+<!-- energiemarkt.html v1.1.0 — 2026-09-02 13:36 (Europe/Brussels) — ENTSO-E-onderhoud zacht afgehandeld:
+     proxy v15.131.0 geeft {source_unavailable:true,...} → badge "ENTSO-E in onderhoud, spot toont laatst
+     bekende data" + log-warn i.p.v. een rode HTTP 500 in de console; lege spot-respons overschrijft de
+     cache niet en triggert geen GitHub-write. Fallback voor oudere proxy (HTTP 5xx met onderhoudspagina).
+     Eerste versiestempel op dit bestand (conventie versie+datum+uur). -->
 <html lang="nl">
 <head>
 <meta charset="utf-8">
@@ -95,6 +100,7 @@
     <div class="fd-sub">ENTSO-E BELPEX day-ahead (spot, uurlijks) · Elia onbalansprijs (SI, kwartierlijks)</div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <span class="fd-badge fd-warn" id="fd-s-spot" style="display:none"></span>
     <span class="fd-badge fd-warn" id="fd-s-cache">cache: laden...</span>
     <span class="fd-badge fd-load" id="fd-s-api">● API</span>
   </div>
@@ -328,6 +334,33 @@ function log(msg,cls){
   b.scrollTop=b.scrollHeight;
 }
 function badge(id,txt,cls){var e=document.getElementById(id);if(e){e.textContent=txt;e.className='fd-badge fd-'+cls;}}
+
+// ── Spot-bron (ENTSO-E) tijdelijk onbeschikbaar ───────────────
+// ENTSO-E Transparency Platform valt af en toe weg voor onderhoud. Dat is geen
+// fout van dit dashboard: onbalans/wind/zon (Elia) lopen gewoon door en de spot-
+// lijn toont de laatst bekende day-ahead data uit de cache. We tonen dat als een
+// nette badge i.p.v. een rode HTTP 500 in de console.
+var spotBronDown=null;
+function spotBronOnbeschikbaar(reden, detail){
+  spotBronDown=reden||'entsoe_unavailable';
+  var txt=(spotBronDown==='entsoe_maintenance')
+    ? 'ENTSO-E in onderhoud — spot toont laatst bekende data'
+    : 'ENTSO-E tijdelijk niet bereikbaar — spot toont laatst bekende data';
+  var e=document.getElementById('fd-s-spot');
+  if(e){e.textContent=txt;e.className='fd-badge fd-warn';e.style.display='';}
+  log(txt+(detail?(' ('+detail+')'):''),'warn');
+}
+function spotBronOk(){
+  spotBronDown=null;
+  var e=document.getElementById('fd-s-spot');
+  if(e){e.style.display='none';e.textContent='';}
+}
+// Herkent een onderhouds-/onbereikbaarheidsantwoord van een OUDERE proxy
+// (< v15.131.0), die bij ENTSO-E-onderhoud nog HTTP 500 teruggaf.
+function spotOnderhoudInBody(status, body){
+  if(status<500)return false;
+  return /transparency platform|maintenance|temporarily unavailable|HTTP 50[234]|HTTP 429/i.test(String(body||''));
+}
 function prog(p){
   var w=document.getElementById('fd-prog'),b=document.getElementById('fd-pbar');
   if(!w||!b)return;
@@ -522,14 +555,34 @@ async function fetchDayAheadSpot(fromDate, toDate){
     prog(20+Math.round(si/segs.length*20));
     try{
       var r=await fetch(CFG.WORKER+'/entsoe-dayahead?from='+seg.from+'&to='+seg.to);
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      var data=await r.json();
-      var fresh=(data.data||[]).map(function(p){return{t:new Date(p.t).getTime(),v:p.v};});
-      cache.spot=mergeArr(cache.spot, fresh);
-      if(cache.spot.length)cache.lastDate=new Date(cache.spot[cache.spot.length-1].t);
-      log('Spot segment klaar: '+fresh.length+' punten — opslaan...','ok');
-      var kb=await saveDataset('spot', cache.spot);
-      if(kb!==null)log('Spot opgeslagen ('+kb+' KB)','ok');
+      var data=null;
+      if(!r.ok){
+        // Oudere proxy (< v15.131.0) geeft bij ENTSO-E-onderhoud nog HTTP 500 terug.
+        var body=''; try{ body=await r.text(); }catch(e2){}
+        if(spotOnderhoudInBody(r.status, body)){
+          spotBronOnbeschikbaar('entsoe_maintenance','HTTP '+r.status);
+          data=null;
+        } else {
+          throw new Error('HTTP '+r.status);
+        }
+      } else {
+        data=await r.json();
+        // Proxy v15.131.0+: bron even weg → 200 met source_unavailable i.p.v. 500.
+        if(data && data.source_unavailable){
+          spotBronOnbeschikbaar(data.reason, data.detail);
+        }
+      }
+      var fresh=(data&&data.data?data.data:[]).map(function(p){return{t:new Date(p.t).getTime(),v:p.v};});
+      if(!fresh.length){
+        // Niets nieuws: cache NIET overschrijven en geen nutteloze GitHub-write.
+        if(!spotBronDown)log('Spot segment leeg — geen nieuwe punten','warn');
+      } else {
+        cache.spot=mergeArr(cache.spot, fresh);
+        if(cache.spot.length)cache.lastDate=new Date(cache.spot[cache.spot.length-1].t);
+        log('Spot segment klaar: '+fresh.length+' punten — opslaan...','ok');
+        var kb=await saveDataset('spot', cache.spot);
+        if(kb!==null)log('Spot opgeslagen ('+kb+' KB)','ok');
+      }
     }catch(e){ log('Spot fout: '+e.message,'warn'); }
     await new Promise(function(r){setTimeout(r,400);}); // ENTSO-E rate limit
   }
@@ -561,6 +614,7 @@ window.fdFetch=async function(){
   var btn=document.getElementById('fd-fetchbtn');
   btn.disabled=true; btn.textContent='laden...';
   prog(5);
+  spotBronOk();   // melding wissen; wordt opnieuw gezet als de bron nog weg is
 
   try{
     // 1. Laad cache (enkel de eerste keer) — progressief renderen
