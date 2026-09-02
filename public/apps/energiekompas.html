@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.26.0 (2026-09-01, Fase 6 — EKI-annualisatie-fix, uit walkthrough-test): _energiekostJaar
+<!-- energiekompas.html v0.27.0 (2026-09-01, Fase 6 — walkthrough-review-fixes Johan): (1) particulier roept na de
+     exacte studie nu ook toonExactExtra aan → pill "op ingeschat profiel" (i.p.v. het tegenstrijdige "indicatief"),
+     + groeistap-CTA, shoppinglist en extra KPI's, consistent met bedrijf. (2) heatmap-optimumcel: klasse hernoemd
+     van .opt → .hmopt (botste met de .opt-optiekaart-CSS → 40px padding duwde de % uit de cel). (4) fisc-blok
+     verborgen in particulier-modus (40% investeringsaftrek/boekhouder-copy geldt niet voor een woning). (6) "Jaarkost
+     daarna" toont ook bij bedrijf de "nu ± €…/j"-ondertitel (fallback op de sweep-referentiekost). Additief.
+     ── v0.26.0 (2026-09-01, Fase 6 — EKI-annualisatie-fix, uit walkthrough-test): _energiekostJaar
      annualiseert nu de factuur-energiepost (periodewaarde × 365/dagen) vóór de EKI-deling door de jaarwinst; anders
      was de EnergieKompasImpact bij een maandfactuur ~12× te laag (1% i.p.v. ± het echte %). Enkel _energiekostJaar
      (alleen door _ekiBlok gebruikt) gewijzigd — geen andere berekening geraakt.
@@ -230,7 +236,7 @@
   table.hm td.cell{ width:40px; height:30px; border-radius:6px; cursor:pointer; text-align:center; font-size:10.5px; font-weight:700; color:#12315e; transition:transform .08s; border:2px solid transparent; }
   table.hm td.cell:hover{ transform:scale(1.08); }
   table.hm td.cell.sel{ border-color:var(--navy); box-shadow:0 0 0 1px #fff inset; }
-  table.hm td.cell.opt{ outline:2px dashed var(--navy); outline-offset:1px; }
+  table.hm td.cell.hmopt{ outline:2px dashed var(--navy); outline-offset:1px; }
   table.hm td.cell.est{ font-weight:600; opacity:.72; }
   table.hm td.cell.est::after{ content:'·'; position:absolute; }
   table.hm td.cell.exact{ opacity:1; font-weight:700; box-shadow:0 0 0 1px #fff inset; }
@@ -950,7 +956,10 @@
     function toonKpis(kpis){ FluctusWait.stop(); $('kpi-host').innerHTML=kpis.map(function(k){ return '<div class="kpi"><div class="t">'+esc(k.t)+'</div><div class="v">'+k.v+'</div><div class="s">'+esc(k.s)+'</div></div>'; }).join(''); }
     function toonResultaat(st){
       var fb=$('fisc-blok');
-      if(st==='ja'){ fb.classList.remove('hidden'); fb.innerHTML='<b style="color:#0a7a37">Fiscaal voordeel mogelijk</b><div class="hint" style="margin-top:4px">U valt onder de vennootschapsbelasting (of bent zelfstandige/eenmanszaak). Dan kan de <b>40 % thematische investeringsaftrek</b> tellen — nettovoordeel volgens uw tarief. Exact in de volledige studie (voorwaarden: TVT ≥ 3 j, IRR ≤ 13 %).</div>'; }
+      // v0.27.0 (Johan/walkthrough-fix 4): het fiscaal-blok (40% investeringsaftrek, boekhouder/statuut) geldt voor
+      // bedrijf/zelfstandige — niet voor een particuliere woning. Verberg het in particulier-modus i.p.v. bedrijf-copy.
+      if(STATE.modus==='particulier'){ fb.classList.add('hidden'); fb.innerHTML=''; }
+      else if(st==='ja'){ fb.classList.remove('hidden'); fb.innerHTML='<b style="color:#0a7a37">Fiscaal voordeel mogelijk</b><div class="hint" style="margin-top:4px">U valt onder de vennootschapsbelasting (of bent zelfstandige/eenmanszaak). Dan kan de <b>40 % thematische investeringsaftrek</b> tellen — nettovoordeel volgens uw tarief. Exact in de volledige studie (voorwaarden: TVT ≥ 3 j, IRR ≤ 13 %).</div>'; }
       else if(st==='weet_niet'){ fb.classList.remove('hidden'); fb.innerHTML='<b>Fiscaal voordeel: te bevestigen</b><div class="hint" style="margin-top:4px">Uw boekhouder bevestigt uw statuut; wij leiden het nooit af. In de volledige studie tonen we het voordeel zodra de status duidelijk is.</div>'; }
       else { fb.classList.add('hidden'); fb.innerHTML=''; }
       // Gratis onderhandelingsnota — beide modi (particulier + bedrijf; bedrijf krijgt het generator-hoofdstuk).
@@ -1056,8 +1065,9 @@
           if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); toonKpisTL(STATE.tlBest); hmParticulier(j); }
           else { toonKpisClient(inv); $('heatmap-blok').classList.add('hidden'); }
           toonResultaat(st);
+          if(STATE.exact) toonExactExtra();   // v0.27.0 (walkthrough-fix 1): particulier consistent met bedrijf — pill "op ingeschat profiel", groeistap, shoppinglist, extra KPI's
         })
-        .catch(function(){ _klaar(); toonKpisClient(inv); toonResultaat(st); });
+        .catch(function(){ _klaar(); toonKpisClient(inv); toonResultaat(st); if(STATE.exact) toonExactExtra(); });
     }
     // Optimale combinatie = hoogste rendement met positieve besparing; tiebreak = hoogste besparing.
     function kiesBesteAnker(anchors){
@@ -1078,10 +1088,13 @@
       // Stap 6 = ENKEL de uitkomst (verleidt); NIET de "hoe" (investering + exacte PV/batterij-grootte).
       // Die komen pas na "wil u weten hoe?". Daarom: geen investering-KPI en geen combo in de subtitels.
       if(!a) return; var tvt=(a.besparing>0 && a.capex>0)?(Math.round(a.capex/a.besparing*10)/10):null;
+      // v0.27.0 (walkthrough-fix 6): ref_kost per anker ontbreekt bij de bedrijf-sweep → val terug op de heatmap/sweep-
+      // referentiekost, zodat "Jaarkost daarna" ook bij bedrijf de "nu ± €…/j"-ondertitel toont (zoals particulier).
+      var _rk=(a.ref_kost!=null)?a.ref_kost:((STATE.hm&&STATE.hm.refKost!=null)?STATE.hm.refKost:((STATE.tl&&+STATE.tl.referentie_kost)||null));
       toonKpis([
         { t:'Besparing per jaar', v:eur(a.besparing), s:'op uw bestaande aansluiting' },
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
-        { t:'Jaarkost daarna', v:eur(a.kost), s:(a.ref_kost!=null?('nu ± '+eur(a.ref_kost)+'/j'):'') }
+        { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ]);
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
@@ -1144,7 +1157,7 @@
         cols.forEach(function(cx){
           var a=_cellAt(H,ry,cx), v=a?a[mx]:null;
           var isEst=a&&a._interp&&!a._exact, isEx=a&&a._exact;
-          var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' opt':'')+(isEx?' exact':(isEst?' est':''));
+          var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' hmopt':'')+(isEx?' exact':(isEst?' est':''));
           html+='<td class="'+cls+'" style="background:'+hmKleur(v,min,max)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+hmFmt(v,mx)+'</td>';
         });
         html+='</tr>';
