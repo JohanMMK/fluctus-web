@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.30.0 (2026-09-09, Slice B — boekhouding-mail + 3x herinnering, Johan/strakke-flow):
+     knop "Vraag mijn boekhouding de factuur op te laden" (lead-klaar) -> POST /api/lead-boekhouding (mail met @boekhouding-blok + uploadlink ?lead=<token>&factuur=1); boekhouding-link opent de factuur-stap en koppelt de upload aan de lead; naFactuur meldt /api/lead-factuur-ontvangen -> reminders stoppen. Server: v15.132.0. Additief + geguard. -->
 <!-- energiekompas.html v0.29.0 (2026-09-09, Slice A — laagdrempelige instap + voorbeeldrapport zonder login, Johan/strakke-flow):
      nieuw scherm #stap-instap VÓÓR de factuur: kost/maand + type/sector + PV-grootte + e-mail (leveradres, onbevestigd) →
      indicatief voorbeeldrapport (onderhandelingsmarge via de bestaande raming-plumbing + EV €/km vs diesel-indicatie +
@@ -493,6 +495,9 @@
       <div id="lead-klaar" class="hidden">
         <p class="hint" id="lead-bevestig"></p>
         <button class="linkbtn" type="button" id="btn-nota">Nota opnieuw openen →</button>
+        <!-- Slice B: laat de klant zijn boekhouding de factuur laten opladen (mail met @boekhouding-blok). -->
+        <div style="margin-top:8px"><button class="btn ghost sm" type="button" id="btn-boekhouding">📧 Vraag mijn boekhouding de factuur op te laden</button></div>
+        <div class="msg" id="boekhouding-msg"></div>
       </div>
     </div>
 
@@ -1449,6 +1454,7 @@
       var pb=$('profiel-blok'); pb.classList.remove('hidden'); pb.scrollIntoView({behavior:'smooth', block:'center'});
       STATE.factuurAdres = bc.leveringsadres || null; STATE.factuurEan = (bc.ean || bc.eanAfname || '') ? String(bc.ean || bc.eanAfname).replace(/\D/g,'') : '';
       var mo=$('btn-mandaat-open'); if(mo) mo.classList.remove('hidden');   // self-service mandaat kan nu
+      if(STATE.leadToken){ try{ fetch(API+'/api/lead-factuur-ontvangen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})}); }catch(e){} }  // Slice B: factuur binnen → reminders stoppen
     }
     // ── VOORSCHOTFACTUUR-GATE ─────────────────────────────────────────────────────────────────
     // Een voorschotfactuur mist verbruik/netkosten. We annualiseren NIET (dat gaf stil verkeerde
@@ -2150,6 +2156,17 @@
       berekenAfnameMarge();                                             // hergebruik: raming-marge in stap-afname
     }
     function _naarFactuur(){ $('stap-instap').classList.add('hidden'); toon('stap-start'); }
+    // ── SLICE B — boekhouding-mail vragen (factuur laten opladen door de boekhouding) ──
+    function boekhoudingGo(){
+      var msg=$('boekhouding-msg'); if(!msg) return;
+      if(!STATE.leadToken){ msg.style.color='#b00'; msg.textContent='Open eerst uw nota (stap 4).'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Versturen…';
+      fetch(API+'/api/lead-boekhouding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          if(j&&j.ok){ msg.style.color='#0a7a37'; msg.textContent=j.mail_klant?'✔ Verzonden — stuur de mail door naar uw boekhouding; zij laden de factuur in één klik op.':'✔ Genoteerd.'; }
+          else { msg.style.color='#b00'; msg.textContent='Kon niet versturen — probeer opnieuw.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon niet versturen — probeer opnieuw.'; });
+    }
 
     window.addEventListener('DOMContentLoaded', function(){
       pasThema(); laadProfielen();
@@ -2164,6 +2181,10 @@
       if($('btn-instap-factuur')) $('btn-instap-factuur').onclick=_naarFactuur;
       if($('btn-instap-verfijn')) $('btn-instap-verfijn').onclick=_naarFactuur;
       Array.prototype.forEach.call(document.querySelectorAll('input[name="istype"]'), function(r){ r.onchange=syncIsType; });
+      // ── Slice B: boekhouding-mail ──
+      if($('btn-boekhouding')) $('btn-boekhouding').onclick=boekhoudingGo;
+      if(qp('factuur')==='1' && qp('lead')){ STATE.leadToken=qp('lead'); _naarFactuur();
+        var _fm=$('factuur-msg'); if(_fm){ _fm.style.color='#1F3864'; _fm.textContent='Laad hier de factuur op — dit hoort bij het verzoek dat u per e-mail kreeg.'; } }
       // ── Funnel-bediening ──
       $('btn-factuur').onclick=function(){ $('factuur-input').click(); };
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
