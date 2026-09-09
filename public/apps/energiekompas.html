@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.39.0 (2026-09-09, Slice H, Johan): AANBOD-REKENBLOK (#aanbod-blok, _aanbodBlok) in de
+     exacte studie: verkoop · leasing (10%/10j annuiteit +20% marge) · concessie-waterfall (bedrijf) OF consumentenkrediet
+     (particulier: wettelijke looptijd-staffel i.f.v. bedrag + bijpassend indicatief JKP -> netto jaarwinst na financiering).
+     + KU Leuven-bankdossier-verwijzing. Indicatief, geen gepersonaliseerd advies. Client-side, additief. -->
 <!-- energiekompas.html v0.38.0 (2026-09-09, Slice G, Johan): (1) SENSITIVITEIT — availability batterij+EMS 100->70%
      (stappen 5%) op besparing/TVT, enkel in de exacte studie (#sens-blok, _sensBlok). (2) ANONIEME PARTNERBEVRAGING —
      knop naast de offerte-upload -> POST /api/lead-bevraging (back-office legt geanonimiseerd mini-bestek voor). Additief. -->
@@ -585,6 +589,8 @@
       <div id="hardware-voorstel" class="hidden" style="margin-top:16px"></div>
       <!-- Slice G: sensitiviteit — availability batterij+EMS 100→70% op besparing/TVT (de-risking, enkel exacte studie). -->
       <div id="sens-blok" class="hidden" style="margin-top:16px"></div>
+      <!-- Slice H: aanbod-rekenblok — verkoop / leasing / concessie (bedrijf) of consumentenkrediet (particulier). -->
+      <div id="aanbod-blok" class="hidden" style="margin-top:16px"></div>
       <!-- Groeistap-CTA (Ontwerp §14.6): warmste lead-signaal — verschijnt na de exacte studie. -->
       <div id="groeistap-cta" class="hidden" style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:10px;padding:12px 14px;margin-top:16px">
         <div style="font-weight:700;color:#1F3864;margin-bottom:4px">Eén stap tegelijk</div>
@@ -1203,6 +1209,32 @@
       var pv=anchorKwp(a), kwh=a.battKwh||0, kw=a.battKw;
       return (pv>0?(pv+' kWp PV'):'geen PV')+(kwh>0?(' + '+kwh+' kWh'+(kw?(' / '+kw+' kW'):'')+' batterij'):' · geen batterij');
     }
+    // Slice H: aanbod-rekenblok — verkoop / leasing / concessie (bedrijf) · consumentenkrediet (particulier).
+    function _annu(r,n){ return (r<=0)?(1/n):(r/(1-Math.pow(1+r,-n))); }   // jaarlijkse annuïteitsfactor
+    // Wettelijke max terugbetalingstermijn (maanden) i.f.v. bedrag — indicatieve staffel (BE), verankerd op €15k→60m, €20k→84m.
+    function _kredietLooptijdM(b){ if(b<=2500)return 24; if(b<=3700)return 30; if(b<=5600)return 36; if(b<=7500)return 42; if(b<=10000)return 48; if(b<=15000)return 60; if(b<=20000)return 84; return 120; }
+    // Indicatief JKP binnen de wettelijke maxima — rente die bij bedrag/periode past (kleiner/korter = hoger).
+    function _kredietJKP(b){ if(b<=5000)return 0.10; if(b<=10000)return 0.08; if(b<=20000)return 0.065; return 0.06; }
+    function _aanbodBlok(a){
+      var el=$('aanbod-blok'); if(!el) return;
+      if(!STATE.exact || !a || !(a.capex>0)){ el.classList.add('hidden'); el.innerHTML=''; return; }
+      var capex=a.capex, besp=a.besparing||0, isB=(STATE.modus==='bedrijf');
+      var card='style="border:1px solid #D6E0EC;border-radius:9px;padding:9px 12px;margin:6px 0;font-size:13px;color:#1F3864"';
+      var H=['<div style="font-weight:800;color:var(--navy);font-size:15px;margin-bottom:4px">Hoe financiert u dit? <span class="hint" style="display:inline;font-weight:400">— indicatieve aanbodvormen</span></div>'];
+      var tvt=(besp>0)?(Math.round(capex/besp*10)/10):null;
+      H.push('<div '+card+'><b>Verkoop</b> — '+eur(capex)+' ineens · besparing '+eur(besp)+'/j'+(tvt!=null?(' · terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'')+'</div>');
+      if(isB){
+        var lc=capex*1.20, lj=Math.round(lc*_annu(0.10,10)), netL=Math.round(besp-lj);
+        H.push('<div '+card+'><b>Leasing</b> (10 % / 10 j, +20 % marge) — ± '+eur(lj)+'/j tegenover '+eur(besp)+'/j besparing → <b>netto '+(netL>=0?'+':'−')+eur(Math.abs(netL))+'/j</b></div>');
+        H.push('<div '+card+'><b>Concessie</b> — u investeert niets. Waterfall: afbetaling + 10 % intrest op het openstaande → inname parkingplaatsen (€5/AC-sessie · €10/DC-sessie) → 50/50 overwinst (flex/Marktflex meegerekend). Afkoopoptie.</div>');
+      } else {
+        var n=_kredietLooptijdM(capex), jkp=_kredietJKP(capex), i=jkp/12, maand=capex*(i/(1-Math.pow(1+i,-n))), jaar=Math.round(maand*12), netto=Math.round(besp-jaar);
+        H.push('<div '+card+'><b>Consumentenkrediet</b> — ± '+eur(Math.round(maand))+'/maand over '+n+' m (indicatief JKP '+(jkp*100).toFixed(1).replace('.',',')+' %) tegenover '+eur(besp)+'/j besparing → <b>u '+(netto>=0?'verdient ± '+eur(netto):'betaalt ± '+eur(-netto)+' meer')+' per jaar '+(netto>=0?'na financiering':'dan de besparing')+'</b></div>');
+      }
+      H.push('<div '+card+' style="background:#EAF3EC;border-color:#A9CDB4"><b>Bij een Fluctus-partner</b> → objectieve <b>KU Leuven-verificatie</b> = bankdossier + verhoogde investeringsaftrek.</div>');
+      H.push('<p class="hint" style="margin-top:4px">Indicatief; definitieve voorwaarden via een erkende kredietgever/partner. Dit is geen gepersonaliseerd financieel advies.</p>');
+      el.innerHTML=H.join(''); el.classList.remove('hidden');
+    }
     // Slice G: sensitiviteit — hoe robuust is de case als batterij+EMS minder beschikbaar zijn (availability 100→70%).
     function _sensBlok(a){
       var el=$('sens-blok'); if(!el) return;
@@ -1234,7 +1266,7 @@
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ]);
-      if(STATE.exact) _sensBlok(a); else { var _sb=$('sens-blok'); if(_sb) _sb.classList.add('hidden'); }   // Slice G: sensitiviteit enkel in de exacte studie
+      if(STATE.exact){ _sensBlok(a); _aanbodBlok(a); } else { var _sb=$('sens-blok'); if(_sb) _sb.classList.add('hidden'); var _ab=$('aanbod-blok'); if(_ab) _ab.classList.add('hidden'); }   // Slice G+H: sensitiviteit + aanbod enkel in de exacte studie
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
     // STATE.hm = { anchors, rows:[rawY], cols:[rawX], rowLabel(v), colLabel(v), find(rowRaw,colRaw), best, sel }.
