@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.32.0 (2026-09-09, Slice D — apparaat-id-binding + laadpleinen na login, Johan/strakke-flow):
+     anoniem device-id (localStorage ek_device) meegestuurd bij /api/lead en /api/lead-verify-check; server bindt het
+     bij OTP-bevestiging aan de lead (rec.device_ids) zodat pre-login-gedrag meeverhuist. Laadpleinen-na-login: de
+     bestaande volgorde (verify -> profieldata -> stap-hoe) voldoet al. Additief + geguard. Server: v15.133.0. -->
 <!-- energiekompas.html v0.31.0 (2026-09-09, Slice C — watermerk-rapport + profieltoegang-CTA, Johan/strakke-flow):
      #res-watermerk (badge INDICATIEF + knop "Reken op mijn echte data") boven het studie-resultaat, zichtbaar zolang
      !STATE.mandaatBevestigd; verdwijnt automatisch via _setResIntro zodra de echte Fluvius-kwartierdata bevestigd is.
@@ -805,6 +809,8 @@
     function cregTL(regio){ return P_TL['CREG_'+(regio||'VL')] || P_TL.CREG_VL; }
 
     function qp(k){ try{ return new URLSearchParams(location.search).get(k)||''; }catch(e){ return ''; } }
+    // Slice D: anoniem apparaat-id (localStorage) → bij OTP aan de e-mail/lead gebonden voor herkenning + lifecycle.
+    function _deviceId(){ try{ var k='ek_device', v=localStorage.getItem(k); if(!v){ v='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,10); localStorage.setItem(k,v); } return v; }catch(e){ return ''; } }
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
     function num(id){ var v=parseFloat(($(id)||{}).value); return isFinite(v)?v:0; }
     // ── Wacht-carrousel: nooit dode tijd. Toont "we rekenen X" + roterende microlessen die de
@@ -1611,7 +1617,7 @@
           spanning:(STATE.modus==='bedrijf'?(($('b-spanning')||{}).value||'LS'):'LS') };
         return fetch(API+'/api/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
           mail:mail, tel:tel, naam:naam, partner:STATE.partner||'', herkomst:STATE.herkomst||'direct',
-          factuur_type:(STATE.raming?'voorschot':((STATE.baseCase&&STATE.baseCase.is_voorschot)?'voorschot':'afrekening')), data:D, samenvatting:s, kamino:km })})
+          factuur_type:(STATE.raming?'voorschot':((STATE.baseCase&&STATE.baseCase.is_voorschot)?'voorschot':'afrekening')), data:D, samenvatting:s, kamino:km, device_id:_deviceId() })})
           .then(function(r){return r.ok?r.json():null;}).then(function(res){
             $('btn-lead-go').removeAttribute('disabled'); msg.textContent='';
             STATE.leadToken=(res&&res.token)||''; var url=_notaUrl(); STATE.notaUrl=url;
@@ -1706,7 +1712,7 @@
       var msg=$('verify-msg'), code=($('verify-code').value||'').trim();
       if(!/^[0-9]{6}$/.test(code)){ msg.style.color='#b00'; msg.textContent='Vul de 6-cijferige code in.'; return; }
       msg.style.color='var(--muted)'; msg.textContent='⏳ Controleren…';
-      fetch(API+'/api/lead-verify-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, code:code})})
+      fetch(API+'/api/lead-verify-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, code:code, device_id:_deviceId()})})
         .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
           if(res.ok && res.j && res.j.verified){ STATE.leadVerified=true; msg.style.color='#0a7a37'; msg.textContent='✔ E-mail bevestigd.'; naarProfieldata(); }
           else { msg.style.color='#b00'; msg.textContent=(res.j&&res.j.error)||'Onjuiste code.'; }
