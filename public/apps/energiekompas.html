@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.40.0 (2026-09-09, Slice I, Johan): AFSLUITEN (#afsluit-blok, _afsluitBlok, exacte studie):
+     (1) partner + voorschot -> POST /api/lead-afsluiten -> kickback-trigger (segment €500-4200) + KU Leuven-start;
+     (2) Fluctus-EMS -> EMS-order (Voltmasters €2000 + €6/kVA/j, 6/12m-evaluatie). Geen echte facturatie (back-office-signaal). -->
 <!-- energiekompas.html v0.39.0 (2026-09-09, Slice H, Johan): AANBOD-REKENBLOK (#aanbod-blok, _aanbodBlok) in de
      exacte studie: verkoop · leasing (10%/10j annuiteit +20% marge) · concessie-waterfall (bedrijf) OF consumentenkrediet
      (particulier: wettelijke looptijd-staffel i.f.v. bedrag + bijpassend indicatief JKP -> netto jaarwinst na financiering).
@@ -591,6 +594,8 @@
       <div id="sens-blok" class="hidden" style="margin-top:16px"></div>
       <!-- Slice H: aanbod-rekenblok — verkoop / leasing / concessie (bedrijf) of consumentenkrediet (particulier). -->
       <div id="aanbod-blok" class="hidden" style="margin-top:16px"></div>
+      <!-- Slice I: afsluiten — kickback-op-voorschot (+ KUL-start) + EMS-order (Voltmasters). -->
+      <div id="afsluit-blok" class="hidden" style="margin-top:16px"></div>
       <!-- Groeistap-CTA (Ontwerp §14.6): warmste lead-signaal — verschijnt na de exacte studie. -->
       <div id="groeistap-cta" class="hidden" style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:10px;padding:12px 14px;margin-top:16px">
         <div style="font-weight:700;color:#1F3864;margin-bottom:4px">Eén stap tegelijk</div>
@@ -1209,6 +1214,41 @@
       var pv=anchorKwp(a), kwh=a.battKwh||0, kw=a.battKw;
       return (pv>0?(pv+' kWp PV'):'geen PV')+(kwh>0?(' + '+kwh+' kWh'+(kw?(' / '+kw+' kW'):'')+' batterij'):' · geen batterij');
     }
+    // Slice I: afsluiten — kickback (segment) op voorschot-bevestiging + KUL-start + EMS-order.
+    function _kickbackSegment(){
+      if(STATE.modus!=='bedrijf') return { code:'particulier', label:'particulier', bedrag:500 };
+      var kva=num('b-kva')||0, ms=(($('b-spanning')||{}).value==='MS');
+      if(!ms) return { code:'ls', label:'niet-particulier · LS', bedrag:900 };
+      if(kva<500) return { code:'ms_<500', label:'MS < 500 kVA', bedrag:1600 };
+      if(kva<=1000) return { code:'ms_500_1000', label:'MS 500–1000 kVA', bedrag:2400 };
+      return { code:'ms_>1000', label:'MS > 1000 kVA', bedrag:4200 };
+    }
+    function afsluitGo(){
+      var msg=$('afsluit-msg'); if(!msg) return;
+      if(!STATE.leadToken){ msg.style.color='#b00'; msg.textContent='Open eerst uw nota (stap 4).'; return; }
+      var partner=$('af-partner')&&$('af-partner').checked, ems=$('af-ems')&&$('af-ems').checked;
+      if(!partner && !ems){ msg.style.color='#b00'; msg.textContent='Vink minstens één keuze aan.'; return; }
+      var seg=_kickbackSegment();
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Bevestigen…';
+      fetch(API+'/api/lead-afsluiten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, partner_offerte:!!partner, voorschot_betaald:!!partner, ems:!!ems, segment:seg.code, kickback_bedrag:seg.bedrag})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          if(j&&j.ok){ msg.style.color='#0a7a37'; msg.textContent='✔ Genoteerd — '+(partner?'we starten de kickback-facturatie + KU Leuven-verificatie (bankdossier + investeringsaftrek). ':'')+(ems?'uw EMS-bestelling wordt voorbereid, met opvolging op 6 en 12 maand.':''); }
+          else { msg.style.color='#b00'; msg.textContent='Kon niet bevestigen — probeer opnieuw.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon niet bevestigen — probeer opnieuw.'; });
+    }
+    function _afsluitBlok(a){
+      var el=$('afsluit-blok'); if(!el) return;
+      if(!STATE.exact || !a){ el.classList.add('hidden'); el.innerHTML=''; return; }
+      var seg=_kickbackSegment();
+      var H=['<div style="font-weight:800;color:var(--navy);font-size:15px;margin-bottom:4px">Afsluiten</div>'];
+      H.push('<label class="chk"><input type="checkbox" id="af-partner"> Ik koos een Fluctus-partner en betaal het voorschot</label>');
+      H.push('<div class="hint" style="margin:0 0 8px">→ dan factureren wij de kickback en starten we de <b>KU Leuven-verificatie</b> (uw bankdossier + verhoogde investeringsaftrek). Segment: '+esc(seg.label)+'.</div>');
+      H.push('<label class="chk"><input type="checkbox" id="af-ems"> Ik wil de Fluctus-EMS (sturing + opvolging)</label>');
+      H.push('<div class="hint" style="margin:0 0 8px">→ Voltmasters white-label · eenmalig ± '+eur(2000)+' + ± '+eur(6)+'/kVA/jaar · <b>evaluatie op 6 en 12 maand</b>. Flex naar lokale congestie (Marktflex) of onbalans (passieve respons); Fluctus neemt géén commissie op flex.</div>');
+      H.push('<button class="btn" type="button" id="btn-afsluit">Bevestigen →</button><div class="msg" id="afsluit-msg"></div>');
+      el.innerHTML=H.join(''); el.classList.remove('hidden');
+      var b=$('btn-afsluit'); if(b) b.onclick=afsluitGo;
+    }
     // Slice H: aanbod-rekenblok — verkoop / leasing / concessie (bedrijf) · consumentenkrediet (particulier).
     function _annu(r,n){ return (r<=0)?(1/n):(r/(1-Math.pow(1+r,-n))); }   // jaarlijkse annuïteitsfactor
     // Wettelijke max terugbetalingstermijn (maanden) i.f.v. bedrag — indicatieve staffel (BE), verankerd op €15k→60m, €20k→84m.
@@ -1266,7 +1306,7 @@
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ]);
-      if(STATE.exact){ _sensBlok(a); _aanbodBlok(a); } else { var _sb=$('sens-blok'); if(_sb) _sb.classList.add('hidden'); var _ab=$('aanbod-blok'); if(_ab) _ab.classList.add('hidden'); }   // Slice G+H: sensitiviteit + aanbod enkel in de exacte studie
+      if(STATE.exact){ _sensBlok(a); _aanbodBlok(a); _afsluitBlok(a); } else { ['sens-blok','aanbod-blok','afsluit-blok'].forEach(function(id){ var _e=$(id); if(_e) _e.classList.add('hidden'); }); }   // Slice G+H+I: sensitiviteit + aanbod + afsluiten enkel in de exacte studie
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
     // STATE.hm = { anchors, rows:[rawY], cols:[rawX], rowLabel(v), colLabel(v), find(rowRaw,colRaw), best, sel }.
