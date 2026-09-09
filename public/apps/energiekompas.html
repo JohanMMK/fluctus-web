@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.29.0 (2026-09-09, Slice A — laagdrempelige instap + voorbeeldrapport zonder login, Johan/strakke-flow):
+     nieuw scherm #stap-instap VÓÓR de factuur: kost/maand + type/sector + PV-grootte + e-mail (leveradres, onbevestigd) →
+     indicatief voorbeeldrapport (onderhandelingsmarge via de bestaande raming-plumbing + EV €/km vs diesel-indicatie +
+     batterij 80% toegangsvermogen/min 5 kW + PV-caveat: lokaal verbruik = afname + 30% PV). Additief + geguard: de
+     bestaande factuur-flow (#stap-start) blijft integraal bereikbaar via de brug. Hergebruikt _pasProfielToe/berekenAfnameMarge. -->
 <!-- energiekompas.html v0.28.0 (2026-09-01, Fase 6 — walkthrough-2 CX-fixes Johan): (#8) particulier: "Eigen wagenpark"
      → "Uw wagen(s)", knop "+ nog een wagen". (#9) particulier wagen-invoer vereenvoudigd — geen wagentype/venster-
      getallen meer (thuisladen = 1 personenwagen); enkel een ja/nee-vraag "staat hij overdag stil om te laden"
@@ -288,8 +293,37 @@
       <div class="hint">Bepaalt de huisstijl van de nota en het rapport. U kan dit later nog wijzigen.</div>
     </div>
 
+    <!-- STAP 0 — LAAGDREMPELIGE INSTAP (v0.29.0 Slice A): voorbeeldrapport zonder login -->
+    <div class="card" id="stap-instap">
+      <div class="stapkop"><span class="stapnr">0</span> Uw voorbeeldrapport — in één minuut, zonder login</div>
+      <p class="hint">Geef ons enkele gegevens en u krijgt meteen een eerste, concreet beeld: uw onderhandelingsmarge, wat elektrisch rijden u per kilometer kost tegenover diesel, en wat een batterij op uw aansluiting kan betekenen. <b>Geen factuur nodig</b> — exact verfijnen kan straks.</p>
+      <div class="grid3">
+        <div><label>Elektriciteitskost per maand (€)</label><input type="number" id="is-kostmaand" step="10" min="0" placeholder="bv. 350"></div>
+        <div><label>Uw e-mailadres <span class="hint" style="display:inline;font-weight:400">— waar het rapport naartoe mag</span></label><input type="email" id="is-mail" placeholder="u@voorbeeld.be"></div>
+        <div><label>Type</label>
+          <div class="radio" id="is-type" style="gap:8px">
+            <label><input type="radio" name="istype" value="particulier" checked> 🏠 Particulier</label>
+            <label><input type="radio" name="istype" value="bedrijf"> 🏢 Bedrijf</label>
+          </div>
+        </div>
+      </div>
+      <div class="grid3">
+        <div id="is-sector-wrap" class="hidden"><label>Sector-verbruiksprofiel</label><select id="is-sector"></select></div>
+        <div><label>Zonnepanelen — grootte (0 = geen)</label><input type="number" id="is-pv" step="1" min="0" value="0" placeholder="bv. 20"></div>
+        <div><label>Eenheid</label><select id="is-pveenheid"><option value="panelen">panelen</option><option value="m2">m²</option><option value="kwp" selected>kWp</option></select></div>
+      </div>
+      <button class="btn" type="button" id="btn-instap-go">Toon mijn voorbeeldrapport →</button>
+      <button class="linkbtn" type="button" id="btn-instap-factuur" style="margin-left:8px">Liever meteen exact? Laad uw factuur op →</button>
+      <div class="msg" id="is-msg"></div>
+      <div id="is-voorbeeld" class="hidden" style="margin-top:12px"></div>
+      <div id="is-brug" class="hidden" style="margin-top:12px;padding:10px 12px;background:#EAF3EC;border:1px solid #A9CDB4;border-radius:9px;font-size:13px;color:#1F3864">
+        Dit is een <b>indicatief</b> voorbeeldrapport op standaardgegevens. <b>Verfijn het op uw echte cijfers</b> door uw factuur op te laden.
+        <div><button class="btn" type="button" id="btn-instap-verfijn" style="margin-top:8px">📄 Verfijn met mijn factuur →</button></div>
+      </div>
+    </div>
+
     <!-- STAP 1 — FACTUUR -->
-    <div class="card" id="stap-start">
+    <div class="card hidden" id="stap-start">
       <div class="stapkop"><span class="stapnr">1</span> Uw energiefactuur</div>
       <p class="hint">Laad uw afrekening (PDF) op — we lezen uw verbruik, aansluiting en periode automatisch. Afname- én injectiefactuur mag samen (max 2 PDF's).</p>
       <div class="filerow">
@@ -2039,6 +2073,7 @@
         var lijst=(j&&j.profielen)||[]; if(!lijst.length) return; STATE.profielen=lijst;
         var b=$('b-profiel'); if(b) b.innerHTML=_sectorOpts(lijst,'kantoor');                                    // intern (sector-waarde)
         var ek=$('ek-profiel'); if(ek) ek.innerHTML=_sectorOpts(lijst,'kantoor');                                // enkel sectoren (type = radio)
+        var isS=$('is-sector'); if(isS) isS.innerHTML=_sectorOpts(lijst,'kantoor');                              // Slice A: instap-sector
         var m=$('m-profiel'); if(m) m.innerHTML='<option value="">— kies uw verbruiksprofiel —</option><option value="__res__">Residentieel — woning (particulier)</option>'+_sectorOpts(lijst);
       }).catch(function(){});
     }
@@ -2060,6 +2095,62 @@
       if(m==='particulier'){ if(f.afnMwh)$('p-verbruik').value=f.afnMwh; if(f.kva)$('p-piek').value=Math.round(f.kva*10)/10; if(f.injMwh)$('p-inj').value=f.injMwh; if(f.pvKwp)$('p-pv').value=f.pvKwp; if(f.kost)$('p-kost').value=f.kost; }
       else { if(f.afnMwh)$('b-verbruik').value=f.afnMwh; if(f.injMwh)$('b-inj').value=f.injMwh; if(f.kva)$('b-kva').value=f.kva; if(f.kost)$('b-kost').value=f.kost; $('b-spanning').value=f.spann||'LS'; }
     }
+    // ── SLICE A — laagdrempelige instap + voorbeeldrapport (zonder login) ──────────────────────
+    function _isType(){ var el=document.querySelector('input[name="istype"]:checked'); return el?el.value:'particulier'; }
+    function syncIsType(){ var b=(_isType()==='bedrijf'); var w=$('is-sector-wrap'); if(w) w.classList.toggle('hidden', !b); }
+    // PV-grootte → kWp (indicatief): paneel ~0,45 kWp, m² ~0,19 kWp, kWp = as-is.
+    function _pvNaarKwp(aantal, eenheid){ var a=+aantal||0; if(a<=0) return 0; if(eenheid==='panelen') return Math.round(a*0.45*10)/10; if(eenheid==='m2') return Math.round(a*0.19*10)/10; return Math.round(a*10)/10; }
+    // Voorbeeldrapport-blok: EV €/km vs diesel (loadfactor→70% stappen 5%, 3 curves) + batterij (80% toegang, min 5 kW) + PV-caveat.
+    function _instapVoorbeeld(afnMwh, pvKwp, type, kva){
+      var el=$('is-voorbeeld'); if(!el) return;
+      var batKw=Math.max(5, Math.round((+kva||0)*0.8));                          // batterij = 80% toegangsvermogen, min 5 kW
+      var lf0=Math.min(0.65, Math.max(0.05, (afnMwh*1000)/((+kva||1)*8760)));    // huidige loadfactor (geraamd)
+      var H=[];
+      H.push('<div style="font-weight:800;color:var(--navy);font-size:15px;margin-bottom:6px">Uw voorbeeldrapport <span class="hint" style="display:inline;font-weight:400">— indicatief, op standaardgegevens</span></div>');
+      // Batterij + PV-regels
+      H.push('<div class="kpis">');
+      H.push('<div class="kpi"><div class="t">Indicatieve batterij</div><div class="v">'+batKw+' kW</div><div class="s">80% van uw toegangsvermogen (min 5 kW)</div></div>');
+      if(pvKwp>0){ var pvProd=Math.round(pvKwp*950), lok=Math.round(afnMwh*1000+0.30*pvProd);
+        H.push('<div class="kpi"><div class="t">Lokaal verbruik met uw PV</div><div class="v">± '+(Math.round(lok/100)/10)+' MWh/j</div><div class="s">afname + 30% van uw PV-productie ('+pvKwp+' kWp)</div></div>'); }
+      else { H.push('<div class="kpi"><div class="t">Zonnepanelen</div><div class="v">—</div><div class="s">geen PV opgegeven — voeg toe om de winst te zien</div></div>'); }
+      H.push('</div>');
+      // EV €/km vs diesel — indicatieve curve
+      var DIESEL=0.11, KWH_KM=0.16;   // diesel-energiekost/km (indicatief) · rekenstandaard 0,16 kWh/km
+      H.push('<div style="margin:12px 0 4px;font-weight:700;color:var(--navy)">Elektrisch rijden op uw aansluiting — €/km vs diesel <span class="hint" style="display:inline;font-weight:400">(indicatief)</span></div>');
+      H.push('<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;min-width:420px">');
+      H.push('<tr style="text-align:left;color:var(--muted)"><th style="padding:3px 10px 3px 0">Loadfactor</th><th style="padding:3px 10px">Met sturing + batterij</th><th style="padding:3px 10px">Zonder sturing</th><th style="padding:3px 10px">Diesel</th></tr>');
+      for(var lf=Math.ceil(lf0*20)/20; lf<=0.701; lf+=0.05){
+        var d=lf-lf0;
+        var stur=Math.max(0.02, 0.14 + d*0.20)*KWH_KM;
+        var geen=Math.max(0.03, 0.26 + d*0.45)*KWH_KM;
+        H.push('<tr><td style="padding:2px 10px 2px 0">'+Math.round(lf*100)+'%</td>'
+          +'<td style="padding:2px 10px;color:#048443;font-weight:600">€ '+stur.toFixed(3)+'/km</td>'
+          +'<td style="padding:2px 10px">€ '+geen.toFixed(3)+'/km</td>'
+          +'<td style="padding:2px 10px;color:#9E480E">€ '+DIESEL.toFixed(3)+'/km</td></tr>');
+      }
+      H.push('</table></div>');
+      H.push('<p class="hint" style="margin-top:6px">Meer km\'s laden verhoogt de loadfactor; met slimme sturing + opslag blijft uw €/km ruim onder diesel. De <b>exacte</b> curve op uw echte verbruik zit in de volledige studie.</p>');
+      el.innerHTML=H.join(''); el.classList.remove('hidden');
+    }
+    function instapGo(){
+      var msg=$('is-msg'); msg.textContent='';
+      var kostM=num('is-kostmaand'); if(!(kostM>0)){ msg.style.color='#b00'; msg.textContent='Vul uw elektriciteitskost per maand (€) in.'; return; }
+      var type=_isType(), sector=($('is-sector')||{}).value||'kantoor';
+      STATE.leveradres=(($('is-mail')||{}).value||'').trim();           // e-mail = leveradres (onbevestigd; OTP komt later)
+      if(STATE.leveradres){ if($('ld-mail')&&!$('ld-mail').value) $('ld-mail').value=STATE.leveradres; if($('mand-mail')&&!$('mand-mail').value) $('mand-mail').value=STATE.leveradres; }
+      STATE.instap=true; STATE.raming=true; STATE.baseCase=null;
+      var jaarKost=kostM*12, afnMwh=Math.max(0.5, Math.round(jaarKost/250*10)/10);   // ~250 €/MWh all-in
+      var pvKwp=_pvNaarKwp(num('is-pv'), ($('is-pveenheid')||{}).value||'kwp');
+      var kva=(type==='bedrijf')?Math.max(25, Math.round(afnMwh*1000/(8760*0.30))):Math.max(5, Math.round(afnMwh*1000/(8760*0.25)));
+      STATE.factuur={ afnMwh:afnMwh, injMwh:0, kost:0, kva:kva, spann:(type==='bedrijf'&&kva>100)?'MS':'LS', pvKwp:pvKwp };
+      STATE.injGezien=false; STATE.pvKwpFactuur=pvKwp; STATE.injMwhFactuur=0;
+      _pasProfielToe(type==='bedrijf'?sector:'__res__');
+      _instapVoorbeeld(afnMwh, pvKwp, type, kva);
+      $('is-brug').classList.remove('hidden');
+      berekenAfnameMarge();                                             // hergebruik: raming-marge in stap-afname
+    }
+    function _naarFactuur(){ $('stap-instap').classList.add('hidden'); toon('stap-start'); }
+
     window.addEventListener('DOMContentLoaded', function(){
       pasThema(); laadProfielen();
       Array.prototype.forEach.call(document.querySelectorAll('input[name="partnerkeuze"]'), function(r){ r.onchange=function(){ zetPartner(r.value); }; });
@@ -2068,6 +2159,11 @@
       var pa=$('p-addwagen'); if(pa) pa.onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
       var ea=$('b-eigen-add'); if(ea) ea.onclick=function(){ STATE.eigen.push(nieuwEigen()); renderEigen(); };
       var ba=$('b-bet-add'); if(ba) ba.onclick=function(){ STATE.bet.push(nieuwBet()); renderBet(); };
+      // ── Slice A: instap-bediening ──
+      if($('btn-instap-go')) $('btn-instap-go').onclick=instapGo;
+      if($('btn-instap-factuur')) $('btn-instap-factuur').onclick=_naarFactuur;
+      if($('btn-instap-verfijn')) $('btn-instap-verfijn').onclick=_naarFactuur;
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="istype"]'), function(r){ r.onchange=syncIsType; });
       // ── Funnel-bediening ──
       $('btn-factuur').onclick=function(){ $('factuur-input').click(); };
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
