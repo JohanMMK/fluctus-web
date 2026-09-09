@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.33.0 (2026-09-09, Slice E — destination charging automatisch, Johan/strakke-flow):
+     op het studie-resultaat verschijnt automatisch (bedrijf, geen expliciete plein-input) een indicatieve destination-
+     charging-KPI via de KB-heuristiek (horeca=zitplaatsen×90, sport=leden×38, bedrijf=e-wagens×2000 kWh/j, buurt/school=
+     30%×palen×1 sessie×2u), naast de flex-windfall en BUITEN de kern-ROI. Geen keuzevraag meer (koerswijziging t.o.v.
+     oude 13.0 wij-suggereren-nooit); bestaande expliciete betalend-invoer blijft (behoud-variant). Client-side, geen server. -->
 <!-- energiekompas.html v0.32.0 (2026-09-09, Slice D — apparaat-id-binding + laadpleinen na login, Johan/strakke-flow):
      anoniem device-id (localStorage ek_device) meegestuurd bij /api/lead en /api/lead-verify-check; server bindt het
      bij OTP-bevestiging aan de lead (rec.device_ids) zodat pre-login-gedrag meeverhuist. Laadpleinen-na-login: de
@@ -546,6 +551,7 @@
       <p class="hint" id="res-intro" style="margin:0 0 14px">Eerste inschatting met de <b>actuele markt</b> en een verborgen PV+batterij-combinatie. De precieze berekening — met de heatmap waarin u zelf combinaties kiest — gebeurt op uw <b>werkelijke kwartierprofiel</b> (na een mandaat op uw meetgegevens).</p>
       <div class="msg" id="res-msg"></div>
       <div class="kpis" id="kpi-host"></div>
+      <div id="dest-auto" class="hidden" style="margin-top:10px"></div>
       <div class="kpis" id="extra-kpi"></div>
       <!-- v0.22.0 (Johan): EnergieKompasImpact (EKI) — energie t.o.v. winst vóór belasting (NBB), of een kwalitatieve
            reminder zonder cijfers. Nooit een forfait: energiekost uit de factuur, winst uit de jaarrekening. -->
@@ -2087,6 +2093,45 @@
       var omzet=0; (STATE.bet||[]).forEach(function(g){ var d=PAALDEF[g.type==='dc160'?'DC160':'AC22']; var kwhSes=d.paal_kw*(d.duur_min/60);
         var sesJaar=(+g.sessies||0)*(+g.palen||0)*365; omzet += sesJaar*kwhSes/1000*d.opbrengst_eur_mwh; });
       if(omzet>0){ extraKpiPush([{ t:'Verdiensten betalend laadplein', v:eur(omzet)+'/j', s:'omzet uit laadsessies van derden (indicatief)', info:'Σ per plein: sessies/jaar × kWh/sessie × verkoopprijs. Indicatief — de exacte omzet volgt uit de volledige studie.' }]); }
+      _destinationAuto(omzet);   // Slice E: automatische destination-charging-indicatie (geen keuzevraag) als er geen expliciete plein-input is
+    }
+    // ── SLICE E — destination charging AUTOMATISCH (geen keuzevraag) · sector-heuristiek KB §12.3 ──
+    // Koerswijziging t.o.v. het oude "wij suggereren nooit een betalend plein" (Ontwerp_deelbeslissingen §13.0):
+    // de nieuwe strategie (08-09 §4) onderzoekt het automatisch → één touchpoint minder. Behoud-variant:
+    // de bestaande expliciete betalend-invoer blijft; dit blok verschijnt enkel als de klant die NIET gebruikte.
+    function _destHeuristiek(){
+      var s=(STATE.modus==='bedrijf'?(($('b-profiel')||{}).value||''):'').toLowerCase();
+      if(/horeca|resto|restaur|caf|brasser|eet|tavern|frituur|hotel/.test(s)) return { type:'horeca', label:'zitplaatsen', kwh_per:90, def:60 };
+      if(/sport|club|fitness|padel|tennis|voetbal|hockey|zwem|golf/.test(s))  return { type:'sport',  label:'actieve leden', kwh_per:38, def:400 };
+      if(/kantoor|bedrijf|kmo|industr|logist|garage|magazijn|opslag|productie|groothandel/.test(s)) return { type:'bedrijf', label:'e-bedrijfswagens van bezoekers per dag', kwh_per:2000, def:8 };
+      return { type:'buurt', label:'buurt/school', kwh_per:null, def:null };
+    }
+    function _destinationAuto(omzetExpliciet){
+      var host=$('dest-auto'); if(!host) return;
+      if(STATE.modus!=='bedrijf'){ host.classList.add('hidden'); return; }   // destination charging = B2B
+      if(omzetExpliciet>0){ host.classList.add('hidden'); return; }          // klant gaf al expliciet plein → bestaande KPI volstaat
+      var h=_destHeuristiek();
+      var eigenPalen=Math.max(1,(STATE.eigen||[]).reduce(function(a,g){ return a+(+g.palen||0); },0)||2);
+      var volume, inputHtml='';
+      if(h.type==='buurt'){
+        volume=Math.round(0.30*eigenPalen*365*22);   // 30% van de palen × 1 sessie/dag × ~2u AC (~22 kWh) — buurt/school
+        inputHtml='<div class="hint" style="margin:2px 0 6px">Geraamd op '+eigenPalen+' bestaande paal/palen: 30% × 1 sessie/dag × ~2u (buurt/school) — geen extra paal nodig.</div>';
+      } else {
+        var n=(STATE.destN!=null?STATE.destN:h.def);
+        volume=Math.round(n*h.kwh_per);
+        inputHtml='<label style="display:block;margin:4px 0;font-size:13px">'+esc(h.label)+': <input type="number" id="dest-n" min="0" step="1" value="'+n+'" style="width:90px"></label>';
+      }
+      var omzet=Math.round(volume/1000*PAALDEF.AC22.opbrengst_eur_mwh);
+      var H=[];
+      H.push('<div style="border:1px solid #E8A33D;background:#FFF6E5;border-radius:9px;padding:12px 14px">');
+      H.push('<div style="font-weight:800;color:#12263f;margin-bottom:4px">Extra kans: destination charging <span class="hint" style="display:inline;font-weight:400">— indicatief, buiten uw kern-rendement</span></div>');
+      H.push('<div class="hint" style="margin:0 0 4px">Bezoekers laten laden op uw site (personenwagens), bovenop uw eigen verbruik. We onderzoeken dit automatisch — u hoeft niets te kiezen.</div>');
+      H.push(inputHtml);
+      H.push('<div class="kpis"><div class="kpi g"><div class="t">Potentiële omzet destination charging</div><div class="v">'+eur(omzet)+'/j</div><div class="s">± '+Math.round(volume/1000)+' MWh/j · indicatief ('+esc(h.type)+') · naast uw flex-windfall, niet in de kern-ROI</div></div></div>');
+      H.push('<div class="hint" style="margin-top:6px">Regel: geen extra DC-paal — max 1 DC (2×80 kW); staat die er al, dan dubbel gebruiken. De exacte omzet volgt uit de volledige studie of het betalend-laadplein-blok.</div>');
+      H.push('</div>');
+      host.innerHTML=H.join(''); host.classList.remove('hidden');
+      var inp=$('dest-n'); if(inp) inp.onchange=function(){ STATE.destN=Math.max(0,+inp.value||0); _destinationAuto(0); };
     }
 
     function _sectorOpts(lijst, sel){ return lijst.map(function(p){ var n=p.naam||p; return '<option value="'+esc(n)+'"'+((sel&&String(n).toLowerCase()===sel)?' selected':'')+'>'+esc(n)+'</option>'; }).join(''); }
