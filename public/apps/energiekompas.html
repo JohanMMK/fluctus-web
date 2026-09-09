@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.38.0 (2026-09-09, Slice G, Johan): (1) SENSITIVITEIT — availability batterij+EMS 100->70%
+     (stappen 5%) op besparing/TVT, enkel in de exacte studie (#sens-blok, _sensBlok). (2) ANONIEME PARTNERBEVRAGING —
+     knop naast de offerte-upload -> POST /api/lead-bevraging (back-office legt geanonimiseerd mini-bestek voor). Additief. -->
 <!-- energiekompas.html v0.37.0 (2026-09-09, Slice F-trigger, Johan): na een heatmap-keuze verschijnt de knop
      "Plaats zelf uw componenten" die de kabelplanner in DIY-modus opent (?diy=1, geen tracé). Additief. -->
 <!-- energiekompas.html v0.36.0 (2026-09-09, Slice E-fix3, Johan): FTE-ratio 0,3 -> 0,1 (bezoekers/dag); de
@@ -580,6 +583,8 @@
       <div class="fisc hidden" id="fisc-blok"></div>
       <!-- Hardware-brug (H2): concrete shoppinglist — welke PV/batterij/palen + prijs + payback. -->
       <div id="hardware-voorstel" class="hidden" style="margin-top:16px"></div>
+      <!-- Slice G: sensitiviteit — availability batterij+EMS 100→70% op besparing/TVT (de-risking, enkel exacte studie). -->
+      <div id="sens-blok" class="hidden" style="margin-top:16px"></div>
       <!-- Groeistap-CTA (Ontwerp §14.6): warmste lead-signaal — verschijnt na de exacte studie. -->
       <div id="groeistap-cta" class="hidden" style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:10px;padding:12px 14px;margin-top:16px">
         <div style="font-weight:700;color:#1F3864;margin-bottom:4px">Eén stap tegelijk</div>
@@ -597,6 +602,9 @@
         <!-- v0.24.0 (Johan): offerte-upload → second opinion. Klant laadt een eigen of concurrent-offerte op; de
              server (v15.130) leest ze (Claude-vision) en zet ze af tegen deze studie. -->
         <button class="linkbtn hidden" type="button" id="btn-offerte" style="margin-top:6px">📎 Heeft u al een offerte? Laad ze op voor een gratis second opinion →</button>
+        <!-- Slice G: anonieme partnerbevraging (mini-bestek → betrouwbare partners), naast de eigen-offerte-upload. -->
+        <button class="linkbtn hidden" type="button" id="btn-bevraging" style="margin-top:6px;display:block">🕵️ Of: laat ons vrijblijvend offertes opvragen bij onze partners (geanonimiseerd) →</button>
+        <div class="msg" id="bevraging-msg"></div>
         <input type="file" id="offerte-input" accept="application/pdf,image/*" multiple class="hidden">
         <div id="offerte-panel" class="hidden" style="margin-top:12px;border:1px solid #D6E0EC;border-radius:10px;padding:12px 14px;background:#F4F7FB;font-size:13px;color:#1F3864"></div>
         <div class="msg" id="hoe-msg"></div>
@@ -1195,6 +1203,24 @@
       var pv=anchorKwp(a), kwh=a.battKwh||0, kw=a.battKw;
       return (pv>0?(pv+' kWp PV'):'geen PV')+(kwh>0?(' + '+kwh+' kWh'+(kw?(' / '+kw+' kW'):'')+' batterij'):' · geen batterij');
     }
+    // Slice G: sensitiviteit — hoe robuust is de case als batterij+EMS minder beschikbaar zijn (availability 100→70%).
+    function _sensBlok(a){
+      var el=$('sens-blok'); if(!el) return;
+      if(!STATE.exact || !a || !(a.besparing>0)){ el.classList.add('hidden'); el.innerHTML=''; return; }
+      var H=[];
+      H.push('<div style="font-weight:700;color:var(--navy);margin-bottom:6px">Robuustheid — als batterij + EMS minder beschikbaar zijn</div>');
+      H.push('<p class="hint" style="margin:0 0 6px">Availability = aandeel van de tijd dat de sturing effectief actief is. Minder beschikbaarheid = minder besparing. Indicatief — de-risking vóór uw beslissing.</p>');
+      H.push('<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;min-width:360px">');
+      H.push('<tr style="text-align:left;color:var(--muted)"><th style="padding:3px 10px 3px 0">Availability</th><th style="padding:3px 10px">Besparing/jaar</th><th style="padding:3px 10px">Terugverdientijd</th></tr>');
+      for(var av=100; av>=70; av-=5){
+        var f=av/100, besp=Math.round(a.besparing*f), tvt=(besp>0&&a.capex>0)?(Math.round(a.capex/besp*10)/10):null;
+        H.push('<tr'+(av===100?' style="font-weight:700"':'')+'><td style="padding:2px 10px 2px 0">'+av+'%</td>'
+          +'<td style="padding:2px 10px">'+eur(besp)+'</td>'
+          +'<td style="padding:2px 10px">'+(tvt!=null?('± '+String(tvt).replace('.',',')+' j'):'—')+'</td></tr>');
+      }
+      H.push('</table></div>');
+      el.innerHTML=H.join(''); el.classList.remove('hidden');
+    }
     function toonKpisTL(a){
       FluctusWait.stop();
       // Stap 6 = ENKEL de uitkomst (verleidt); NIET de "hoe" (investering + exacte PV/batterij-grootte).
@@ -1208,6 +1234,7 @@
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ]);
+      if(STATE.exact) _sensBlok(a); else { var _sb=$('sens-blok'); if(_sb) _sb.classList.add('hidden'); }   // Slice G: sensitiviteit enkel in de exacte studie
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
     // STATE.hm = { anchors, rows:[rawY], cols:[rawX], rowLabel(v), colLabel(v), find(rowRaw,colRaw), best, sel }.
@@ -2035,7 +2062,18 @@
     // v0.23.0 (Johan, S4): onderhandelingsnota heropenen per project — zichtbaar zodra er een nota is.
     function _toonNotaHeropen(){ var b=$('btn-nota-heropen'); if(b && (STATE.notaData||STATE.leadToken)) b.classList.remove('hidden'); }
     // v0.24.0 (Johan): offerte-upload voor een second opinion — beschikbaar zodra het resultaat er is.
-    function _toonOfferteKnop(){ var b=$('btn-offerte'); if(b) b.classList.remove('hidden'); }
+    function _toonOfferteKnop(){ var b=$('btn-offerte'); if(b) b.classList.remove('hidden'); var bv=$('btn-bevraging'); if(bv) bv.classList.remove('hidden'); }
+    // Slice G: klant vraagt een anonieme offerte-bevraging bij de partners (back-office legt het mini-bestek voor).
+    function bevragingGo(){
+      var msg=$('bevraging-msg'); if(!msg) return;
+      if(!STATE.leadToken){ msg.style.color='#b00'; msg.textContent='Open eerst uw nota (stap 4).'; return; }
+      msg.style.color='var(--muted)'; msg.textContent='⏳ Aanvraag versturen…';
+      fetch(API+'/api/lead-bevraging',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})})
+        .then(function(r){return r.ok?r.json():null;}).then(function(j){
+          if(j&&j.ok){ msg.style.color='#0a7a37'; msg.textContent='✔ Genoteerd — we leggen uw dossier geanonimiseerd voor aan onze betrouwbare partners en bezorgen u de offertes ter vergelijking.'; }
+          else { msg.style.color='#b00'; msg.textContent='Kon niet versturen — probeer opnieuw.'; }
+        }).catch(function(){ msg.style.color='#b00'; msg.textContent='Kon niet versturen — probeer opnieuw.'; });
+    }
     async function offerteUpload(files){
       var lijst=[]; for(var i=0;i<files.length;i++){ var t=files[i].type; if(t==='application/pdf'||/^image\//.test(t)) lijst.push(files[i]); }
       var panel=$('offerte-panel'); panel.classList.remove('hidden');
@@ -2307,6 +2345,7 @@
       if($('btn-res-mandaat')) $('btn-res-mandaat').onclick=mandOpen;   // Slice C: watermerk-CTA → profieltoegang (mandaat)
       if($('btn-nota-heropen')) $('btn-nota-heropen').onclick=openNotaLead;   // v0.23.0 (S4): nota heropenen per project
       if($('btn-offerte')) $('btn-offerte').onclick=function(){ $('offerte-input').click(); };   // v0.24.0: offerte second opinion
+      if($('btn-bevraging')) $('btn-bevraging').onclick=bevragingGo;   // Slice G: anonieme partnerbevraging
       if($('offerte-input')) $('offerte-input').onchange=function(){ if(this.files&&this.files.length) offerteUpload(this.files); };
       if($('btn-pd-mandaat')) $('btn-pd-mandaat').onclick=mandOpen;   // v0.25.0 (S7): toegang profieldata = mandaat
       if($('btn-pd-later')) $('btn-pd-later').onclick=function(){ _leadUpdate({ event:'profieldata_overgeslagen' }); naar7bis(); };
