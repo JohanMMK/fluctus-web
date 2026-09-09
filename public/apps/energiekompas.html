@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.36.0 (2026-09-09, Slice E-fix3, Johan): FTE-ratio 0,3 -> 0,1 (bezoekers/dag); de
+     bezoekersstroom bepaalt nu ook het aantal AC-palen (volume -> sessies/dag / ~6 per paal), getoond + in STATE.destAcPalen. -->
+<!-- energiekompas.html v0.35.0 (2026-09-09, Slice E-fix2, Johan): bedrijf-bezoekers/dag wordt voorgevuld uit FTE
+     (scan.financieel.fte × 0,3, klant-corrigeerbaar) i.p.v. een vast getal; graceful fallback naar schatting als er geen
+     scan/FTE is. Bron-hint getoond. Horeca/sport/buurt ongewijzigd (zitplaatsen/leden/palen). -->
+<!-- energiekompas.html v0.34.0 (2026-09-09, Slice E-fix, Johan): bedrijf-heuristiek gecorrigeerd — destination =
+     BETALENDE BEZOEKERS/dag (~95 kWh/bezoeker/j, universele KB-formule), NIET de 2,0 MWh/wagen (dat is eigen personeel =
+     eigen wagenpark). Noot toegevoegd dat personeel-laden apart is. Automatische KPI blijft de weg (geen keuzevraag). -->
 <!-- energiekompas.html v0.33.0 (2026-09-09, Slice E — destination charging automatisch, Johan/strakke-flow):
      op het studie-resultaat verschijnt automatisch (bedrijf, geen expliciete plein-input) een indicatieve destination-
      charging-KPI via de KB-heuristiek (horeca=zitplaatsen×90, sport=leden×38, bedrijf=e-wagens×2000 kWh/j, buurt/school=
@@ -2103,7 +2111,7 @@
       var s=(STATE.modus==='bedrijf'?(($('b-profiel')||{}).value||''):'').toLowerCase();
       if(/horeca|resto|restaur|caf|brasser|eet|tavern|frituur|hotel/.test(s)) return { type:'horeca', label:'zitplaatsen', kwh_per:90, def:60 };
       if(/sport|club|fitness|padel|tennis|voetbal|hockey|zwem|golf/.test(s))  return { type:'sport',  label:'actieve leden', kwh_per:38, def:400 };
-      if(/kantoor|bedrijf|kmo|industr|logist|garage|magazijn|opslag|productie|groothandel/.test(s)) return { type:'bedrijf', label:'e-bedrijfswagens van bezoekers per dag', kwh_per:2000, def:8 };
+      if(/kantoor|bedrijf|kmo|industr|logist|garage|magazijn|opslag|productie|groothandel/.test(s)) return { type:'bedrijf', label:'betalende bezoekers per dag (hangt samen met uw personeelsbezetting)', kwh_per:95, def:5, noot:'Personeel dat zelf laadt zit in uw eigen wagenpark — dit gaat enkel over betalende bezoekers/derden.' };
       return { type:'buurt', label:'buurt/school', kwh_per:null, def:null };
     }
     function _destinationAuto(omzetExpliciet){
@@ -2111,6 +2119,11 @@
       if(STATE.modus!=='bedrijf'){ host.classList.add('hidden'); return; }   // destination charging = B2B
       if(omzetExpliciet>0){ host.classList.add('hidden'); return; }          // klant gaf al expliciet plein → bestaande KPI volstaat
       var h=_destHeuristiek();
+      if(h.type==='bedrijf'){   // Slice E: bezoekers/dag voorvullen uit FTE (jaarrekening-scan) — corrigeerbaar, geen verzonnen vast getal
+        var _fin=(STATE.scan&&STATE.scan.scan&&STATE.scan.scan.financieel)||null, _fte=(_fin&&+_fin.fte)||0;
+        if(_fte>0){ h.def=Math.max(1,Math.round(_fte*0.1)); h.bron='voorgesteld o.b.v. ~'+_fte+' FTE (×0,1) — pas gerust aan'; }
+        else h.bron='schatting — vul uw aantal betalende bezoekers/dag in (personeel dat laadt zit in uw eigen wagenpark)';
+      }
       var eigenPalen=Math.max(1,(STATE.eigen||[]).reduce(function(a,g){ return a+(+g.palen||0); },0)||2);
       var volume, inputHtml='';
       if(h.type==='buurt'){
@@ -2119,15 +2132,19 @@
       } else {
         var n=(STATE.destN!=null?STATE.destN:h.def);
         volume=Math.round(n*h.kwh_per);
-        inputHtml='<label style="display:block;margin:4px 0;font-size:13px">'+esc(h.label)+': <input type="number" id="dest-n" min="0" step="1" value="'+n+'" style="width:90px"></label>';
+        inputHtml='<label style="display:block;margin:4px 0;font-size:13px">'+esc(h.label)+': <input type="number" id="dest-n" min="0" step="1" value="'+n+'" style="width:90px"></label>'+(h.bron?'<div class="hint" style="margin:0 0 4px">'+esc(h.bron)+'</div>':'');
       }
       var omzet=Math.round(volume/1000*PAALDEF.AC22.opbrengst_eur_mwh);
+      // Slice E: de bezoekersstroom bepaalt het aantal AC-palen (volume → sessies/dag ÷ ~6 sessies per paal/dag).
+      var acPalen=Math.max(1, Math.ceil((volume/22/300)/6)); STATE.destAcPalen=acPalen; STATE.destVolume=volume; STATE.destOmzet=omzet;
       var H=[];
       H.push('<div style="border:1px solid #E8A33D;background:#FFF6E5;border-radius:9px;padding:12px 14px">');
       H.push('<div style="font-weight:800;color:#12263f;margin-bottom:4px">Extra kans: destination charging <span class="hint" style="display:inline;font-weight:400">— indicatief, buiten uw kern-rendement</span></div>');
       H.push('<div class="hint" style="margin:0 0 4px">Bezoekers laten laden op uw site (personenwagens), bovenop uw eigen verbruik. We onderzoeken dit automatisch — u hoeft niets te kiezen.</div>');
+      if(h.noot) H.push('<div class="hint" style="margin:0 0 6px;color:#9E480E">'+esc(h.noot)+'</div>');
       H.push(inputHtml);
       H.push('<div class="kpis"><div class="kpi g"><div class="t">Potentiële omzet destination charging</div><div class="v">'+eur(omzet)+'/j</div><div class="s">± '+Math.round(volume/1000)+' MWh/j · indicatief ('+esc(h.type)+') · naast uw flex-windfall, niet in de kern-ROI</div></div></div>');
+      H.push('<div class="hint" style="margin:4px 0 0">Geschat nodig voor deze bezoekersstroom: <b>'+acPalen+' AC-laadpaal'+(acPalen>1?'en':'')+'</b> (dubbele stekker).</div>');
       H.push('<div class="hint" style="margin-top:6px">Regel: geen extra DC-paal — max 1 DC (2×80 kW); staat die er al, dan dubbel gebruiken. De exacte omzet volgt uit de volledige studie of het betalend-laadplein-blok.</div>');
       H.push('</div>');
       host.innerHTML=H.join(''); host.classList.remove('hidden');
