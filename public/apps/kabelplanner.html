@@ -1,4 +1,8 @@
 <!-- ============================================================
+     FLUCTUS KABELPLANNER  v1.16 (2026-09-09, Slice F — strakke flow): DIY-MODUS (?diy=1). Dummy-proof
+           componentplaatsing + PV-vlakken ZONDER kabeltracé (tracE-UI verborgen, geen auto-tracE, geen tracE in de
+           teruggestuurde data). Kabelkost = indicatieve LUCHTLIJN-afstand (element -> dichtste ontkoppelbord/cabine/kast)
+           x forfait EUR/m. payload.diy=true. Additief + geguard: zonder ?diy=1 blijft de volwaardige partner-tool identiek.
      FLUCTUS KABELPLANNER  v1.15 (31-08, Fase 5b): CABINE-SEED (§12.6a). seed.cabines[] (uit de locatiescan) →
            vaste, niet-sleepbare oranje markers (naam · afstand · rest_kVA). Ligt de dichtste cabine ≤150 m,
            dan wordt zij het aansluitpunt van het tracé i.p.v. het standaard-ontkoppelbord → echte kabeltrace-
@@ -247,6 +251,10 @@
 (function(){
 "use strict";
 const C=window.FK_CONFIG, PRICE=C.PRICE;
+// v1.16 (Slice F): DIY-modus (?diy=1) — dummy-proof componentplaatsing ZONDER kabeltracé; kabelkost = indicatieve
+// luchtlijn-afstand × forfait €/m. De volwaardige tracé-tool blijft ongewijzigd zonder de vlag (partner-flow).
+const DIY = /^(1|true|ja|on)$/i.test((new URLSearchParams(location.search)).get('diy')||'');
+const DIY_EURM = 45;   // indicatief all-in €/m (kabel + grondwerk) voor de luchtlijn-schatting
 const NAVY="#1F3864", GREEN="#05B050", ORANGE="#9E480E", BROWN="#7a5c3a";
 
 /* type: tracePw = vermogen (kW) voor auto-tracering; undefined = geen tracé */
@@ -468,8 +476,24 @@ function assignPv(){
 
 /* ---- AUTO-TRACERING ---- */
 document.getElementById("fk-auto").onclick=autoTrace;
+if(DIY){   // Slice F: tracé-UI verbergen, DIY-uitleg tonen, KPI-label bijwerken
+  ['fk-auto','fk-draw-trace','fk-edit'].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display='none'; });
+  try{ var _len=document.getElementById('fk-kpi-len'); if(_len&&_len.parentNode){ var _lbl=_len.parentNode.querySelector('.l'); if(_lbl) _lbl.textContent='Kabel luchtlijn (m)'; } }catch(e){}
+  try{ var _pal=document.getElementById('fk-palette'); if(_pal&&_pal.parentNode){ var _n=document.createElement('div'); _n.className='fk-note'; _n.style.cssText='background:#EAF3EC;border:1px solid #A9CDB4;border-radius:8px;padding:8px 10px;margin-top:6px'; _n.innerHTML='<b>DIY-modus:</b> plaats de componenten en PV-vlakken. We tekenen géén kabeltracé — de kabelkost is een indicatieve schatting op luchtlijn-afstand. Een partner werkt het exacte tracé later uit.'; _pal.parentNode.insertBefore(_n,_pal.nextSibling); } }catch(e){}
+}
 const dist=(a,b)=>turf.distance([a.lng,a.lat],[b.lng,b.lat]); // km, alleen voor 'dichtste'
 function nearest(from,list){ let best=list[0],bd=Infinity; list.forEach(n=>{ const d=dist(from,n.marker.getLatLng()); if(d<bd){bd=d;best=n;} }); return best; }
+// Slice F (DIY): kabelkost = som luchtlijn van elk vermogend element naar het dichtste ontkoppelbord/cabine/kast × €/m.
+function diyKabel(){
+  const boards=objects.filter(o=>o.type==="ontk"||o.type==="cabine"||o.type==="kast");
+  if(!boards.length) return {m:0,eur:0};
+  let m=0;
+  objects.filter(o=>["ac","dc","sdc","bat","omv"].includes(o.type)).forEach(o=>{
+    const nb=nearest(o.marker.getLatLng(),boards);
+    m += dist(o.marker.getLatLng(),nb.marker.getLatLng())*1000;   // turf.distance = km → m (luchtlijn)
+  });
+  return { m:Math.round(m), eur:Math.round(m*DIY_EURM) };
+}
 function drawAuto(p,q,pw,srcType){
   // v1.11: L-vorm volgt de SCHERM-assen (dus de georiënteerde luchtfoto), niet de geografische N-Z/O-W.
   //   Bij rotatie berekenen we de knik in container-point-ruimte (die roteert mee via leaflet-rotate):
@@ -643,13 +667,15 @@ function recalc(){
       <div class="fk-note">${calc.I.toFixed(0)} A · ΔU ${calc.du.toFixed(1)}% · ${groundMix(g.meters)}</div></div>`);
   });
   $("fk-traces").innerHTML=tHtml.join("")||`<div class="fk-note">Nog geen tracés — plaats elementen + een ontkoppelbord en klik “Trek tracés”.</div>`;
+  if(DIY){ const dk=diyKabel(); kabelCost=dk.eur; grondCost=0; lenTot=dk.m; cableM=dk.m;   // Slice F: geen tracé → luchtlijn-schatting
+    $("fk-traces").innerHTML=`<div class="fk-note">DIY-modus: geen kabeltracé — kabelkost geschat op <b>luchtlijn-afstand</b> (${Math.round(dk.m)} m × €${DIY_EURM}/m, indicatief). Een partner werkt het exacte tracé later uit.</div>`; }
 
   /* kostenraming */
   const groups={}; objects.forEach(o=>{ const k=o.type; if(!groups[k])groups[k]={n:0,c:0,label:TYPES[k].label}; groups[k].n++; groups[k].c+=objPrice(o); });
   const rows=[];
   Object.values(groups).forEach(g=>{ rows.push(`<tr><td>${g.label} <span style="color:var(--muted)">× ${g.n}</span></td><td>${eur(g.c)}</td></tr>`); });
   if(pvKwp>0)     rows.push(`<tr><td>PV-installatie <span style="color:var(--muted)">${pvKwp.toFixed(0)} kWp</span></td><td>${eur(pvCost)}</td></tr>`);
-  if(kabelCost>0) rows.push(`<tr><td>AC-kabels <span style="color:var(--muted)">${cableM.toFixed(0)} m kabel</span></td><td>${eur(kabelCost)}</td></tr>`);
+  if(kabelCost>0) rows.push(`<tr><td>${DIY?'Kabel (luchtlijn, indicatief)':'AC-kabels <span style="color:var(--muted)">'+cableM.toFixed(0)+' m kabel</span>'}</td><td>${eur(kabelCost)}</td></tr>`);
   if(grondCost>0) rows.push(`<tr><td>Grondwerk</td><td>${eur(grondCost)}</td></tr>`);
   const total=objCost+pvCost+kabelCost+grondCost;
   $("fk-bom").innerHTML=rows.join("")||`<tr><td colspan="2" style="color:var(--muted)">Nog niets om te ramen.</td></tr>`;
@@ -754,7 +780,7 @@ if(rbtn) rbtn.onclick=function(){
   var kaart=null; try{ var b=map.getBounds(); var cc=map.getCenter();
     kaart={center:[Math.round(cc.lat*1e6)/1e6, Math.round(cc.lng*1e6)/1e6], zoom:map.getZoom(),
            bounds:[[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]]}; }catch(e){}
-  var payload={ts:Date.now(), kabeltrace_eur:Math.round(lastKabel+lastGrond),
+  var payload={ts:Date.now(), diy:DIY, kabeltrace_eur:Math.round(lastKabel+lastGrond),
     detail:{kabel:Math.round(lastKabel), grond:Math.round(lastGrond), len_m:Math.round(lastLen)},
     componenten:comps, pv_zones:pvz, pv_kwp_getekend:Math.round(pvKwpTot*10)/10,
     pv_eur:Math.round(pvKwpTot*ekwpVal), tracers:tracers, kaart:kaart};
