@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.45.0 (2026-09-10, engine-slice — laatste items, Johan):
+     (Opm 3) MANDAAT: naam + e-mail geprefild (STATE.factuurNaam), telefoon op eigen rij met uitleg (niet verplicht),
+       knop "Bevestig mijn mailadres", introtekst "enkel EAN's met eerdere afrekening + bevestigde e-mail".
+       Factuurvelden vullen al automatisch via _pasProfielToe (bestaand).
+     (Opm 2) PARTICULIER: per-wagen CREG/diesel-toggle bestond al; toegevoegd = cap op 1–2 wagens (p-addwagen).
+     (Opm 7/9) OFFERTE-MERITE: extra kolom "Kwaliteit" in de vergelijktabel (_offMerite: batterij DoD/RTE/
+       gegarandeerde cycli + beschikbaarheid, uit de heranalyse) + uitleg dat een sterkere partner-offerte, ook
+       al is ze iets duurder, beter kan scoren. (Server levert de batterij-params in /api/offerte-heranalyse.)
+     (Opm 5) BETALEND LAADPLEIN: AC/DC-split-hint (bij hoge bezoekersstroom eventueel 1 DC naast de AC-palen). -->
 <!-- energiekompas.html v0.44.0 (2026-09-10, engine-slice — injectie-marge in tweede rapport, Johan):
      Opm 0 — ONDERHANDELINGSMARGE OP INJECTIE in het tweede rapport (#injectie-blok/#injectie-kpi). berekenAfnameMarge
      roept na de afname-marge berekenInjectieMarge(pv,inj,'injectie-kpi') aan (indien injectie bekend; kWp-afleiding
@@ -454,7 +463,7 @@
     <!-- STAP M — SELF-SERVICE MANDAAT-INTAKE -->
     <div class="card hidden" id="stap-mandaat">
       <div class="stapkop"><span class="stapnr">M</span> Mandaat op uw meetgegevens</div>
-      <p class="hint">Met een mandaat halen we uw <b>echte kwartierprofiel</b> bij Fluvius, zodat uw studie exact wordt. We vragen eerst wie u bent (bevestiging per e-mail), daarna uw EAN.</p>
+      <p class="hint">Met een mandaat halen we uw <b>echte kwartierprofiel</b> bij Fluvius, zodat uw studie exact wordt. We geven toegang tot uw meetgegevens <b>enkel voor EAN's waarvoor we eerder een afrekening kregen</b> en voor gebruikers die hun <b>e-mail bevestigd</b> hebben — zo vermijden we misbruik. We bevestigen dus eerst uw e-mail, daarna uw EAN.</p>
       <!-- 1) rol + identiteit -->
       <div id="mand-id">
         <label>U bent</label>
@@ -472,12 +481,16 @@
             <option value="fluctus">Fluctus (neutraal)</option>
           </select>
         </div>
-        <div class="grid3">
+        <div class="grid2">
           <div><label>Naam</label><input type="text" id="mand-naam" placeholder="uw naam of bedrijf"></div>
           <div><label>E-mail *</label><input type="email" id="mand-mail" placeholder="u@voorbeeld.be"></div>
-          <div><label>Telefoon</label><input type="tel" id="mand-tel" placeholder="0470 12 34 56"></div>
         </div>
-        <button class="btn" type="button" id="btn-mand-id">Stuur mij een bevestigingscode →</button>
+        <!-- Opm 3: telefoon op een eigen rij, met uitleg waarom (niet verplicht). -->
+        <div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+          <div style="min-width:180px"><label>Telefoon</label><input type="tel" id="mand-tel" placeholder="0470 12 34 56"></div>
+          <div class="hint" style="flex:1 1 260px;max-width:520px">Wij vragen uw telefoonnummer om u te kunnen bellen als er iets fout gaat met deze aanvraag of bij een vermoeden van misbruik. Niet verplicht, maar zorgt voor een betere dienstverlening.</div>
+        </div>
+        <button class="btn" type="button" id="btn-mand-id" style="margin-top:10px">Bevestig mijn mailadres →</button>
       </div>
       <!-- 2) OTP -->
       <div id="mand-otp" class="hidden manueelbox">
@@ -964,6 +977,7 @@
         inp.onchange=function(){ var i=+inp.getAttribute('data-w'), k=inp.getAttribute('data-k'); STATE.wagens[i][k]=(k==='creg')?inp.checked:(+inp.value); };
       });
       Array.prototype.forEach.call(host.querySelectorAll('.del'), function(b){ b.onclick=function(){ STATE.wagens.splice(+b.getAttribute('data-i'),1); if(!STATE.wagens.length) STATE.wagens.push(nieuweWagen()); renderWagens(); }; });
+      var _pa=$('p-addwagen'); if(_pa) _pa.style.display=(STATE.wagens.length>=2)?'none':'';   // Opm 2: particulier = 1 of 2 wagens
     }
 
     // ---- Bedrijf: eigen laadplein (type wagen · aantal · laadvenster) ----
@@ -1719,6 +1733,7 @@
       updateProfielHint();
       var pb=$('profiel-blok'); pb.classList.remove('hidden'); pb.scrollIntoView({behavior:'smooth', block:'center'});
       STATE.factuurAdres = bc.leveringsadres || null; STATE.factuurEan = (bc.ean || bc.eanAfname || '') ? String(bc.ean || bc.eanAfname).replace(/\D/g,'') : '';
+      STATE.factuurNaam = bc.klantNaam || STATE.factuurNaam || '';   // Opm 3: naam uit de factuur voor mandaat-prefill
       var mo=$('btn-mandaat-open'); if(mo) mo.classList.remove('hidden');   // self-service mandaat kan nu
       if(STATE.leadToken){ try{ fetch(API+'/api/lead-factuur-ontvangen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})}); }catch(e){} }  // Slice B: factuur binnen → reminders stoppen
     }
@@ -2011,6 +2026,7 @@
       // prefill uit de factuur
       if(STATE.factuurAdres && !$('mand-adres').value) $('mand-adres').value=STATE.factuurAdres;
       if(STATE.factuurEan && !$('mand-eannr').value) $('mand-eannr').value=STATE.factuurEan;
+      if(STATE.factuurNaam && $('mand-naam') && !$('mand-naam').value) $('mand-naam').value=STATE.factuurNaam;   // Opm 3: naam-prefill
       if(STATE.partner && $('mand-partner')){ $('mand-partner').value=STATE.partner; }
       // al geverifieerd via de nota-flow? sla identiteit over.
       if(STATE.leadVerified && STATE.leadToken){ STATE.mandToken=STATE.leadToken; $('mand-id').classList.add('hidden'); $('mand-otp').classList.add('hidden'); $('mand-ean').classList.remove('hidden'); }
@@ -2302,6 +2318,23 @@
       }catch(e){ panel.innerHTML='Kon de offerte niet verwerken — probeer opnieuw.'; }
     }
     function _offCapex(o){ return (o&&o.investering_excl_btw!=null)?o.investering_excl_btw:((o&&o.investering_incl_btw!=null)?Math.round(o.investering_incl_btw/1.21):null); }
+    // Opm 7/9: merite-score op batterijkwaliteit (DoD, RTE, gegarandeerde cycli) + beschikbaarheid, zodat een iets
+    // duurdere offerte van een sterke (partner-)installateur beter kan scoren dan de goedkoopste. Gebruikt de
+    // batterij-params uit de heranalyse zodra de server ze levert; anders "op te vragen".
+    function _offMerite(it){
+      var o=it.offerte||{}, h=it.heranalyse||{};
+      var dod=o.batterij_dod!=null?o.batterij_dod:h.batterij_dod, rte=o.batterij_rte!=null?o.batterij_rte:h.batterij_rte,
+          cycli=o.gegarandeerde_cycli!=null?o.gegarandeerde_cycli:h.gegarandeerde_cycli,
+          besch=o.beschikbaarheid_pct!=null?o.beschikbaarheid_pct:h.beschikbaarheid_pct;
+      var s=0,n=0;
+      if(dod!=null){ s+=Math.max(0,Math.min(1,dod/100)); n++; }
+      if(rte!=null){ s+=Math.max(0,Math.min(1,rte/100)); n++; }
+      if(cycli!=null){ s+=Math.max(0,Math.min(1,cycli/8000)); n++; }
+      if(besch!=null){ s+=Math.max(0,Math.min(1,besch/100)); n++; }
+      if(!n) return { html:'<span style="color:#5A6577">op te vragen</span>' };
+      var pct=Math.round(s/n*100), lbl=pct>=80?'hoog':(pct>=60?'goed':'gemiddeld'), col=pct>=80?'#0a7a37':(pct>=60?'#1F3864':'#9E480E');
+      return { pct:pct, html:'<b style="color:'+col+'">'+lbl+'</b> <span style="color:#5A6577">('+pct+'%)</span>' };
+    }
     // v0.28.0 (Johan/walkthrough-2 #14): meerdere offertes naast elkaar (aanbieder/biedt/CAPEX/jaarvoordeel/TVT) + het
     // detail van de laatste. Zo houdt de klant controle en zien Fluctus/de context-EPC hoe offertes zich verhouden.
     function _renderOffertes(){
@@ -2311,15 +2344,16 @@
       if(list.length>=2){
         H.push('<div style="font-weight:800;font-size:14px;margin-bottom:6px">📊 Uw offertes naast elkaar ('+list.length+')</div>');
         H.push('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
-          '<tr style="background:#1F3864;color:#fff"><th style="text-align:left;padding:6px 8px">Aanbieder</th><th style="text-align:left;padding:6px 8px">Biedt</th><th style="text-align:right;padding:6px 8px">Investering</th><th style="text-align:right;padding:6px 8px">Jaarvoordeel</th><th style="text-align:right;padding:6px 8px">Terugverdientijd</th></tr>'+
-          list.map(function(it,ix){ var o=it.offerte, h=it.heranalyse, cx=_offCapex(o), d=it.datum?it.datum.toLocaleDateString('nl-BE'):'';
+          '<tr style="background:#1F3864;color:#fff"><th style="text-align:left;padding:6px 8px">Aanbieder</th><th style="text-align:left;padding:6px 8px">Biedt</th><th style="text-align:right;padding:6px 8px">Investering</th><th style="text-align:right;padding:6px 8px">Jaarvoordeel</th><th style="text-align:right;padding:6px 8px">Terugverdientijd</th><th style="text-align:right;padding:6px 8px">Kwaliteit</th></tr>'+
+          list.map(function(it,ix){ var o=it.offerte, h=it.heranalyse, cx=_offCapex(o), d=it.datum?it.datum.toLocaleDateString('nl-BE'):'', me=_offMerite(it);
             return '<tr style="border-bottom:1px solid #E4EAF1"><td style="padding:6px 8px"><b>'+esc(o.installateur||('Offerte '+(ix+1)))+'</b>'+(d?('<div style="color:#5A6577;font-size:11px">'+d+(o.is_concurrent?' · andere aanbieder':'')+'</div>'):'')+'</td>'+
               '<td style="padding:6px 8px">'+esc(h.samenvatting_biedt||'—')+'</td>'+
               '<td style="padding:6px 8px;text-align:right;font-weight:700">'+(cx!=null?eur(cx):'—')+'</td>'+
               '<td style="padding:6px 8px;text-align:right">'+(h.jaarvoordeel_studie_eur!=null?(eur(h.jaarvoordeel_studie_eur)+'/j'):'—')+'</td>'+
-              '<td style="padding:6px 8px;text-align:right;font-weight:700">'+(h.payback_studie_jaar!=null?('± '+h.payback_studie_jaar+' j'):'—')+'</td></tr>'; }).join('')+
+              '<td style="padding:6px 8px;text-align:right;font-weight:700">'+(h.payback_studie_jaar!=null?('± '+h.payback_studie_jaar+' j'):'—')+'</td>'+
+              '<td style="padding:6px 8px;text-align:right">'+me.html+'</td></tr>'; }).join('')+
           '</table></div>');
-        H.push('<div class="hint" style="margin:6px 0 12px">Elke terugverdientijd is berekend op het jaarvoordeel uit úw EnergieKompas-studie — zo vergelijkt u de offertes op dezelfde basis. Geen financieel advies; u beslist zelf.</div>');
+        H.push('<div class="hint" style="margin:6px 0 12px">Terugverdientijd = op het jaarvoordeel uit úw EnergieKompas-studie (zelfde basis). <b>Kwaliteit</b> weegt de batterij (DoD, RTE, gegarandeerde cycli) en de beschikbaarheid mee — daardoor kan een <b>iets duurdere offerte van een sterke partner</b> beter scoren dan de goedkoopste. Geen financieel advies; u beslist zelf.</div>');
       }
       H.push('<div id="offerte-detail"></div>');
       H.push('<div class="hint" style="margin-top:8px">💡 Laad gerust nóg een offerte op — we zetten ze naast elkaar.</div>');
@@ -2399,7 +2433,8 @@
       if(h.noot) H.push('<div class="hint" style="margin:0 0 6px;color:#9E480E">'+esc(h.noot)+'</div>');
       H.push(inputHtml);
       H.push('<div class="kpis"><div class="kpi g"><div class="t">Potentiële omzet destination charging</div><div class="v">'+eur(omzet)+'/j</div><div class="s">± '+Math.round(volume/1000)+' MWh/j · indicatief ('+esc(h.type)+') · naast uw flex-windfall, niet in de kern-ROI</div></div></div>');
-      H.push('<div class="hint" style="margin:4px 0 0">Geschat nodig voor deze bezoekersstroom: <b>'+acPalen+' AC-laadpaal'+(acPalen>1?'en':'')+'</b> (dubbele stekker).</div>');
+      var _dcSug=(volume/1000>=40);   // Opm 5: bij een hoge bezoekersstroom kan 1 DC-snellader zinvol zijn voor snelle doorstroom
+      H.push('<div class="hint" style="margin:4px 0 0">Geschat nodig voor deze bezoekersstroom: <b>'+acPalen+' AC-laadpaal'+(acPalen>1?'en':'')+'</b> (dubbele stekker)'+(_dcSug?' <b>+ eventueel 1 DC-snellader</b> (2×80 kW) als er nog geen op uw niet-betalende parking staat':'')+'.</div>');
       H.push('<div class="hint" style="margin-top:6px">Regel: geen extra DC-paal — max 1 DC (2×80 kW); staat die er al, dan dubbel gebruiken. De exacte omzet volgt uit de volledige studie of het betalend-laadplein-blok.</div>');
       H.push('</div>');
       host.innerHTML=H.join(''); host.classList.remove('hidden');
@@ -2550,7 +2585,7 @@
       Array.prototype.forEach.call(document.querySelectorAll('input[name="partnerkeuze"]'), function(r){ r.onchange=function(){ zetPartner(r.value); }; });
       // Legacy-componenten (verborgen) — nodig voor de engines/nota.
       ['c-pv','c-eigen','c-betalend','c-generator'].forEach(function(id){ var e=$(id); if(e) e.onchange=syncBedrijfComp; });
-      var pa=$('p-addwagen'); if(pa) pa.onclick=function(){ STATE.wagens.push(nieuweWagen()); renderWagens(); };
+      var pa=$('p-addwagen'); if(pa) pa.onclick=function(){ if(STATE.wagens.length>=2) return; STATE.wagens.push(nieuweWagen()); renderWagens(); };   // Opm 2: max 2 wagens
       var ea=$('b-eigen-add'); if(ea) ea.onclick=function(){ STATE.eigen.push(nieuwEigen()); renderEigen(); };
       var ba=$('b-bet-add'); if(ba) ba.onclick=function(){ STATE.bet.push(nieuwBet()); renderBet(); };
       // ── Slice A: instap-bediening ──
