@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.42.0 (2026-09-10, engine-slice deel 1 [client-side, render-getest], Johan):
+     (1) EV-tabel (_evTabel) km-GEDREVEN: rijen = realistische km/jaar (particulier 0-25k · bedrijf 0-500k),
+         loadfactor volgt uit de laadenergie -> lost de onrealistisch hoge km-getallen op (km-kolom-kalibratie).
+     (2) DERDE ONTWERP opgedeeld (_ontwerpBlokken, #ontwerp-blokken): 1) bestaande situatie (aansluiting, PV) ·
+         2) optimum (aansluiting, PV, batterij, laadpaal — uit STATE.hm.best/sel + STATE.destAcPalen) ·
+         3) besparing+rendement (= KPI's); stapkop -> "Uw derde ontwerp". Enkel in de exacte studie.
+     Server-sim-items (injectie-marge, kWp-afleiding+stap3, per-wagen CREG/diesel, betalend-windfall,
+     offerte-merite, voorschot->mandaat) volgen apart, tegen de sim te testen. -->
 <!-- energiekompas.html v0.41.0 (2026-09-10, UX-slice-1, Johan): VEILIGE UI-AANPASSINGEN uit de actielijst.
      (1) Instap: 4-lijnen-layout, eenheid=radiobuttons (_isEenheid), e-mail verplicht + consent-smallprint, knop
          "Ontwerp voor me"; stapkop "Uw eerste ontwerp". (2) Eerste ontwerp (_instapVoorbeeld): titel "Uw eerste
@@ -596,6 +604,8 @@
       </div>
       <p class="hint" id="res-intro" style="margin:0 0 14px">Eerste inschatting met de <b>actuele markt</b> en een verborgen PV+batterij-combinatie. De precieze berekening — met de heatmap waarin u zelf combinaties kiest — gebeurt op uw <b>werkelijke kwartierprofiel</b> (na een mandaat op uw meetgegevens).</p>
       <div class="msg" id="res-msg"></div>
+      <!-- Derde ontwerp (Opm 4): opdeling bestaande situatie / optimum / besparing+rendement (enkel exacte studie). -->
+      <div id="ontwerp-blokken" class="hidden" style="margin-bottom:10px"></div>
       <div class="kpis" id="kpi-host"></div>
       <div id="dest-auto" class="hidden" style="margin-top:10px"></div>
       <div class="kpis" id="extra-kpi"></div>
@@ -1367,6 +1377,35 @@
       H.push('</table></div>');
       el.innerHTML=H.join(''); el.classList.remove('hidden');
     }
+    // Opm 4 — derde ontwerp opgedeeld: (1) bestaande situatie (2) optimum (3) besparing+rendement (= de KPI's eronder).
+    function _ontwerpBlokken(a){
+      var el=$('ontwerp-blokken'); if(!el) return;
+      if(!STATE.exact){ el.classList.add('hidden'); el.innerHTML=''; return; }
+      var f=STATE.factuur||{};
+      var opt=(a&&a.pvKwp!=null)?a:((STATE.hm&&(STATE.hm.sel||STATE.hm.best))||null);
+      var kva=f.kva||null, bestPv=f.pvKwp||STATE.pvKwpFactuur||0;
+      var optPv=opt?(opt.pvKwp!=null?opt.pvKwp:opt._cx):null;
+      var optBattKw=opt?(opt.battKw||(opt.battKwh?Math.round(opt.battKwh/2):null)):null;
+      var optBattKwh=opt?(opt.battKwh||null):null;
+      var laadpaal=(STATE.destAcPalen?(STATE.destAcPalen+' AC-laadpaal'+(STATE.destAcPalen>1?'en':'')):null);
+      var kop=document.querySelector('#stap-resultaat .stapkop'); if(kop) kop.innerHTML='<span class="stapnr">6</span> Uw derde ontwerp <span class="pill">indicatief</span>';
+      function card(nr,titel,rijen,hl){
+        var b='flex:1 1 240px;min-width:220px;border:1px solid '+(hl?'#A9CDB4':'#D6E0EC')+';border-radius:11px;padding:11px 13px;font-size:13px;color:#1F3864;background:'+(hl?'#EAF3EC':'#fff');
+        var h='<div style="'+b+'"><div style="font-weight:800;color:var(--navy);margin-bottom:6px">'+nr+'. '+titel+'</div>';
+        rijen.forEach(function(r){ h+='<div style="display:flex;justify-content:space-between;gap:8px;margin:2px 0"><span style="color:var(--muted)">'+r[0]+'</span><span style="font-weight:600">'+r[1]+'</span></div>'; });
+        return h+'</div>';
+      }
+      var H=['<div style="display:flex;gap:10px;flex-wrap:wrap">'];
+      H.push(card('1','Bestaande situatie',[['Aansluiting', kva?(kva+' kVA'):'—'],['Zonnepanelen', bestPv>0?(bestPv+' kWp'):'geen']]));
+      var optR=[['Aansluiting', kva?(kva+' kVA'):'—']];
+      if(optPv!=null) optR.push(['Zonnepanelen', optPv+' kWp']);
+      if(optBattKw||optBattKwh) optR.push(['Batterij', (optBattKw?optBattKw+' kW':'')+(optBattKwh?((optBattKw?' · ':'')+optBattKwh+' kWh'):'')]);
+      if(laadpaal) optR.push(['Laadpaal', laadpaal]);
+      H.push(card('2','Optimum',optR,true));
+      H.push('</div>');
+      H.push('<div style="font-weight:700;color:var(--navy);margin:12px 0 2px">3. Besparing &amp; rendement</div>');
+      el.innerHTML=H.join(''); el.classList.remove('hidden');
+    }
     function toonKpisTL(a){
       FluctusWait.stop();
       // Stap 6 = ENKEL de uitkomst (verleidt); NIET de "hoe" (investering + exacte PV/batterij-grootte).
@@ -1380,7 +1419,7 @@
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ]);
-      if(STATE.exact){ _sensBlok(a); _aanbodBlok(a); _afsluitBlok(a); } else { ['sens-blok','aanbod-blok','afsluit-blok'].forEach(function(id){ var _e=$(id); if(_e) _e.classList.add('hidden'); }); }   // Slice G+H+I: sensitiviteit + aanbod + afsluiten enkel in de exacte studie
+      if(STATE.exact){ _ontwerpBlokken(a); _sensBlok(a); _aanbodBlok(a); _afsluitBlok(a); } else { ['ontwerp-blokken','sens-blok','aanbod-blok','afsluit-blok'].forEach(function(id){ var _e=$(id); if(_e) _e.classList.add('hidden'); }); }   // Slice G+H+I + derde-ontwerp-blokken: enkel in de exacte studie
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
     // STATE.hm = { anchors, rows:[rawY], cols:[rawX], rowLabel(v), colLabel(v), find(rowRaw,colRaw), best, sel }.
@@ -2402,15 +2441,18 @@
       var fuel=(($('is-evfuel')||{}).value)||'benzine';
       var elecStuur=0.14, elecGeen=0.26;                            // €/kWh indicatief (sturing goedkoper)
       var brandKost=Math.round(l100*_BRANDSTOF[fuel]*10)/10;        // €/100km brandstof
-      var H=['<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;min-width:520px">'];
-      H.push('<tr style="text-align:left;color:var(--muted)"><th style="padding:3px 10px 3px 0">Loadfactor</th><th style="padding:3px 10px">km/jaar bijgeladen</th><th style="padding:3px 10px">Met sturing + batterij</th><th style="padding:3px 10px">Zonder sturing</th><th style="padding:3px 10px">Brandstof</th></tr>');
-      for(var lf=Math.ceil(lf0*20)/20; lf<=0.701; lf+=0.05){
-        var d=lf-lf0;
+      // km-gedreven (realistisch): rijen = km/jaar per type; loadfactor volgt uit de laadenergie.
+      var kmLijst=(s.type==='bedrijf')?[0,50000,100000,200000,350000,500000]:[0,5000,10000,15000,20000,25000];
+      var H=['<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;min-width:560px">'];
+      H.push('<tr style="text-align:left;color:var(--muted)"><th style="padding:3px 10px 3px 0">km/jaar bijgeladen</th><th style="padding:3px 10px">Loadfactor</th><th style="padding:3px 10px">Met sturing + batterij</th><th style="padding:3px 10px">Zonder sturing</th><th style="padding:3px 10px">Brandstof</th></tr>');
+      for(var ki=0; ki<kmLijst.length; ki++){
+        var km=kmLijst[ki];
+        var extraKwh=km*(kwh100/100), extraKw=extraKwh/8760;          // gemiddeld extra vermogen
+        var lf=Math.min(0.95, lf0 + extraKw/(kva||1)), d=lf-lf0;
         var stur=Math.max(0.02,0.14+d*0.20)/0.14*elecStuur*(kwh100);   // €/100km met sturing
         var geen=Math.max(0.03,0.26+d*0.45)/0.26*elecGeen*(kwh100);    // €/100km zonder sturing
-        var extraKwh=Math.max(0,d)*kva*8760, km=Math.round(extraKwh/(kwh100/100));
-        H.push('<tr><td style="padding:2px 10px 2px 0">'+Math.round(lf*100)+'%</td>'
-          +'<td style="padding:2px 10px">'+(km>0?('± '+km.toLocaleString('nl-BE')):'—')+'</td>'
+        H.push('<tr'+(km===0?' style="color:var(--muted)"':'')+'><td style="padding:2px 10px 2px 0">'+(km>0?('± '+km.toLocaleString('nl-BE')):'geen')+'</td>'
+          +'<td style="padding:2px 10px">'+Math.round(lf*100)+'%</td>'
           +'<td style="padding:2px 10px;color:#048443;font-weight:600">€ '+stur.toFixed(2)+'/100km</td>'
           +'<td style="padding:2px 10px">€ '+geen.toFixed(2)+'/100km</td>'
           +'<td style="padding:2px 10px;color:#9E480E">€ '+brandKost.toFixed(2)+'/100km</td></tr>');
@@ -2422,7 +2464,7 @@
       var el=$('is-voorbeeld'); if(!el) return;
       var batKw=Math.max(5, Math.round((+kva||0)*0.8));                          // batterij = 80% toegangsvermogen, min 5 kW
       var lf0=Math.min(0.65, Math.max(0.05, (afnMwh*1000)/((+kva||1)*8760)));    // huidige loadfactor (geraamd)
-      STATE._ev={ lf0:lf0, kva:(+kva||1) };
+      STATE._ev={ lf0:lf0, kva:(+kva||1), type:type };
       var fuelDef=(_BRANDSTOF.benzine<=_BRANDSTOF.diesel)?'benzine':'diesel';    // standaard de goedkoopste
       var H=[];
       H.push('<div style="font-weight:800;color:var(--navy);font-size:15px;margin-bottom:6px">Uw eerste ontwerp <span class="hint" style="display:inline;font-weight:400">— indicatief, op standaardgegevens</span></div>');
