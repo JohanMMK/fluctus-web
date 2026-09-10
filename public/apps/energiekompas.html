@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.44.0 (2026-09-10, engine-slice — injectie-marge in tweede rapport, Johan):
+     Opm 0 — ONDERHANDELINGSMARGE OP INJECTIE in het tweede rapport (#injectie-blok/#injectie-kpi). berekenAfnameMarge
+     roept na de afname-marge berekenInjectieMarge(pv,inj,'injectie-kpi') aan (indien injectie bekend; kWp-afleiding
+     piek×1,3 als PV ontbreekt). berekenInjectieMarge kreeg een targetId-param en rendert nu in de afname-stap i.p.v.
+     het geschrapte stap 3; stapkop → "…afname én injectie". naarPv herberekent niet meer als STATE.injAnalyse al bestaat.
+     (Render-getest met gestubde /api/injectie-optimalisatie.) Betalend-laadplein-windfall = al in Slice E. -->
 <!-- energiekompas.html v0.43.0 (2026-09-10, engine-slice deel 2a [client-routing, render-getest], Johan):
      (1) STAP 3 (zonnepanelen/injectie-vraag) GESCHRAPT (Opm 1): naarPv() haalt PV/injectie uit instap/factuur,
          berekent de injectie-onderhandelingsmarge STIL (STATE.injAnalyse voedt de nota) en gaat door naar de nota;
@@ -525,9 +531,14 @@
 
     <!-- STAP 2 — AFNAME-MARGE -->
     <div class="card hidden" id="stap-afname">
-      <div class="stapkop"><span class="stapnr">2</span> Wat valt er te onderhandelen op uw afname?</div>
+      <div class="stapkop"><span class="stapnr">2</span> Wat valt er te onderhandelen op uw afname <span id="afname-injtitel"></span>?</div>
       <p class="hint" id="afname-sub">We vergelijken uw huidige factuur met een dynamisch (spot-gebaseerd) contract op hetzelfde verbruik — zonder investering.</p>
       <div class="kpis" id="afname-kpi"></div>
+      <!-- Opm 0: onderhandelingsmarge óók op injectie (teruglevering), naast de afname. -->
+      <div id="injectie-blok" class="hidden" style="margin-top:8px">
+        <div class="hint" style="margin:0 0 4px"><b>En op uw injectie</b> — wat uw teruglevering waard is met slim afregelen:</div>
+        <div class="kpis" id="injectie-kpi"></div>
+      </div>
       <!-- v0.28.0 (Johan/walkthrough-2 #2): positieve framing — de nota is een gespreksaanleiding, geen aanval. -->
       <div style="margin:10px 0 0;padding:10px 12px;background:#EAF3EC;border:1px solid #A9CDB4;border-radius:9px;font-size:13px;color:#1F3864">💬 Deze cijfers — en uw onderhandelingsnota — zijn vooral een <b>sterke aanleiding voor een gesprek</b> met uw leverancier over uw contract, marges en prijzen. Een goede leverancier waardeert een goede klant; vaak volstaat het gesprek al voor een beter tarief.</div>
       <div class="msg" id="afname-msg"></div>
@@ -1790,6 +1801,10 @@
           { t:'Met een dynamisch contract', v:(ond.energiekost_dyn_mwh>0?('± '+Math.round(ond.energiekost_dyn_mwh)+' €/MWh'):'—'), s:'spot day-ahead, zelfde verbruik' },
           { g:true, t:'Onderhandelingsmarge', v:(ond.marge_jaar>0?eur(ond.marge_jaar):'—')+(ond.marge_jaar>0?'/j':''), s:bron?(ond.besparing_pct?('± '+Math.round(ond.besparing_pct)+'% goedkoper'):'zonder investering'):'indicatief — laad uw factuur voor exact' }
         ]);
+        // Opm 0: onderhandelingsmarge óók op injectie (teruglevering), in ditzelfde tweede rapport — indien injectie bekend.
+        var _pv=STATE.pvKwpFactuur||(STATE.factuur&&STATE.factuur.pvKwp)||(STATE.modus==='bedrijf'?num('b-pvbestaand'):num('p-pv'))||0;
+        var _inj=STATE.injMwhFactuur||(STATE.factuur&&STATE.factuur.injMwh)||(STATE.modus==='bedrijf'?num('b-inj'):num('p-inj'))||0;
+        if(_inj>0){ if(!(_pv>0)) _pv=Math.round((_inj*1000/950)*1.3*10)/10; berekenInjectieMarge(_pv,_inj,'injectie-kpi'); } else { _toonInjBlok(false); }
         $('btn-na-afname').classList.remove('hidden');
       });
     }
@@ -1800,33 +1815,35 @@
       var injM = STATE.injMwhFactuur || STATE.injMwh || (STATE.factuur&&STATE.factuur.injMwh) || (STATE.modus==='bedrijf'?num('b-inj'):num('p-inj')) || 0;
       // kWp afleiden uit injectie (Opm 1: piek × 1,3) als de PV-grootte ontbreekt maar er wél injectie is.
       if(!(kwp>0) && injM>0){ kwp = Math.round((injM*1000/950)*1.3*10)/10; }
-      if(kwp>0){ berekenInjectieMarge(kwp, injM); }   // rendert (verborgen) + zet STATE.injAnalyse voor de nota
+      // De injectie-marge is meestal al in de afname-stap berekend (STATE.injAnalyse); enkel berekenen als dat nog niet is gebeurd.
+      if(!STATE.injAnalyse && kwp>0){ berekenInjectieMarge(kwp, injM, 'injectie-kpi'); }
       toon('stap-lead');
     }
     function _injMargeJaar(){ var A=STATE.injAnalyse; if(!A) return 0; var o=A.opbrengst_jaar||{}; return (o.meerwaarde_curtail_eur||0)+((STATE.modus==='bedrijf')?(o.meerwaarde_onbalans_eur||0):0); }
-    function berekenInjectieMarge(kwp, injMwh){
+    // Opm 0: injectie-onderhandelingsmarge; rendert in het tweede rapport (#injectie-kpi) i.p.v. het geschrapte stap 3.
+    function _toonInjBlok(show){ var b=$('injectie-blok'); if(b) b.classList.toggle('hidden', !show); var t=$('afname-injtitel'); if(t) t.textContent=show?'én injectie':''; }
+    function berekenInjectieMarge(kwp, injMwh, targetId){
+      targetId=targetId||'injectie-kpi';
       if(STATE.modus==='bedrijf'){ $('b-pvbestaand').value=kwp||0; if(injMwh)$('b-inj').value=injMwh; }
       else { $('p-pv').value=kwp||0; if(injMwh)$('p-inj').value=injMwh; }
       STATE.pvKwp=kwp||0; STATE.injMwh=injMwh||0;
-      var msg=$('pv-msg');
-      if(!(kwp>0)){ $('inj-kpi').innerHTML=''; STATE.injAnalyse=null; $('btn-na-pv').classList.remove('hidden'); return; }
-      msg.style.color='var(--muted)'; msg.textContent='⏳ Injectie-marge berekenen…';
+      if(!(kwp>0)){ var _t=$(targetId); if(_t)_t.innerHTML=''; STATE.injAnalyse=null; _toonInjBlok(false); return; }
       var profiel=_profielOnderhandel();
       var afnameMwh=STATE.modus==='bedrijf'?num('b-verbruik'):num('p-verbruik');
       var piek=STATE.modus==='bedrijf'?Math.round(num('b-kva')*0.9):num('p-piek');
       fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         profielNaam:profiel, pv_kwp:kwp, injectie_mwh_jaar:injMwh, afname_mwh_jaar:afnameMwh, piek_kw:piek, inverter_kva:Math.round(kwp*0.75*10)/10 })})
         .then(function(r){return r.ok?r.json():null;}).then(function(j){
-          msg.textContent=''; var A=(j&&j.analyse)||null; STATE.injAnalyse=A;
+          var A=(j&&j.analyse)||null; STATE.injAnalyse=A;
           if(A){ var o=A.opbrengst_jaar||{}, isB=(STATE.modus==='bedrijf');
-            renderKpisIn('inj-kpi',[
+            renderKpisIn(targetId,[
               { t:'Injectie vandaag', v:eur(o.vandaag_spot_eur||0)+'/j', s:'alles aan day-ahead' },
               { t:'Met slim afregelen', v:eur(o.met_curtail_eur||0)+'/j', s:'niet injecteren bij negatieve prijs' },
-              { g:true, t:'Meerwaarde injectie', v:eur((o.meerwaarde_curtail_eur||0)+(isB?(o.meerwaarde_onbalans_eur||0):0))+'/j', s:isB?'afregelen + onbalans':'afregelen (curtailment)' }
+              { g:true, t:'Onderhandelingsmarge injectie', v:eur((o.meerwaarde_curtail_eur||0)+(isB?(o.meerwaarde_onbalans_eur||0):0))+'/j', s:isB?'afregelen + onbalans':'afregelen (curtailment)' }
             ]);
-          } else { $('inj-kpi').innerHTML=''; }
-          $('btn-na-pv').classList.remove('hidden');
-        }).catch(function(){ msg.textContent=''; STATE.injAnalyse=null; $('btn-na-pv').classList.remove('hidden'); });
+            if(targetId==='injectie-kpi') _toonInjBlok(true);
+          } else { var _t2=$(targetId); if(_t2)_t2.innerHTML=''; _toonInjBlok(false); }
+        }).catch(function(){ STATE.injAnalyse=null; _toonInjBlok(false); });
     }
     // ── Stap 4: lead-capture + nota-mail ──
     // Relatieve nota-URL (zelfde origin als de schil → geen "not found" bij een ander domein).
