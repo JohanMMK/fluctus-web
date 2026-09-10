@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.43.0 (2026-09-10, engine-slice deel 2a [client-routing, render-getest], Johan):
+     (1) STAP 3 (zonnepanelen/injectie-vraag) GESCHRAPT (Opm 1): naarPv() haalt PV/injectie uit instap/factuur,
+         berekent de injectie-onderhandelingsmarge STIL (STATE.injAnalyse voedt de nota) en gaat door naar de nota;
+         kWp-afleiding uit injectie (piek × 1,3) als de PV-grootte ontbreekt. Geen zichtbaar scherm meer.
+     (2) VOORSCHOTFACTUUR (Opm 4): mandaat is nu de primaire weg ("Meteen exact — met uw EAN" → exact ontwerp /
+         variant 3); afrekening-opladen secundair. Offerte-upload staat al bij het resultaat (_toonOfferteKnop).
+     Sim-wiskunde (per-wagen CREG/diesel, injectie-marge-KPI in tweede rapport, betalend-windfall, offerte-merite)
+     volgt als aparte slice, tegen de sim te testen. -->
 <!-- energiekompas.html v0.42.0 (2026-09-10, engine-slice deel 1 [client-side, render-getest], Johan):
      (1) EV-tabel (_evTabel) km-GEDREVEN: rijen = realistische km/jaar (particulier 0-25k · bedrijf 0-500k),
          loadfactor volgt uit de laadenergie -> lost de onrealistisch hoge km-getallen op (km-kolom-kalibratie).
@@ -492,14 +500,15 @@
     <div class="card hidden" id="stap-voorschot">
       <div class="stapkop"><span class="stapnr" style="background:#9E480E">!</span> Dit lijkt een voorschotfactuur</div>
       <div id="vs-reden" style="background:#FFF4E5;border:1px solid #F0C070;color:#7A4A00;border-radius:8px;padding:10px 12px;font-size:13px;margin:2px 0 10px"></div>
-      <p class="hint">Een voorschot- of tussentijdse factuur bevat <b>geen gemeten verbruik en geen netkosten</b>. Daarmee kunnen we uw onderhandelingsmarge niet correct berekenen — we zouden het voorschotbedrag verkeerd naar een heel jaar omrekenen. Voor een <b>correcte</b> analyse hebben we uw <b>jaarafrekening</b> nodig.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button class="btn" type="button" id="btn-vs-afrekening">📄 Afrekening opladen</button>
-        <button class="linkbtn" type="button" id="btn-vs-raming">Verder met een ruwe raming →</button>
+      <p class="hint">Een voorschot- of tussentijdse factuur bevat <b>geen gemeten verbruik en geen netkosten</b>. Daarmee kunnen we uw onderhandelingsmarge niet correct berekenen — we zouden het voorschotbedrag verkeerd naar een heel jaar omrekenen. Voor een <b>correcte</b> analyse hebben we uw <b>afrekening</b> nodig — of, sneller, uw EAN.</p>
+      <!-- Opm 4: bij enkel een voorschot hebben we de EAN al → mandaat is dé weg → meteen het exacte ontwerp (variant 3). -->
+      <div style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:8px;padding:10px 12px;margin-top:2px">
+        <b style="color:#1F3864">Meteen exact — met uw EAN:</b> uw voorschotfactuur bevat uw <b>EAN</b>. Zet een <b>mandaat op uw meetgegevens</b> op, dan halen we uw werkelijke kwartierprofiel bij Fluvius en maken we meteen uw <b>exacte ontwerp</b> (op uw echte profieldata) — u slaat het factuurgedoe over.
+        <div><button class="btn" type="button" id="btn-vs-mandaat" style="margin-top:8px">🔐 Mandaat opzetten → exact ontwerp</button></div>
       </div>
-      <div style="background:#EAF3EC;border:1px solid #A9CDB4;border-radius:8px;padding:10px 12px;margin-top:12px">
-        <b style="color:#1F3864">De echte uitweg naar exacte cijfers:</b> zet een <b>mandaat op uw meetgegevens</b> op — dan halen we uw werkelijke kwartierprofiel bij Fluvius en wordt de studie exact. Voor het mandaat volstaat uw EAN.
-        <div><button class="btn" type="button" id="btn-vs-mandaat" style="margin-top:8px">🔐 Mandaat opzetten →</button></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <button class="btn ghost" type="button" id="btn-vs-afrekening">📄 Toch een afrekening opladen</button>
+        <button class="linkbtn" type="button" id="btn-vs-raming">Verder met een ruwe raming →</button>
       </div>
       <!-- Ramingspad (secundair): SLP + geschat jaarverbruik → marge als bandbreedte, nooit hard. -->
       <div id="vs-raming" class="hidden manueelbox">
@@ -1784,14 +1793,15 @@
         $('btn-na-afname').classList.remove('hidden');
       });
     }
-    // ── Stap 3: PV-vraag / injectie-marge ──
+    // ── Stap 3 — GESCHRAPT (Opm 1): de PV/injectie-vraag is redundant (we kennen PV/injectie al uit instap/factuur).
+    // We berekenen de injectie-onderhandelingsmarge STIL (voedt de nota via STATE.injAnalyse) en gaan door naar de nota.
     function naarPv(){
-      toon('stap-pv');
-      if(STATE.injGezien){
-        $('pv-vraag').classList.add('hidden'); $('pv-auto').classList.remove('hidden');
-        $('pv-auto').innerHTML='We zagen <b>injectie</b> op uw factuur — u heeft dus PV. We berekenen meteen wat uw injectie waard is met een beter contract.';
-        berekenInjectieMarge(STATE.pvKwpFactuur||0, STATE.injMwhFactuur||0);
-      } else { $('pv-vraag').classList.remove('hidden'); $('pv-auto').classList.add('hidden'); }
+      var kwp = STATE.pvKwpFactuur || STATE.pvKwp || (STATE.factuur&&STATE.factuur.pvKwp) || (STATE.modus==='bedrijf'?num('b-pvbestaand'):num('p-pv')) || 0;
+      var injM = STATE.injMwhFactuur || STATE.injMwh || (STATE.factuur&&STATE.factuur.injMwh) || (STATE.modus==='bedrijf'?num('b-inj'):num('p-inj')) || 0;
+      // kWp afleiden uit injectie (Opm 1: piek × 1,3) als de PV-grootte ontbreekt maar er wél injectie is.
+      if(!(kwp>0) && injM>0){ kwp = Math.round((injM*1000/950)*1.3*10)/10; }
+      if(kwp>0){ berekenInjectieMarge(kwp, injM); }   // rendert (verborgen) + zet STATE.injAnalyse voor de nota
+      toon('stap-lead');
     }
     function _injMargeJaar(){ var A=STATE.injAnalyse; if(!A) return 0; var o=A.opbrengst_jaar||{}; return (o.meerwaarde_curtail_eur||0)+((STATE.modus==='bedrijf')?(o.meerwaarde_onbalans_eur||0):0); }
     function berekenInjectieMarge(kwp, injMwh){
