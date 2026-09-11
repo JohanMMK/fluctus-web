@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.48.0 (2026-09-11, vervolg 1/2/3 [client, render-getest], Johan):
+     (Punt 1) AFSLUITEN: de winnende offerte wordt nu ÉCHT geüpload (af-offerte → offerteUpload → /api/offerte-heranalyse),
+       zodat de server de 5DE ANALYSE kan samenstellen (incl. KU Leuven bij een partner-offerte).
+     (Punt 2) BETALEND LAADPLEIN: sizing-driver op AANTAL EENHEDEN (personeelsleden/clubleden/stoelen) → leidt sessies/paal/dag
+       af (zelfde factoren als server _DEST_EENHEID_BEZOEK), aanpasbaar; renderBet + nieuwBet uitgebreid met eenheidType/eenheden.
+     (Punt 3) PROFIELSUGGESTIE (zonder KBO): korte activiteit-omschrijving (is-activiteit/ek-activiteit) → GET /api/profiel-suggestie
+       → selecteert het dichtste sectorprofiel in de dropdown (_suggereerProfiel), debounced. -->
 <!-- energiekompas.html v0.47.0 (2026-07-16, flow-review vervolg-slice [client-side, render-getest], Johan):
      (A2.2) INSTAP: e-mail niet meer vooraf verplicht — knop "Zend mij mijn ontwerp" opent opt-in modal ná het eerste ontwerp.
      (A1.2) ÉÉN CONSENT: de opt-in bij het eerste ontwerp geldt als de toestemming; de nota-checkbox wordt voor-aangevinkt/verborgen.
@@ -414,7 +421,11 @@
       <!-- Sector (enkel bedrijf) — A3.1: visueel gekoppeld aan de Bedrijf-keuze -->
       <div id="is-sector-wrap" class="hidden" style="margin-top:6px;padding:8px 10px;background:#EAF3EC;border:1px solid #A9CDB4;border-left:3px solid var(--accent);border-radius:9px">
         <label style="color:var(--navy)">↳ Sector-verbruiksprofiel <span class="hint" style="display:inline;font-weight:400">— hoort bij uw Bedrijf-keuze</span></label>
-        <select id="is-sector"></select></div>
+        <select id="is-sector"></select>
+        <!-- A2.4 (zonder KBO): korte activiteit → profielsuggestie -->
+        <label style="margin-top:6px">Of omschrijf kort uw activiteit</label>
+        <input type="text" id="is-activiteit" placeholder="bv. slagerij, kantoor met airco, sportclub, magazijn…" style="width:100%">
+        <div class="hint" id="is-activiteit-sug" style="margin-top:3px"></div></div>
       <!-- Lijn 2: zonnepanelen + eenheid (radiobuttons) -->
       <div class="grid2" style="margin-top:6px">
         <div><label>Zonnepanelen — grootte (0 = geen)</label><input type="number" id="is-pv" step="1" min="0" value="0" placeholder="bv. 20"></div>
@@ -491,6 +502,9 @@
         <div id="sector-wrap" class="hidden">
           <label>Sector-verbruiksprofiel</label>
           <select id="ek-profiel"></select>
+          <label style="margin-top:6px">Of omschrijf kort uw activiteit</label>
+          <input type="text" id="ek-activiteit" placeholder="bv. slagerij, kantoor met airco, sportclub, magazijn…" style="width:100%">
+          <div class="hint" id="ek-activiteit-sug" style="margin-top:3px"></div>
         </div>
         <p class="hint" id="profiel-hint"></p>
         <button class="btn" type="button" id="btn-profiel-go">Ontwerp voor me →</button>
@@ -1057,18 +1071,36 @@
     }
 
     // ---- Bedrijf: betalend laadplein (meerdere) ----
-    function nieuwBet(){ return { type:'ac22', palen:2, sessies:4 }; }
+    function nieuwBet(){ return { type:'ac22', palen:2, sessies:4, eenheidType:'', eenheden:0 }; }
+    // Punt 2 — sizing op AANTAL EENHEDEN (personeel/clubleden/stoelen) i.p.v. sessies. Zelfde bezoek-factoren als de
+    // server (_DEST_EENHEID_BEZOEK). bezoekers/dag = eenheden × factor; sessies/paal/dag ≈ bezoekers × EV(0,10) × capture(0,30) / palen.
+    var _BET_EENHEID_BEZOEK={ personeel:1.0, clubleden:0.15, stoelen:2.0 };
+    function _betSessiesUitEenheden(type, eenheden, palen){
+      var f=_BET_EENHEID_BEZOEK[type]; if(!f||!(eenheden>0)) return null;
+      var bezoekers=eenheden*f, sesTot=bezoekers*0.10*0.30, perPaal=sesTot/Math.max(1,palen||1);
+      return Math.max(0, Math.round(perPaal*2)/2);   // afgerond op 0,5
+    }
     function renderBet(){
       var host=$(STATE.betHost||'b-bet-lijst'); if(!host) return; host.innerHTML='';
       STATE.bet.forEach(function(g,i){
+        var driven=!!(g.eenheidType && _BET_EENHEID_BEZOEK[g.eenheidType]);
         var d=document.createElement('div'); d.className='wagen';
         d.innerHTML='<button class="del" data-i="'+i+'">✕</button><div style="font-weight:700;color:var(--navy);font-size:12.5px;margin-bottom:6px">Laadplein '+(i+1)+'</div>'+
           '<div class="row2"><div><label>Type</label><select data-b="'+i+'" data-k="type"><option value="ac22"'+(g.type==='ac22'?' selected':'')+'>AC 22 kW</option><option value="dc160"'+(g.type==='dc160'?' selected':'')+'>DC 160 kW</option></select></div><div><label>Aantal palen</label><input type="number" min="0" step="1" data-b="'+i+'" data-k="palen" value="'+g.palen+'"></div></div>'+
-          '<label>Sessies/paal/dag</label><input type="number" min="0" step="0.5" data-b="'+i+'" data-k="sessies" value="'+g.sessies+'">';
+          '<div class="row2"><div><label>Sizing op</label><select data-b="'+i+'" data-k="eenheidType"><option value="">— sessies invullen —</option><option value="personeel"'+(g.eenheidType==='personeel'?' selected':'')+'>personeelsleden</option><option value="clubleden"'+(g.eenheidType==='clubleden'?' selected':'')+'>clubleden</option><option value="stoelen"'+(g.eenheidType==='stoelen'?' selected':'')+'>stoelen (horeca)</option></select></div>'+
+          '<div><label>Aantal '+(driven?g.eenheidType:'eenheden')+'</label><input type="number" min="0" step="1" data-b="'+i+'" data-k="eenheden" value="'+(g.eenheden||0)+'"'+(driven?'':' disabled')+'></div></div>'+
+          '<label>Sessies/paal/dag'+(driven?' <span class="hint" style="display:inline;font-weight:400">(afgeleid — aanpasbaar)</span>':'')+'</label><input type="number" min="0" step="0.5" data-b="'+i+'" data-k="sessies" value="'+g.sessies+'">';
         host.appendChild(d);
       });
       Array.prototype.forEach.call(host.querySelectorAll('[data-b]'), function(inp){
-        inp.onchange=function(){ var i=+inp.getAttribute('data-b'), k=inp.getAttribute('data-k'); STATE.bet[i][k]=(k==='type')?inp.value:(+inp.value); };
+        inp.onchange=function(){ var i=+inp.getAttribute('data-b'), k=inp.getAttribute('data-k');
+          STATE.bet[i][k]=(k==='type'||k==='eenheidType')?inp.value:(+inp.value);
+          if(k==='eenheidType'||k==='eenheden'||k==='palen'){
+            var g=STATE.bet[i], s=_betSessiesUitEenheden(g.eenheidType, +g.eenheden, +g.palen);
+            if(s!=null){ g.sessies=s; }
+            renderBet();
+          }
+        };
       });
       Array.prototype.forEach.call(host.querySelectorAll('.del'), function(b){ b.onclick=function(){ STATE.bet.splice(+b.getAttribute('data-i'),1); if(!STATE.bet.length) STATE.bet.push(nieuwBet()); renderBet(); }; });
     }
@@ -1362,7 +1394,13 @@
       H.push('<button class="btn" type="button" id="btn-afsluit">Bevestigen →</button><div class="msg" id="afsluit-msg"></div>');
       el.innerHTML=H.join(''); el.classList.remove('hidden');
       var b=$('btn-afsluit'); if(b) b.onclick=afsluitGo;
-      var of=$('btn-af-offerte'), ofi=$('af-offerte'); if(of&&ofi){ of.onclick=function(){ ofi.click(); }; ofi.onchange=function(){ var m=$('af-offerte-msg'); if(m){ if(ofi.files&&ofi.files[0]){ m.style.color='#0a7a37'; m.textContent='✔ '+ofi.files[0].name+' — klaar om te verifiëren.'; } else m.textContent=''; } }; }
+      var of=$('btn-af-offerte'), ofi=$('af-offerte'); if(of&&ofi){ of.onclick=function(){ ofi.click(); }; ofi.onchange=function(){ var m=$('af-offerte-msg');
+        if(ofi.files&&ofi.files[0]){
+          // Punt 1: de winnende offerte écht uploaden → server leest ze (offerte-heranalyse) en stelt de 5de analyse samen.
+          if(m){ m.style.color='#0a7a37'; m.textContent='✔ '+ofi.files[0].name+' — we lezen en verifiëren uw offerte…'; }
+          try{ if(typeof offerteUpload==='function' && STATE.leadToken){ offerteUpload(ofi.files); } else if(m){ m.textContent='✔ '+ofi.files[0].name+' — klaar. (Open eerst uw nota zodat we ze aan uw dossier koppelen.)'; } }catch(e){}
+        } else if(m){ m.textContent=''; }
+      }; }
     }
     // Slice H: aanbod-rekenblok — verkoop / leasing / concessie (bedrijf) · consumentenkrediet (particulier).
     function _annu(r,n){ return (r<=0)?(1/n):(r/(1-Math.pow(1+r,-n))); }   // jaarlijkse annuïteitsfactor
@@ -2513,6 +2551,22 @@
         var m=$('m-profiel'); if(m) m.innerHTML='<option value="">— kies uw verbruiksprofiel —</option><option value="__res__">Residentieel — woning (particulier)</option>'+_sectorOpts(lijst);
       }).catch(function(){});
     }
+    // A2.4 (zonder KBO) — korte activiteit → /api/profiel-suggestie → selecteer het dichtste sectorprofiel in de dropdown.
+    var _sugTimer=null;
+    function _suggereerProfiel(actId, selId, sugId){
+      var act=(($(actId)||{}).value||'').trim(), sug=$(sugId), sel=$(selId); if(!sug||!sel) return;
+      if(act.length<3){ sug.textContent=''; return; }
+      clearTimeout(_sugTimer);
+      _sugTimer=setTimeout(function(){
+        sug.style.color='var(--muted)'; sug.textContent='⏳ zoeken naar het best passende profiel…';
+        fetch(API+'/api/profiel-suggestie?activiteit='+encodeURIComponent(act)).then(function(r){return r.ok?r.json():null;}).then(function(j){
+          var s=j&&j.suggestie; if(!s){ sug.style.color='var(--muted)'; sug.textContent='Geen duidelijk profiel gevonden — kies er zelf een hierboven.'; return; }
+          var opt=Array.prototype.filter.call(sel.options,function(o){ return o.value.toLowerCase()===String(s.naam).toLowerCase(); })[0];
+          if(opt){ sel.value=opt.value; try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} sug.style.color='#0a7a37'; sug.innerHTML='✔ Voorstel: <b>'+esc(s.naam)+'</b> — aangepast hierboven (u kan het wijzigen).'; }
+          else { sug.style.color='var(--muted)'; sug.textContent='Voorstel: '+s.naam+' (niet in de lijst — kies het dichtste hierboven).'; }
+        }).catch(function(){ sug.textContent=''; });
+      }, 500);
+    }
     // Type-toggle (particulier/bedrijf) + sector → profiel-waarde. Residentieel ⇒ particulier, sector ⇒ bedrijf.
     function _modusVanProfiel(val){ return (val==='__res__'||!val)?'particulier':'bedrijf'; }
     function _ekType(){ var el=document.querySelector('input[name="ektype"]:checked'); return el?el.value:'particulier'; }
@@ -2671,6 +2725,9 @@
       if($('btn-instap-verfijn')) $('btn-instap-verfijn').onclick=_naarFactuur;
       if($('btn-instap-mail')) $('btn-instap-mail').onclick=function(){ var mb=$('is-mailbox'); if(mb){ mb.classList.toggle('hidden'); var mi=$('is-mail-in'); if(mi&&!mi.value&&STATE.leveradres) mi.value=STATE.leveradres; } };
       if($('btn-instap-mail-go')) $('btn-instap-mail-go').onclick=instapMailGo;
+      // A2.4: activiteit → profielsuggestie (instap + factuur)
+      if($('is-activiteit')) $('is-activiteit').oninput=function(){ _suggereerProfiel('is-activiteit','is-sector','is-activiteit-sug'); };
+      if($('ek-activiteit')) $('ek-activiteit').oninput=function(){ _suggereerProfiel('ek-activiteit','ek-profiel','ek-activiteit-sug'); };
       Array.prototype.forEach.call(document.querySelectorAll('input[name="istype"]'), function(r){ r.onchange=syncIsType; });
       // ── Slice F: DIY-plaatsingstool (kabelplanner ?diy=1) vanuit de heatmap-keuze ──
       if($('btn-diy-plaats')) $('btn-diy-plaats').onclick=function(){ var u=location.pathname.replace(/[^/]*$/,'kabelplanner.html')+'?diy=1'; window.open(u,'_blank'); };
