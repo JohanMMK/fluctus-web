@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.49.0 (2026-09-11, offerte-scenario-simulatie [client], Johan):
+     Elke offerte kan andere hardware dragen (PV-kWp, batterij kW/kWh + RTE/DoD/cycli, laadpalen). Nieuwe knop
+     "🔬 Simuleer het scenario van deze offerte (3 lagen)" (_simuleerOfferte) → POST /api/offerte-simulatie met de
+     aansluiting-context (STATE.factuur) → toont base case (arbitrage z. onbalans), windfall op onbalans en betalend laden.
+     (Vereist de live simulator; enkel de UI/aanroep zit hier.) -->
 <!-- energiekompas.html v0.48.0 (2026-09-11, vervolg 1/2/3 [client, render-getest], Johan):
      (Punt 1) AFSLUITEN: de winnende offerte wordt nu ÉCHT geüpload (af-offerte → offerteUpload → /api/offerte-heranalyse),
        zodat de server de 5DE ANALYSE kan samenstellen (incl. KU Leuven bij een partner-offerte).
@@ -2456,9 +2461,32 @@
         H.push('<div class="hint" style="margin:6px 0 12px">Terugverdientijd = op het jaarvoordeel uit úw EnergieKompas-studie (zelfde basis). <b>Kwaliteit</b> weegt de batterij (DoD, RTE, gegarandeerde cycli) en de beschikbaarheid mee — daardoor kan een <b>iets duurdere offerte van een sterke partner</b> beter scoren dan de goedkoopste. Geen financieel advies; u beslist zelf.</div>');
       }
       H.push('<div id="offerte-detail"></div>');
+      // Simulatie van het scenario zoals gepresenteerd in de offerte (3 lagen: base-arbitrage / onbalans-windfall / betalend laden).
+      H.push('<div style="margin-top:10px"><button class="btn ghost sm" type="button" id="btn-off-sim">🔬 Simuleer het scenario van deze offerte (3 lagen)</button></div>');
+      H.push('<div id="off-sim-res" class="hint" style="margin-top:8px"></div>');
       H.push('<div class="hint" style="margin-top:8px">💡 Laad gerust nóg een offerte op — we zetten ze naast elkaar.</div>');
       panel.innerHTML=H.join('');
       var laatste=list[list.length-1]; _renderHeranalyse(laatste.heranalyse, laatste.offerte, $('offerte-detail'));
+      var bs=$('btn-off-sim'); if(bs) bs.onclick=function(){ _simuleerOfferte(laatste.offerte); };
+    }
+    // Roept /api/offerte-simulatie: simuleert de OFFERTE-hardware (PV, batterij kW/kWh + RTE/DoD/cycli, laadpalen)
+    // in de drie lagen. Vereist de aansluiting-context uit STATE.factuur. Enkel zinvol met de live simulator.
+    function _simuleerOfferte(offerte){
+      var res=$('off-sim-res'); if(!res||!offerte) return;
+      var f=STATE.factuur||{};
+      var prof=(($('ek-profiel')||{}).value||($('b-profiel')||{}).value||'kantoor');
+      var body={ token:STATE.leadToken||'', offerte:offerte, afname_mwh:(+f.afnMwh||0), aansluiting_kva:(+f.kva||0), spanning:(f.spann||''), profielNaam:prof };
+      res.style.color='var(--muted)'; res.textContent='⏳ We simuleren het scenario van deze offerte (base case, onbalans-windfall, betalend laden)…';
+      fetch(API+'/api/offerte-simulatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json();}).then(function(j){
+          if(!j||!j.ok){ res.style.color='#b00'; res.textContent=(j&&j.error)||'Kon deze offerte niet simuleren.'; return; }
+          var L=j.lagen||{}, hw=j.hardware||{};
+          var html='<div style="font-weight:700;color:var(--navy);margin-bottom:4px">Scenario uit deze offerte'+(hw.batterij?(' — batterij '+hw.batterij.kwh+' kWh / '+hw.batterij.kw+' kW · RTE '+hw.batterij.rte_pct+'% · DoD '+hw.batterij.dod_pct+'% · '+hw.batterij.cycli+' cycli'):'')+(hw.pv_kwp?(' · PV '+hw.pv_kwp+' kWp'):'')+'</div>';
+          html+='<div>Base case (arbitrage, zonder onbalans): <b>'+((L.arbitrage&&L.arbitrage.meerwaarde_vs_basis_jaar!=null)?(eur(L.arbitrage.meerwaarde_vs_basis_jaar)+'/j meerwaarde'):'—')+'</b></div>';
+          html+='<div>Windfall op onbalans (passieve respons): <b>'+((L.onbalans&&L.onbalans.meerwaarde_vs_arbitrage_jaar!=null)?(eur(L.onbalans.meerwaarde_vs_arbitrage_jaar)+'/j extra'):((L.onbalans&&L.onbalans.niet_van_toepassing)?'n.v.t. (geen flexibele asset)':'—'))+'</b></div>';
+          html+='<div>Betalend laden: <b>'+((L.betalend_laden&&L.betalend_laden.palen)?(L.betalend_laden.palen.reduce(function(s,p){return s+(+p.aantal||0);},0)+' laadpunt(en) — opbrengst volgt uit de bezoekers-/eenheden-sizing'):'geen laadpalen in de offerte')+'</b></div>';
+          res.style.color='var(--ink)'; res.innerHTML=html;
+        }).catch(function(){ res.style.color='#b00'; res.textContent='Kon niet simuleren — probeer opnieuw.'; });
     }
     function _renderHeranalyse(h, off, target){
       var panel=target||$('offerte-panel'); if(!panel||!h) return;
