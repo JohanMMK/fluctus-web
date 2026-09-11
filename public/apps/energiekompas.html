@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.50.0 (2026-09-11, factuurmail-abonnement deep-link + e-mailwijziging [client], Johan):
+     (A) DEEP-LINK ?case=<token>: opent een dossier dat via de factuurmail-intake is aangemaakt — haalt de baseCase op
+         (GET /api/inbound-case), zet modus, toont "factuur gelezen" + profiel-blok (naFactuur) zodat de klant rapport 1
+         verfijnt en verder gaat in de journey (= de "volgende stap na rapport 1" uit de rapport-mail).
+     (B) E-MAILADRES WIJZIGEN: op de verify-stap kan de klant een nieuw adres aanvragen (btn-mailwijzig → POST
+         /api/case/mail-wijzig-aanvraag) — wij mailen een bevestigingslink naar het HUIDIGE adres. ?mailconfirm=<code>
+         bevestigt (POST /api/case/mail-wijzig-bevestig); daarna krijgt de klant een OTP op het NIEUWE adres (mail_otp_pending
+         → verifySend op het nieuwe adres). Additief; bestaande flows ongewijzigd. Server: v15.141.0. -->
 <!-- energiekompas.html v0.49.0 (2026-09-11, offerte-scenario-simulatie [client], Johan):
      Elke offerte kan andere hardware dragen (PV-kWp, batterij kW/kWh + RTE/DoD/cycli, laadpalen). Nieuwe knop
      "🔬 Simuleer het scenario van deze offerte (3 lagen)" (_simuleerOfferte) → POST /api/offerte-simulatie met de
@@ -760,6 +768,15 @@
         <button class="linkbtn" type="button" id="btn-verify-resend">Geen code ontvangen? Opnieuw sturen</button>
       </div>
       <div class="msg" id="verify-msg"></div>
+      <div id="verify-mailwijzig" style="margin-top:10px">
+        <button class="linkbtn" type="button" id="btn-mailwijzig">Verkeerd e-mailadres? Wijzig het voor dit dossier</button>
+        <div id="mailwijzig-blok" class="hidden manueelbox">
+          <div class="grid2"><div><label>Nieuw e-mailadres</label><input type="email" id="mailwijzig-in" placeholder="naam@bedrijf.be"></div></div>
+          <button class="btn" type="button" id="btn-mailwijzig-go">Stuur bevestiging naar mijn huidige adres →</button>
+          <p class="hint" style="margin:6px 0 0">We sturen een bevestigingslink naar uw <b>huidige</b> adres. Na bevestiging krijgt u een code op het <b>nieuwe</b> adres.</p>
+          <div class="msg" id="mailwijzig-msg"></div>
+        </div>
+      </div>
     </div>
 
     <!-- STAP 7ter — PROFIELDATA-TOEGANG (S7, Johan): na e-mailbevestiging tonen we het verbruiksadres (factuur) + de
@@ -1841,6 +1858,53 @@
       var mo=$('btn-mandaat-open'); if(mo) mo.classList.remove('hidden');   // self-service mandaat kan nu
       if(STATE.leadToken){ try{ fetch(API+'/api/lead-factuur-ontvangen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})}); }catch(e){} }  // Slice B: factuur binnen → reminders stoppen
     }
+    // ── v0.50 (Johan): FACTUURMAIL-DEEP-LINK ?case=<token> + E-MAILWIJZIGING ────────────────────
+    // Opent een dossier dat via de factuurmail-intake is aangemaakt. Haalt de baseCase op, zet modus, toont
+    // "factuur gelezen" + profiel-blok (naFactuur) → de klant verfijnt rapport 1 en gaat verder in de journey.
+    // Bij een lopende e-mailwijziging (mail_otp_pending) sturen we de klant eerst naar de OTP op het NIEUWE adres.
+    function _hervatCase(token, errMsg){
+      fetch(API+'/api/inbound-case/'+encodeURIComponent(token)).then(function(r){return r.ok?r.json():null;}).then(function(j){
+        if(!j||!j.ok){ return; }
+        STATE.leadToken=token; STATE.leadVerified=!!j.verified;
+        var pp=$('stap-partner'); if(pp) pp.classList.add('hidden');
+        var pi=$('stap-instap'); if(pi) pi.classList.add('hidden');
+        if(j.mail_otp_pending){   // nieuw e-mailadres bevestigd → verificatie op dat nieuwe adres
+          if($('verify-mail')) $('verify-mail').textContent = j.mail_masked||'uw nieuwe adres';
+          $('verify-code-blok').classList.add('hidden'); $('verify-msg').textContent='';
+          toon('stap-verify');
+          if(errMsg){ $('verify-msg').style.color='#b00'; $('verify-msg').textContent=errMsg; }
+          verifySend();   // stuurt de code naar het (server-side) nieuwe adres
+          return;
+        }
+        if(!j.baseCase){ if(errMsg){ try{ alert(errMsg); }catch(e){} } return; }   // niet-inbound lead → app opent normaal
+        var bc=j.baseCase; STATE.baseCase=bc;
+        zetModus(j.modus||((bc.klantBtw||(+bc.aansluitVermogenKva||0)>25||bc.spanningsniveau==='MS')?'bedrijf':'particulier'));
+        toon('stap-start');
+        try{ _toonFactuurLezen(bc); }catch(e){}
+        naFactuur(bc);
+        var fm=$('factuur-msg'); if(fm){ if(errMsg){ fm.style.color='#b00'; fm.textContent=errMsg; } else { fm.style.color='#0a7a37'; fm.textContent='✔ We openden uw dossier op basis van de factuur die u ons bezorgde. Bevestig hieronder uw profiel voor uw exacte cijfer.'; } }
+      }).catch(function(){});
+    }
+    function _mailConfirm(token, code){
+      fetch(API+'/api/case/mail-wijzig-bevestig',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token, code:code})})
+        .then(function(r){return r.json();}).then(function(j){
+          if(j&&j.ok){ _hervatCase(token); }                                   // nieuw adres actief → inbound-case geeft mail_otp_pending → OTP
+          else { _hervatCase(token, (j&&j.error)||'De bevestigingslink is ongeldig of verlopen.'); }
+        }).catch(function(){ _hervatCase(token); });
+    }
+    function mailWijzigGo(){
+      var msg=$('mailwijzig-msg'), nw=(($('mailwijzig-in')||{}).value||'').trim();
+      if(!STATE.leadToken){ if(msg){ msg.style.color='#b00'; msg.textContent='Geen dossier geopend.'; } return; }
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(nw)){ if(msg){ msg.style.color='#b00'; msg.textContent='Vul een geldig e-mailadres in.'; } return; }
+      if(msg){ msg.style.color='var(--muted)'; msg.textContent='⏳ Versturen…'; }
+      fetch(API+'/api/case/mail-wijzig-aanvraag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, nieuw_mail:nw})})
+        .then(function(r){return r.json();}).then(function(j){
+          if(!msg) return;
+          if(j&&j.ok){ msg.style.color='#0a7a37'; msg.textContent='✔ We stuurden een bevestigingslink naar uw huidige adres'+(j.naar_masked?(' ('+esc(j.naar_masked)+')'):'')+'. Klik die link om het nieuwe adres te activeren; daarna krijgt u een code op het nieuwe adres.'; }
+          else { msg.style.color='#b00'; msg.textContent=(j&&j.error)||'Kon de aanvraag niet versturen.'; }
+        }).catch(function(){ if(msg){ msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet versturen — probeer opnieuw.'; } });
+    }
+
     // ── VOORSCHOTFACTUUR-GATE ─────────────────────────────────────────────────────────────────
     // Een voorschotfactuur mist verbruik/netkosten. We annualiseren NIET (dat gaf stil verkeerde
     // marges), maar tonen een gate: jaarafrekening opladen (juist), mandaat opzetten (echte uitweg),
@@ -2763,6 +2827,11 @@
       if($('btn-boekhouding')) $('btn-boekhouding').onclick=boekhoudingGo;
       if(qp('factuur')==='1' && qp('lead')){ STATE.leadToken=qp('lead'); _naarFactuur();
         var _fm=$('factuur-msg'); if(_fm){ _fm.style.color='#1F3864'; _fm.textContent='Laad hier de factuur op — dit hoort bij het verzoek dat u per e-mail kreeg.'; } }
+      // v0.50: factuurmail-deep-link + e-mailwijziging
+      if($('btn-mailwijzig')) $('btn-mailwijzig').onclick=function(){ var b=$('mailwijzig-blok'); if(b) b.classList.toggle('hidden'); };
+      if($('btn-mailwijzig-go')) $('btn-mailwijzig-go').onclick=mailWijzigGo;
+      var _caseTok=qp('case')||'';
+      if(_caseTok){ var _mc=qp('mailconfirm')||''; if(_mc){ _mailConfirm(_caseTok, _mc); } else { _hervatCase(_caseTok); } }
       // ── Funnel-bediening ──
       $('btn-factuur').onclick=function(){ $('factuur-input').click(); };
       $('factuur-input').onchange=function(){ if(this.files&&this.files.length) leesFactuur(this.files); };
