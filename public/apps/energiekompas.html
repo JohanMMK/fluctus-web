@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.51.0 (2026-09-11, inbound volledige studie + abonnement-pitch [client], Johan):
+     (A) INBOUND-CASE: bij een ?case=-deep-link verschijnt onder de factuur een CTA "Volledige studie (wagenpark +
+         profiel + heatmap)" (btn-inbound-volledig → naarVerify) die de bestaande keten start: OTP → mandaat/profiel-
+         toegang → wagenpark (stap-hoe) → exacte studie + heatmap. Hergebruikt de volledige bestaande flow.
+     (B) ABONNEMENT-PITCH op de verify-stap (net vóór de OTP): met een geregistreerd adres kan de klant zijn studie
+         maandelijks automatisch laten bijwerken door zijn factuur-mailbox te laten doorsturen naar energiekompas@fluctus.net
+         → vernieuwd rapport per factuur. Additief; bestaande flows ongewijzigd. Server: v15.142.4+. -->
 <!-- energiekompas.html v0.50.0 (2026-09-11, factuurmail-abonnement deep-link + e-mailwijziging [client], Johan):
      (A) DEEP-LINK ?case=<token>: opent een dossier dat via de factuurmail-intake is aangemaakt — haalt de baseCase op
          (GET /api/inbound-case), zet modus, toont "factuur gelezen" + profiel-blok (naFactuur) zodat de klant rapport 1
@@ -524,6 +531,14 @@
       </div>
       <!-- Self-service mandaat: zodra er een factuur is, kan men meteen een Fluvius-mandaat opzetten op de EAN. -->
       <button class="linkbtn hidden" type="button" id="btn-mandaat-open" style="margin-top:6px">🔐 Of: geef ons toegang tot uw gebruiksprofiel bij Fluvius (exacte studie) →</button>
+      <!-- v0.51 (Johan): INBOUND-CASE — na een factuurmail bieden we meteen de VOLLEDIGE studie aan (wagenpark per type
+           + toegang tot het profiel → volledige run + heatmap). Enkel zichtbaar bij een ?case=-deep-link. Start de
+           bestaande keten: e-mail bevestigen (OTP) → profiel-toegang (mandaat) → wagenpark → exacte studie + heatmap. -->
+      <div id="inbound-volledig" class="hidden" style="margin-top:14px;padding:12px 14px;background:#EAF3EC;border:1px solid #A9CDB4;border-radius:9px">
+        <div style="font-weight:700;color:#1F3864;margin-bottom:4px">Wilt u meteen uw volledige studie?</div>
+        <div class="hint" style="margin:0 0 10px">Boven ziet u uw onderhandelingsmarge (rapport 1). Voor de <b>volledige analyse</b> — met uw <b>wagenpark</b> en uw <b>werkelijke verbruiksprofiel</b>, inclusief de <b>heatmap</b> waarin u zelf combinaties kiest — bevestigt u eerst uw e-mail en geeft u ons toegang tot uw profiel.</div>
+        <button class="btn" type="button" id="btn-inbound-volledig">🔓 Volledige studie (wagenpark + profiel + heatmap) →</button>
+      </div>
     </div>
 
     <!-- STAP M — SELF-SERVICE MANDAAT-INTAKE -->
@@ -761,6 +776,11 @@
     <div class="card hidden" id="stap-verify">
       <div class="stapkop"><span class="stapnr">7</span> Bevestig uw e-mail</div>
       <p class="hint">Om uw <b>exacte studie</b> te maken (op uw echte profiel) bevestigen we eerst uw e-mail — <b>zo weten we zeker dat u het zelf bent</b> die dit aanvraagt. We sturen een code naar <b id="verify-mail">uw adres</b>.</p>
+      <!-- v0.51 (Johan): abonnement-pitch net vóór de OTP — met een geregistreerd adres kan de klant zijn studie
+           elke maand automatisch laten bijwerken door zijn factuur-mailbox te laten doorsturen naar energiekompas. -->
+      <div style="margin:6px 0 12px;padding:10px 12px;background:#F4F7FB;border:1px solid #D6E0EC;border-radius:9px;font-size:13px;color:#1F3864">
+        <b>💡 Gratis: elke maand een verse analyse.</b> Met een geregistreerd e-mailadres houden we uw studie automatisch up-to-date. Stel in de mailbox waar u uw <b>elektronische factuur</b> ontvangt een <b>automatische doorstuur</b> in naar <b>energiekompas@fluctus.net</b> — bij elke nieuwe factuur krijgt u een <b>vernieuwd rapport</b> op uw geregistreerde adres. U beslist zelf; opzeggen kan altijd.
+      </div>
       <button class="btn" type="button" id="btn-verify-send">Stuur mij de code →</button>
       <div id="verify-code-blok" class="hidden manueelbox">
         <div class="grid2"><div><label>Code (6 cijfers)</label><input type="text" id="verify-code" inputmode="numeric" maxlength="6" placeholder="123456"></div></div>
@@ -1877,11 +1897,12 @@
           return;
         }
         if(!j.baseCase){ if(errMsg){ try{ alert(errMsg); }catch(e){} } return; }   // niet-inbound lead → app opent normaal
-        var bc=j.baseCase; STATE.baseCase=bc;
+        var bc=j.baseCase; STATE.baseCase=bc; STATE.inboundCase=true; STATE.inboundMailMasked=j.mail_masked||'';
         zetModus(j.modus||((bc.klantBtw||(+bc.aansluitVermogenKva||0)>25||bc.spanningsniveau==='MS')?'bedrijf':'particulier'));
         toon('stap-start');
         try{ _toonFactuurLezen(bc); }catch(e){}
         naFactuur(bc);
+        var iv=$('inbound-volledig'); if(iv) iv.classList.remove('hidden');   // v0.51: bied meteen de volledige studie aan
         var fm=$('factuur-msg'); if(fm){ if(errMsg){ fm.style.color='#b00'; fm.textContent=errMsg; } else { fm.style.color='#0a7a37'; fm.textContent='✔ We openden uw dossier op basis van de factuur die u ons bezorgde. Bevestig hieronder uw profiel voor uw exacte cijfer.'; } }
       }).catch(function(){});
     }
@@ -2830,6 +2851,8 @@
       // v0.50: factuurmail-deep-link + e-mailwijziging
       if($('btn-mailwijzig')) $('btn-mailwijzig').onclick=function(){ var b=$('mailwijzig-blok'); if(b) b.classList.toggle('hidden'); };
       if($('btn-mailwijzig-go')) $('btn-mailwijzig-go').onclick=mailWijzigGo;
+      // v0.51: inbound-case → start de volledige studie (OTP → mandaat → wagenpark → exacte heatmap).
+      if($('btn-inbound-volledig')) $('btn-inbound-volledig').onclick=function(){ naarVerify(); if(STATE.inboundMailMasked && $('verify-mail')) $('verify-mail').textContent=STATE.inboundMailMasked; };
       var _caseTok=qp('case')||'';
       if(_caseTok){ var _mc=qp('mailconfirm')||''; if(_mc){ _mailConfirm(_caseTok, _mc); } else { _hervatCase(_caseTok); } }
       // ── Funnel-bediening ──
