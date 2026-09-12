@@ -1,4 +1,8 @@
 <!doctype html>
+<!-- energiemarkt.html v1.2.0 — 2026-09-12 12:14 (Europe/Brussels) — LOPENDE ONBALANSDAG ZICHTBAAR: de grafiek
+     toonde onbalans/wind/zon enkel tot het einde van de laatste VOLLEDIGE UTC-dag (>=92 kwartieren), waardoor de
+     al opgehaalde kwartieren van de lopende dag (tot ~22u oud) onzichtbaar bleven. De grafiek loopt nu door tot het
+     laatste beschikbare punt; KPI's, dagspread en waardeberekening blijven op volledige dagen rekenen. -->
 <!-- energiemarkt.html v1.1.0 — 2026-09-02 13:36 (Europe/Brussels) — ENTSO-E-onderhoud zacht afgehandeld:
      proxy v15.131.0 geeft {source_unavailable:true,...} → badge "ENTSO-E in onderhoud, spot toont laatst
      bekende data" + log-warn i.p.v. een rode HTTP 500 in de console; lege spot-respons overschrijft de
@@ -775,7 +779,9 @@ function fdApplyRange(){
   var cutoff=endOfWindow-rangeDays*86400000;
 
   // Spot loopt door naar rechts (day-ahead publiceert tot D+1 ~14u).
-  // Onbalans, wind en zon blijven binnen de volledige dagen (= tot endOfWindow).
+  // Onbalans, wind en zon worden voor de REKENKUNDE (KPI's, dagspread,
+  // waardeberekening) begrensd tot endOfWindow = enkel VOLLEDIGE dagen. Anders
+  // vertekent een halve laatste dag de gemiddelden en de dagspread.
   viewSpot =cache.spot .filter(function(p){return p.t>=cutoff;});
   viewImb  =cache.imb  .filter(function(p){return p.t>=cutoff && p.t<endOfWindow;});
   viewWind =(cache.wind ||[]).filter(function(p){return p.t>=cutoff && p.t<endOfWindow;});
@@ -786,13 +792,28 @@ function fdApplyRange(){
   // De grafiek toont wel de volledige viewSpot (incl. vandaag/morgen).
   var viewSpotCapped=viewSpot.filter(function(p){return p.t<endOfWindow;});
 
+  // ── GRAFIEK: toon ook de LOPENDE (nog onvolledige) onbalansdag ────────────
+  // Elia publiceert onbalans met ~12u vertraging, dus de laatste dag is bijna
+  // altijd onvolledig. Die kwartieren zitten wél in de cache; ze wegknippen gaf
+  // een grafiek die tot ~22u vroeger stopte dan de data die net binnenkwam.
+  // Rechterrand = het laatste prijspunt (spot of onbalans); wind/zon mogen daar
+  // niet voorbij lopen, anders loopt de groene lijn in de toekomst.
+  var lastSpotT=viewSpot.length?viewSpot[viewSpot.length-1].t:0;
+  var lastImbT =(cache.imb&&cache.imb.length)?cache.imb[cache.imb.length-1].t:0;
+  var chartEnd =Math.max(lastSpotT,lastImbT)+1;
+  var chartImb  =cache.imb  .filter(function(p){return p.t>=cutoff && p.t<chartEnd;});
+  var chartWind =(cache.wind ||[]).filter(function(p){return p.t>=cutoff && p.t<chartEnd;});
+  var chartSolar=(cache.solar||[]).filter(function(p){return p.t>=cutoff && p.t<chartEnd;});
+
   var startLabel=new Date(cutoff).toISOString().slice(0,10);
   var spotEnd=viewSpot.length?new Date(viewSpot[viewSpot.length-1].t):new Date(endOfWindow-1);
   var spotEndLabel=spotEnd.toISOString().slice(0,10)+' '+String(spotEnd.getUTCHours()).padStart(2,'0')+'u';
-  log('Periode '+rangeDays+'d: '+startLabel+' → '+spotEndLabel+' ('+viewSpot.length+' spot, '+viewImb.length+' imb punten)','info');
+  var imbExtra=chartImb.length-viewImb.length;
+  log('Periode '+rangeDays+'d: '+startLabel+' → '+spotEndLabel+' ('+viewSpot.length+' spot, '+viewImb.length+' imb punten'
+      +(imbExtra>0?(' + '+imbExtra+' imb van de lopende dag — wel in de grafiek, niet in de KPI\'s'):'')+')','info');
 
-  if(viewSpot.length||viewImb.length){
-    buildChart1(viewSpot,viewImb,viewWind,viewSolar);
+  if(viewSpot.length||chartImb.length){
+    buildChart1(viewSpot,chartImb,chartWind,chartSolar);
     allDaily=dailyStats(viewSpot,viewImb);
     fdFilter();
     updateMetrics(viewSpotCapped,viewImb,allDaily);
