@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.3.0 (2026-08-31, Fase 4) — SELF-SERVICE: losse entries tonen aanvrager (naam/mail/rol) +
+<!-- mandaten.html v0.4.0 (2026-09-12) — HANDMATIGE FLUVIUS-SYNC: knop "Plak → Sync" plakt de JSON die de
+     Fluvius-bookmarklet (bookmarklet.src.js) op het klembord zette en POST't ze naar /api/mandaat/sync
+     (Supabase-manager-token). Geen agent → geen classifier. Additief; Ververs/filters ongewijzigd.
+     mandaten.html v0.3.0 (2026-08-31, Fase 4) — SELF-SERVICE: losse entries tonen aanvrager (naam/mail/rol) +
      bron; supermanager kan rol (klant/adviseur) én partner corrigeren via /api/mandaat/los-patch.
      mandaten.html v0.2.0 (2026-08-27, Fase 3) — MANAGER-overzicht van de mandaat-wachtrij (rec.mandaat).
      v0.2.0: bevestig/weiger-knoppen op adres_mismatch-rijen (POST /api/mandaat/bevestig-adres). v0.1.0 basis:
@@ -74,7 +77,18 @@
       <span class="chip" data-f="geleverd">Geleverd</span>
       <span class="chip" data-f="special">⚠ Te verifiëren</span>
       <button class="btn ghost" id="ververs" style="margin-left:8px">↻ Ververs</button>
+      <button class="btn" id="syncknop">📋 Plak → Sync</button>
       <span class="cnt" id="cnt"></span>
+    </div>
+    <div id="syncpaneel" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Fluvius-status syncen</div>
+      <div class="sub" style="margin-bottom:8px">Klik de <b>Fluvius-bookmarklet</b> op mijn.fluvius.be (ingelogd), tik <b>Kopieer</b>, en plak de tekst hieronder. Daarna <b>Sync nu</b>.</div>
+      <textarea id="syncdata" placeholder='Plak hier de gekopieerde tekst ({"items":[…]})' style="width:100%;height:90px;border:1px solid var(--line);border-radius:8px;padding:8px;font:12px ui-monospace,Menlo,Consolas,monospace"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="syncdoen">Sync nu</button>
+        <button class="btn ghost" id="syncsluit">Sluiten</button>
+        <span class="cnt" id="syncmeld" style="margin-left:0"></span>
+      </div>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
     <div class="legend" id="legend" style="display:none">
@@ -200,11 +214,42 @@
         laad();
       }catch(e){ alert('Fout: '+e.message); }
     };
+    // v0.4.0: handmatige Fluvius-sync — plak de bookmarklet-JSON en schrijf de status in bulk terug.
+    function syncMeld(t, kleur){ var e=$('syncmeld'); if(e){ e.textContent=t||''; e.style.color=kleur||''; } }
+    window.syncToggle = function(open){
+      var p=$('syncpaneel'); if(!p) return;
+      var toon = (open===undefined) ? (p.style.display==='none') : !!open;
+      p.style.display = toon ? 'block' : 'none';
+      if(toon){ syncMeld(''); var ta=$('syncdata'); if(ta){ ta.focus(); } }
+    };
+    window.syncDoen = async function(){
+      var ta=$('syncdata'); var raw=(ta&&ta.value||'').trim();
+      if(!raw){ syncMeld('Plak eerst de gekopieerde tekst.', '#b23'); return; }
+      var items=null;
+      try{ var parsed=JSON.parse(raw); items = Array.isArray(parsed) ? parsed : (parsed && parsed.items); }
+      catch(e){ syncMeld('Kon de tekst niet lezen (geen geldige JSON). Kopieer opnieuw via de bookmarklet.', '#b23'); return; }
+      if(!Array.isArray(items) || !items.length){ syncMeld('Geen mandaten in de geplakte tekst gevonden.', '#b23'); return; }
+      var geldig = items.filter(function(x){ return x && /^\d{18}$/.test(String(x.ean||'').replace(/\s/g,'')); });
+      if(!geldig.length){ syncMeld('Geen geldige EAN’s (18 cijfers) in de tekst.', '#b23'); return; }
+      syncMeld('Syncen… ('+geldig.length+' EAN’s)', 'var(--muted)');
+      try{
+        var r = await fetch(PROXY+'/api/mandaat/sync', { method:'POST', headers: await authHeaders(), body: JSON.stringify({ items: geldig }) });
+        var j = await r.json().catch(function(){ return {}; });
+        if(r.status===403){ syncMeld('Enkel voor managers.', '#b23'); return; }
+        if(!r.ok){ syncMeld('Fout ('+r.status+'): '+(j.error||'onbekend'), '#b23'); return; }
+        syncMeld('✓ '+ (j.ontvangen!=null?j.ontvangen:geldig.length) +' verwerkt · '+(j.projecten_bijgewerkt||0)+' project(en) bijgewerkt · '+(j.los_toegevoegd||0)+' los toegevoegd', '#059669');
+        if(ta) ta.value='';
+        await laad();
+      }catch(e){ syncMeld('Kan de server niet bereiken: '+e.message, '#b23'); }
+    };
     window.addEventListener('DOMContentLoaded', async function(){
       Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(c){
         c.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); }); c.classList.add('on'); FILT=c.getAttribute('data-f'); render(); };
       });
       $('ververs').onclick=laad;
+      $('syncknop').onclick=function(){ syncToggle(); };
+      $('syncdoen').onclick=syncDoen;
+      $('syncsluit').onclick=function(){ syncToggle(false); };
       try{ await loadConfig(); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
     });
