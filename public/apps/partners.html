@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partners · Fluctus</title>
+<!-- partners.html v0.1.0 (2026-09-12) — PARTNER-BEHEER (manager). CRUD partners (id, naam, thema, e-maildomeinen)
+     via GET/POST/DELETE /api/partners; toont de adviseurs (uit leads + losse mandaten) met hun expliciete én
+     uit-mail-afgeleide partner via GET /api/partners/adviseurs. Voeg een e-maildomein aan een partner toe →
+     adviseurs met dat domein hangen voortaan automatisch aan die partner (in nieuwe intakes). -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --teal:#0E7C86; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .wrap{ max-width:1100px; margin:0 auto; padding:18px 20px 60px; }
+  h2{ font-size:15px; color:var(--navy); margin:24px 0 10px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .btn.del{ background:#fff; color:#b23; border:1.5px solid #f2c7c7; }
+  label{ display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  input,select{ width:100%; border:1.5px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .tbl-wrap{ overflow-x:auto; background:#fff; border:1px solid var(--line); border-radius:12px; }
+  table{ border-collapse:collapse; width:100%; font-size:12.5px; min-width:640px; }
+  th,td{ text-align:left; padding:9px 11px; border-bottom:1px solid #eef2f8; vertical-align:middle; }
+  th{ background:#f7faff; color:var(--navy); font-weight:700; white-space:nowrap; }
+  .code{ font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .sub{ color:var(--muted); font-size:11px; }
+  .pill{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; background:#eef2f8; color:var(--navy2); }
+  .ok{ color:var(--green); font-weight:700; } .warn{ color:#9E480E; font-weight:700; }
+  .state{ padding:24px; text-align:center; color:var(--muted); }
+  .fout{ padding:24px; text-align:center; color:#b23; }
+  .msg{ font-size:12.5px; margin-left:8px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>🤝 Partners</h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="who" id="who"></span>
+      <a href="/apps/mandaten.html">Mandaten →</a>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap" id="wrap"><div class="state">Laden…</div></div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='', PARTNERS=[], ADVISEURS=[];
+    var THEMES=['fluctus','jacops','edrive','wattkraft','energypro'];
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+    async function initAuth(){
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('wrap').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d = await sb.auth.getSession(); SESSION = d.data.session;
+      if(!SESSION){ window.location.href='/portal.html'; return; }
+      $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      await laad();
+    }
+    async function authHeaders(){
+      var tok = SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function laad(){
+      $('wrap').innerHTML='<div class="state">Partners laden…</div>';
+      var r;
+      try{ r = await fetch(PROXY+'/api/partners/adviseurs', { headers: await authHeaders() }); }
+      catch(e){ $('wrap').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+      if(r.status===403){ $('wrap').innerHTML='<div class="fout">Enkel voor managers.</div>'; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      if(!r.ok){ $('wrap').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+      var j = await r.json(); PARTNERS = j.partners||[]; ADVISEURS = j.adviseurs||[];
+      render();
+    }
+
+    function themaOpts(sel){ return THEMES.map(function(t){ return '<option value="'+t+'"'+(t===sel?' selected':'')+'>'+t+'</option>'; }).join(''); }
+
+    function render(){
+      var h='';
+      // 1) Partners-tabel
+      h+='<h2>Partners</h2><div class="tbl-wrap"><table><thead><tr><th>Id</th><th>Naam</th><th>Thema</th><th>E-maildomeinen</th><th></th></tr></thead><tbody>';
+      if(!PARTNERS.length){ h+='<tr><td colspan="5" class="sub" style="padding:14px">Nog geen partners gedefinieerd.</td></tr>'; }
+      PARTNERS.forEach(function(p){
+        h+='<tr>'+
+          '<td class="code">'+esc(p.id)+'</td>'+
+          '<td><input value="'+esc(p.naam||'')+'" id="n_'+esc(p.id)+'"></td>'+
+          '<td><select id="t_'+esc(p.id)+'">'+themaOpts(p.thema||p.id)+'</select></td>'+
+          '<td><input value="'+esc((p.domeinen||[]).join(', '))+'" id="d_'+esc(p.id)+'" placeholder="bv. jacops.be, jacops.eu"></td>'+
+          '<td style="white-space:nowrap"><button class="btn" onclick="bewaar(\''+esc(p.id)+'\')">Bewaar</button> <button class="btn del" onclick="verwijder(\''+esc(p.id)+'\')">✕</button> <span class="msg" id="m_'+esc(p.id)+'"></span></td>'+
+        '</tr>';
+      });
+      h+='</tbody></table></div>';
+      // 2) Nieuwe partner
+      h+='<h2>Nieuwe partner</h2><div class="card"><div class="grid">'+
+        '<div><label>Id (kleine letters, uniek)</label><input id="np_id" placeholder="bv. jacops"></div>'+
+        '<div><label>Naam</label><input id="np_naam" placeholder="bv. Jacops"></div>'+
+        '<div><label>Thema (huisstijl)</label><select id="np_thema">'+themaOpts('fluctus')+'</select></div>'+
+        '<div><label>E-maildomeinen (komma-gescheiden)</label><input id="np_dom" placeholder="bv. jacops.be, jacops.eu"></div>'+
+        '</div><div style="margin-top:12px"><button class="btn" onclick="nieuw()">Partner toevoegen</button> <span class="msg" id="np_msg"></span></div></div>';
+      // 3) Adviseurs
+      h+='<h2>Adviseurs (uit leads + mandaten)</h2><div class="tbl-wrap"><table><thead><tr><th>E-mail</th><th>Naam</th><th>Partner (ingevuld)</th><th>Partner (uit e-mail)</th></tr></thead><tbody>';
+      if(!ADVISEURS.length){ h+='<tr><td colspan="4" class="sub" style="padding:14px">Nog geen adviseurs gezien.</td></tr>'; }
+      ADVISEURS.forEach(function(a){
+        var afg = a.partner_afgeleid ? ('<span class="ok">'+esc(a.partner_afgeleid)+'</span>') : '<span class="warn">— geen domein-match</span>';
+        h+='<tr>'+
+          '<td class="code">'+esc(a.mail)+'</td>'+
+          '<td>'+esc(a.naam||'—')+'</td>'+
+          '<td>'+(a.partner_expliciet?('<span class="pill">'+esc(a.partner_expliciet)+'</span>'):'<span class="sub">—</span>')+'</td>'+
+          '<td>'+afg+'</td>'+
+        '</tr>';
+      });
+      h+='</tbody></table></div>';
+      h+='<p class="sub" style="margin-top:10px">Tip: staat er bij een adviseur "geen domein-match", voeg dan zijn e-maildomein toe aan de juiste partner hierboven. Nieuwe intakes zonder expliciete partner-URL hangen dan automatisch aan die partner. Bestaande losse mandaten corrigeer je per EAN in de Mandaten-app.</p>';
+      $('wrap').innerHTML=h;
+    }
+
+    function parseDom(s){ return String(s||'').split(/[,;\s]+/).map(function(x){ return x.toLowerCase().replace(/^@/,'').trim(); }).filter(Boolean); }
+
+    window.bewaar = async function(id){
+      var naam=($('n_'+id)||{}).value, thema=($('t_'+id)||{}).value, dom=parseDom(($('d_'+id)||{}).value);
+      $('m_'+id).textContent='…';
+      try{
+        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, naam:naam, thema:thema, domeinen:dom }) });
+        var j=await r.json().catch(function(){return {};});
+        if(!r.ok){ $('m_'+id).innerHTML='<span class="warn">'+esc(j.error||r.status)+'</span>'; return; }
+        $('m_'+id).innerHTML='<span class="ok">✓</span>'; await laad();
+      }catch(e){ $('m_'+id).innerHTML='<span class="warn">'+esc(e.message)+'</span>'; }
+    };
+    window.verwijder = async function(id){
+      if(!confirm('Partner "'+id+'" verwijderen?')) return;
+      try{
+        var r=await fetch(PROXY+'/api/partners/'+encodeURIComponent(id),{ method:'DELETE', headers: await authHeaders() });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        await laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
+    window.nieuw = async function(){
+      var id=$('np_id').value, naam=$('np_naam').value, thema=$('np_thema').value, dom=parseDom($('np_dom').value);
+      if(!id.trim()){ $('np_msg').innerHTML='<span class="warn">Id verplicht</span>'; return; }
+      $('np_msg').textContent='…';
+      try{
+        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, naam:naam, thema:thema, domeinen:dom }) });
+        var j=await r.json().catch(function(){return {};});
+        if(!r.ok){ $('np_msg').innerHTML='<span class="warn">'+esc(j.error||r.status)+'</span>'; return; }
+        $('np_id').value=$('np_naam').value=$('np_dom').value=''; $('np_msg').innerHTML='<span class="ok">✓ toegevoegd</span>'; await laad();
+      }catch(e){ $('np_msg').innerHTML='<span class="warn">'+esc(e.message)+'</span>'; }
+    };
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ $('wrap').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+    });
+  </script>
+</body>
+</html>
