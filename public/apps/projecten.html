@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projecten · Fluctus</title>
+<!-- projecten.html v0.1.0 (2026-09-14) — MANAGER-COCKPIT: overzicht van ALLE projecten (manager-only: David/Johan).
+     Toont per project de status (profiel afname/injectie, mandaat, studies, factuurdata) + de afgeleide volgende
+     actie, met deeplinks (Open in Kamino, ⚡ Acties) en archiveren/herstellen. GET /api/kamino/projecten-overzicht
+     (?archief=1 = incl. gearchiveerd) + POST /api/kamino/archiveer {id,archived}. Server v15.150. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .links{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .wrap{ max-width:1200px; margin:0 auto; padding:16px 20px 60px; }
+  .bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .bar input[type=search]{ flex:1; min-width:200px; border:1.5px solid var(--line); border-radius:9px; padding:9px 12px; font-size:13.5px; }
+  .bar label{ font-size:12.5px; color:var(--muted); display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .telling{ font-size:12.5px; color:var(--muted); margin-left:auto; }
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th,td{ text-align:left; padding:10px 12px; font-size:13px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ background:#f7f9fd; color:var(--navy2); font-size:11.5px; text-transform:uppercase; letter-spacing:.02em; }
+  tr:last-child td{ border-bottom:none; }
+  tr.arch{ opacity:.6; }
+  .naam{ font-weight:700; color:var(--navy); }
+  .sub{ font-size:11.5px; color:var(--muted); }
+  .id{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:var(--muted); }
+  .pill{ display:inline-block; border-radius:999px; padding:2px 8px; font-size:10.5px; font-weight:700; margin:1px 3px 1px 0; white-space:nowrap; }
+  .p-ok{ background:#D1FAE5; color:#065f46; } .p-wacht{ background:#FEF3C7; color:#92610a; } .p-mis{ background:#FEE2E2; color:#9b1c1c; }
+  .p-neu{ background:#EEF2F8; color:#42506a; } .p-info{ background:#E0ECFB; color:#1F3864; }
+  .actie{ font-weight:700; font-size:12.5px; }
+  .a-doe{ color:var(--amber); } .a-klaar{ color:#065f46; } .a-wacht{ color:#42506a; }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:7px 11px; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .btn.warn{ background:#fff; color:var(--amber); border:1.5px solid #f0d9bf; }
+  .rowbtns{ display:flex; gap:6px; flex-wrap:wrap; }
+  .state{ padding:34px; text-align:center; color:var(--muted); } .fout{ padding:28px; text-align:center; color:#b23; }
+  @media(max-width:820px){ table,thead,tbody,th,td,tr{ display:block; } thead{ display:none; } tr{ border-bottom:1px solid var(--line); padding:6px 0; } td{ border:none; padding:5px 12px; } }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>📁 Projecten</h1>
+    <div class="links">
+      <span class="who" id="who"></span>
+      <a href="/apps/fluvius-acties.html">⚡ Acties</a>
+      <a href="/apps/mandaten.html">Mandaten</a>
+      <a href="/apps/partners.html">🤝 Partners</a>
+      <a href="/apps/mailtemplates.html">✉️ Mails</a>
+      <a href="/apps/kamino.html">📊 Kamino</a>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="bar">
+      <input type="search" id="zoek" placeholder="Zoek op naam, klant, adviseur, partner of project-ID…">
+      <label><input type="checkbox" id="toonArchief"> toon archief</label>
+      <span class="telling" id="telling"></span>
+    </div>
+    <div id="root"><div class="state">Laden…</div></div>
+  </div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false;
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear(); }catch(e){ return '—'; } }
+
+    async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+    async function initAuth(){
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d = await sb.auth.getSession(); SESSION = d.data.session;
+      if(!SESSION){ window.location.href='/portal.html'; return; }
+      $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      await laad();
+    }
+    async function authHeaders(){
+      var tok = SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function laad(){
+      $('root').innerHTML='<div class="state">Projecten laden…</div>';
+      var r;
+      try{ r = await fetch(PROXY+'/api/kamino/projecten-overzicht'+(ARCHIEF?'?archief=1':''), { headers: await authHeaders() }); }
+      catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+      if(r.status===403){ $('root').innerHTML='<div class="fout">Enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a></div>'; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+      var j = await r.json(); DATA = (j&&j.projecten)||[];
+      render();
+    }
+
+    // Afgeleide volgende actie per project (uit de status-samenvatting).
+    function actieVoor(p){
+      var m=p.mandaat_status;
+      if(m==='adres_mismatch') return { txt:'Adres verifiëren', kls:'a-doe' };
+      if(m==='wachtrij')       return { txt:'Mandaat aanvragen', kls:'a-doe' };
+      if(m==='aangevraagd')    return { txt:'Wacht op bevestiging titularis', kls:'a-wacht' };
+      if(m==='fout')           return { txt:'Mandaat: fout — nakijken', kls:'a-doe' };
+      if(!p.profiel_afname && !m) return { txt: p.has_basecase ? 'Mandaat aanvragen / profiel opladen' : 'Geen factuurdata', kls:'a-doe' };
+      if((m==='actief'||m==='geleverd'||p.profiel_afname) && p.studies_count===0) return { txt:'Studie draaien in Kamino', kls:'a-doe' };
+      if(p.profiel_afname && p.studies_count>0) return { txt:'Klaar — rapport / offerte', kls:'a-klaar' };
+      return { txt:'—', kls:'a-wacht' };
+    }
+    function statusPills(p){
+      var h='';
+      h+= p.has_basecase ? '<span class="pill p-ok">factuur</span>' : '<span class="pill p-neu">geen factuur</span>';
+      h+= p.profiel_afname ? '<span class="pill p-ok">profiel afname</span>' : '<span class="pill p-neu">geen profiel</span>';
+      if(p.profiel_injectie) h+='<span class="pill p-ok">profiel injectie</span>';
+      if(p.mandaat_status){
+        var mk = p.mandaat_status==='actief'||p.mandaat_status==='geleverd' ? 'p-ok' : (p.mandaat_status==='adres_mismatch'||p.mandaat_status==='fout'?'p-mis':'p-wacht');
+        h+='<span class="pill '+mk+'">mandaat: '+esc(p.mandaat_status)+(p.mandaat_eans>1?(' ('+p.mandaat_eans+')'):'')+'</span>';
+      }
+      h+= p.studies_count>0 ? '<span class="pill p-info">'+p.studies_count+' studie'+(p.studies_count>1?'s':'')+'</span>' : '';
+      return h;
+    }
+    function matchZoek(p){
+      if(!ZOEK) return true;
+      var hay=[p.naam,p.klant,p.adviseur,p.partner,p.id,p.klant_mail].join(' ').toLowerCase();
+      return hay.indexOf(ZOEK)>=0;
+    }
+    function render(){
+      var rows = DATA.filter(matchZoek);
+      $('telling').textContent = rows.length + ' project'+(rows.length===1?'':'en') + (ARCHIEF?' (incl. archief)':'');
+      if(!rows.length){ $('root').innerHTML='<div class="state">Geen projecten gevonden.</div>'; return; }
+      var h='<table><thead><tr><th>Project</th><th>Klant / adviseur</th><th>Status</th><th>Volgende actie</th><th>Bijgewerkt</th><th></th></tr></thead><tbody>';
+      rows.forEach(function(p){
+        var a=actieVoor(p);
+        h+='<tr class="'+(p.archief?'arch':'')+'">'+
+          '<td><div class="naam">'+esc(p.naam)+(p.archief?' <span class="pill p-neu">gearchiveerd</span>':'')+'</div><div class="id">'+esc(p.id)+(p.partner?(' · '+esc(p.partner)):'')+(p.bron?(' · '+esc(p.bron)):'')+'</div></td>'+
+          '<td>'+esc(p.klant||'—')+(p.adviseur?('<div class="sub">adv: '+esc(p.adviseur)+'</div>'):'')+'</td>'+
+          '<td>'+statusPills(p)+'</td>'+
+          '<td><span class="actie '+a.kls+'">'+esc(a.txt)+'</span></td>'+
+          '<td class="sub">'+kort(p.bijgewerkt)+'</td>'+
+          '<td><div class="rowbtns">'+
+            '<a class="btn" href="/apps/kamino.html?open='+encodeURIComponent(p.id)+'">Open</a>'+
+            (p.mandaat_status?('<a class="btn ghost" href="/apps/fluvius-acties.html">⚡</a>'):'')+
+            (p.archief
+              ? '<button class="btn ghost" onclick="archiveer(\''+esc(p.id)+'\',false)">Herstel</button>'
+              : '<button class="btn warn" onclick="archiveer(\''+esc(p.id)+'\',true)">Archiveer</button>')+
+          '</div></td>'+
+        '</tr>';
+      });
+      h+='</tbody></table>';
+      $('root').innerHTML=h;
+    }
+    window.archiveer = async function(id, archived){
+      if(archived && !confirm('Project '+id+' archiveren? Het verdwijnt uit het actieve overzicht (herstelbaar via "toon archief").')) return;
+      try{
+        var r=await fetch(PROXY+'/api/kamino/archiveer',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, archived:archived }) });
+        if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        await laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
+      $('toonArchief').addEventListener('change', function(){ ARCHIEF=this.checked; laad(); });
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+    });
+  </script>
+</body>
+</html>
