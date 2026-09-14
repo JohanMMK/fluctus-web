@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailtemplates · Fluctus</title>
+<!-- mailtemplates.html v0.1.0 (2026-09-14) — MAIL-REVIEW-DASHBOARD (manager). Toont elke klant-mailtemplate met
+     status (in review / goedgekeurd), het laatste voorbeeld (To + Subject + tijd), en laat je een template
+     goedkeuren of terug naar review zetten + een opmerking/gewenste aanpassing bewaren. GET/POST /api/mailreview.
+     Zolang 'in review' gaan die mails naar oekene (envelop) i.p.v. de klant; goedgekeurd = echt naar de klant. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .wrap{ max-width:1000px; margin:0 auto; padding:18px 20px 60px; }
+  .banner{ background:#EAF1FB; border:1px solid var(--line); border-radius:10px; padding:11px 14px; font-size:12.5px; color:var(--navy2); margin-bottom:16px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:12px; }
+  .card.review{ border-left:4px solid var(--amber); } .card.ok{ border-left:4px solid var(--green); }
+  .hd{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .hd .naam{ font-weight:700; color:var(--navy); font-size:14.5px; }
+  .hd .id{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11.5px; color:var(--muted); }
+  .st{ display:inline-block; border-radius:999px; padding:2px 10px; font-size:11px; font-weight:700; margin-left:auto; }
+  .st.review{ background:#FEF3C7; color:#92610a; } .st.ok{ background:#D1FAE5; color:#065f46; }
+  .laatste{ font-size:12px; color:var(--muted); margin-top:7px; }
+  .code{ font-family:ui-monospace,Menlo,Consolas,monospace; }
+  textarea{ width:100%; height:52px; border:1.5px solid var(--line); border-radius:8px; padding:8px; font-size:12.5px; margin-top:9px; }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:8px 13px; font-size:12.5px; font-weight:700; cursor:pointer; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .btn.ok{ background:var(--green); } .btn.warn{ background:#fff; color:var(--amber); border:1.5px solid #f0d9bf; }
+  .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:9px; }
+  .msg{ font-size:12px; margin-left:4px; }
+  .state{ padding:28px; text-align:center; color:var(--muted); } .fout{ padding:28px; text-align:center; color:#b23; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>✉️ Mailtemplates</h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="who" id="who"></span>
+      <a href="/apps/fluvius-acties.html">⚡ Acties</a>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap" id="wrap"><div class="state">Laden…</div></div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=null;
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function kort(iso){ try{ if(!iso) return ''; var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return ''; } }
+
+    async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+    async function initAuth(){
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('wrap').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d = await sb.auth.getSession(); SESSION = d.data.session;
+      if(!SESSION){ window.location.href='/portal.html'; return; }
+      $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      await laad();
+    }
+    async function authHeaders(){
+      var tok = SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function laad(){
+      $('wrap').innerHTML='<div class="state">Templates laden…</div>';
+      var r;
+      try{ r = await fetch(PROXY+'/api/mailreview', { headers: await authHeaders() }); }
+      catch(e){ $('wrap').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+      if(r.status===403){ $('wrap').innerHTML='<div class="fout">Enkel voor managers.</div>'; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      if(!r.ok){ $('wrap').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+      DATA = await r.json();
+      render();
+    }
+
+    function render(){
+      var t = DATA.templates||[];
+      var inReview = t.filter(function(x){return !x.approved;}).length;
+      var h='<div class="banner">Klant-mails in <b>review</b> gaan naar <b class="code">'+esc(DATA.review_naar||'')+'</b> (envelop met To/Cc/Subject), niet naar de klant. '+
+        'Zeg mij in de chat hoe een template moet wijzigen; is hij goed → <b>Goedkeuren</b> en dan vertrekt hij echt naar de klant. '+
+        '<b>'+inReview+'</b> van '+t.length+' nog in review.</div>';
+      t.forEach(function(x){
+        var st = x.approved ? '<span class="st ok">✓ goedgekeurd</span>' : '<span class="st review">in review</span>';
+        var laatste = x.laatste ? ('Laatste voorbeeld → <b>'+esc(x.laatste.to||'')+'</b> · "'+esc(x.laatste.subject||'')+'" · '+kort(x.laatste.ts)) : 'Nog geen voorbeeld verstuurd.';
+        var appr = x.approved ? ('<span class="sub" style="font-size:11px;color:var(--muted)">door '+esc(x.approved_door||'')+' · '+kort(x.approved_op)+'</span>') : '';
+        h+='<div class="card '+(x.approved?'ok':'review')+'">'+
+          '<div class="hd"><span class="naam">'+esc(x.omschrijving||x.id)+'</span><span class="id">'+esc(x.id)+'</span>'+st+'</div>'+
+          '<div class="laatste">'+laatste+'</div>'+
+          '<textarea id="op_'+esc(x.id)+'" placeholder="Opmerking / gewenste aanpassing (voor jezelf of om mij te briefen)…">'+esc(x.opmerking||'')+'</textarea>'+
+          '<div class="row">'+
+            (x.approved
+              ? '<button class="btn warn" onclick="zetAppr(\''+esc(x.id)+'\',false)">↩ Terug naar review</button>'
+              : '<button class="btn ok" onclick="zetAppr(\''+esc(x.id)+'\',true)">✓ Goedkeuren → naar klant</button>')+
+            '<button class="btn ghost" onclick="bewaarOp(\''+esc(x.id)+'\')">Opmerking bewaren</button>'+
+            appr+'<span class="msg" id="m_'+esc(x.id)+'"></span>'+
+          '</div>'+
+        '</div>';
+      });
+      $('wrap').innerHTML=h;
+    }
+
+    async function post(body, id){
+      $('m_'+id).textContent='…';
+      try{
+        var r=await fetch(PROXY+'/api/mailreview',{ method:'POST', headers: await authHeaders(), body: JSON.stringify(body) });
+        var j=await r.json().catch(function(){return {};});
+        if(!r.ok){ $('m_'+id).innerHTML='<span style="color:#b23">'+esc(j.error||r.status)+'</span>'; return false; }
+        return true;
+      }catch(e){ $('m_'+id).innerHTML='<span style="color:#b23">'+esc(e.message)+'</span>'; return false; }
+    }
+    window.zetAppr = async function(id, approved){
+      if(approved && !confirm('Template "'+id+'" goedkeuren? Vanaf nu vertrekt deze mail ECHT naar de klant.')) return;
+      if(await post({ id:id, approved:approved }, id)) laad();
+    };
+    window.bewaarOp = async function(id){
+      var op=($('op_'+id)||{}).value||'';
+      if(await post({ id:id, opmerking:op }, id)){ $('m_'+id).innerHTML='<span style="color:var(--green)">✓ bewaard</span>'; }
+    };
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ $('wrap').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+    });
+  </script>
+</body>
+</html>
