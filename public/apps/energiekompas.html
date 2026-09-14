@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.52.0 (2026-09-14, EAN-prefill fix [client, render-getest], Johan):
+     Het EAN-veld in het profieltoegang-scherm werd niet voorgevuld hoewel de EAN uit de factuur bekend was —
+     STATE.factuurEan werd enkel uit bc.ean/eanAfname afgeleid, maar facturen met eanBlokken[]/eanNrs[] (afname+injectie)
+     vulden dat niet. Nieuwe helper _afnEan(bc) kiest robuust de AFNAME-EAN (niet de injectie-EAN) uit vlak veld →
+     eanBlokken (rol!=injectie) → eanNrs → eanNr. Gebruikt op beide STATE.factuurEan-toewijzingen. -->
 <!-- energiekompas.html v0.51.0 (2026-09-11, inbound volledige studie + abonnement-pitch [client], Johan):
      (A) INBOUND-CASE: bij een ?case=-deep-link verschijnt onder de factuur een CTA "Volledige studie (wagenpark +
          profiel + heatmap)" (btn-inbound-volledig → naarVerify) die de bestaande keten start: OTP → mandaat/profiel-
@@ -1873,7 +1878,7 @@
       preselectProfiel(detecteerModus(STATE.factuur.kva, STATE.factuur.spann)==='bedrijf');
       updateProfielHint();
       var pb=$('profiel-blok'); pb.classList.remove('hidden'); pb.scrollIntoView({behavior:'smooth', block:'center'});
-      STATE.factuurAdres = bc.leveringsadres || null; STATE.factuurEan = (bc.ean || bc.eanAfname || '') ? String(bc.ean || bc.eanAfname).replace(/\D/g,'') : '';
+      STATE.factuurAdres = bc.leveringsadres || null; STATE.factuurEan = _afnEan(bc);
       STATE.factuurNaam = bc.klantNaam || STATE.factuurNaam || '';   // Opm 3: naam uit de factuur voor mandaat-prefill
       var mo=$('btn-mandaat-open'); if(mo) mo.classList.remove('hidden');   // self-service mandaat kan nu
       if(STATE.leadToken){ try{ fetch(API+'/api/lead-factuur-ontvangen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken})}); }catch(e){} }  // Slice B: factuur binnen → reminders stoppen
@@ -1926,13 +1931,26 @@
         }).catch(function(){ if(msg){ msg.style.color='#b00'; msg.textContent='Kon de aanvraag niet versturen — probeer opnieuw.'; } });
     }
 
+    // v0.52.0 (Johan 14-09): robuuste AFNAME-EAN uit de factuur. De EAN kan als vlak veld (bc.ean/eanAfname),
+    // als eanBlokken[] (met rol afname/injectie) of als eanNrs[] binnenkomen. Voor de mandaat-prefill nemen we
+    // de AFNAME-EAN (niet de injectie-EAN). Zonder dit bleef STATE.factuurEan leeg bij facturen met eanBlokken/eanNrs
+    // → het EAN-veld in het profieltoegang-scherm werd niet voorgevuld hoewel we de EAN wél kenden.
+    function _afnEan(bc){
+      bc=bc||{};
+      var flat=(bc.ean||bc.eanAfname||'');
+      if(flat) return String(flat).replace(/\D/g,'');
+      var blok=(bc.eanBlokken||[]);
+      var afn=blok.length ? (blok.filter(function(b){return b && !/injectie/i.test(b.rol||'');}).map(function(b){return b&&b.ean;}).filter(Boolean)[0]||'') : '';
+      if(!afn) afn=(bc.eanNrs&&bc.eanNrs[0])||bc.eanNr||'';
+      return afn ? String(afn).replace(/\D/g,'') : '';
+    }
     // ── VOORSCHOTFACTUUR-GATE ─────────────────────────────────────────────────────────────────
     // Een voorschotfactuur mist verbruik/netkosten. We annualiseren NIET (dat gaf stil verkeerde
     // marges), maar tonen een gate: jaarafrekening opladen (juist), mandaat opzetten (echte uitweg),
     // of een expliciete RAMING (bandbreedte, geen hard bedrag, zichtbaar gelabeld).
     function toonVoorschotGate(bc){
       STATE.factuurAdres = bc.leveringsadres || null;
-      STATE.factuurEan = (bc.ean || bc.eanAfname || '') ? String(bc.ean || bc.eanAfname).replace(/\D/g,'') : '';
+      STATE.factuurEan = _afnEan(bc);
       var reden = bc.voorschot_reden || 'geen gemeten verbruik of netkosten op deze factuur';
       $('vs-reden').innerHTML='<b>Waarom denken we dat?</b> '+esc(reden)+'.'+(STATE.factuurEan?(' Uw EAN ('+esc(STATE.factuurEan)+') lazen we wél — dat volstaat voor profieltoegang.'):'');
       if(STATE.profielen && $('vs-profiel')) $('vs-profiel').innerHTML=_sectorOpts(STATE.profielen,'kantoor');
