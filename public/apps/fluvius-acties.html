@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fluvius-acties · Fluctus</title>
-<!-- fluvius-acties.html v0.2.0 (2026-09-12) — + bucket 'Te bevestigen' (aangevraagd = titularis moet bevestigen)
+<!-- fluvius-acties.html v0.3.0 (2026-09-13) — ACTIE-MODAL: klik een rij → modal met status-relevante acties
+     (aanvragen/markeer aangevraagd/actief/geleverd/annuleer, adres bevestigen, dringende reminder, koppel aan
+     project, open Mijn Fluvius). Endpoints: /api/mandaat/status, /los-patch, /bevestig-adres, /reminder-een, /aanvraag.
+     fluvius-acties.html v0.2.0 (2026-09-12) — + bucket 'Te bevestigen' (aangevraagd = titularis moet bevestigen)
      met dringend (≥21d) / vermoedelijk-vervallen (≥30d) markering; 'Adres te verifiëren' = adres_mismatch.
      fluvius-acties.html v0.1.0 (2026-09-12) — ACTIE-DASHBOARD over de Chrome-scraping op Mijn Fluvius.
      Leest GET /api/mandaat/wachtrij?status=<alle> (manager) en verdeelt elk EAN in vier buckets:
@@ -48,6 +51,13 @@
   .fout{ padding:32px; text-align:center; color:#b23; }
   .leeg{ padding:14px; color:var(--muted); font-size:12.5px; }
   .legend{ font-size:11.5px; color:var(--muted); margin-top:16px; line-height:1.7; }
+  tr.klik{ cursor:pointer; } tr.klik:hover td{ background:#f2f7ff; }
+  .m-overlay{ position:fixed; inset:0; background:rgba(18,49,94,.45); display:flex; align-items:center; justify-content:center; z-index:9999; padding:16px; }
+  .m-card{ background:#fff; border-radius:14px; padding:18px; max-width:460px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .m-top{ display:flex; align-items:center; gap:8px; font-size:16px; color:var(--navy); font-weight:700; }
+  .m-x{ margin-left:auto; background:transparent; border:none; font-size:16px; cursor:pointer; color:var(--muted); }
+  .m-act{ display:block; width:100%; text-align:left; background:#fff; border:1.5px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13.5px; font-weight:600; color:var(--navy2); cursor:pointer; margin-top:8px; }
+  .m-act:hover{ background:#f2f7ff; } .m-act.danger{ color:#b23; border-color:#f2c7c7; } .m-act.danger:hover{ background:#fef2f2; }
 </style>
 </head>
 <body>
@@ -66,7 +76,9 @@
       <span class="sync" id="sync"></span>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
+    <div id="modal" class="m-overlay" style="display:none" onclick="sluitModal()"></div>
     <div class="legend" id="legend" style="display:none">
+      <b>Klik een rij</b> voor de acties die bij die status horen (aanvragen, markeren, bevestigen, reminder, koppelen, Mijn Fluvius openen).<br>
       <b>Backlog</b> = wat er nog via je ingelogde Chrome op Mijn Fluvius moet gebeuren. <b>Aan te vragen</b> =
       mandaat nog te starten · <b>Te bevestigen</b> = de titularis moet de toegang goedkeuren (Fluvius-mail of
       brief met QR, ~1 maand geldig) — na 21 d wordt het <b style="color:#dc2626">dringend</b>, na 30 d
@@ -80,8 +92,10 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], ZOEK='';
+    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], ZOEK='', ROWMAP={};
     var ALLE = 'wachtrij,aangevraagd,actief,geleverd,adres_mismatch,geannuleerd,fout';
+    var FLUVIUS_AANVRAAG='https://mijn.fluvius.be/verbruik/dienstverlener?kbo=0848039623';
+    var FLUVIUS_EIGEN='https://mijn.fluvius.be/verbruik/';
 
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
     function kort(iso){ try{ if(!iso) return ''; var d=new Date(iso); if(isNaN(d.getTime())) return ''; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return ''; } }
@@ -141,7 +155,8 @@
         if(dg!=null){ if(dg>=30) urg=' <span class="badge verval">⚠ vermoedelijk vervallen ('+dg+'d)</span>';
           else if(dg>=21) urg=' <span class="badge dringend">🔴 dringend ('+dg+'d)</span>';
           else urg=' <span class="sub">('+dg+'d)</span>'; } }
-      return '<tr>'+
+      var key=it.ean+'|'+(it.project_id||'LOS'); ROWMAP[key]=it;
+      return '<tr class="klik" onclick="openActie(\''+key+'\')">'+
         '<td>'+klant+(it.los?' <span class="sub">(los)</span>':'')+'</td>'+
         '<td>'+partner+'</td>'+
         '<td class="code">'+esc(it.ean)+'</td>'+
@@ -158,6 +173,7 @@
 
     function render(){
       if(!ITEMS.length){ $('root').innerHTML='<div class="state">Nog geen Fluvius-mandaten. Draai een sync om de backlog te vullen.</div>'; return; }
+      ROWMAP={};
       var f = ITEMS.filter(match);
       var b = { aanvragen:[], bevestigen:[], verifieren:[], downloaden:[], gedaan:[], overig:[] };
       f.forEach(function(it){ b[bucket(it)].push(it); });
@@ -179,6 +195,80 @@
       if(b.overig.length){ h+='<h2>⚪ Overige (geannuleerd/fout) <span class="cnt">'+b.overig.length+'</span></h2>'+tabel(b.overig); }
       $('root').innerHTML=h;
     }
+
+    // ── ACTIE-MODAL ─────────────────────────────────────────────────────────
+    function actiesVoor(it){
+      var s=it.status, los=!!it.los, a=[];
+      if(s==='wachtrij'){
+        a.push({label:'📶 Open Mijn Fluvius — mandaat aanvragen', kind:'openAanvraag'});
+        a.push({label:'✅ Markeer als aangevraagd', kind:'markAangevraagd'});
+        a.push({label:'✕ Annuleren', kind:'annuleer', danger:true});
+      } else if(s==='aangevraagd'){
+        a.push({label:'✅ Markeer als actief (goedgekeurd)', kind:'markActief'});
+        a.push({label:'📨 Stuur nu een dringende reminder', kind:'reminder'});
+        a.push({label:'🔎 Open Mijn Fluvius — status checken', kind:'openStatus'});
+        a.push({label:'✕ Annuleren / vervallen', kind:'annuleer', danger:true});
+      } else if(s==='adres_mismatch'){
+        if(!los) a.push({label:'✅ Adres bevestigen (indienen)', kind:'adresOk'});
+        a.push({label:'🔎 Open Mijn Fluvius — adres nakijken', kind:'openStatus'});
+        a.push({label:'✕ Weigeren / annuleren', kind:'annuleer', danger:true});
+      } else if(s==='actief'){
+        a.push({label:'⬇️ Open Mijn Fluvius — kwartierdata downloaden', kind:'openEigen'});
+        a.push({label:'📥 Markeer profiel geleverd', kind:'markGeleverd'});
+        a.push({label:'🔎 Open Mijn Fluvius — status', kind:'openStatus'});
+      } else if(s==='geleverd'){
+        a.push({label:'⬇️ Open Mijn Fluvius — opnieuw downloaden', kind:'openEigen'});
+        a.push({label:'↩️ Terug naar actief (correctie)', kind:'markActief'});
+      } else {
+        a.push({label:'🔎 Open Mijn Fluvius', kind:'openStatus'});
+        a.push({label:'✅ Terug naar aangevraagd', kind:'markAangevraagd'});
+      }
+      if(los) a.push({label:'🔗 Koppel aan project…', kind:'koppel'});
+      return a;
+    }
+    window.openActie=function(key){
+      var it=ROWMAP[key]; if(!it) return;
+      var acts=actiesVoor(it);
+      var titel=esc(it.klant||it.project_naam||(it.aanvrager&&it.aanvrager.naam)||'—');
+      var h='<div class="m-card" onclick="event.stopPropagation()">'+
+        '<div class="m-top"><span>'+titel+(it.los?' <span class="sub" style="font-weight:400">(los)</span>':'')+'</span><button class="m-x" onclick="sluitModal()">✕</button></div>'+
+        '<div class="sub" style="margin:2px 0 12px"><span class="code">'+esc(it.ean)+'</span> · status <b>'+esc(it.status)+'</b>'+(it.partner?(' · '+esc(it.partner)):'')+(it.titularis_mail_masked?(' · titularis '+esc(it.titularis_mail_masked)):'')+'</div>'+
+        acts.map(function(a){ return '<button class="m-act'+(a.danger?' danger':'')+'" onclick="doeActie(\''+a.kind+'\',\''+key+'\')">'+esc(a.label)+'</button>'; }).join('')+
+        '</div>';
+      var m=$('modal'); m.innerHTML=h; m.style.display='flex';
+    };
+    window.sluitModal=function(){ var m=$('modal'); m.style.display='none'; m.innerHTML=''; };
+    async function postAct(path, body){
+      try{
+        var r=await fetch(PROXY+path,{method:'POST',headers:await authHeaders(),body:JSON.stringify(body)});
+        var j=await r.json().catch(function(){return {};});
+        if(!r.ok){ alert('Kon niet: '+(j.error||r.status)); return; }
+        sluitModal(); await laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    }
+    async function patchStatus(it, patch){
+      var url = it.los ? '/api/mandaat/los-patch' : '/api/mandaat/status';
+      var body = it.los ? {ean:it.ean, patch:patch} : {project_id:it.project_id, ean:it.ean, patch:patch};
+      await postAct(url, body);
+    }
+    window.doeActie=async function(kind, key){
+      var it=ROWMAP[key]; if(!it) return;
+      var pid=it.project_id||'';
+      if(kind==='openAanvraag'||kind==='openStatus'){ window.open(FLUVIUS_AANVRAAG,'_blank'); return; }
+      if(kind==='openEigen'){ window.open(FLUVIUS_EIGEN,'_blank'); return; }
+      if(kind==='markAangevraagd'){
+        var ref=(prompt('Referentienummer (MijnFluvius-…), optioneel — laat leeg om over te slaan:')||'').trim();
+        var mail=(prompt('Gemaskeerd titularis-mailadres (bv. x***@domein), optioneel:')||'').trim();
+        var patch={status:'aangevraagd'}; if(ref) patch.referentienummer=ref; if(mail) patch.titularis_mail_masked=mail;
+        await patchStatus(it,patch); return;
+      }
+      if(kind==='markActief'){ await patchStatus(it,{status:'actief'}); return; }
+      if(kind==='markGeleverd'){ await patchStatus(it,{status:'geleverd', kwartierdata_aanwezig:true}); return; }
+      if(kind==='annuleer'){ if(!confirm('Zeker annuleren voor EAN '+it.ean+'?')) return; await patchStatus(it,{status:'geannuleerd'}); return; }
+      if(kind==='adresOk'){ await postAct('/api/mandaat/bevestig-adres',{project_id:pid, ean:it.ean, akkoord:true}); return; }
+      if(kind==='reminder'){ await postAct('/api/mandaat/reminder-een',{ean:it.ean, project_id:pid||'LOS'}); return; }
+      if(kind==='koppel'){ var p=((prompt('Koppel aan project-id (FLX-XXX-XXXX):')||'').trim().toUpperCase()); if(!/^FLX-/.test(p)){ if(p) alert('Ongeldig project-id.'); return; } await postAct('/api/mandaat/aanvraag',{project_id:p, eans:[it.ean]}); return; }
+    };
 
     window.addEventListener('DOMContentLoaded', async function(){
       $('ververs').onclick=laad;
