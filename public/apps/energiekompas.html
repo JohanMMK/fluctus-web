@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
+<!-- energiekompas.html v0.53.0 (2026-09-14, ÉÉN RAPPORT + JOURNEY-DEEPLINK + LIVE-PROFIEL [client], Johan):
+     (a) _hervatCase vangt project_id op uit /api/inbound-case → STATE.projectId; _ondBody stuurt project_id mee naar
+         /api/kamino/onderhandel zodat de app LIVE herrekent op het opgeladen (gemeten) Fluvius-profiel (leeg = ongewijzigd).
+     (b) journey-mail-deeplink &stap= → _stapSprong springt naar de juiste plek (rapport/profiel → profiel-blok; mandaat → mandOpen; hoe → stap-hoe).
+     (c) _rapportMailNudge: bij de volgende stap (naarVerify) krijgt de klant zijn rapport per mail als DEEPLINK (server throttelt). -->
 <!-- energiekompas.html v0.52.0 (2026-09-14, EAN-prefill fix [client, render-getest], Johan):
      Het EAN-veld in het profieltoegang-scherm werd niet voorgevuld hoewel de EAN uit de factuur bekend was —
      STATE.factuurEan werd enkel uit bc.ean/eanAfname afgeleid, maar facturen met eanBlokken[]/eanNrs[] (afname+injectie)
@@ -1735,11 +1740,12 @@
     function _ondBody(profiel, afnameMwh, refEurMwh, kva, spanning, pVan, pTot){
       if(_factuurBasis()){
         var b2=Object.assign({}, STATE.baseCase); if(!b2.spanningsniveau) b2.spanningsniveau=spanning;
-        return { baseCase:b2, profielNaam:profiel, heatmaps:true };
+        // v0.53: project_id → server past het opgeladen (gemeten) Fluvius-profiel toe (live-recompute), leeg = ongewijzigd
+        return { baseCase:b2, profielNaam:profiel, heatmaps:true, project_id: STATE.projectId||undefined };
       }
       var baseCase={ klantNaam:'', afnameKwh:Math.round((+afnameMwh||0)*1000), aansluitVermogenKva:Math.round(+kva||0),
         spanningsniveau:spanning, postcode:'', dnb:'', periodeVan:pVan, periodeTot:pTot };
-      var body={ baseCase:baseCase, profielNaam:profiel, heatmaps:true };
+      var body={ baseCase:baseCase, profielNaam:profiel, heatmaps:true, project_id: STATE.projectId||undefined };
       if(refEurMwh>0) body.referentie_eur_mwh=refEurMwh;
       return body;
     }
@@ -1891,6 +1897,7 @@
       fetch(API+'/api/inbound-case/'+encodeURIComponent(token)).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(!j||!j.ok){ return; }
         STATE.leadToken=token; STATE.leadVerified=!!j.verified;
+        STATE.projectId=j.project_id||STATE.projectId||'';   // v0.53: gekoppeld seed-project → live-recompute op het echte profiel
         var pp=$('stap-partner'); if(pp) pp.classList.add('hidden');
         var pi=$('stap-instap'); if(pi) pi.classList.add('hidden');
         if(j.mail_otp_pending){   // nieuw e-mailadres bevestigd → verificatie op dat nieuwe adres
@@ -1909,7 +1916,23 @@
         naFactuur(bc);
         var iv=$('inbound-volledig'); if(iv) iv.classList.remove('hidden');   // v0.51: bied meteen de volledige studie aan
         var fm=$('factuur-msg'); if(fm){ if(errMsg){ fm.style.color='#b00'; fm.textContent=errMsg; } else { fm.style.color='#0a7a37'; fm.textContent='✔ We openden uw dossier op basis van de factuur die u ons bezorgde. Bevestig hieronder uw profiel voor uw exacte cijfer.'; } }
+        try{ setTimeout(function(){ _stapSprong(qp('stap')); }, 600); }catch(e){}   // v0.53: spring naar de stap uit de mail-deeplink
       }).catch(function(){});
+    }
+    // v0.53: deeplink-stap uit de journey-mail (&stap=). Additief + guarded — onbekende stap = geen actie.
+    function _stapSprong(stap){
+      try{
+        stap=String(stap||'');
+        if(stap==='mandaat'){ if(typeof mandOpen==='function'){ mandOpen(); } return; }
+        if(stap==='hoe'){ var h=$('stap-hoe'); if(h && !h.classList.contains('hidden')) h.scrollIntoView({behavior:'smooth',block:'start'}); return; }
+        if(stap==='rapport'||stap==='profiel'){ var pb=$('profiel-blok'); if(pb) pb.scrollIntoView({behavior:'smooth',block:'center'}); return; }
+      }catch(e){}
+    }
+    // v0.53: rapport-by-mail bij de volgende stap (fire-and-forget, server throttelt 10 min + vereist verified).
+    function _rapportMailNudge(stap){
+      try{ if(!STATE.leadToken) return;
+        fetch(API+'/api/lead-rapport-mail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:STATE.leadToken, stap:stap||'rapport'})}).catch(function(){});
+      }catch(e){}
     }
     function _mailConfirm(token, code){
       fetch(API+'/api/case/mail-wijzig-bevestig',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token, code:code})})
@@ -2173,6 +2196,7 @@
       return fetch(API+'/api/lead-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}); }
     function naarVerify(){
       _leadUpdate({ event:'hoe_clicked' });
+      _rapportMailNudge('rapport');   // v0.53: klant zet de volgende stap → rapport-by-mail (deeplink terug in EnergieKompas)
       if(STATE.leadVerified){ naar7bis(); return; }   // al geverifieerd → sla over (via 7bis indien scan klaar)
       $('verify-mail').textContent = ($('ld-mail').value||'uw adres');
       $('verify-code-blok').classList.add('hidden'); $('verify-msg').textContent='';
