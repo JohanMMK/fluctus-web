@@ -1,6 +1,8 @@
-// portal.js v1.8.0 — 2026-08-27 (Europe/Brussels) — Fase 3: manager-tegel 'Mandaten' (mandaat-wachtrij-overzicht)
+// portal.js v1.9.0 — 2026-09-14 (Europe/Brussels) — manager-tegel 'Projecten' (projecten-cockpit)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
+// v1.9.0 — 2026-09-14 — nieuwe managerOnly-tegel 'projecten' (📁 Projecten) → /apps/projecten.html: overzicht van
+//          ALLE projecten met status/volgende-actie + archiveren. Additief: enkel een catalogus-rij bij; RBAC ongewijzigd.
 // v1.8.0 — 2026-08-27 — Fase 3: nieuwe managerOnly-tegel 'mandaten' (🗂️ Mandaten) → /apps/mandaten.html,
 //          manager-overzicht van de mandaat-wachtrij (status per EAN + adres-bevestigingen voor nazicht).
 //          Additief: enkel een catalogus-rij bij; RBAC-filter (managerOnly) ongewijzigd.
@@ -76,6 +78,9 @@ const APP_CATALOG = [
   // v1.8.0 (Fase 3): manager-overzicht van de mandaat-wachtrij (rec.mandaat) — status per EAN + adres-mismatches
   // die door klant/adviseur bevestigd zijn, voor manueel nazicht. Read-only, leest GET /api/mandaat/wachtrij.
   { id: 'mandaten',    naam: 'Mandaten',         ico: '🗂️', beschrijving: 'Mandaatstatus per EAN + adres-bevestigingen om na te kijken.', url: '/apps/mandaten.html', managerOnly: true },
+  // v1.9.0 (Fase, 14-09): manager-cockpit — alle projecten met status/acties + archiveren. Read/manage via
+  // /api/kamino/projecten-overzicht + /api/kamino/archiveer. Enkel managers (David/Johan).
+  { id: 'projecten',   naam: 'Projecten',        ico: '📁', beschrijving: 'Alle projecten: status, volgende actie en archief — voor managers.', url: '/apps/projecten.html', managerOnly: true },
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
 ];
