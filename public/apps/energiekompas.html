@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.56.0 (2026-09-15, HEATMAP-HARDENING + FALLBACK-KPI'S €/100km·loadfactor·km, Johan):
+<!-- energiekompas.html v0.57.0 (2026-09-15, RESILIENTE HEATMAP-SWEEP, Johan):
+     (resilience) de PV×batterij-sweep (particulier /api/thuisladen + bedrijf /api/energiekompas/bedrijf-sweep) valt niet
+          meer STIL terug op een heatmap-loos KPI-scherm bij een 502/time-out (drukke/koude server): eerst 1× automatisch
+          opnieuw, en blijft het falen dan een expliciete "⚠ combinatie-heatmap kon niet berekend worden — 🔄 opnieuw
+          proberen"-banner (_heatmapFout) i.p.v. de klant meteen op de OTP-muur te zetten. Zo blijft de standaardprofiel-
+          heatmap vóór de OTP betrouwbaar zichtbaar. (Analyse: de heatmap wordt NIET leeg door 2 wagens — het rooster is
+          vast 6×5; enkel een gefaalde/lege sweep-respons veroorzaakte de fallback.)
+     ── v0.56.0 (2026-09-15, HEATMAP-HARDENING + FALLBACK-KPI'S €/100km·loadfactor·km, Johan):
      (fix) de mobiliteit-KPI-toevoeging in toonKpisTL staat nu in try/catch én de heatmap rendert EERST (hmParticulier/
           renderHeatmap vóór toonKpisTL) zodat een KPI-fout de heatmap nooit kan killen (die viel anders in de .catch →
           toonKpisClient-fallback zonder heatmap). Zo blijft de standaardprofiel-heatmap vóór de OTP zichtbaar.
@@ -1390,22 +1397,30 @@
       berekenBedrijfSweep(inv, st, msg);   // slice B/C: echte laadplein-engine (PV×batterij-sweep)
     }
     // ── Bedrijf: de ECHTE laadplein-engine via de server-side PV×batterij-sweep (server v15.103.0+). ──
-    function berekenBedrijfSweep(inv, st, msg){
+    function berekenBedrijfSweep(inv, st, msg, _poging){
       var payload={ afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, spanning:inv.spanning,
         toegangsvermogen_kw:Math.round((inv.aansluiting_kva||0)*0.9), profielNaam:inv.profielNaam||'kantoor', grd:inv.grd||'', postcode:inv.postcode||'',
         pleinen:inv.pleinen||[], generator:inv.generator||{} };
       STATE.bedrijfPayload=payload;   // hergebruikt door de klik-cel (/bedrijf-cel) voor exacte berekening
+      var poging=+_poging||1;
       var t0=Date.now(); msg.style.color='var(--muted)';
-      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen op uw bedrijfslast… ('+s+' s — kan tot ±1 min duren)'; }
+      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen op uw bedrijfslast… ('+s+' s — kan tot ±1 min duren)'+(poging>1?' — 2e poging':''); }
       _tick(); var _iv=setInterval(_tick,1000);
       function _klaar(){ clearInterval(_iv); $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; }
+      // #RESILIENCE: 1× auto-retry vóór de KPI-fallback; blijft het falen → expliciete heatmap-fout met opnieuw-knop.
+      function _faal(){
+        _klaar();
+        if(poging<2){ msg.style.color='var(--muted)'; msg.textContent='⏳ De server had het even druk — we proberen opnieuw…';
+          setTimeout(function(){ berekenBedrijfSweep(inv, st, msg, poging+1); }, 1600); return; }
+        bedrijfSnelleKpi(inv, st); _heatmapFout(function(){ berekenBedrijfSweep(inv, st, msg, 1); });
+      }
       fetch(API+'/api/energiekompas/bedrijf-sweep',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
-        .then(function(sw){ _klaar();
-          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); toonGeneratorKpi(); if(STATE.exact) toonExactExtra(); }
-          else { bedrijfSnelleKpi(inv, st); }   // fallback zolang v15.103 niet gedeployed is
+        .then(function(sw){
+          if(sw&&sw.ok&&Array.isArray(sw.anchors)&&sw.anchors.length){ _klaar(); _heatmapFoutWeg(); STATE.tl=sw; hmBedrijf(sw); toonResultaat(st); toonGeneratorKpi(); if(STATE.exact) toonExactExtra(); }
+          else { _faal(); }
         })
-        .catch(function(){ _klaar(); bedrijfSnelleKpi(inv, st); });
+        .catch(function(){ _faal(); });
     }
     // Fallback: snelle markt-KPI (server v15.102) zolang de bedrijf-sweep niet live is.
     function bedrijfSnelleKpi(inv, st){
@@ -1434,25 +1449,46 @@
     // We draaien /api/thuisladen op het standaardprofiel, kiezen de optimale combinatie (verborgen) en tonen
     // de thuisladen-inzichten (besparing/jaar · rendement · jaarkost · investering). De klant kiest de combinatie
     // straks zelf op de 4 heatmaps (slice C). Zelfde in/params als thuisladen.html.
-    function berekenParticulierTL(inv, st, msg){
+    function berekenParticulierTL(inv, st, msg, _poging){
       var IN = inv.in || {}; IN.regio = inv.regio || 'VL';
       if(!(IN.referentiekost>0)) IN.referentiekost = inv.huidige_kost || 0;
       var params = Object.assign({}, P_TL, { CREG: cregTL(IN.regio) });
+      var poging=+_poging||1;
       // Voortgangsteller — de volledige PV×batterij-sweep (thuisladen-engine) kan tot ~1 min duren.
       var t0=Date.now(); msg.style.color='var(--muted)';
-      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen… ('+s+' s — dit kan tot ±1 min duren)'; }
+      function _tick(){ var s=Math.round((Date.now()-t0)/1000); msg.textContent='⏳ Uw optimale PV+batterij-combinatie berekenen… ('+s+' s — dit kan tot ±1 min duren)'+(poging>1?' — 2e poging':''); }
       _tick(); var _iv=setInterval(_tick,1000);
       function _klaar(){ clearInterval(_iv); $('btn-bereken').removeAttribute('disabled'); msg.textContent=''; }
+      // #RESILIENCE (Johan): de sweep kan bij een drukke/koude server een 502/time-out geven → GEEN stille terugval op
+      // een heatmap-loos scherm. Eerst 1× automatisch opnieuw; blijft het falen, toon een expliciete "opnieuw"-knop.
+      function _faal(){
+        _klaar();
+        if(poging<2){ msg.style.color='var(--muted)'; msg.textContent='⏳ De server had het even druk — we proberen opnieuw…';
+          setTimeout(function(){ berekenParticulierTL(inv, st, msg, poging+1); }, 1600); return; }
+        toonKpisClient(inv); toonResultaat(st); if(STATE.exact) toonExactExtra();
+        _heatmapFout(function(){ berekenParticulierTL(inv, st, msg, 1); });
+      }
       fetch(API+'/api/thuisladen',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ in:IN, params:params }) })
         .then(function(r){ return r.ok?r.json():null; })
-        .then(function(j){ _klaar();
-          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); hmParticulier(j); toonKpisTL(STATE.tlBest); }   // heatmap eerst — een KPI-fout mag de heatmap nooit killen
-          else { toonKpisClient(inv); $('heatmap-blok').classList.add('hidden'); }
-          toonResultaat(st);
-          if(STATE.exact) toonExactExtra();   // v0.27.0 (walkthrough-fix 1): particulier consistent met bedrijf — pill "op ingeschat profiel", groeistap, shoppinglist, extra KPI's
+        .then(function(j){
+          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ _klaar(); _heatmapFoutWeg(); STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); hmParticulier(j); toonKpisTL(STATE.tlBest); toonResultaat(st); if(STATE.exact) toonExactExtra(); }   // heatmap eerst — een KPI-fout mag de heatmap nooit killen
+          else { _faal(); }
         })
-        .catch(function(){ _klaar(); toonKpisClient(inv); toonResultaat(st); if(STATE.exact) toonExactExtra(); });
+        .catch(function(){ _faal(); });
     }
+    // #RESILIENCE: expliciete heatmap-fout met opnieuw-knop (i.p.v. stil doorschuiven naar de OTP). Overschrijft de
+    // heatmap-tabel NIET (die heeft renderHeatmap nodig) — het is een aparte banner boven het heatmap-blok.
+    function _heatmapFout(retry){
+      var host=$('heatmap-blok'); if(!host||!host.parentNode) return;
+      var el=$('hm-fout');
+      if(!el){ el=document.createElement('div'); el.id='hm-fout'; el.style.cssText='margin:10px 0;padding:12px 14px;border:1px solid #E8A33D;background:#FFF6E5;border-radius:10px;color:#7A4A00;font-size:13.5px'; host.parentNode.insertBefore(el, host); }
+      el.style.display='';
+      el.innerHTML='⚠ De <b>combinatie-heatmap</b> kon even niet berekend worden (de server had het druk). '+
+        '<button class="btn ghost sm" type="button" id="hm-retry" style="margin-left:6px">🔄 Opnieuw proberen</button>';
+      var b=$('hm-retry'); if(b) b.onclick=function(){ el.style.display='none'; retry(); };
+      host.classList.add('hidden');   // geen lege heatmap tonen
+    }
+    function _heatmapFoutWeg(){ var el=$('hm-fout'); if(el) el.style.display='none'; }
     // Optimale combinatie = hoogste rendement met positieve besparing; tiebreak = hoogste besparing.
     function kiesBesteAnker(anchors){
       var cand=anchors.filter(function(a){ return a && a.besparing>0 && a.rendement!=null && (anchorKwp(a)>0 || (a.battKwh||0)>0); });
