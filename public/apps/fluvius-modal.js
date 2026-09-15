@@ -1,4 +1,5 @@
-// fluvius-modal.js v1.0.0 (2026-09-15) — GEDEELDE actie-modal voor mandaat/EAN-acties.
+// fluvius-modal.js v1.1.0 (2026-09-15) — GEDEELDE actie-modal voor mandaat/EAN-acties.
+// v1.1.0: actie "🚫 Analoge meter — geen mandaat (standaardprofiel)" (kind 'analoog' → POST /api/mandaat/geen-digitale-meter).
 // Eén bron van waarheid voor "welke acties per status" + het uitvoeren ervan, gebruikt door zowel
 // apps/fluvius-acties.html (volledige actielijst) als apps/projecten.html (acties per project).
 // Classic script (geen module) → laadt via <script src>. Init met FLXModal.init({proxy, authHeaders, onDone, modalId}).
@@ -41,6 +42,7 @@
     if(s==='wachtrij'){
       a.push({label:'📶 Open Mijn Fluvius — mandaat aanvragen', kind:'openAanvraag'});
       a.push({label:'✅ Markeer als aangevraagd', kind:'markAangevraagd'});
+      a.push({label:'🚫 Analoge meter — geen mandaat (standaardprofiel)', kind:'analoog'});
       a.push({label:'✕ Annuleren', kind:'annuleer', danger:true});
     } else if(s==='aangevraagd'){
       a.push({label:'✅ Markeer als actief (goedgekeurd)', kind:'markActief'});
@@ -107,6 +109,7 @@
     if(kind==='annuleer'){ if(!confirm('Zeker annuleren voor EAN '+it.ean+'?')) return; await patchStatus(it,{status:'geannuleerd'}); return; }
     if(kind==='adresOk'){ await postAct('/api/mandaat/bevestig-adres',{project_id:pid, ean:it.ean, akkoord:true}); return; }
     if(kind==='reminder'){ await postAct('/api/mandaat/reminder-een',{ean:it.ean, project_id:pid||'LOS'}); return; }
+    if(kind==='analoog'){ if(!confirm('EAN '+it.ean+' markeren als ANALOGE meter? Geen mandaat; de klant krijgt een mail dat de studie op een standaardprofiel loopt (verbruik+piek uit de factuur).')) return; await postAct('/api/mandaat/geen-digitale-meter',{ean:it.ean, project_id:pid||'LOS'}); return; }
     if(kind==='koppel'){ var p=((prompt('Koppel aan project-id (FLX-XXX-XXXX):')||'').trim().toUpperCase()); if(!/^FLX-/.test(p)){ if(p) alert('Ongeldig project-id.'); return; } await postAct('/api/mandaat/aanvraag',{project_id:p, eans:[it.ean]}); return; }
   }
   // Publieke API + globals voor de inline onclick-handlers in de gegenereerde modal-HTML.
