@@ -4,15 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
-<!-- projecten.html v0.2.0 (2026-09-14) — MANAGER-COCKPIT: overzicht van ALLE projecten (manager-only: David/Johan).
-     Toont per project de status (profiel afname/injectie, mandaat, studies, factuurdata) + de afgeleide volgende
-     actie, met deeplinks (Open in Kamino, ⚡ Acties) en archiveren/herstellen. GET /api/kamino/projecten-overzicht
-     (?archief=1 = incl. gearchiveerd) + POST /api/kamino/archiveer {id,archived}. Server v15.150.
-     v0.2.0 (14-09): checkbox per rij + "selecteer alle (gefilterde)" (master-checkbox, indeterminate) + bulk-balk
-     "📦 Archiveer selectie / ↩ Herstel selectie" over de hele selectie (loop over /api/kamino/archiveer).
-     v0.3.0 (14-09): "Open" → EnergieKompas op de rapport-stap (?case=<lead_token>&stap=rapport) als er een lead/case
-     is (customer journey, live herrekend op het profiel); zonder lead → Kamino. 📊-knop opent altijd Kamino. -->
+<!-- projecten.html v0.4.0 (2026-09-15) — MANAGER-COCKPIT: overzicht van ALLE projecten (manager-only: David/Johan).
+     Toont per project de status + de afgeleide volgende actie (klikbaar → actie-modal), met deeplinks en archief.
+     GET /api/kamino/projecten-overzicht (?archief=1) + POST /api/kamino/archiveer {id,archived}. Server v15.150.
+     v0.2.0: multi-select + bulk-archief. v0.3.0: "Open" → EnergieKompas rapport-stap (?case=&stap=rapport) of Kamino.
+     v0.4.0 (15-09): klik de "volgende actie" → project-actie-modal met dezelfde mandaat/EAN-acties als de volledige
+     actielijst (gedeelde module fluvius-modal.js / FLXModal); EAN's per project via /api/mandaat/wachtrij. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/fluvius-modal.js"></script>
 <style>
   :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E; }
   *{ box-sizing:border-box; }
@@ -49,6 +48,15 @@
   .bulk b{ color:var(--navy2); }
   th.chk,td.chk{ width:32px; text-align:center; padding-left:10px; padding-right:4px; }
   th.chk input,td.chk input{ width:16px; height:16px; cursor:pointer; }
+  .acbtn{ font:inherit; font-weight:700; font-size:12.5px; background:none; border:none; cursor:pointer; padding:0; text-align:left; }
+  .acbtn:hover{ text-decoration:underline; }
+  .m-overlay{ position:fixed; inset:0; background:rgba(18,49,94,.45); display:flex; align-items:center; justify-content:center; z-index:9999; padding:16px; }
+  .m-card{ background:#fff; border-radius:14px; padding:18px; max-width:460px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .m-top{ display:flex; align-items:center; gap:8px; font-size:16px; color:var(--navy); font-weight:700; }
+  .m-x{ margin-left:auto; background:transparent; border:none; font-size:16px; cursor:pointer; color:var(--muted); }
+  .m-act{ display:block; width:100%; text-align:left; background:#fff; border:1.5px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13.5px; font-weight:600; color:var(--navy2); cursor:pointer; margin-top:8px; }
+  .m-act:hover{ background:#f2f7ff; } .m-act.danger{ color:#b23; border-color:#f2c7c7; } .m-act.danger:hover{ background:#fef2f2; }
+  .code{ font-family:ui-monospace,Menlo,Consolas,monospace; }
   .state{ padding:34px; text-align:center; color:var(--muted); } .fout{ padding:28px; text-align:center; color:#b23; }
   @media(max-width:820px){ table,thead,tbody,th,td,tr{ display:block; } thead{ display:none; } tr{ border-bottom:1px solid var(--line); padding:6px 0; } td{ border:none; padding:5px 12px; } }
 </style>
@@ -81,10 +89,11 @@
     </div>
     <div id="root"><div class="state">Laden…</div></div>
   </div>
+  <div id="modal" class="m-overlay" style="display:none" onclick="_flxSluit()"></div>
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, SEL=new Set();
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, SEL=new Set(), EANMAP={};
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
     function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear(); }catch(e){ return '—'; } }
 
@@ -113,6 +122,16 @@
       if(r.status===401){ window.location.href='/portal.html'; return; }
       if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
       var j = await r.json(); DATA = (j&&j.projecten)||[];
+      // v0.4.0: EAN's per project ophalen (voor de actie-modal, dezelfde als in fluvius-acties). Los-entries mappen
+      // op hun seed_project_id. Niet-blokkerend.
+      EANMAP={};
+      try{
+        var rw=await fetch(PROXY+'/api/mandaat/wachtrij?status=wachtrij,aangevraagd,actief,adres_mismatch,geleverd,geannuleerd,fout',{ headers: await authHeaders() });
+        if(rw.ok){ var jw=await rw.json(); (jw.items||[]).forEach(function(en){
+          var pid = en.los ? (en.seed_project_id||null) : en.project_id;
+          if(!pid) return; (EANMAP[pid]=EANMAP[pid]||[]).push(en);
+        }); }
+      }catch(e){}
       render();
     }
 
@@ -161,7 +180,7 @@
           '<td><div class="naam">'+esc(p.naam)+(p.archief?' <span class="pill p-neu">gearchiveerd</span>':'')+'</div><div class="id">'+esc(p.id)+(p.partner?(' · '+esc(p.partner)):'')+(p.bron?(' · '+esc(p.bron)):'')+'</div></td>'+
           '<td>'+esc(p.klant||'—')+(p.adviseur?('<div class="sub">adv: '+esc(p.adviseur)+'</div>'):'')+'</td>'+
           '<td>'+statusPills(p)+'</td>'+
-          '<td><span class="actie '+a.kls+'">'+esc(a.txt)+'</span></td>'+
+          '<td><button class="acbtn '+a.kls+'" onclick="openProjectActies(\''+esc(p.id)+'\')" title="Acties voor dit project">'+esc(a.txt)+' ▸</button></td>'+
           '<td class="sub">'+kort(p.bijgewerkt)+'</td>'+
           '<td><div class="rowbtns">'+
             // v0.3.0: "Open" → EnergieKompas op de rapport-stap (customer journey, live herrekend op het profiel)
@@ -210,11 +229,39 @@
       if(msg) msg.textContent='✓ '+ok+' verwerkt'+(fout?(' · '+fout+' mislukt'):'');
       SEL.clear(); await laad();
     }
+    // ── Project-actie-modal (gedeeld met fluvius-acties via FLXModal) ──
+    function projById(id){ for(var i=0;i<DATA.length;i++) if(DATA[i].id===id) return DATA[i]; return null; }
+    window.openProjectActies=function(id){
+      var p=projById(id); if(!p) return;
+      var eans=EANMAP[id]||[];
+      var m=$('modal'); if(!m) return;
+      var h='<div class="m-card" onclick="event.stopPropagation()">'+
+        '<div class="m-top"><span>'+esc(p.naam)+'</span><button class="m-x" onclick="_flxSluit()">✕</button></div>'+
+        '<div class="sub" style="margin:2px 0 10px"><span class="code">'+esc(p.id)+'</span>'+(p.klant?(' · '+esc(p.klant)):'')+(p.partner?(' · '+esc(p.partner)):'')+'</div>';
+      if(p.lead_token) h+='<a class="m-act" href="/apps/energiekompas.html?case='+encodeURIComponent(p.lead_token)+'&stap=rapport" target="_blank" rel="noopener" style="text-decoration:none">📈 Open in EnergieKompas (rapport)</a>';
+      h+='<a class="m-act" href="/apps/kamino.html?open='+encodeURIComponent(p.id)+'" target="_blank" rel="noopener" style="text-decoration:none">📊 Open in Kamino</a>';
+      if(eans.length){
+        h+='<div class="sub" style="margin:12px 0 4px;font-weight:700;color:var(--navy2)">Mandaat-acties per EAN</div>';
+        eans.forEach(function(en,i){
+          h+='<button class="m-act" onclick="eanActie(\''+esc(id)+'\','+i+')"><b>'+esc(en.status)+'</b> · <span class="code">'+esc(en.ean)+'</span>'+(en.richting?(' · '+esc(en.richting)):'')+' — acties…</button>';
+        });
+      } else {
+        h+='<div class="sub" style="margin:12px 0 4px">Nog geen mandaat gekoppeld aan dit project.</div>'+
+           '<button class="m-act" onclick="_flxOpenFluvius(FLXModal.AANVRAAG,'+JSON.stringify(p.naam||'Mijn Fluvius')+')">📶 Open Mijn Fluvius — mandaat aanvragen</button>';
+      }
+      h+=(p.archief
+        ? '<button class="m-act" onclick="archiveer(\''+esc(id)+'\',false)">↩ Herstel uit archief</button>'
+        : '<button class="m-act danger" onclick="archiveer(\''+esc(id)+'\',true)">📦 Archiveer project</button>');
+      h+='</div>';
+      m.innerHTML=h; m.style.display='flex';
+    };
+    window.eanActie=function(id,i){ var arr=EANMAP[id]||[]; if(arr[i]) FLXModal.open(arr[i]); };
     window.archiveer = async function(id, archived){
       if(archived && !confirm('Project '+id+' archiveren? Het verdwijnt uit het actieve overzicht (herstelbaar via "toon archief").')) return;
       try{
         var r=await fetch(PROXY+'/api/kamino/archiveer',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, archived:archived }) });
         if(!r.ok){ var j=await r.json().catch(function(){return {};}); alert('Kon niet: '+(j.error||r.status)); return; }
+        try{ _flxSluit(); }catch(e){}
         await laad();
       }catch(e){ alert('Fout: '+e.message); }
     };
@@ -222,7 +269,7 @@
     window.addEventListener('DOMContentLoaded', async function(){
       $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
       $('toonArchief').addEventListener('change', function(){ ARCHIEF=this.checked; laad(); });
-      try{ await loadConfig(); await initAuth(); }
+      try{ await loadConfig(); FLXModal.init({proxy:PROXY, authHeaders:authHeaders, onDone:laad}); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
     });
   </script>

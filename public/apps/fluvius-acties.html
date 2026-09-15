@@ -4,10 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fluvius-acties · Fluctus</title>
-<!-- fluvius-acties.html v0.5.0 (2026-09-14) — «Open Mijn Fluvius» keuzepaneel PLATFORM-BEWUST: op iPhone een
-     «Open in Chrome» (googlechromes://), op Mac/desktop NIET (een webpagina kan daar geen andere browser openen —
-     was misleidend) maar de tip "open dit dashboard in Chrome / zet Chrome als standaard". echte link + kopieer blijven.
-     v0.4.0 (2026-09-14) — keuzepaneel i.p.v. window.open (opende in de browser waar het dashboard draait). -->
+<!-- fluvius-acties.html v0.6.0 (2026-09-15) — actie-modal-logica verhuisd naar de GEDEELDE module fluvius-modal.js
+     (FLXModal), zodat apps/projecten.html exact dezelfde acties per EAN kan tonen én starten. Gedrag identiek.
+     v0.5.0 (2026-09-14) — «Open Mijn Fluvius» keuzepaneel PLATFORM-BEWUST (iPhone: Chrome-knop; Mac: tip). -->
 <!-- fluvius-acties.html v0.3.0 (2026-09-13) — ACTIE-MODAL: klik een rij → modal met status-relevante acties
      (aanvragen/markeer aangevraagd/actief/geleverd/annuleer, adres bevestigen, dringende reminder, koppel aan
      project, open Mijn Fluvius). Endpoints: /api/mandaat/status, /los-patch, /bevestig-adres, /reminder-een, /aanvraag.
@@ -19,6 +18,7 @@
        (actief + geen kwartierdata) · afgewerkt (geleverd of actief+kwartierdata). Filter op klant/partner.
      Toont de laatste beweging als 'sync'-indicator. Read-only; acties zelf gebeuren via mandaten.html + de sync. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/fluvius-modal.js"></script>
 <style>
   :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --teal:#0E7C86; --amber:#9E480E; }
   *{ box-sizing:border-box; }
@@ -82,7 +82,7 @@
       <span class="sync" id="sync"></span>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
-    <div id="modal" class="m-overlay" style="display:none" onclick="sluitModal()"></div>
+    <div id="modal" class="m-overlay" style="display:none" onclick="_flxSluit()"></div>
     <div class="legend" id="legend" style="display:none">
       <b>Klik een rij</b> voor de acties die bij die status horen (aanvragen, markeren, bevestigen, reminder, koppelen, Mijn Fluvius openen).<br>
       <b>Backlog</b> = wat er nog via je ingelogde Chrome op Mijn Fluvius moet gebeuren. <b>Aan te vragen</b> =
@@ -202,115 +202,14 @@
       $('root').innerHTML=h;
     }
 
-    // ── ACTIE-MODAL ─────────────────────────────────────────────────────────
-    function actiesVoor(it){
-      var s=it.status, los=!!it.los, a=[];
-      if(s==='wachtrij'){
-        a.push({label:'📶 Open Mijn Fluvius — mandaat aanvragen', kind:'openAanvraag'});
-        a.push({label:'✅ Markeer als aangevraagd', kind:'markAangevraagd'});
-        a.push({label:'✕ Annuleren', kind:'annuleer', danger:true});
-      } else if(s==='aangevraagd'){
-        a.push({label:'✅ Markeer als actief (goedgekeurd)', kind:'markActief'});
-        a.push({label:'📨 Stuur nu een dringende reminder', kind:'reminder'});
-        a.push({label:'🔎 Open Mijn Fluvius — status checken', kind:'openStatus'});
-        a.push({label:'✕ Annuleren / vervallen', kind:'annuleer', danger:true});
-      } else if(s==='adres_mismatch'){
-        if(!los) a.push({label:'✅ Adres bevestigen (indienen)', kind:'adresOk'});
-        a.push({label:'🔎 Open Mijn Fluvius — adres nakijken', kind:'openStatus'});
-        a.push({label:'✕ Weigeren / annuleren', kind:'annuleer', danger:true});
-      } else if(s==='actief'){
-        a.push({label:'⬇️ Open Mijn Fluvius — kwartierdata downloaden', kind:'openEigen'});
-        a.push({label:'📥 Markeer profiel geleverd', kind:'markGeleverd'});
-        a.push({label:'🔎 Open Mijn Fluvius — status', kind:'openStatus'});
-      } else if(s==='geleverd'){
-        a.push({label:'⬇️ Open Mijn Fluvius — opnieuw downloaden', kind:'openEigen'});
-        a.push({label:'↩️ Terug naar actief (correctie)', kind:'markActief'});
-      } else {
-        a.push({label:'🔎 Open Mijn Fluvius', kind:'openStatus'});
-        a.push({label:'✅ Terug naar aangevraagd', kind:'markAangevraagd'});
-      }
-      if(los) a.push({label:'🔗 Koppel aan project…', kind:'koppel'});
-      return a;
-    }
-    // v0.4.0 (Johan 14-09): «Open Mijn Fluvius» opende via window.open in de browser waar dít dashboard draait
-    // (bv. Safari) — niet noodzakelijk Chrome waar u bij Fluvius (itsme) bent aangemeld. Een webpagina kan een
-    // link niet naar een andere desktop-browser sturen; daarom een keuzepaneel: echte link (huidige browser),
-    // «Open in Chrome» via het googlechromes://-schema (werkt op iPhone / waar Chrome dat schema registreert),
-    // en «Kopieer link» als robuuste fallback om in Chrome te plakken.
-    function _chromeScheme(url){ return url.replace(/^https:\/\//,'googlechromes://').replace(/^http:\/\//,'googlechrome://'); }
-    window.kopieer=function(txt, btn){
-      try{ navigator.clipboard.writeText(txt).then(function(){ if(btn){ var o=btn.textContent; btn.textContent='✓ gekopieerd'; setTimeout(function(){ btn.textContent=o; },1500); } }); }
-      catch(e){ try{ prompt('Kopieer de link:', txt); }catch(_){} }
-    };
-    window.openFluvius=function(url, titel){
-      // v0.5.0 (14-09): platform-bewust. Een webpagina kan op de Mac géén ándere browser (Chrome) openen — dat
-      // 'googlechromes://'-schema werkt enkel op iPhone. Op desktop tonen we die knop dus NIET (was misleidend) en
-      // sturen we naar "open dit dashboard in Chrome". Op iPhone blijft de Chrome-knop.
-      var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent||'');
-      var m=$('modal');
-      var chromeBtn = isIOS ? '<button class="m-act" onclick="location.href=\''+_chromeScheme(url)+'\'">🌐 Open in Chrome</button>' : '';
-      var tip = isIOS
-        ? 'Tip: «Open in Chrome» opent Mijn Fluvius in de Chrome-app, waar u via itsme aangemeld bent.'
-        : 'Op <b>Mac</b> opent «deze browser» in de browser waar dít dashboard draait (bv. Safari). Om in <b>Chrome</b> te werken — waar u bij Fluvius aangemeld bent én de Claude-extensie draait — open dit dashboard óók in Chrome, of zet Chrome als standaardbrowser. Dan werkt de aanvraag-flow via de extensie.';
-      m.innerHTML='<div class="m-card" onclick="event.stopPropagation()">'+
-        '<div class="m-top"><span>📶 '+esc(titel||'Open Mijn Fluvius')+'</span><button class="m-x" onclick="sluitModal()">✕</button></div>'+
-        '<div class="sub" style="margin:2px 0 12px;line-height:1.45">Open dit in de browser waar u <b>bij Fluvius bent aangemeld</b> (itsme).</div>'+
-        '<a class="m-act" href="'+esc(url)+'" target="_blank" rel="noopener" style="text-decoration:none;box-sizing:border-box" onclick="setTimeout(sluitModal,400)">🔗 Open Mijn Fluvius (deze browser)</a>'+
-        chromeBtn+
-        '<button class="m-act" onclick="kopieer('+JSON.stringify(url)+',this)">📋 Kopieer link</button>'+
-        '<div class="sub" style="margin-top:11px;line-height:1.5">'+tip+'</div>'+
-        '</div>';
-      m.style.display='flex';
-    };
-    window.openActie=function(key){
-      var it=ROWMAP[key]; if(!it) return;
-      var acts=actiesVoor(it);
-      var titel=esc(it.klant||it.project_naam||(it.aanvrager&&it.aanvrager.naam)||'—');
-      var h='<div class="m-card" onclick="event.stopPropagation()">'+
-        '<div class="m-top"><span>'+titel+(it.los?' <span class="sub" style="font-weight:400">(los)</span>':'')+'</span><button class="m-x" onclick="sluitModal()">✕</button></div>'+
-        '<div class="sub" style="margin:2px 0 12px"><span class="code">'+esc(it.ean)+'</span> · status <b>'+esc(it.status)+'</b>'+(it.partner?(' · '+esc(it.partner)):'')+(it.titularis_mail_masked?(' · titularis '+esc(it.titularis_mail_masked)):'')+'</div>'+
-        acts.map(function(a){ return '<button class="m-act'+(a.danger?' danger':'')+'" onclick="doeActie(\''+a.kind+'\',\''+key+'\')">'+esc(a.label)+'</button>'; }).join('')+
-        '</div>';
-      var m=$('modal'); m.innerHTML=h; m.style.display='flex';
-    };
-    window.sluitModal=function(){ var m=$('modal'); m.style.display='none'; m.innerHTML=''; };
-    async function postAct(path, body){
-      try{
-        var r=await fetch(PROXY+path,{method:'POST',headers:await authHeaders(),body:JSON.stringify(body)});
-        var j=await r.json().catch(function(){return {};});
-        if(!r.ok){ alert('Kon niet: '+(j.error||r.status)); return; }
-        sluitModal(); await laad();
-      }catch(e){ alert('Fout: '+e.message); }
-    }
-    async function patchStatus(it, patch){
-      var url = it.los ? '/api/mandaat/los-patch' : '/api/mandaat/status';
-      var body = it.los ? {ean:it.ean, patch:patch} : {project_id:it.project_id, ean:it.ean, patch:patch};
-      await postAct(url, body);
-    }
-    window.doeActie=async function(kind, key){
-      var it=ROWMAP[key]; if(!it) return;
-      var pid=it.project_id||'';
-      var _t=it.klant||it.project_naam||(it.aanvrager&&it.aanvrager.naam)||'Mijn Fluvius';
-      if(kind==='openAanvraag'||kind==='openStatus'){ openFluvius(FLUVIUS_AANVRAAG, _t); return; }
-      if(kind==='openEigen'){ openFluvius(FLUVIUS_EIGEN, _t); return; }
-      if(kind==='markAangevraagd'){
-        var ref=(prompt('Referentienummer (MijnFluvius-…), optioneel — laat leeg om over te slaan:')||'').trim();
-        var mail=(prompt('Gemaskeerd titularis-mailadres (bv. x***@domein), optioneel:')||'').trim();
-        var patch={status:'aangevraagd'}; if(ref) patch.referentienummer=ref; if(mail) patch.titularis_mail_masked=mail;
-        await patchStatus(it,patch); return;
-      }
-      if(kind==='markActief'){ await patchStatus(it,{status:'actief'}); return; }
-      if(kind==='markGeleverd'){ await patchStatus(it,{status:'geleverd', kwartierdata_aanwezig:true}); return; }
-      if(kind==='annuleer'){ if(!confirm('Zeker annuleren voor EAN '+it.ean+'?')) return; await patchStatus(it,{status:'geannuleerd'}); return; }
-      if(kind==='adresOk'){ await postAct('/api/mandaat/bevestig-adres',{project_id:pid, ean:it.ean, akkoord:true}); return; }
-      if(kind==='reminder'){ await postAct('/api/mandaat/reminder-een',{ean:it.ean, project_id:pid||'LOS'}); return; }
-      if(kind==='koppel'){ var p=((prompt('Koppel aan project-id (FLX-XXX-XXXX):')||'').trim().toUpperCase()); if(!/^FLX-/.test(p)){ if(p) alert('Ongeldig project-id.'); return; } await postAct('/api/mandaat/aanvraag',{project_id:p, eans:[it.ean]}); return; }
-    };
+    // ── ACTIE-MODAL (gedeeld) — logica in fluvius-modal.js (FLXModal), zodat projecten.html dezelfde acties heeft ──
+    window.openActie=function(key){ FLXModal.open(ROWMAP[key]); };
+
 
     window.addEventListener('DOMContentLoaded', async function(){
       $('ververs').onclick=laad;
       $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
-      try{ await loadConfig(); await initAuth(); }
+      try{ await loadConfig(); FLXModal.init({proxy:PROXY, authHeaders:authHeaders, onDone:laad}); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
     });
   </script>
