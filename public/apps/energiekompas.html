@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.53.0 (2026-09-14, ÉÉN RAPPORT + JOURNEY-DEEPLINK + LIVE-PROFIEL [client], Johan):
+<!-- energiekompas.html v0.54.0 (2026-09-15, NOTA-FALLBACK + WAGENS-VROEG + KABELTRACÉ-SEED/ROUND-TRIP, Johan):
+     (#2) _bouwNotaData/_bouwNotaDataBedrijf vallen terug op de factuur (STATE.factuur) als de invoer-velden leeg zijn
+          (factuur/resume-pad) → energieverbruik in de nota komt niet meer op 0.
+     (#3) stap-meer vraagt bij 'elektrische mobiliteit' nu meteen het aantal wagens (particulier 1/2 · bedrijf wagenpark);
+          meerGo past dat toe (STATE.wagens/STATE.eigen) zodat de eerste analyse de laadvraag al meeneemt.
+     (#4/#5) de DIY-plaatsingstool krijgt een SEED (adres uit de factuur + PV/batterij/laadpalen uit de analyse) via
+          localStorage → de kabeltracé vraagt het adres niet opnieuw en dropt de componenten meteen (_kblSeedUitAnalyse).
+     (#6) round-trip: _kblWatchResult/_kblPasResultToe lezen het teruggestuurde ontwerp (kabelprijs + geplaatste palen);
+          bedrijf kan met de extra palen de analyse herrekenen (_kblHerbereken). Zie ook kabelplanner.html v1.19 (simpel palet).
+     ── v0.53.0 (2026-09-14, ÉÉN RAPPORT + JOURNEY-DEEPLINK + LIVE-PROFIEL [client], Johan):
      (a) _hervatCase vangt project_id op uit /api/inbound-case → STATE.projectId; _ondBody stuurt project_id mee naar
          /api/kamino/onderhandel zodat de app LIVE herrekent op het opgeladen (gemeten) Fluvius-profiel (leeg = ongewijzigd).
      (b) journey-mail-deeplink &stap= → _stapSprong springt naar de juiste plek (rapport/profiel → profiel-blok; mandaat → mandOpen; hoe → stap-hoe).
@@ -698,6 +707,19 @@
       <p class="hint">Zonder extra aansluitvermogen zit er vaak nog ruimte. Wat wilt u laten berekenen?</p>
       <label class="opt"><input type="checkbox" id="q-besparing" checked> <b>Besparing &amp; rendement</b><span>Heeft mijn aansluiting nog besparing en rendement in petto (slim laden/opslaan)?</span></label>
       <label class="opt"><input type="checkbox" id="q-mobiliteit"> <b>Elektrische mobiliteit</b><span>Hoeveel km kan ik laden op mijn bestaande aansluiting, en hoe goedkoop wordt de energiekost per km?</span></label>
+      <!-- #3 (Johan): meteen bij de eerste analyse het aantal wagens vragen (particulier 1/2 · bedrijf wagenpark),
+           zodat de resultaten de laadvraag al meenemen i.p.v. dat pas later te vragen. -->
+      <div id="q-mob-wagens" class="hidden" style="margin:-2px 0 10px 26px;padding:9px 12px;background:#F4F8FB;border:1px solid #D6E2EE;border-radius:8px">
+        <p class="hint" id="q-mob-wagens-lbl" style="margin:0 0 6px">Hoeveel wagens wilt u kunnen laden?</p>
+        <div id="q-mob-part" class="hidden">
+          <label class="optmini"><input type="radio" name="mobwagens" value="1" checked> 1 wagen</label>
+          <label class="optmini"><input type="radio" name="mobwagens" value="2"> 2 wagens</label>
+        </div>
+        <div id="q-mob-bedr" class="hidden">
+          <label>Aantal wagens in het wagenpark</label>
+          <input type="number" id="q-mob-aantal" min="1" step="1" value="4" style="max-width:130px">
+        </div>
+      </div>
       <label class="opt" id="opt-generator"><input type="checkbox" id="q-generator"> <b>Generator vervangen</b> <span class="nieuw">nieuw</span><span>Kan ik een brandstofgenerator vervangen door goedkope stroom en vermogen uit mijn bestaande aansluiting?</span></label>
       <!-- v0.20.0 (Johan): kwalificatie-bullets — enkel particulier. Niet in de berekening, wel om de lead te
            kwalificeren (hoe meer elektrisch, hoe relevanter een batterij). -->
@@ -1751,17 +1773,23 @@
     }
     function _bouwNotaData(){
       var inv=STATE.invoer||{}, sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest||null;
-      var afnameMwh=+inv.afname_mwh||0;
-      var refEurMwh=(inv.huidige_kost>0&&afnameMwh>0)?Math.round(inv.huidige_kost/afnameMwh):0;
+      // v0.54 (#2): factuur-fallback — als de invoer-velden leeg zijn (factuur/resume-pad) neem de waarden uit de
+      // ingelezen factuur (STATE.factuur, gezet door naFactuur uit de baseCase) zodat de nota niet op 0 komt.
+      var f=STATE.factuur||{};
+      var afnameMwh=(+inv.afname_mwh>0)?+inv.afname_mwh:(+f.afnMwh||0);
+      var injMwh=(+inv.injectie_mwh>0)?+inv.injectie_mwh:(+f.injMwh||0);
+      var kva=(+inv.aansluiting_kva>0)?+inv.aansluiting_kva:(+f.kva||0);
+      var kost=(+inv.huidige_kost>0)?+inv.huidige_kost:(+f.kost||0);
+      var refEurMwh=(kost>0&&afnameMwh>0)?Math.round(kost/afnameMwh):0;
       // markt-periode (rolling 12m) → dagen≈365 zodat de onderhandel-marge op jaarbasis klopt
       return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
         var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
-        var ondBody=_ondBody('Residentieel', afnameMwh, refEurMwh, inv.aansluiting_kva, 'LS', pVan, pTot);
+        var ondBody=_ondBody('Residentieel', afnameMwh, refEurMwh, kva, 'LS', pVan, pTot);
         var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         var pInj=Promise.resolve(null);
         if((+inv.bestaand_pv_kwp||0)>0){
           pInj=fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-            profielNaam:'Residentieel', pv_kwp:+inv.bestaand_pv_kwp, injectie_mwh_jaar:+inv.injectie_mwh||0,
+            profielNaam:'Residentieel', pv_kwp:+inv.bestaand_pv_kwp, injectie_mwh_jaar:injMwh,
             afname_mwh_jaar:afnameMwh, piek_kw:+inv.piek_kw||0, inverter_kva:Math.round((+inv.bestaand_pv_kwp||0)*0.75*10)/10 })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         }
         return Promise.all([pOnd,pInj]).then(function(res){
@@ -1772,7 +1800,7 @@
           return {
             mode:'particulier', klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:regioLabel(inv.regio), profiel:'Residentieel',
             specifiek_profiel:false, thema:STATE.partner||'', raming:!!STATE.raming,
-            input:{ afname_mwh:afnameMwh, injectie_mwh:+inv.injectie_mwh||0, aansluiting_kva:+inv.aansluiting_kva||0,
+            input:{ afname_mwh:afnameMwh, injectie_mwh:injMwh, aansluiting_kva:kva,
               fasen:+inv.fasen||0, bestaand_pv_kwp:+inv.bestaand_pv_kwp||0, wagens:inv.wagens||[] },
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
@@ -1786,20 +1814,24 @@
     // Bedrijf: dezelfde nota, gevoed uit de bedrijf-sweep (dimensionering + generator + gekozen combo) + tegel 1/2.
     function _bouwNotaDataBedrijf(){
       var inv=STATE.invoer||{}, sw=STATE.tl||{}, sel=(STATE.hm&&STATE.hm.sel)||null;
-      var afnameMwh=+inv.afname_mwh||0;
-      var refEurMwh=(inv.huidige_kost>0&&afnameMwh>0)?Math.round(inv.huidige_kost/afnameMwh):0;
+      var f=STATE.factuur||{};
+      var afnameMwh=(+inv.afname_mwh>0)?+inv.afname_mwh:(+f.afnMwh||0);
+      var injMwh=(+inv.injectie_mwh>0)?+inv.injectie_mwh:(+f.injMwh||0);
+      var kva=(+inv.aansluiting_kva>0)?+inv.aansluiting_kva:(+f.kva||0);
+      var kost=(+inv.huidige_kost>0)?+inv.huidige_kost:(+f.kost||0);
+      var refEurMwh=(kost>0&&afnameMwh>0)?Math.round(kost/afnameMwh):0;
       var profiel=inv.profielNaam||'kantoor';
       var bestPv=(inv.pv&&+inv.pv.bestaand_kwp)||0;
       return fetch(API+'/?c='+Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}).then(function(root){
         var mp=(root&&root.markt_periode)||{}, pVan=mp.van||'', pTot=mp.tot||'';
-        var spanning=(inv.spanning==='MS'||inv.spanning==='LS')?inv.spanning:'LS';
-        var ondBody=_ondBody(profiel, afnameMwh, refEurMwh, inv.aansluiting_kva, spanning, pVan, pTot);
+        var spanning=(inv.spanning==='MS'||inv.spanning==='LS')?inv.spanning:((f.spann==='MS'||f.spann==='LS')?f.spann:'LS');
+        var ondBody=_ondBody(profiel, afnameMwh, refEurMwh, kva, spanning, pVan, pTot);
         var pOnd=fetch(API+'/api/kamino/onderhandel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ondBody)}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         var pInj=Promise.resolve(null);
         if(bestPv>0){
           pInj=fetch(API+'/api/injectie-optimalisatie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-            profielNaam:profiel, pv_kwp:bestPv, injectie_mwh_jaar:+inv.injectie_mwh||0,
-            afname_mwh_jaar:afnameMwh, piek_kw:Math.round((+inv.aansluiting_kva||0)*0.9), inverter_kva:Math.round(bestPv*0.75*10)/10 })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
+            profielNaam:profiel, pv_kwp:bestPv, injectie_mwh_jaar:injMwh,
+            afname_mwh_jaar:afnameMwh, piek_kw:Math.round(kva*0.9), inverter_kva:Math.round(bestPv*0.75*10)/10 })}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
         }
         return Promise.all([pOnd,pInj]).then(function(res){
           var ond=res[0], inj=res[1], A=(inj&&inj.analyse)||null;
@@ -1808,8 +1840,8 @@
           return {
             mode:'bedrijf', klant:'', datum:new Date().toLocaleDateString('nl-BE'), regio:'', profiel:profiel,
             specifiek_profiel:false, thema:STATE.partner||'', raming:!!STATE.raming, spreiden:STATE.spreiden||null,
-            input:{ afname_mwh:afnameMwh, injectie_mwh:+inv.injectie_mwh||0, aansluiting_kva:+inv.aansluiting_kva||0,
-              spanning:inv.spanning||'', bestaand_pv_kwp:bestPv, pleinen:inv.pleinen||[] },
+            input:{ afname_mwh:afnameMwh, injectie_mwh:injMwh, aansluiting_kva:kva,
+              spanning:inv.spanning||f.spann||'', bestaand_pv_kwp:bestPv, pleinen:inv.pleinen||[] },
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
               energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
@@ -2151,6 +2183,22 @@
         syncBedrijfComp();
       }
       STATE.wilMobiliteit=$('q-mobiliteit').checked;
+      // #3 (Johan): het aantal wagens is nu al in deze stap gevraagd → meteen toepassen zodat de eerste analyse de
+      // laadvraag meeneemt (i.p.v. dat pas in stap 8 te vragen). Particulier = 1/2 wagens; bedrijf = wagenpark-aantal.
+      if(STATE.wilMobiliteit){
+        if(STATE.modus==='bedrijf'){
+          var _na=Math.max(1, +(($('q-mob-aantal')||{}).value)||0);
+          if($('c-eigen')&&!$('c-eigen').checked) $('c-eigen').checked=true;
+          if(!STATE.eigen || !STATE.eigen.length) STATE.eigen=[nieuwEigen()];
+          STATE.eigen[0].aantal=_na; STATE.eigen[0]._klantGezet=true;
+          syncBedrijfComp();
+        } else {
+          var _rw=document.querySelector('input[name="mobwagens"]:checked');
+          var _nw=Math.max(1, Math.min(2, _rw?(+_rw.value||1):1));
+          STATE.wagens=[]; for(var _iw=0;_iw<_nw;_iw++) STATE.wagens.push(nieuweWagen());
+          if($('p-wagens')) renderWagens();
+        }
+      }
       try{ _leadUpdate({ event:'interesses', interesses:STATE.interesses, kwalificaties:STATE.kwalificaties }); }catch(e){}   // v0.20.0: lead-verrijking
       var st='weet_niet', inv=gatherInvoer(st); STATE.invoer=inv;
       $('extra-kpi').innerHTML=''; $('meer-msg').textContent='';
@@ -2418,6 +2466,76 @@
         el.classList.remove('hidden');
       }).catch(function(){});
     }
+    // ── #4·#5·#6 (Johan): kabelplanner-seed uit de gekozen analyse + round-trip van de teruggestuurde prijs/palen ──
+    // #4/#5: adres uit de factuur + de analyse-componenten (PV kWp, batterij kWh, laadpalen) → seed zodat de kabeltracé
+    //        het adres niet opnieuw vraagt en de componenten meteen dropt.
+    function _kblSeedUitAnalyse(){
+      var sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest||null;
+      var adres=STATE.factuurAdres||(STATE.baseCase&&STATE.baseCase.leveringsadres)||'';
+      var bedrijf=(STATE.modus==='bedrijf');
+      var laadpunten=[];
+      if(bedrijf){
+        var wag=0; (STATE.eigen||[]).forEach(function(g){ wag+=(+g.aantal||0); });
+        var acp=Math.max(0, Math.ceil(wag/2));   // dubbele AC 22 kW = 2 laadpunten per paal
+        if(acp>0) laadpunten.push({type:'AC22', aantal:acp});
+        (STATE.bet||[]).forEach(function(g){ var n=Math.max(0,+g.palen||0); if(n>0) laadpunten.push({type:(g.type==='dc160'?'DC160':'AC22'), aantal:n}); });
+      } else if(STATE.wilMobiliteit){
+        var nw=(STATE.wagens&&STATE.wagens.length)||1;
+        laadpunten.push({type:'AC22', aantal:Math.max(1, Math.ceil(nw/2))});
+      }
+      var seed={ adres:adres, simpel:true, mode:(bedrijf?'bedrijf':'particulier'), allow_extra_palen:bedrijf, laadpunten:laadpunten };
+      if(sel){
+        var kwp=anchorKwp(sel)||0; if(kwp>0) seed.pv={kwp:kwp};
+        var kwh=+sel.battKwh||0; if(kwh>0) seed.batterij={aantal:1, kwh:kwh};
+      }
+      STATE._kblSeedPalen=laadpunten.reduce(function(s,l){ return s+(+l.aantal||0); },0);   // om extra palen te herkennen
+      var cab=(STATE.scan&&STATE.scan.scan&&STATE.scan.scan.cabines)||null;
+      if(cab&&cab.length) seed.cabines=cab;
+      return seed;
+    }
+    // #6: luister op het teruggestuurde ontwerp (prijs + geplaatste palen) uit de kabelplanner (andere tab, zelfde origin).
+    var _kblWatching=false;
+    function _kblWatchResult(){
+      if(_kblWatching) return; _kblWatching=true;
+      window.addEventListener('storage', function(ev){
+        if(ev.key!=='fluctus_kbl_result' || !ev.newValue) return;
+        var r; try{ r=JSON.parse(ev.newValue); }catch(e){ return; }
+        _kblPasResultToe(r);
+      });
+      // Fallback-polling: storage-events zijn niet in elke browser betrouwbaar na window.open.
+      var _n=0, _iv=setInterval(function(){
+        _n++; if(_n>600){ clearInterval(_iv); return; }   // ~10 min
+        var raw; try{ raw=localStorage.getItem('fluctus_kbl_result'); }catch(e){ return; }
+        if(raw){ clearInterval(_iv); var r; try{ r=JSON.parse(raw); }catch(e){ return; } _kblPasResultToe(r); }
+      }, 1000);
+    }
+    function _kblPasResultToe(r){
+      if(!r) return;
+      STATE.kabelResult=r; STATE.kabeltraceEur=+r.kabeltrace_eur||0;
+      var comps=r.componenten||[];
+      var palen=comps.filter(function(c){ return c.type==='ac'||c.type==='dc'||c.type==='sdc'; }).length;
+      var seeded=+STATE._kblSeedPalen||0, extra=Math.max(0, palen-seeded), bedrijf=(STATE.modus==='bedrijf');
+      var host=$('hardware-voorstel'); if(!host) return;
+      var el=$('kbl-result-note');
+      if(!el){ el=document.createElement('div'); el.id='kbl-result-note'; el.style.cssText='margin-top:14px;padding:12px 14px;border:1px solid #A9CDB4;border-radius:10px;background:#EAF3EC;color:#1F3864;font-size:13.5px'; host.parentNode.insertBefore(el, host.nextSibling); }
+      var html='<b>📍 Kabeltracé ontvangen.</b> Indicatieve kabelkost: <b>'+eur(STATE.kabeltraceEur)+'</b> · '+palen+' laadpunt(en) geplaatst'+((+r.pv_kwp_getekend>0)?(' · '+r.pv_kwp_getekend+' kWp PV getekend'):'')+'.';
+      if(bedrijf && extra>0){
+        html+='<div style="margin-top:8px">U plaatste <b>'+extra+' extra laadpaal(en)</b> bovenop de analyse. Wilt u de studie hiermee herrekenen?</div>'+
+              '<button class="btn sm" type="button" id="kbl-herbereken" style="margin-top:8px">↻ Herbereken analyse met '+palen+' laadpalen →</button>';
+      }
+      el.innerHTML=html; el.scrollIntoView({behavior:'smooth', block:'nearest'});
+      if(bedrijf && extra>0){ var b=$('kbl-herbereken'); if(b) b.onclick=function(){ _kblHerbereken(palen); }; }
+      try{ _leadUpdate({ event:'kabeltrace_terug', kabeltrace_eur:STATE.kabeltraceEur, palen:palen, extra_palen:extra }); }catch(e){}
+    }
+    function _kblHerbereken(palen){
+      if(!STATE.eigen || !STATE.eigen.length) STATE.eigen=[nieuwEigen()];
+      STATE.eigen[0].aantal=Math.max(STATE.eigen[0].aantal||0, palen*2);   // ~2 wagens per dubbele AC-paal
+      STATE.eigen[0]._klantGezet=true;
+      if($('c-eigen')) $('c-eigen').checked=true; syncBedrijfComp();
+      var inv=gatherInvoer('weet_niet'); STATE.invoer=inv;
+      try{ FluctusWait.start('kpi-host','We herrekenen met uw laadpalen…', WAIT_SWEEP); }catch(e){}
+      berekenBedrijfSweep(inv,'weet_niet',$('res-msg'));
+    }
     // Stap 8: laadpleinen-invoer + rapport-keuze. Reuse renderEigen/renderBet via aparte hosts.
     function naarHoe(){
       STATE.eigenHost='hoe-eigen-lijst'; STATE.betHost='hoe-bet-lijst';
@@ -2453,6 +2571,18 @@
       var g=$('opt-generator'); if(g) g.classList.toggle('hidden', part);
       if(part && $('q-generator')){ $('q-generator').checked=false; var gv=$('gen-velden'); if(gv) gv.classList.add('hidden'); }
       var kw=$('q-kwalificatie'); if(kw) kw.classList.toggle('hidden', !part);
+      // #3: wagens-sub aanpassen aan de modus + tonen zodra mobiliteit aan staat.
+      _pasMobWagens();
+    }
+    // #3: stem de wagens-sub af op de modus (particulier 1/2 · bedrijf wagenpark) en toon ze enkel als 'elektrische
+    //     mobiliteit' is aangevinkt. Robuust op elk instap-pad (aangeroepen door _pasMeerAanModus én de onchange).
+    function _pasMobWagens(){
+      var part=(STATE.modus!=='bedrijf');
+      var mp=$('q-mob-part'), mb=$('q-mob-bedr'), ml=$('q-mob-wagens-lbl'), w=$('q-mob-wagens');
+      if(mp) mp.classList.toggle('hidden', !part);
+      if(mb) mb.classList.toggle('hidden', part);
+      if(ml) ml.textContent = part ? 'Hoeveel wagens wilt u kunnen laden?' : 'Hoe groot is uw wagenpark (aantal wagens)?';
+      if(w) w.classList.toggle('hidden', !($('q-mobiliteit')&&$('q-mobiliteit').checked));
     }
     // Verzamelt de aangevinkte kwalificatie-bullets (particulier) — voor lead-kwalificatie, niet voor de berekening.
     function _kwalificaties(){ return Array.prototype.filter.call(document.querySelectorAll('.q-kwal'), function(c){return c.checked;}).map(function(c){return c.value;}); }
@@ -2884,8 +3014,16 @@
       if($('is-activiteit')) $('is-activiteit').oninput=function(){ _suggereerProfiel('is-activiteit','is-sector','is-activiteit-sug'); };
       if($('ek-activiteit')) $('ek-activiteit').oninput=function(){ _suggereerProfiel('ek-activiteit','ek-profiel','ek-activiteit-sug'); };
       Array.prototype.forEach.call(document.querySelectorAll('input[name="istype"]'), function(r){ r.onchange=syncIsType; });
-      // ── Slice F: DIY-plaatsingstool (kabelplanner ?diy=1) vanuit de heatmap-keuze ──
-      if($('btn-diy-plaats')) $('btn-diy-plaats').onclick=function(){ var u=location.pathname.replace(/[^/]*$/,'kabelplanner.html')+'?diy=1'; window.open(u,'_blank'); };
+      // ── Slice F / #4·#5·#6 (Johan): DIY-plaatsingstool (kabelplanner ?diy=1) MET seed — het adres komt uit de factuur
+      //    (niet opnieuw vragen) en de componenten uit de analyse worden meteen gedropt. Simpele modus dropbaar; bedrijf
+      //    mag extra laadpalen bijzetten die met de kabelprijs terugkomen naar de analyse. ──
+      if($('btn-diy-plaats')) $('btn-diy-plaats').onclick=function(){
+        try{ localStorage.setItem('fluctus_kbl_seed', JSON.stringify(_kblSeedUitAnalyse())); }catch(e){}
+        try{ localStorage.removeItem('fluctus_kbl_result'); }catch(e){}   // vorige round-trip wissen
+        _kblWatchResult();   // #6: luister op de teruggestuurde prijs + extra palen
+        var u=location.pathname.replace(/[^/]*$/,'kabelplanner.html')+'?diy=1';
+        window.open(u,'_blank');
+      };
       // ── Slice B: boekhouding-mail ──
       if($('btn-boekhouding')) $('btn-boekhouding').onclick=boekhoudingGo;
       if(qp('factuur')==='1' && qp('lead')){ STATE.leadToken=qp('lead'); _naarFactuur();
@@ -2916,6 +3054,7 @@
       $('btn-lead-go').onclick=leadGo;
       $('btn-nota').onclick=openNotaLead;
       $('q-generator').onchange=function(){ $('gen-velden').classList.toggle('hidden', !this.checked); };
+      if($('q-mobiliteit')) $('q-mobiliteit').onchange=function(){ _pasMobWagens(); };   // #3: wagens-sub tonen/verbergen
       $('btn-meer-go').onclick=meerGo;
       $('btn-hoe').onclick=naarVerify;
       $('btn-verify-send').onclick=verifySend;
