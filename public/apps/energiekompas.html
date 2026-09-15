@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.55.0 (2026-09-15, NOTA-VERBRUIK-COHERENT + CREG-WAGENS + MOBILITEIT-KPI'S, Johan):
+<!-- energiekompas.html v0.56.0 (2026-09-15, HEATMAP-HARDENING + FALLBACK-KPI'S €/100km·loadfactor·km, Johan):
+     (fix) de mobiliteit-KPI-toevoeging in toonKpisTL staat nu in try/catch én de heatmap rendert EERST (hmParticulier/
+          renderHeatmap vóór toonKpisTL) zodat een KPI-fout de heatmap nooit kan killen (die viel anders in de .catch →
+          toonKpisClient-fallback zonder heatmap). Zo blijft de standaardprofiel-heatmap vóór de OTP zichtbaar.
+     (KPI) de fallback-schermen (toonKpisClient particulier + bedrijfSnelleKpi) tonen nu óók Loadfactor i.p.v.
+          "Restcapaciteit", Energiekost in €/100 km i.p.v. €/km, en een dynamische 'Elektrische km/jaar'.
+     ── v0.55.0 (2026-09-15, NOTA-VERBRUIK-COHERENT + CREG-WAGENS + MOBILITEIT-KPI'S, Johan):
      (nota) COHERENTIE-FIX: de nota toonde op de cover het geannualiseerde jaarverbruik (f.afnMwh, via naFactuur ×365/dagen)
           maar in blok 1 het RAUWE periode-volume dat _ondBody als STATE.baseCase naar de server stuurt (die de marge wél
           annualiseert). Bij een factuurperiode ≠ 12 mnd gaf dat twee getallen (bv. 2,5 vs 2,8). Nu toont de nota-tegel
@@ -1407,12 +1413,18 @@
       var payload={ modus:'bedrijf', afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens, km:inv._km };
       fetch(API+'/api/energiekompas/kpi',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(function(r){ return r.ok?r.json():null; })
-        .then(function(j){ if(j&&j.kpi){ var k=j.kpi,m=j.markt||{}; toonKpis([
-            { t:'Kost van uw afname', v:eur(k.kost_afname_eur), s:inv.afname_mwh+' MWh/j'+(inv.huidige_kost>0?' (uit uw factuur)':' (actuele markt)') },
-            { t:'Waarde van uw injectie', v:eur(k.waarde_injectie_eur), s:inv.injectie_mwh+' MWh/j × ± '+(m.injectiewaarde_eur_mwh||'?')+' €/MWh' },
-            { t:'Restcapaciteit aansluiting', v:(k.restcapaciteit_pct==null?'—':(k.restcapaciteit_pct+' %')), s:'ruimte voor PV/batterij/laden' },
-            { t:'Kilometerkost (slim laden)', v:kmKostTxt(k.kilometerkost_eur_per_km), s:'goedkoopste uren (± '+(m.dyn_laadkost_eur_mwh||'?')+' €/MWh)'+(k.laadvraag_mwh?(' · '+k.laadvraag_mwh+' MWh/j'):'') }
-          ]); } else { toonKpisClient(inv); }
+        .then(function(j){ if(j&&j.kpi){ var k=j.kpi,m=j.markt||{}; STATE.mobKpi=k; STATE.mobMarkt=m;
+            var _kva=+inv.aansluiting_kva||0, _laad=(+k.laadvraag_mwh||0), _noem=_kva*8760;
+            var _lf=(_noem>0)?Math.round(((+inv.afname_mwh||0)+_laad)*1000/_noem*100):null;
+            var _km=Math.round((+inv._wagens||0)*(+inv._km||0));
+            var _k=[
+              { t:'Kost van uw afname', v:eur(k.kost_afname_eur), s:inv.afname_mwh+' MWh/j'+(inv.huidige_kost>0?' (uit uw factuur)':' (actuele markt)') },
+              { t:'Waarde van uw injectie', v:eur(k.waarde_injectie_eur), s:inv.injectie_mwh+' MWh/j × ± '+(m.injectiewaarde_eur_mwh||'?')+' €/MWh' },
+              { t:'Loadfactor', v:(_lf==null?'—':(_lf+' %')), s:'benutting van uw aansluiting (met laden)' },
+              { t:'Energiekost mobiliteit', v:'€ '+_eur2((k.kilometerkost_eur_per_km||0)*100)+'/100 km', s:'all-in achter de meter (slim laden)'+(_laad?(' · ± '+_laad+' MWh/j'):'') }
+            ];
+            if(_km>0) _k.push({ t:'Elektrische km/jaar', v:_km.toLocaleString('nl-BE')+' km', s:'op uw wagenpark' });
+            toonKpis(_k); } else { toonKpisClient(inv); }
           toonResultaat(st);
         })
         .catch(function(){ toonKpisClient(inv); toonResultaat(st); });
@@ -1434,7 +1446,7 @@
       fetch(API+'/api/thuisladen',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ in:IN, params:params }) })
         .then(function(r){ return r.ok?r.json():null; })
         .then(function(j){ _klaar();
-          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); toonKpisTL(STATE.tlBest); hmParticulier(j); }
+          if(j&&j.ok&&Array.isArray(j.anchors)&&j.anchors.length){ STATE.tl=j; STATE.tlBest=kiesBesteAnker(j.anchors); hmParticulier(j); toonKpisTL(STATE.tlBest); }   // heatmap eerst — een KPI-fout mag de heatmap nooit killen
           else { toonKpisClient(inv); $('heatmap-blok').classList.add('hidden'); }
           toonResultaat(st);
           if(STATE.exact) toonExactExtra();   // v0.27.0 (walkthrough-fix 1): particulier consistent met bedrijf — pill "op ingeschat profiel", groeistap, shoppinglist, extra KPI's
@@ -1646,12 +1658,15 @@
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
       ];
       // #KPI (Johan): na de berekening dynamische mobiliteit-KPI's mee in de summary — €/100 km + loadfactor + km/jaar.
-      var _md=(STATE.wilMobiliteit||(STATE.wagens&&STATE.wagens.length))?_mobDyn():null;
-      if(_md){
-        if(_md.eur100!=null) _kpis.push({ t:'Energiekost mobiliteit', v:'€ '+_eur2(_md.eur100)+'/100 km', s:'all-in achter de meter (slim laden)'+(_md.laadMwh>0?(' · ± '+_md.laadMwh+' MWh/j'):'') });
-        if(_md.loadfactor!=null) _kpis.push({ t:'Loadfactor', v:_md.loadfactor+' %', s:'benutting van uw aansluiting (met laden)' });
-        if(_md.km>0) _kpis.push({ t:'Elektrische km/jaar', v:_md.km.toLocaleString('nl-BE')+' km', s:'op uw wagen(s), dynamisch' });
-      }
+      // In try/catch: een fout hier mag NOOIT de heatmap-render breken (die volgt na toonKpisTL bij de caller).
+      try{
+        var _md=(STATE.wilMobiliteit||(STATE.wagens&&STATE.wagens.length))?_mobDyn():null;
+        if(_md){
+          if(_md.eur100!=null) _kpis.push({ t:'Energiekost mobiliteit', v:'€ '+_eur2(_md.eur100)+'/100 km', s:'all-in achter de meter (slim laden)'+(_md.laadMwh>0?(' · ± '+_md.laadMwh+' MWh/j'):'') });
+          if(_md.loadfactor!=null) _kpis.push({ t:'Loadfactor', v:_md.loadfactor+' %', s:'benutting van uw aansluiting (met laden)' });
+          if(_md.km>0) _kpis.push({ t:'Elektrische km/jaar', v:_md.km.toLocaleString('nl-BE')+' km', s:'op uw wagen(s), dynamisch' });
+        }
+      }catch(_e){}
       toonKpis(_kpis);
       if(STATE.exact){ _ontwerpBlokken(a); _sensBlok(a); _aanbodBlok(a); _afsluitBlok(a); } else { ['ontwerp-blokken','sens-blok','aanbod-blok','afsluit-blok'].forEach(function(id){ var _e=$(id); if(_e) _e.classList.add('hidden'); }); }   // Slice G+H+I + derde-ontwerp-blokken: enkel in de exacte studie
     }
@@ -1781,7 +1796,7 @@
             } else done&&done(null);
           }).catch(function(){ done&&done(null); });
       };
-      STATE.hm=H; toonKpisTL(best); renderHeatmap();
+      STATE.hm=H; renderHeatmap(); toonKpisTL(best);   // heatmap eerst — KPI-fout mag de heatmap niet killen
       $('hm-detail').innerHTML='De heatmap toont geschatte combinaties (geïnterpoleerd tussen doorgerekende ankers). <b>Klik</b> een cel voor de exacte berekening.';
     }
 
@@ -1898,14 +1913,20 @@
       }).catch(function(){ $('cta-msg').style.color='#b00'; $('cta-msg').textContent='Kon de nota niet opbouwen — probeer opnieuw.'; if(w&&!w.closed) w.close(); });
     }
     function toonKpisClient(inv){
-      var toegang=inv.aansluiting_kva*0.9, gem=inv.afname_mwh*1000/8760;
-      var restPct=toegang>0?Math.max(0,Math.min(95,Math.round((1-gem/toegang)*100))):null;
-      toonKpis([
+      // #KPI (Johan): loadfactor i.p.v. "restcapaciteit"; €/100 km i.p.v. €/km; + dynamische km/jaar.
+      var kva=+inv.aansluiting_kva||0;
+      var laadMwh=(+inv._wagens||0)*(+inv._km||0)*0.16/1000;
+      var noemer=kva*8760, lf=(noemer>0)?Math.round(((+inv.afname_mwh||0)+laadMwh)*1000/noemer*100):null;
+      var totKm=Math.round((+inv._wagens||0)*(+inv._km||0));
+      var kmk=(STATE.mobKpi&&STATE.mobKpi.kilometerkost_eur_per_km!=null)?STATE.mobKpi.kilometerkost_eur_per_km:0.032;
+      var _k=[
         { t:'Kost van uw afname', v:eur(inv.huidige_kost>0?inv.huidige_kost:inv.afname_mwh*140), s:inv.afname_mwh+' MWh/j (indicatief)' },
         { t:'Waarde van uw injectie', v:eur(inv.injectie_mwh*60), s:inv.injectie_mwh+' MWh/j' },
-        { t:'Restcapaciteit aansluiting', v:(restPct==null?'—':(restPct+' %')), s:'ruimte voor PV/batterij/laden' },
-        { t:'Kilometerkost (slim laden)', v:kmKostTxt(0.032), s:(inv._wagens*inv._km*0.16/1000>0?('laadvraag ± '+Math.round(inv._wagens*inv._km*0.16/1000*10)/10+' MWh/j'):'≈ 0,16 kWh/km') }
-      ]);
+        { t:'Loadfactor', v:(lf==null?'—':(lf+' %')), s:'benutting van uw aansluiting (met laden)' },
+        { t:'Energiekost mobiliteit', v:'€ '+_eur2(kmk*100)+'/100 km', s:'all-in achter de meter (slim laden)'+(laadMwh>0?(' · ± '+Math.round(laadMwh*10)/10+' MWh/j'):'') }
+      ];
+      if(totKm>0) _k.push({ t:'Elektrische km/jaar', v:totKm.toLocaleString('nl-BE')+' km', s:'op uw wagen(s)' });
+      toonKpis(_k);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
