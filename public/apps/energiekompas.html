@@ -4,7 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnergieKompas — Fluctus</title>
-<!-- energiekompas.html v0.54.0 (2026-09-15, NOTA-FALLBACK + WAGENS-VROEG + KABELTRACÉ-SEED/ROUND-TRIP, Johan):
+<!-- energiekompas.html v0.55.0 (2026-09-15, NOTA-VERBRUIK-COHERENT + CREG-WAGENS + MOBILITEIT-KPI'S, Johan):
+     (nota) COHERENTIE-FIX: de nota toonde op de cover het geannualiseerde jaarverbruik (f.afnMwh, via naFactuur ×365/dagen)
+          maar in blok 1 het RAUWE periode-volume dat _ondBody als STATE.baseCase naar de server stuurt (die de marge wél
+          annualiseert). Bij een factuurperiode ≠ 12 mnd gaf dat twee getallen (bv. 2,5 vs 2,8). Nu toont de nota-tegel
+          'Verbruik' hetzelfde geannualiseerde afnameMwh als de cover (volume_mwh = afnameMwh), coherent met de jaarmarge.
+     (#3b) de wagens-vraag (particulier) vraagt nu PER wagen: werkgever vergoedt (CREG-inkomsten) of eigen wagen
+          (besparing t.o.v. diesel) → meerGo zet w.creg zodat de besparing klopt.
+     (KPI) na de berekening komen dynamische mobiliteit-KPI's vanboven in de summary (beide modi): €/100 km (all-in,
+          slim laden), Loadfactor % (met laadvraag) en Elektrische km/jaar (uit de wagen(s)). STATE.mobKpi voedt _mobDyn;
+          de summary ververst zodra de kpi-call binnen is. Het pre-studie 'vanaf €0,02/km' + km-plafond blijven in het
+          instap-voorbeeld (_instapVoorbeeld). Zie ook kabelplanner v1.19.
+     ── v0.54.0 (2026-09-15, NOTA-FALLBACK + WAGENS-VROEG + KABELTRACÉ-SEED/ROUND-TRIP, Johan):
      (#2) _bouwNotaData/_bouwNotaDataBedrijf vallen terug op de factuur (STATE.factuur) als de invoer-velden leeg zijn
           (factuur/resume-pad) → energieverbruik in de nota komt niet meer op 0.
      (#3) stap-meer vraagt bij 'elektrische mobiliteit' nu meteen het aantal wagens (particulier 1/2 · bedrijf wagenpark);
@@ -712,8 +723,21 @@
       <div id="q-mob-wagens" class="hidden" style="margin:-2px 0 10px 26px;padding:9px 12px;background:#F4F8FB;border:1px solid #D6E2EE;border-radius:8px">
         <p class="hint" id="q-mob-wagens-lbl" style="margin:0 0 6px">Hoeveel wagens wilt u kunnen laden?</p>
         <div id="q-mob-part" class="hidden">
-          <label class="optmini"><input type="radio" name="mobwagens" value="1" checked> 1 wagen</label>
-          <label class="optmini"><input type="radio" name="mobwagens" value="2"> 2 wagens</label>
+          <div style="margin-bottom:7px">
+            <label class="optmini"><input type="radio" name="mobwagens" value="1" checked> 1 wagen</label>
+            <label class="optmini"><input type="radio" name="mobwagens" value="2"> 2 wagens</label>
+          </div>
+          <!-- #3b (Johan): per wagen — werkgever vergoedt (CREG-tarief als inkomsten) vs eigen wagen (besparing t.o.v. diesel) -->
+          <div class="q-mob-wrow" data-w="0" style="margin:3px 0">
+            <span style="font-size:12.5px;color:var(--muted)">Wagen 1 —</span>
+            <label class="optmini"><input type="radio" name="mobcreg0" value="creg" checked> werkgever vergoedt (CREG)</label>
+            <label class="optmini"><input type="radio" name="mobcreg0" value="eigen"> eigen wagen (t.o.v. diesel)</label>
+          </div>
+          <div class="q-mob-wrow hidden" data-w="1" style="margin:3px 0">
+            <span style="font-size:12.5px;color:var(--muted)">Wagen 2 —</span>
+            <label class="optmini"><input type="radio" name="mobcreg1" value="creg" checked> werkgever vergoedt (CREG)</label>
+            <label class="optmini"><input type="radio" name="mobcreg1" value="eigen"> eigen wagen (t.o.v. diesel)</label>
+          </div>
         </div>
         <div id="q-mob-bedr" class="hidden">
           <label>Aantal wagens in het wagenpark</label>
@@ -1616,11 +1640,19 @@
       // v0.27.0 (walkthrough-fix 6): ref_kost per anker ontbreekt bij de bedrijf-sweep → val terug op de heatmap/sweep-
       // referentiekost, zodat "Jaarkost daarna" ook bij bedrijf de "nu ± €…/j"-ondertitel toont (zoals particulier).
       var _rk=(a.ref_kost!=null)?a.ref_kost:((STATE.hm&&STATE.hm.refKost!=null)?STATE.hm.refKost:((STATE.tl&&+STATE.tl.referentie_kost)||null));
-      toonKpis([
+      var _kpis=[
         { t:'Besparing per jaar', v:eur(a.besparing), s:'op uw bestaande aansluiting' },
         { t:'Rendement', v:(a.rendement!=null?(Math.round(a.rendement*10)/10+' %'):'—'), s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting') },
         { t:'Jaarkost daarna', v:eur(a.kost), s:(_rk!=null?('nu ± '+eur(_rk)+'/j'):'') }
-      ]);
+      ];
+      // #KPI (Johan): na de berekening dynamische mobiliteit-KPI's mee in de summary — €/100 km + loadfactor + km/jaar.
+      var _md=(STATE.wilMobiliteit||(STATE.wagens&&STATE.wagens.length))?_mobDyn():null;
+      if(_md){
+        if(_md.eur100!=null) _kpis.push({ t:'Energiekost mobiliteit', v:'€ '+_eur2(_md.eur100)+'/100 km', s:'all-in achter de meter (slim laden)'+(_md.laadMwh>0?(' · ± '+_md.laadMwh+' MWh/j'):'') });
+        if(_md.loadfactor!=null) _kpis.push({ t:'Loadfactor', v:_md.loadfactor+' %', s:'benutting van uw aansluiting (met laden)' });
+        if(_md.km>0) _kpis.push({ t:'Elektrische km/jaar', v:_md.km.toLocaleString('nl-BE')+' km', s:'op uw wagen(s), dynamisch' });
+      }
+      toonKpis(_kpis);
       if(STATE.exact){ _ontwerpBlokken(a); _sensBlok(a); _aanbodBlok(a); _afsluitBlok(a); } else { ['ontwerp-blokken','sens-blok','aanbod-blok','afsluit-blok'].forEach(function(id){ var _e=$(id); if(_e) _e.classList.add('hidden'); }); }   // Slice G+H+I + derde-ontwerp-blokken: enkel in de exacte studie
     }
     // ── Slice C: GENERIEKE interactieve heatmap (particulier=kWh-batt/PV-panelen · bedrijf=kW-batt/kWp).
@@ -1804,7 +1836,7 @@
               fasen:+inv.fasen||0, bestaand_pv_kwp:+inv.bestaand_pv_kwp||0, wagens:inv.wagens||[] },
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
-              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
+              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:((+afnameMwh>0)?+afnameMwh:ond.volume_mwh),
               toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null
           };
@@ -1844,7 +1876,7 @@
               spanning:inv.spanning||f.spann||'', bestaand_pv_kwp:bestPv, pleinen:inv.pleinen||[] },
             combo:combo,
             onderhandel: ond?{ marge_jaar:ond.marge_jaar, marge_maand:ond.marge_maand, besparing_pct:ond.besparing_pct,
-              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:ond.volume_mwh,
+              energiekost_nu_mwh:ond.energiekost_nu_mwh, energiekost_dyn_mwh:ond.energiekost_dyn_mwh, volume_mwh:((+afnameMwh>0)?+afnameMwh:ond.volume_mwh),
               toegangsvermogen_advies:ond.toegangsvermogen_advies, heatmaps:ond.heatmaps, bron:(_factuurBasis()?'factuur':'indicatief') }:null,
             injectie: A?{ opbrengst_jaar:A.opbrengst_jaar, energie_jaar:A.energie_jaar, payback:A.payback, heatmaps:A.heatmaps }:null,
             generator: sw.generator||null,
@@ -2195,7 +2227,12 @@
         } else {
           var _rw=document.querySelector('input[name="mobwagens"]:checked');
           var _nw=Math.max(1, Math.min(2, _rw?(+_rw.value||1):1));
-          STATE.wagens=[]; for(var _iw=0;_iw<_nw;_iw++) STATE.wagens.push(nieuweWagen());
+          STATE.wagens=[];
+          for(var _iw=0;_iw<_nw;_iw++){ var _w=nieuweWagen();
+            var _cr=document.querySelector('input[name="mobcreg'+_iw+'"]:checked');
+            _w.creg=(!_cr || _cr.value==='creg');   // #3b: default = werkgever vergoedt (CREG); 'eigen' = diesel-benchmark
+            STATE.wagens.push(_w);
+          }
           if($('p-wagens')) renderWagens();
         }
       }
@@ -2211,23 +2248,35 @@
       else berekenBedrijfSweep(inv, st, $('res-msg'));
       haalMobiliteitKpi(inv);   // v0.28.0 (Johan/walkthrough-2 #10): €/km is een begrijpelijke maat → altijd tonen (ook indicatief)
     }
-    // Extra KPI's (km beschikbaar · €/km · generator-rendement) — apart blok onder de hoofd-KPI's.
+    // #KPI helpers — dynamische mobiliteit (na de berekening): €/100 km, loadfactor, km/jaar uit STATE.mobKpi + de wagens.
+    function _eur2(n){ try{ return (Math.round(n*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); }catch(e){ return (Math.round(n*100)/100).toFixed(2).replace('.',','); } }
+    function _mobDyn(){
+      var k=STATE.mobKpi; if(!k) return null; var inv=STATE.invoer||{};
+      var totKm=Math.round((+inv._wagens||0)*(+inv._km||0));
+      var laadMwh=(+k.laadvraag_mwh||0);
+      var kva=(+inv.aansluiting_kva||0), noemer=kva*8760;
+      var lf=(noemer>0)?Math.round(((+inv.afname_mwh||0)+laadMwh)*1000/noemer*100):null;   // loadfactor mét laadvraag
+      var eur100=(k.kilometerkost_eur_per_km!=null)?(k.kilometerkost_eur_per_km*100):null;   // €/100 km all-in
+      return { km:totKm, laadMwh:laadMwh, loadfactor:lf, eur100:eur100 };
+    }
+    // Extra KPI-blok onder de hoofd-KPI's: kwalitatieve "Ruimte voor mobiliteit". De dynamische cijfers (€/100 km,
+    // loadfactor, km/jaar) staan sinds #KPI vanboven in de summary (toonKpisTL). STATE.mobKpi voedt die.
     function haalMobiliteitKpi(inv){
       fetch(API+'/api/energiekompas/kpi',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         modus:STATE.modus, afname_mwh:inv.afname_mwh, injectie_mwh:inv.injectie_mwh, aansluiting_kva:inv.aansluiting_kva, huidige_kost:inv.huidige_kost, wagens:inv._wagens||0, km:inv._km||0 }) })
         .then(function(r){return r.ok?r.json():null;}).then(function(j){
           if(!j||!j.kpi) return; var k=j.kpi, m=j.markt||{};
+          STATE.mobKpi=k; STATE.mobMarkt=m;   // #KPI: bewaren zodat de summary er dynamische €/100 km + loadfactor uit bouwt
           var toegangKw=(+inv.aansluiting_kva||0)*0.9, restKw=toegangKw*((k.restcapaciteit_pct||0)/100);
           var kmJaar=(restKw>0)?Math.round(restKw*8760*0.85/0.16):null;   // capaciteitsplafond (intern, voor de ⓘ)
-          var energieKm=(k.kilometerkost_energie_eur_per_km!=null)?kmKostTxt(k.kilometerkost_energie_eur_per_km):null;
-          var ruim=(k.restcapaciteit_pct==null)||(k.restcapaciteit_pct>=20);   // aansluiting heeft ruim capaciteit?
+          var ruim=(k.restcapaciteit_pct==null)||(k.restcapaciteit_pct>=20);
           extraKpiPush([
             { t:'Ruimte voor mobiliteit', v:(ruim?'Ruim voldoende':'Beperkt'), s:'binnen uw bestaande piekvermogen — geen zwaardere aansluiting nodig',
-              info:'Uw aansluiting kan binnen het bestaande piekvermogen nog veel energie binnenhalen (vrije capaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+')'+(kmJaar!=null?(' — ruwweg tot '+kmJaar.toLocaleString('nl-BE')+' km/j als plafond'):'')+'. Hoeveel km u écht haalt, hangt af van uw laadvenster en wagenpark — dat rekenen we exact in de volledige analyse.' },
-            { t:'Energiekost per km', v:'zeer laag — vanaf '+kmKostTxt(k.kilometerkost_eur_per_km||0), s:'diesel vandaag ± €0,12/km — elektrisch all-in achter de meter is véél lager',
-              info:'All-in achter de meter = energiecomponent (goedkoopste ~30% spot)'+(energieKm?(' ≈ '+energieKm):'')+' + netkosten/heffingen ('+(m.net_heffing_eur_mwh||90)+' €/MWh). De exacte €/km hangt af van uw wagenpark & opslag.' }
+              info:'Uw aansluiting kan binnen het bestaande piekvermogen nog veel energie binnenhalen (vrije capaciteit '+(k.restcapaciteit_pct!=null?(k.restcapaciteit_pct+'%'):'?')+')'+(kmJaar!=null?(' — ruwweg tot '+kmJaar.toLocaleString('nl-BE')+' km/j als plafond'):'')+'. De €/100 km, loadfactor en km/jaar hierboven volgen uit uw wagen(s) en aansluiting.' }
           ]);
-          $('mob-note').innerHTML='<b>Uw aansluiting heeft ruim genoeg en de kost per km kan zeer laag.</b> Hoeveel km en tegen welke exacte €/km u haalt, rekenen we met uw <b>echte verbruiksprofiel</b> én een reële inschatting van uw <b>wagenpark en laadplein</b>. Deze eerste indicatie wijst al op mooie winst.';
+          $('mob-note').innerHTML='<b>Uw aansluiting heeft ruim genoeg en de kost per km is laag.</b> De €/100 km, loadfactor en km/jaar hierboven zijn berekend op uw wagen(s); de <b>exacte</b> cijfers volgen uit uw echte kwartierprofiel (na mandaat).';
+          // #KPI: summary verversen zodat de dynamische mobiliteit-KPI's meekomen (kpi-endpoint komt async binnen).
+          var _sel=(STATE.hm&&STATE.hm.sel)||STATE.tlBest; if(_sel){ try{ toonKpisTL(_sel); }catch(e){} }
         }).catch(function(){});
     }
     function extraKpiPush(kpis){ var h=$('extra-kpi'); if(!h) return; h.innerHTML += kpis.map(function(k){
@@ -2583,6 +2632,9 @@
       if(mb) mb.classList.toggle('hidden', part);
       if(ml) ml.textContent = part ? 'Hoeveel wagens wilt u kunnen laden?' : 'Hoe groot is uw wagenpark (aantal wagens)?';
       if(w) w.classList.toggle('hidden', !($('q-mobiliteit')&&$('q-mobiliteit').checked));
+      // #3b: tweede wagen-CREG-rij enkel bij 2 wagens
+      var _r2=document.querySelector('.q-mob-wrow[data-w="1"]'); var _c=document.querySelector('input[name="mobwagens"]:checked');
+      if(_r2) _r2.classList.toggle('hidden', !(part && _c && +_c.value>=2));
     }
     // Verzamelt de aangevinkte kwalificatie-bullets (particulier) — voor lead-kwalificatie, niet voor de berekening.
     function _kwalificaties(){ return Array.prototype.filter.call(document.querySelectorAll('.q-kwal'), function(c){return c.checked;}).map(function(c){return c.value;}); }
@@ -3055,6 +3107,7 @@
       $('btn-nota').onclick=openNotaLead;
       $('q-generator').onchange=function(){ $('gen-velden').classList.toggle('hidden', !this.checked); };
       if($('q-mobiliteit')) $('q-mobiliteit').onchange=function(){ _pasMobWagens(); };   // #3: wagens-sub tonen/verbergen
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="mobwagens"]'), function(r){ r.onchange=function(){ _pasMobWagens(); }; });   // #3b: 1/2 → tweede CREG-rij
       $('btn-meer-go').onclick=meerGo;
       $('btn-hoe').onclick=naarVerify;
       $('btn-verify-send').onclick=verifySend;
