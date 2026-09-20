@@ -4,7 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.9.0 (2026-09-20) — HEATMAP-CONSISTENTIE (Johan: "rendement hoger maar TVT langer?"): het rendement
+<!-- ek.html v0.9.2 (2026-09-20) — TOEGANGSVERMOGEN = PIEK × 3 VOOR EEN WONING (Johan). De SLP-piek is de gladde
+     profielpiek; een individuele woning piekt ~3× hoger, dus het toegangsvermogen (maandpiek) ≈ SLP-piek × 3
+     (2,45 MWh ⇒ piek 1,3 kW → toegang ~3,9 kW). Enkel bij een uit-het-SLP-afgeleide piek (analoge meter, PIEK_IS_SLP);
+     een gemeten meter houdt zijn factuurwaarde. Toegangsvermogen stuurt capaciteit + loadfactor + km-plafond; de piek
+     stuurt de engine. Weergave toont "piek · toegang" enkel als ze verschillen.
+     ── v0.9.1 (2026-09-20) — REALISTISCHE PIEK BIJ ANALOGE METER (Johan: "2,45 MWh residentieel heeft toch geen piek
+     van 8 kW?"). PIEK ≠ AANSLUITING: bij een analoge meter kennen we geen gemeten piek, maar wél het profiel (residentieel)
+     + het verbruik → de kwartierpiek volgt uit het residentiële standaardprofiel (SLP): vaste loadfactor ~0,21 → piek ≈
+     0,55 kW per MWh afname (gemeten op data/profielen/residentieel.json; 2,45 MWh ⇒ ~1,3 kW i.p.v. 8 kW). Die piek stuurt
+     nu de engine (piek_kw) + de weergave; de fysieke AANSLUITING (≥ 1×40A, tier op verbruik, ≥ ingevulde waarde) stuurt
+     capaciteit + loadfactor + km-plafond. Veldlabel → "Piek / toegangsvermogen (kW)".
+     ── v0.9.0 (2026-09-20) — HEATMAP-CONSISTENTIE (Johan: "rendement hoger maar TVT langer?"): het rendement
      op de heatmap + de aanbeveling (dashed cel) rekenden op de ENGINE-capex (enkel PV+batterij), terwijl de TVT en de
      investeringstabel op de TOTALE klant-investering (PV+batt+palen+kabeltracé) rekenden. Daardoor kon een cel een hoger
      rendement tonen maar een LANGERE terugverdientijd. Nu één noemer: rendement = besparing ÷ totale investering, dus
@@ -171,7 +182,7 @@
     </div>
     <div class="row2">
       <div><label class="fld">Jaarverbruik afname (MWh)</label><input type="number" id="i-afname" step="0.1" min="0" inputmode="decimal" value="3.5"></div>
-      <div><label class="fld">Toegangsvermogen (kW)</label><input type="number" id="i-toegang" step="1" min="0" inputmode="decimal" value="8"></div>
+      <div><label class="fld">Piek / toegangsvermogen (kW)</label><input type="number" id="i-toegang" step="0.1" min="0" inputmode="decimal" value="8"></div>
     </div>
     <div>
       <label class="fld">Energiekost/jaar (€, van uw factuur)</label><input type="number" id="i-kost" step="10" min="0" inputmode="numeric" value="1150">
@@ -260,6 +271,7 @@
   var TOKEN='';        // lead-token (uit ?case= of /api/ek-intake)
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var NETHEF=0;        // netkosten+heffingen €/MWh uit de factuur (case-pad); 0 = onbekend → val terug op markt-default
+  var PIEK_IS_SLP=false; // true = piek is afgeleid uit het SLP (analoge meter, geen meting) → toegangsvermogen = piek × factor
   function eur(n){ try{ return '€ '+Math.round(n).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(n); } }
   function eur2(n){ try{ return (Math.round(n*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); }catch(e){ return (Math.round(n*100)/100).toFixed(2).replace('.',','); } }
   function num0(n){ try{ return Math.round(n).toLocaleString('nl-BE'); }catch(e){ return String(Math.round(n)); } }
@@ -271,6 +283,8 @@
     kost_dyn_eur_mwh:141,     // dynamisch contract (spot)
     km100_eur:3.2,            // €/100km slim laden (komt uit /kpi)
     km_per_wagen:15000, kwh_per_km:0.16,
+    res_piek_kw_per_mwh:0.55,  // residentieel SLP: vaste loadfactor ~0,21 → kwartierpiek ≈ 0,55 kW per MWh afname (gemeten op data/profielen/residentieel.json)
+    res_piek_naar_aansluiting:3,  // een individuele woning piekt ~3× het gladde SLP-profiel → toegangsvermogen/maandpiek ≈ SLP-piek × 3 (Johan)
     pv_eur_kwp:350, batt_eur_kwh:300, ac_paal_eur:2600,   // richtprijzen (Jacops/E+Drive-stijl)
     kabel_eur_m:45, ontk_eur:2500,   // kabeltracé-heuristiek
     besp_pct_van_kost:0.35            // stub: jaarbesparing ≈ 35% van huidige kost (komt uit sweep)
@@ -381,6 +395,10 @@
   function renderRapport(a){
     var C=CTX; if(!C) return;
     var ev=C.ev, particulier=C.particulier, afnameMwh=C.afnameMwh, toegangKw=C.toegangKw, profiel=C.profiel;
+    var _pk=(C.piekKw!=null?C.piekKw:toegangKw), _an=(C.aansluitingKw||toegangKw);
+    var _vermTxt = (particulier && Math.abs(_an-_pk)>0.2)
+      ? (String(_pk).replace('.',',')+' kW piek · '+String(_an).replace('.',',')+' kW toegang')
+      : (String(_an).replace('.',',')+' kW toegang');
     var pvKwp = a?Math.round(_anchorKwp(a)*10)/10 : C.pvKwpFb;
     var battKwh = a?(+a.battKwh||0) : C.battKwhFb;
     var bespJaar = a?Math.round(+a.besparing||0) : C.bespFb;
@@ -389,7 +407,7 @@
     var tvt = bespJaar>0 ? Math.round(invTot/bespJaar*10)/10 : null;
     LAST={ pvKwp:pvKwp, battKwh:battKwh, palen:palen, invTot:invTot };
     // 1-A4
-    $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+toegangKw+' kW toegang'+(ev?(' · '+ev+' EV'):'');
+    $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
     $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="sub" style="font-weight:600">('+String(C.afnameMwh).replace('.',',')+' MWh)</span> <span class="arrow">→</span> '+eur(C.kostNieuw)+'/j <span class="sub" style="font-weight:600">('+String(C.totaalMwh).replace('.',',')+' MWh, gebouw + laadplein)</span>';
     $('a4-besp').innerHTML=eur(bespJaar)+'/j'+(tvt!=null?(' <span class="sub" style="font-weight:600">· TVT '+String(tvt).replace('.',',')+' j</span>'):'');
     $('a4-km100').textContent=ev>0?('€ '+eur2(C.km100)+' /100 km · bespaart ± '+eur(C.bespDiesel)+'/j vs diesel'):'geen EV opgegeven';
@@ -439,9 +457,17 @@
     var profiel=$('i-profiel').value;
     var ev=+$('i-ev').value||0;
     var afnameMwh=+$('i-afname').value||0;
-    var toegangKw=+$('i-toegang').value||0;   // toegangsvermogen (kW) — we kennen de max aansluiting niet en verhogen ze niet
+    var toegangKw=+$('i-toegang').value||0;   // ingevulde waarde = realistische kwartierPIEK (analoog: SLP-piek; digitaal/bedrijf: gemeten)
     var kost=+$('i-kost').value||0;
     var particulier=(profiel==='residentieel');
+    // v0.9.2: PIEK ≠ TOEGANGSVERMOGEN. De piek (SLP) is de gladde profielpiek; een individuele woning piekt ~3× hoger →
+    //   toegangsvermogen ≈ piek × factor (Johan). Enkel wanneer de piek uit het SLP komt (analoog, geen meting); bij een
+    //   gemeten waarde is het ingevulde veld al het toegangsvermogen. Toegangsvermogen stuurt capaciteit + loadfactor +
+    //   km-plafond; de piek stuurt de engine (piek_kw). Bedrijf: gemeten piek = toegangsvermogen (ongewijzigd).
+    var piekKw = toegangKw;
+    var aansluitingKw = (particulier && PIEK_IS_SLP)
+      ? Math.max(2.5, Math.round(piekKw*STUB.res_piek_naar_aansluiting*10)/10)
+      : toegangKw;
 
     // ── Backbone: lead + FLX-project (dossiercode) + baseCase + consents + (opt-in) mandaat op één project_id.
     //    /api/ek-intake is idempotent op TOKEN; faalt hij, dan tonen we toch het rapport (met een lokale stubcode).
@@ -458,16 +484,16 @@
     var _btn=document.querySelector('#intake .btn.block'); if(_btn){ _btn.disabled=true; _btn.textContent='⏳ Uw rapport wordt berekend… (kan tot ±1 min)'; }
     var _d2=new Date(), _iso=function(x){return x.toISOString().slice(0,10);}, _van=new Date(_d2.getTime()-365*864e5);
     var profNaam = particulier?'Residentieel':profiel;
-    var bc={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.max(1,Math.round(toegangKw)),
+    var bc={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.max(1,Math.round(aansluitingKw)),
              totaalEnergieExclBtw: kost>0?kost:Math.round(afnameMwh*STUB.kost_nu_eur_mwh),
-             periodeVan:_iso(_van), periodeTot:_iso(_d2), spanningsniveau:(toegangKw>63?'MS':'LS') };
+             periodeVan:_iso(_van), periodeTot:_iso(_d2), spanningsniveau:(aansluitingKw>63?'MS':'LS') };
     var _sweepPath = particulier?'/api/thuisladen':'/api/energiekompas/bedrijf-sweep';
     var _sweepBody = particulier
-      ? { in:{ profiel:'residentieel', jaarverbruik_mwh:afnameMwh, piek_kw:toegangKw, fasen:3, regio:'VL', bestaand_pv_kwp:0, bestaand_inj_mwh:0, wagens:_wagens(ev) }, params:P_TL }
+      ? { in:{ profiel:'residentieel', jaarverbruik_mwh:afnameMwh, piek_kw:piekKw, fasen:3, regio:'VL', bestaand_pv_kwp:0, bestaand_inj_mwh:0, wagens:_wagens(ev) }, params:P_TL }
       : { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:toegangKw, spanning:(toegangKw>63?'MS':'LS'), toegangsvermogen_kw:toegangKw, profielNaam:profiel, pleinen:_pleinen(ev), generator:{} };
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
-      _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(toegangKw>0?toegangKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
+      _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(aansluitingKw>0?aansluitingKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
       _post(_sweepPath,_sweepBody)
     ]);
     var ond=(_res[0].status==='fulfilled')?_res[0].value:null;
@@ -476,7 +502,7 @@
 
     // Kost oud→nieuw (all-in per jaar): energie-rate uit onderhandel + netkosten/heffingen × jaarvolume.
     // Netkosten bij voorkeur ECHT uit de factuur (NETHEF, case-pad); anders markt-default. MS betaalt minder/MWh.
-    var isMS = (toegangKw>63);
+    var isMS = (aansluitingKw>63);
     var netHef = NETHEF>0 ? NETHEF : ((kpiR&&kpiR.markt&&+kpiR.markt.net_heffing_eur_mwh)||STUB.net_heffing_eur_mwh);
     var refMwh=(ond&&+ond.energiekost_nu_mwh>0)?+ond.energiekost_nu_mwh:(kost>0&&afnameMwh>0?Math.round(kost/afnameMwh):STUB.kost_nu_eur_mwh);
     var dynMwh=(ond&&+ond.energiekost_dyn_mwh>0)?+ond.energiekost_dyn_mwh:STUB.kost_dyn_eur_mwh;
@@ -494,7 +520,7 @@
     var km100 = kmBehoefte>0 ? Math.max(0, deltaFactuur)/kmBehoefte*100 : 0;
     // Laadplafond op de BESTAANDE aansluiting bij een loadfactor-DOEL van 60% → toont dat er geen verzwaring nodig is.
     var LF_DOEL=0.60;
-    var kmPlafond=Math.max(0, Math.round((toegangKw*8760*LF_DOEL - afnameMwh*1000)/STUB.kwh_per_km));
+    var kmPlafond=Math.max(0, Math.round((aansluitingKw*8760*LF_DOEL - afnameMwh*1000)/STUB.kwh_per_km));
     // Laadvenster-aanname (Johan): tot 2 wagens = thuis, 's nachts/daluren; meer dan 2 = wagenpark, overdag (kantooruren).
     var laadVenster = ev>2 ? 'overdag (kantooruren)' : "'s nachts / daluren";
     // Mobiliteitsbesparing uit de ENGINE: thuisladen geeft income = kost bij CREG-tarief (322 €/MWh) resp. dieselkost
@@ -508,12 +534,12 @@
     var bespDiesel = Math.max(0, Math.round(dieselKost - laadKostReeel));
     var bespCreg   = Math.max(0, Math.round(cregKost   - laadKostReeel));
     // Loadfactor (met laadvraag) op het toegangsvermogen
-    var noemer=toegangKw*8760, loadfactor = noemer>0 ? Math.round((afnameMwh+laadMwh)*1000/noemer*100) : null;
+    var noemer=aansluitingKw*8760, loadfactor = noemer>0 ? Math.round((afnameMwh+laadMwh)*1000/noemer*100) : null;
 
     if(_btn){ _btn.disabled=false; _btn.textContent='Toon mijn rapport →'; }
 
     // Cel-onafhankelijke context (verandert niet met de PV/batterij-keuze in de heatmap).
-    CTX={ ev:ev, particulier:particulier, afnameMwh:afnameMwh, toegangKw:toegangKw, profiel:profiel,
+    CTX={ ev:ev, particulier:particulier, afnameMwh:afnameMwh, toegangKw:toegangKw, piekKw:piekKw, aansluitingKw:aansluitingKw, profiel:profiel,
       kostNu:kostNu, kostNieuw:kostNieuw, totaalMwh:totaalMwh, deltaFactuur:deltaFactuur,
       km100:km100, laadMwh:laadMwh, kmBehoefte:kmBehoefte, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
       loadfactor:loadfactor, isMS:isMS, laadVenster:laadVenster,
@@ -565,13 +591,15 @@
         var inj=bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
         var toe=+bc.toegangsvermogenKw||Math.round((+bc.aansluitVermogenKva||0)*0.9)||0;
         var kst=bc.totaalEnergieExclBtw?Math.round(bc.totaalEnergieExclBtw*jf):(bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0);
-        // v0.8: ANALOGE METER — geen gemeten piek/toegangsvermogen, geen digitale meterdata → geen Fluvius-mandaat/
-        //   kwartierdata mogelijk. Profiel = residentieel (afgeleid), en het toegangsvermogen leiden we af uit het
-        //   verbruik als een standaard residentiële aansluiting (1×40A ≈ 8 kW / 3×25A ≈ 14 kW / 3×32A ≈ 17 kW).
+        // v0.9.1: ANALOGE METER — geen gemeten piek. We kennen wél het profiel (residentieel) + het verbruik, dus leiden
+        //   we de PIEK af uit het residentiële standaardprofiel (SLP): dat heeft een vaste loadfactor ~0,21 → kwartierpiek
+        //   ≈ 0,55 kW per MWh afname (bv. 2,45 MWh ⇒ ~1,3 kW, niet de 8 kW aansluitingstier). De fysieke aansluiting
+        //   (voor laadhoofdruimte/capaciteit) leidt toonRapport apart af (≥ 1×40A, tier op verbruik).
         var analoog = (bc.meterType==='analoog') || (bc.heeftPiekmeting===false);
         if(analoog && !(+bc.toegangsvermogenKw>0)){
           var _mwh = afn || ((+bc.afnameKwh||0)/1000);
-          toe = _mwh>12 ? 17 : (_mwh>6 ? 14 : 8);   // afgeleide standaard aansluiting (geen meting)
+          toe = Math.max(1, Math.round(_mwh*STUB.res_piek_kw_per_mwh*10)/10);   // SLP-piek residentieel (geen meting)
+          PIEK_IS_SLP = true;   // → toonRapport leidt het toegangsvermogen af als piek × factor
         }
         // Netkosten+heffingen ECHT uit de factuur (rate, periode-invariant) → all-in klopt (MS betaalt minder/MWh).
         var _vol=(+bc.afnameKwh||0)/1000; var _nh=_vol>0?Math.round(((+bc.totaalDistributieExclBtw||0)+(+bc.totaalHeffingenExclBtw||0))/_vol):0;
@@ -590,7 +618,7 @@
           var _oc=$('i-optout'); if(_oc) _oc.checked=false;
           var _an=$('analoog-note'); if(_an) _an.classList.remove('hidden');
         }
-        var _det=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?toe+' kW toegang'+(analoog?' (afgeleid)':''):''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ');
+        var _det=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?(analoog?(String(toe).replace('.',',')+' kW piek (uit standaardprofiel)'):(toe+' kW toegang')):''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ');
         $('factuur-detail').textContent=_det+(analoog?' — analoge meter, standaardprofiel (residentieel).':' (uit uw factuur).');
         $('intake-intro').textContent=analoog
           ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
