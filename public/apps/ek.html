@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.6.1 (2026-09-20) — onthoudt de vorige klant-input bij terugkeer via ?case=: aantal wagens (j.ev) +
+<!-- ek.html v0.7.0 (2026-09-20) — MOBILITEITSBESPARING uit de engine (Johan): toont nu hoeveel elektrisch rijden
+     bespaart t.o.v. diesel (9 €/100km) en t.o.v. regulier laden aan CREG-tarief (322 €/MWh) — uit /api/thuisladen
+     income (fallback met dezelfde referenties voor de bedrijf-sweep). Het laden zelf wordt in de engine spot-gedispatcht
+     in het venster BINNEN het toegangsvermogen (home_kw ≤ max_kva; bestaande simulator-code). Nieuwe KPI-tegel
+     "Besparing elektrisch rijden" + besparing vs diesel op de A4-regel.
+     ── v0.6.1 (2026-09-20) — onthoudt de vorige klant-input bij terugkeer via ?case=: aantal wagens (j.ev) +
      gekozen profiel (j.profiel) + telefoon worden nu voorgevuld (server v15.157.1 geeft ze mee in /api/inbound-case)
      i.p.v. terug te vallen op de default.
      ── v0.6.0 (2026-09-20) — REKENMODEL-CORRECTIE mobiliteit (Johan): (1) twee prijzen = huidige factuur op huidig
@@ -362,7 +367,7 @@
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+toegangKw+' kW toegang'+(ev?(' · '+ev+' EV'):'');
     $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="sub" style="font-weight:600">('+String(C.afnameMwh).replace('.',',')+' MWh)</span> <span class="arrow">→</span> '+eur(C.kostNieuw)+'/j <span class="sub" style="font-weight:600">('+String(C.totaalMwh).replace('.',',')+' MWh, gebouw + laadplein)</span>';
     $('a4-besp').innerHTML=eur(bespJaar)+'/j'+(tvt!=null?(' <span class="sub" style="font-weight:600">· TVT '+String(tvt).replace('.',',')+' j</span>'):'');
-    $('a4-km100').textContent=ev>0?('€ '+eur2(C.km100)+' /100 km'):'geen EV opgegeven';
+    $('a4-km100').textContent=ev>0?('€ '+eur2(C.km100)+' /100 km · bespaart ± '+eur(C.bespDiesel)+'/j vs diesel'):'geen EV opgegeven';
     $('a4-km').textContent=ev>0?(num0(C.kmBehoefte)+' km/j nodig · tot ± '+num0(C.kmPlafond)+' km/j op uw aansluiting (geen verzwaring)'):('tot ± '+num0(C.kmPlafond)+' km/j mogelijk');
     $('a4-lf').textContent=C.loadfactor!=null?(C.loadfactor+' %'):'—';
     $('a4-inv').textContent=eur(invTot);
@@ -371,6 +376,7 @@
       {hero:true,t:'Energiekost vandaag → met laadplein',v:eur(C.kostNu)+' → '+eur(C.kostNieuw),vs:true,s:String(C.afnameMwh).replace('.',',')+' MWh → '+String(C.totaalMwh).replace('.',',')+' MWh (gebouw + laadplein) · all-in'+(NETHEF>0?', netkosten uit uw factuur':'')},
       {t:'Besparing per jaar',v:eur(bespJaar),s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting')},
       {t:'Energiekost mobiliteit',v:(ev>0?('€ '+eur2(C.km100)+' /100 km'):'—'),s:(ev>0?('louter energiekost, all-in · laden '+C.laadVenster):'geen EV')},
+      {t:'Besparing elektrisch rijden',v:(ev>0?eur(C.bespDiesel)+'/j':'—'),s:(ev>0?('vs diesel · '+eur(C.bespCreg)+'/j vs regulier laden (322 €/MWh)'):'geen EV')},
       {t:'Elektrische km/jaar',v:(ev>0?num0(C.kmBehoefte)+' km':('≤ '+num0(C.kmPlafond)+' km')),s:(ev>0?('tot ± '+num0(C.kmPlafond)+' km mogelijk → geen verzwaring'):'plafond op vrije capaciteit')},
       {t:'Loadfactor',v:(C.loadfactor!=null?C.loadfactor+' %':'—'),s:'toekomstvastheid van deze kost'},
       {t:'Investering',v:eur(invTot),s:'PV + batterij + palen + aansluiting'}
@@ -466,6 +472,16 @@
     var kmPlafond=Math.max(0, Math.round((toegangKw*8760*LF_DOEL - afnameMwh*1000)/STUB.kwh_per_km));
     // Laadvenster-aanname (Johan): tot 2 wagens = thuis, 's nachts/daluren; meer dan 2 = wagenpark, overdag (kantooruren).
     var laadVenster = ev>2 ? 'overdag (kantooruren)' : "'s nachts / daluren";
+    // Mobiliteitsbesparing uit de ENGINE: thuisladen geeft income = kost bij CREG-tarief (322 €/MWh) resp. dieselkost
+    //   (9 €/100km); het laden zelf is spot-gedispatcht in het venster, BINNEN het toegangsvermogen (home_kw ≤ max_kva).
+    //   Zonder engine-income (bedrijf-sweep) → fallback met dezelfde referenties. Besparing = referentie − reële laadkost.
+    var _inc = (swp && swp.income) || {};
+    var CREG_MWH=322, DIESEL_100=9;
+    var cregKost   = (+_inc.creg>0)   ? Math.round(+_inc.creg)   : Math.round(laadMwh*CREG_MWH);
+    var dieselKost = (+_inc.diesel>0) ? Math.round(+_inc.diesel) : Math.round((kmBehoefte/100)*DIESEL_100);
+    var laadKostReeel = Math.max(0, deltaFactuur);   // wat de klant de facto méér op de factuur betaalt voor het laden
+    var bespDiesel = Math.max(0, Math.round(dieselKost - laadKostReeel));
+    var bespCreg   = Math.max(0, Math.round(cregKost   - laadKostReeel));
     // Loadfactor (met laadvraag) op het toegangsvermogen
     var noemer=toegangKw*8760, loadfactor = noemer>0 ? Math.round((afnameMwh+laadMwh)*1000/noemer*100) : null;
 
@@ -476,6 +492,7 @@
       kostNu:kostNu, kostNieuw:kostNieuw, totaalMwh:totaalMwh, deltaFactuur:deltaFactuur,
       km100:km100, laadMwh:laadMwh, kmBehoefte:kmBehoefte, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
       loadfactor:loadfactor, isMS:isMS, laadVenster:laadVenster,
+      bespDiesel:bespDiesel, bespCreg:bespCreg, cregKost:cregKost, dieselKost:dieselKost,
       pvKwpFb:(particulier?4.5:Math.min(200,Math.round(afnameMwh*0.9))),
       battKwhFb:(particulier?10:Math.min(400,Math.round(afnameMwh*0.6))),
       bespFb:Math.round(kostNu*STUB.besp_pct_van_kost) };
