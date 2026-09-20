@@ -4,7 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.10.4 (2026-09-20) — LAYOUT-HERORDENING + RAPPORT-MAILEN + €/100km-FMT (Johan). (1) Volgorde: beste oplossing
+<!-- ek.html v0.10.6 (2026-09-20) — PV/BATTERIJ-BESPARING TOEGEREKEND AAN HET RIJDEN (Johan). €/100 km + besparing vs diesel
+     rekenen nu op de INCREMENTELE laadkost NA PV+batterij = (factuur gebouw+laden mét PV/batterij) − (oude factuur
+     gebouw-only), gedeeld door de km. Dus die dalen mee als je meer PV/batterij zet (combi-afhankelijk, verplaatst naar
+     "Varieert per combinatie"). Bij de 0/0-cel = de kale laadkost (zoals vroeger). _laadNaVan(a) is de gedeelde noemer.
+     Enkel elektrische km/jaar, loadfactor en energiekost-met-laadplein (zonder PV/batt) blijven combi-onafhankelijk.
+     ── v0.10.5 (2026-09-20) — FACTUUR NA PV+BATTERIJ BEWEEGT MEE (Johan: "de besparing verandert wel maar de nieuwe
+     factuur niet — dat klopt niet"). De nieuwe factuur MET PV+batterij = factuur met laadplein − de besparing van de
+     gekozen combi, dus ze daalt als je meer PV/batterij zet. Hero + 1-A4 tonen nu 3 trappen: vandaag → met laadplein →
+     met PV + batterij. Nieuwe combi-afhankelijke heatmap-metriek "Factuur na PV+batterij (€/j)". (€/100 km, loadfactor,
+     km, diesel-besparing blijven combi-onafhankelijk — dat is correct: die hangen af van contract + aansluiting.)
+     ── v0.10.4 (2026-09-20) — LAYOUT-HERORDENING + RAPPORT-MAILEN + €/100km-FMT (Johan). (1) Volgorde: beste oplossing
      (1-A4) → KPI's → heatmaps → capex-details → acties (offertes + rapport mailen). (2) Nieuwe knop "📧 Rapport mailen"
      (mailRapport → POST /api/ek-rapport-mail, deeplink via EK-mailbox). (3) €/100km-heatmap toont nu 1 decimaal zonder
      "/100km"-suffix (anders te breed).
@@ -268,11 +278,12 @@
               <option value="tvt" selected>Terugverdientijd PV+batt (j)</option>
               <option value="rendement">Rendement PV+batt (%)</option>
               <option value="besparing">Besparing/jaar (€)</option>
+              <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
+              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
+              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
               <option value="investering">Investering (€)</option>
             </optgroup>
             <optgroup label="Gelijk voor elke combinatie">
-              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
-              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
               <option value="km_jaar">Elektrische km/jaar</option>
               <option value="loadfactor">Loadfactor (%)</option>
               <option value="kost_nieuw">Energiekost met laadplein (€/j)</option>
@@ -287,11 +298,12 @@
               <option value="tvt">Terugverdientijd PV+batt (j)</option>
               <option value="rendement" selected>Rendement PV+batt (%)</option>
               <option value="besparing">Besparing/jaar (€)</option>
+              <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
+              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
+              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
               <option value="investering">Investering (€)</option>
             </optgroup>
             <optgroup label="Gelijk voor elke combinatie">
-              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
-              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
               <option value="km_jaar">Elektrische km/jaar</option>
               <option value="loadfactor">Loadfactor (%)</option>
               <option value="kost_nieuw">Energiekost met laadplein (€/j)</option>
@@ -302,7 +314,7 @@
         </div>
       </div>
       <div class="hmdetail sub" id="hm-detail"></div>
-      <p class="foot" style="margin-top:6px">Groener = beter (kortere TVT / hoger rendement / hogere besparing / lagere investering). <b>Terugverdientijd en rendement slaan op de investering in PV + batterij</b> (die de besparing/jaar oplevert) — de laadpalen + aansluiting zitten wél in "Investering" en in de investeringstabel, maar niet in de TVT/ROI. Kies je een kengetal uit "Gelijk voor elke combinatie" (€/100&nbsp;km, besparing vs diesel, elektrische km, loadfactor, energiekost), dan is elk vakje gelijk — die cijfers hangen af van uw contract + aansluiting, niet van de PV/batterij-keuze.</p>
+      <p class="foot" style="margin-top:6px">Groener = beter (kortere TVT / hoger rendement / hogere besparing / lagere factuur / lagere €&nbsp;per&nbsp;100&nbsp;km / lagere investering). <b>Terugverdientijd en rendement slaan op de investering in PV + batterij</b>; de laadpalen + aansluiting zitten wél in "Investering", maar niet in de TVT/ROI. <b>De PV/batterij-besparing wordt aan het rijden toegerekend</b>: de €/100&nbsp;km en de besparing vs diesel dalen dus mee als u meer PV/batterij kiest (factuur gebouw+laden mét PV/batterij − oude factuur gebouw). Enkel "Elektrische km/jaar", "Loadfactor" en "Energiekost met laadplein" (zonder PV/batterij) zijn gelijk voor elke combinatie.</p>
     </div>
 
     <!-- 4) Investering / capex-details (onder de heatmaps) -->
@@ -455,14 +467,18 @@
     tvt:         { val:function(a){return _tvtVan(a);}, fmt:function(v){return String(Math.round(v*10)/10).replace('.',',')+' j';}, goedHoog:false },
     rendement:   { val:function(a){return _rendNetto(a);}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },
     besparing:   { val:function(a){return (a&&+a.besparing)||0;}, fmt:_fmtEurK, goedHoog:true },
+    factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?Math.max(0,CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing van deze combi
     investering: { val:function(a){return _invVan(a);}, fmt:_fmtEurK, goedHoog:false },
+    // combi-AFHANKELIJK via de factuur-na-PV+batterij: de PV/batterij-besparing wordt aan het rijden toegerekend (Johan)
+    km100:       { val:function(a){ return CTX ? (CTX.kmBehoefte>0 ? _laadNaVan(a)/CTX.kmBehoefte*100 : 0) : null; }, fmt:function(v){return '€'+v.toFixed(1).replace('.',',');}, goedHoog:false },   // 1 decimaal, geen /100km-suffix (anders te breed)
+    besp_diesel: { val:function(a){ return CTX ? Math.max(0, (CTX.dieselKost||0) - _laadNaVan(a)) : null; }, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:true },
     // combi-ONAFHANKELIJK (zelfde voor elke cel — hangen af van contract + aansluiting, niet van de PV/batterij-keuze)
-    km100:       { val:function(){return CTX?CTX.km100:null;}, fmt:function(v){return '€'+v.toFixed(1).replace('.',',');}, goedHoog:false, vast:true },   // 1 decimaal, geen /100km-suffix (anders te breed)
-    besp_diesel: { val:function(){return CTX?CTX.bespDiesel:null;}, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:true, vast:true },
     km_jaar:     { val:function(){return CTX?CTX.kmBehoefte:null;}, fmt:function(v){return (v>=1000?(Math.round(v/1000)+'k'):Math.round(v))+' km';}, goedHoog:true, vast:true },
     loadfactor:  { val:function(){return CTX?CTX.loadfactor:null;}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true, vast:true },
     kost_nieuw:  { val:function(){return CTX?CTX.kostNieuw:null;}, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:false, vast:true }
   };
+  // incrementele laadkost NA PV+batterij voor cel a = (factuur met laadplein − besparing van a) − oude factuur gebouw-only
+  function _laadNaVan(a){ if(!CTX) return 0; var b=(a&&+a.besparing)||0; return Math.max(0, (CTX.kostNieuw - b) - CTX.kostNu); }
   function _hmKleurT(t){ if(t==null||!isFinite(t)) return '#eef2f8'; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
   function _hmKies(ry,cx){ var H=HM; if(!H) return; var a=_cellAt(H,ry,cx); if(!a) return; H.sel=a; renderRapport(a); _hmDetail(a); renderHeatmap();
@@ -509,21 +525,31 @@
     var palen=_bd.palen, kt=_bd.kt, invPv=_bd.invPv, invBatt=_bd.invBatt, invPalen=_bd.invPalen, invTot=_bd.invTot, invPvBatt=_bd.invPvBatt;
     // TVT/ROI slaan op de investering in PV + batterij (die genereert de besparing/jaar) — niet op palen/kabel.
     var tvt = bespJaar>0 ? Math.round(invPvBatt/bespJaar*10)/10 : null;
+    // v0.10.5 (Johan): de nieuwe factuur MET PV+batterij = factuur met laadplein − de besparing van deze combi. Beweegt mee
+    //   met de PV/batterij-keuze (meer batterij → meer besparing → lagere factuur), zodat het verhaal klopt.
+    var factuurNa = Math.max(0, Math.round(C.kostNieuw - bespJaar));
+    // v0.10.6 (Johan): €/100km + besparing vs diesel rekenen op de INCREMENTELE laadkost NA alle PV+batterij-besparing =
+    //   (nieuwe factuur gebouw+laden mét PV/batterij) − (oude factuur gebouw-only). Zo daalt de €/100km als je meer PV/
+    //   batterij zet (het systeemvoordeel wordt aan het rijden toegerekend). Bij de 0/0-cel = de kale laadkost (zoals vroeger).
+    var _laadNa = Math.max(0, factuurNa - C.kostNu);
+    var km100Cell = (ev>0 && C.kmBehoefte>0) ? (_laadNa/C.kmBehoefte*100) : 0;
+    var bespDieselCell = Math.max(0, Math.round((C.dieselKost||0) - _laadNa));
+    var bespCregCell   = Math.max(0, Math.round((C.cregKost||0) - _laadNa));
     LAST={ pvKwp:pvKwp, battKwh:battKwh, palen:palen, invTot:invTot, invPvBatt:invPvBatt };
     // 1-A4
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
-    $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="sub" style="font-weight:600">('+String(C.afnameMwh).replace('.',',')+' MWh)</span> <span class="arrow">→</span> '+eur(C.kostNieuw)+'/j <span class="sub" style="font-weight:600">('+String(C.totaalMwh).replace('.',',')+' MWh, gebouw + laadplein)</span>';
+    $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="sub" style="font-weight:600">('+String(C.afnameMwh).replace('.',',')+' MWh)</span> <span class="arrow">→</span> '+eur(C.kostNieuw)+'/j <span class="sub" style="font-weight:600">(gebouw + laadplein)</span> <span class="arrow">→</span> <b>'+eur(factuurNa)+'/j</b> <span class="sub" style="font-weight:600">(met PV + batterij)</span>';
     $('a4-besp').innerHTML=eur(bespJaar)+'/j'+(tvt!=null?(' <span class="sub" style="font-weight:600">· TVT '+String(tvt).replace('.',',')+' j (PV + batterij)</span>'):'');
-    $('a4-km100').textContent=ev>0?('€ '+eur2(C.km100)+' /100 km · bespaart ± '+eur(C.bespDiesel)+'/j vs diesel'):'geen EV opgegeven';
+    $('a4-km100').textContent=ev>0?('€ '+eur2(km100Cell)+' /100 km · bespaart ± '+eur(bespDieselCell)+'/j vs diesel'):'geen EV opgegeven';
     $('a4-km').textContent=ev>0?(num0(C.kmBehoefte)+' km/j nodig · tot ± '+num0(C.kmPlafond)+' km/j op uw aansluiting (geen verzwaring)'):('tot ± '+num0(C.kmPlafond)+' km/j mogelijk');
     $('a4-lf').textContent=C.loadfactor!=null?(C.loadfactor+' %'):'—';
     $('a4-inv').textContent=eur(invTot);
     // KPI-grid
     var K=[
-      {hero:true,t:'Energiekost vandaag → met laadplein',v:eur(C.kostNu)+' → '+eur(C.kostNieuw),vs:true,s:String(C.afnameMwh).replace('.',',')+' MWh → '+String(C.totaalMwh).replace('.',',')+' MWh (gebouw + laadplein) · all-in'+(NETHEF>0?', netkosten uit uw factuur':'')},
+      {hero:true,t:'Energiekost: vandaag → met laadplein → met PV + batterij',v:eur(C.kostNu)+' → '+eur(C.kostNieuw)+' → '+eur(factuurNa),vs:true,s:'vandaag ('+String(C.afnameMwh).replace('.',',')+' MWh) → met laadplein ('+String(C.totaalMwh).replace('.',',')+' MWh) → na PV + batterij (−'+eur(bespJaar)+'/j) · all-in'+(NETHEF>0?', netkosten uit uw factuur':'')},
       {t:'Besparing per jaar',v:eur(bespJaar),s:(tvt!=null?('door PV + batterij · terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'door PV + batterij')},
-      {t:'Energiekost mobiliteit',v:(ev>0?('€ '+eur2(C.km100)+' /100 km'):'—'),s:(ev>0?('louter energiekost, all-in · laden '+C.laadVenster):'geen EV')},
-      {t:'Besparing elektrisch rijden',v:(ev>0?eur(C.bespDiesel)+'/j':'—'),s:(ev>0?('vs diesel · '+eur(C.bespCreg)+'/j vs regulier laden (322 €/MWh)'):'geen EV')},
+      {t:'Energiekost mobiliteit',v:(ev>0?('€ '+eur2(km100Cell)+' /100 km'):'—'),s:(ev>0?('na PV + batterij, all-in · laden '+C.laadVenster):'geen EV')},
+      {t:'Besparing elektrisch rijden',v:(ev>0?eur(bespDieselCell)+'/j':'—'),s:(ev>0?('vs diesel · '+eur(bespCregCell)+'/j vs regulier laden (322 €/MWh)'):'geen EV')},
       {t:'Elektrische km/jaar',v:(ev>0?num0(C.kmBehoefte)+' km':('≤ '+num0(C.kmPlafond)+' km')),s:(ev>0?('tot ± '+num0(C.kmPlafond)+' km mogelijk → geen verzwaring'):'plafond op vrije capaciteit')},
       {t:'Loadfactor',v:(C.loadfactor!=null?C.loadfactor+' %':'—'),s:'toekomstvastheid van deze kost'},
       {t:'Investering',v:eur(invTot),s:'PV + batterij + palen + aansluiting'}
