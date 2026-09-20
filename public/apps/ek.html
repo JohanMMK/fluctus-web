@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.10.1 (2026-09-20) — ANALOOG = ALTIJD SLP-PIEK (Johan-debug: "dezelfde LUMINUS-factuur wordt nu niet meer
+<!-- ek.html v0.10.2 (2026-09-20) — ALLE KENGETALLEN KIESBAAR IN DE HEATMAP (Johan). De links/rechts-keuze bevat nu ook de
+     combi-onafhankelijke kengetallen (€/100 km, besparing vs diesel, elektrische km/jaar, loadfactor, energiekost met
+     laadplein), gegroepeerd onder "Varieert per combinatie" vs "Gelijk voor elke combinatie". Een 'vast' kengetal rendert
+     een uniform rooster + een noot "zelfde voor elke combinatie". (Besparing/jaar = engine: kost(0/0) − kost(combi);
+     besparing elektrisch rijden = dieselkost − extra laadkost op de factuur.)
+     ── v0.10.1 (2026-09-20) — ANALOOG = ALTIJD SLP-PIEK (Johan-debug: "dezelfde LUMINUS-factuur wordt nu niet meer
      als analoog herkend, 8 kW staat terug"). Bij meterType='analoog' leiden we de piek nu ALTIJD uit het SLP af, ook als
      de parse toevallig een (afgeleid/forfaitair) toegangsvermogen teruggaf — een analoge meter heeft nooit een gemeten
      piek. Server-kant (extract.js v1.5.1): meterType hangt nu enkel af van een GEMETEN piek in kW (maandpiek), niet van de
@@ -275,25 +280,45 @@
       <div class="hmpair">
         <div class="hmside">
           <div class="hmpick"><label>Links</label><select id="hm-mx-L">
-            <option value="tvt" selected>Terugverdientijd (j)</option>
-            <option value="rendement">Rendement (%)</option>
-            <option value="besparing">Besparing/jaar (€)</option>
-            <option value="investering">Investering (€)</option>
+            <optgroup label="Varieert per combinatie">
+              <option value="tvt" selected>Terugverdientijd (j)</option>
+              <option value="rendement">Rendement (%)</option>
+              <option value="besparing">Besparing/jaar (€)</option>
+              <option value="investering">Investering (€)</option>
+            </optgroup>
+            <optgroup label="Gelijk voor elke combinatie">
+              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
+              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
+              <option value="km_jaar">Elektrische km/jaar</option>
+              <option value="loadfactor">Loadfactor (%)</option>
+              <option value="kost_nieuw">Energiekost met laadplein (€/j)</option>
+            </optgroup>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-L"></table></div>
+          <div class="sub" id="hm-note-L" style="margin-top:4px"></div>
         </div>
         <div class="hmside">
           <div class="hmpick"><label>Rechts</label><select id="hm-mx-R">
-            <option value="tvt">Terugverdientijd (j)</option>
-            <option value="rendement" selected>Rendement (%)</option>
-            <option value="besparing">Besparing/jaar (€)</option>
-            <option value="investering">Investering (€)</option>
+            <optgroup label="Varieert per combinatie">
+              <option value="tvt">Terugverdientijd (j)</option>
+              <option value="rendement" selected>Rendement (%)</option>
+              <option value="besparing">Besparing/jaar (€)</option>
+              <option value="investering">Investering (€)</option>
+            </optgroup>
+            <optgroup label="Gelijk voor elke combinatie">
+              <option value="km100">Energiekost mobiliteit (€/100 km)</option>
+              <option value="besp_diesel">Besparing elektrisch rijden (€/j)</option>
+              <option value="km_jaar">Elektrische km/jaar</option>
+              <option value="loadfactor">Loadfactor (%)</option>
+              <option value="kost_nieuw">Energiekost met laadplein (€/j)</option>
+            </optgroup>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-R"></table></div>
+          <div class="sub" id="hm-note-R" style="margin-top:4px"></div>
         </div>
       </div>
       <div class="hmdetail sub" id="hm-detail"></div>
-      <p class="foot" style="margin-top:6px">Groener = beter (kortere TVT / hoger rendement / hogere besparing / lagere investering). €/100&nbsp;km, loadfactor en de besparing t.o.v. diesel hangen niet af van de PV/batterij-keuze — die zijn gelijk voor elke combinatie en staan in de tegels hierboven.</p>
+      <p class="foot" style="margin-top:6px">Groener = beter (kortere TVT / hoger rendement / hogere besparing / lagere investering). Kies je een kengetal uit "Gelijk voor elke combinatie" (€/100&nbsp;km, besparing vs diesel, elektrische km, loadfactor, energiekost), dan is elk vakje gelijk — die cijfers hangen af van uw contract + aansluiting, niet van de PV/batterij-keuze.</p>
     </div>
 
     <button class="btn ghost block noprint" type="button" onclick="location.reload()">↺ Opnieuw</button>
@@ -408,11 +433,19 @@
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   function _invVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invTotVoor(pvKwp, battKwh); }
   function _tvtVan(a){ var b=+((a&&a.besparing)||0), inv=_invVan(a); return (b>0&&inv>0)?Math.round(inv/b*10)/10:null; }
+  function _fmtEurK(v){ return v>=1000?('€'+String(Math.round(v/100)/10).replace('.',',')+'k'):('€'+Math.round(v)); }
   var HM_METRICS = {
+    // combi-AFHANKELIJK (variëren per PV/batterij-cel)
     tvt:         { val:function(a){return _tvtVan(a);}, fmt:function(v){return String(Math.round(v*10)/10).replace('.',',')+' j';}, goedHoog:false },
     rendement:   { val:function(a){return _rendNetto(a);}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },
-    besparing:   { val:function(a){return (a&&+a.besparing)||0;}, fmt:function(v){return v>=1000?('€'+String(Math.round(v/100)/10).replace('.',',')+'k'):('€'+Math.round(v));}, goedHoog:true },
-    investering: { val:function(a){return _invVan(a);}, fmt:function(v){return v>=1000?('€'+String(Math.round(v/100)/10).replace('.',',')+'k'):('€'+Math.round(v));}, goedHoog:false }
+    besparing:   { val:function(a){return (a&&+a.besparing)||0;}, fmt:_fmtEurK, goedHoog:true },
+    investering: { val:function(a){return _invVan(a);}, fmt:_fmtEurK, goedHoog:false },
+    // combi-ONAFHANKELIJK (zelfde voor elke cel — hangen af van contract + aansluiting, niet van de PV/batterij-keuze)
+    km100:       { val:function(){return CTX?CTX.km100:null;}, fmt:function(v){return '€'+v.toFixed(2).replace('.',',')+'/100km';}, goedHoog:false, vast:true },
+    besp_diesel: { val:function(){return CTX?CTX.bespDiesel:null;}, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:true, vast:true },
+    km_jaar:     { val:function(){return CTX?CTX.kmBehoefte:null;}, fmt:function(v){return (v>=1000?(Math.round(v/1000)+'k'):Math.round(v))+' km';}, goedHoog:true, vast:true },
+    loadfactor:  { val:function(){return CTX?CTX.loadfactor:null;}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true, vast:true },
+    kost_nieuw:  { val:function(){return CTX?CTX.kostNieuw:null;}, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:false, vast:true }
   };
   function _hmKleurT(t){ if(t==null||!isFinite(t)) return '#eef2f8'; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
@@ -434,6 +467,7 @@
         html+='<td class="'+cls+'" style="background:'+_hmKleurT(t)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+((v==null||!isFinite(v))?'':M.fmt(v))+'</td>'; });
       html+='</tr>'; });
     T.innerHTML=html;
+    var noteEl=$(tblId.replace('hm-tabel','hm-note')); if(noteEl) noteEl.textContent = M.vast ? '— zelfde voor elke combinatie (hangt af van contract + aansluiting)' : '';
     Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){ var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
       td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a){ renderRapport(a); _hmDetail(a); } };
       td.onclick=function(){ _hmKies(ry,cx); }; });
