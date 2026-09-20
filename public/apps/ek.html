@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.7.0 (2026-09-20) — MOBILITEITSBESPARING uit de engine (Johan): toont nu hoeveel elektrisch rijden
+<!-- ek.html v0.8.0 (2026-09-20) — ANALOGE METER (Johan): een factuur zonder capaciteitstarief/maandpiek =
+     analoge meter (extract.js meterType) → geen gemeten piek, geen Fluvius-kwartierdata/mandaat mogelijk. Flow past
+     zich aan: profiel = residentieel (afgeleid), toegangsvermogen afgeleid als standaard residentiële aansluiting
+     (1×40A≈8 / 3×25A≈14 / 3×32A≈17 kW, geschaald op verbruik, gelabeld "afgeleid"), kwartierdata-opt-in verborgen +
+     uitgezet, en een duidelijke melding "standaardprofiel geschaald op uw verbruik".
+     ── v0.7.0 (2026-09-20) — MOBILITEITSBESPARING uit de engine (Johan): toont nu hoeveel elektrisch rijden
      bespaart t.o.v. diesel (9 €/100km) en t.o.v. regulier laden aan CREG-tarief (322 €/MWh) — uit /api/thuisladen
      income (fallback met dezelfde referenties voor de bedrijf-sweep). Het laden zelf wordt in de engine spot-gedispatcht
      in het venster BINNEN het toegangsvermogen (home_kw ≤ max_kva; bestaande simulator-code). Nieuwe KPI-tegel
@@ -170,9 +175,10 @@
       <div><label class="fld">Telefoon</label><input type="tel" id="i-tel" inputmode="tel" placeholder="+32 …"></div>
     </div>
 
-    <label class="chk"><input type="checkbox" id="i-optout" checked>
+    <label class="chk" id="optout-blok"><input type="checkbox" id="i-optout" checked>
       <span><b>Vraag mijn kwartierdata op bij Fluvius</b> zodat mijn rapport exact wordt. U bevestigt dit zelf bij Fluvius (via itsme). Liever niet? Vink uit — u krijgt enkel het rapport op standaardprofiel.</span>
     </label>
+    <div class="chk hidden" id="analoog-note" style="border-color:var(--greenln)"><span>ℹ️ <b>Analoge meter gedetecteerd.</b> Er is geen digitale meting (geen piekvermogen/kwartierdata), dus we kunnen geen Fluvius-mandaat inzetten. Uw rapport draait op een <b>standaardprofiel</b>, geschaald op uw verbruik.</span></div>
     <label class="chk"><input type="checkbox" id="i-optcontact" checked>
       <span><b>Fluctus mag mij contacteren</b> om o.a. mijn rapporten en updates te bezorgen. Vink uit als u dat niet wilt.</span>
     </label>
@@ -540,6 +546,14 @@
         var inj=bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
         var toe=+bc.toegangsvermogenKw||Math.round((+bc.aansluitVermogenKva||0)*0.9)||0;
         var kst=bc.totaalEnergieExclBtw?Math.round(bc.totaalEnergieExclBtw*jf):(bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0);
+        // v0.8: ANALOGE METER — geen gemeten piek/toegangsvermogen, geen digitale meterdata → geen Fluvius-mandaat/
+        //   kwartierdata mogelijk. Profiel = residentieel (afgeleid), en het toegangsvermogen leiden we af uit het
+        //   verbruik als een standaard residentiële aansluiting (1×40A ≈ 8 kW / 3×25A ≈ 14 kW / 3×32A ≈ 17 kW).
+        var analoog = (bc.meterType==='analoog') || (bc.heeftPiekmeting===false);
+        if(analoog && !(+bc.toegangsvermogenKw>0)){
+          var _mwh = afn || ((+bc.afnameKwh||0)/1000);
+          toe = _mwh>12 ? 17 : (_mwh>6 ? 14 : 8);   // afgeleide standaard aansluiting (geen meting)
+        }
         // Netkosten+heffingen ECHT uit de factuur (rate, periode-invariant) → all-in klopt (MS betaalt minder/MWh).
         var _vol=(+bc.afnameKwh||0)/1000; var _nh=_vol>0?Math.round(((+bc.totaalDistributieExclBtw||0)+(+bc.totaalHeffingenExclBtw||0))/_vol):0;
         if(_nh>0) NETHEF=_nh;
@@ -547,13 +561,21 @@
         if(toe) $('i-toegang').value=toe;
         if(kst) $('i-kost').value=kst;
         var bedr=(j.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
-        // v0.6.1: onthoud het eerder gekozen profiel; anders val terug op de zakelijke/residentiële default.
-        $('i-profiel').value = j.profiel || (bedr?'kantoor':'residentieel');
+        // v0.6.1: onthoud het eerder gekozen profiel; bij analoge meter → residentieel (geen andere info); anders default.
+        $('i-profiel').value = analoog ? 'residentieel' : (j.profiel || (bedr?'kantoor':'residentieel'));
         if(j.project_id) STATE_CODE=j.project_id;
         var u=$('upl'); if(u) u.classList.add('hidden');
         var ok=$('factuur-ok'); if(ok) ok.classList.remove('hidden');
-        $('factuur-detail').textContent=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?toe+' kW toegang':''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ')+' (uit uw factuur).';
-        $('intake-intro').textContent='We ontvingen uw factuur en lazen ze in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
+        if(analoog){   // geen kwartierdata/mandaat mogelijk → opt-in verbergen + uitzetten, en de melding tonen
+          var _ob=$('optout-blok'); if(_ob) _ob.classList.add('hidden');
+          var _oc=$('i-optout'); if(_oc) _oc.checked=false;
+          var _an=$('analoog-note'); if(_an) _an.classList.remove('hidden');
+        }
+        var _det=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?toe+' kW toegang'+(analoog?' (afgeleid)':''):''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ');
+        $('factuur-detail').textContent=_det+(analoog?' — analoge meter, standaardprofiel (residentieel).':' (uit uw factuur).');
+        $('intake-intro').textContent=analoog
+          ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
+          : 'We ontvingen uw factuur en lazen ze in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
       }).catch(function(){});
     }catch(e){}
   })();
