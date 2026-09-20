@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Factuurmails · Fluctus</title>
-<!-- inbound-stats.html v1.0.0 (2026-09-20) — MANAGER-DASHBOARD factuurmail-intake: hoeveel factuurmails kwamen
+<!-- inbound-stats.html v1.1.0 (2026-09-20) — + Graph-status strook bovenaan (GET /api/graph/diag): toont in één
+     oogopslag of Graph actief is, of auto-rapport AAN staat (GRAPH_INBOUND_AUTOREPORT), of de login lukt, welke
+     mailbox + poll-interval. Zo hoeft de manager het diag-endpoint niet handmatig met een token op te vragen.
+     v1.0.0 (2026-09-20) — MANAGER-DASHBOARD factuurmail-intake: hoeveel factuurmails kwamen
      binnen op de intake-mailbox (energiekompas@fluctus.net), van hoeveel VERSCHILLENDE afzenders, en per afzender
      (aantal + eerste/laatste). Bron: GET /api/graph/inbound-stats (server v15.156, gevoed door _inboundStatsBump →
      stats/inbound.json in Supabase Storage). Manager-only (Bearer via Supabase-sessie), zelfde bootstrap als
@@ -25,6 +28,10 @@
   .bar .sub{ font-size:12.5px; color:var(--muted); }
   .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:7px 11px; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-block; }
   .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .diag{ display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 14px; margin-bottom:14px; }
+  .diag .chip{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; padding:4px 10px; border-radius:999px; }
+  .chip.on{ background:#D1FAE5; color:#065f46; } .chip.off{ background:#FEE2E2; color:#9b1c1c; } .chip.neu{ background:#EEF2F8; color:#42506a; font-weight:600; }
+  .diag .hint{ font-size:12px; color:var(--amber); font-weight:600; width:100%; }
   .kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px; }
   .kpi{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
   .kpi .lab{ font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); font-weight:700; }
@@ -54,6 +61,7 @@
     </div>
   </div>
   <div class="wrap">
+    <div class="diag" id="diag"><span class="sub">Graph-status laden…</span></div>
     <div class="kpis" id="kpis">
       <div class="kpi"><div class="lab">Factuurmails</div><div class="val" id="k-total">—</div><div class="foot">totaal ontvangen op de intake-mailbox</div></div>
       <div class="kpi"><div class="lab">Unieke afzenders</div><div class="val" id="k-uniek">—</div><div class="foot">verschillende e-mailadressen</div></div>
@@ -62,7 +70,7 @@
     <div class="bar">
       <input type="search" id="zoek" placeholder="Zoek op e-mailadres…">
       <span class="sub" id="telling"></span>
-      <button class="btn ghost" onclick="laad()">↻ Ververs</button>
+      <button class="btn ghost" onclick="laad();laadDiag()">↻ Ververs</button>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
   </div>
@@ -80,7 +88,27 @@
       var d = await sb.auth.getSession(); SESSION = d.data.session;
       if(!SESSION){ window.location.href='/portal.html'; return; }
       $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      laadDiag();
       await laad();
+    }
+    async function laadDiag(){
+      var el=$('diag'); if(!el) return;
+      try{
+        var r=await fetch(PROXY+'/api/graph/diag?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' });
+        if(!r.ok){ el.innerHTML='<span class="sub">Graph-status niet beschikbaar ('+r.status+').</span>'; return; }
+        var j=await r.json();
+        var tokenOk = /^OK/i.test(String(j.token||''));
+        var chip=function(on,txt){ return '<span class="chip '+(on?'on':'off')+'">'+(on?'✓':'✕')+' '+esc(txt)+'</span>'; };
+        var h='';
+        h+=chip(!!j.enabled,'Graph '+(j.enabled?'actief':'uit'));
+        h+=chip(!!j.autoreport,'Auto-rapport '+(j.autoreport?'AAN':'UIT'));
+        h+=chip(tokenOk,'Login '+(tokenOk?'ok':'fout'));
+        h+='<span class="chip neu">📬 '+esc(j.mailbox||'—')+'</span>';
+        h+='<span class="chip neu">poll '+(+j.poll_min||'?')+' min</span>';
+        if(!j.autoreport) h+='<div class="hint">⚠ Auto-rapport staat UIT — zet ENV GRAPH_INBOUND_AUTOREPORT=1 op Railway (fluctus-proxy) + redeploy. Zolang dit uit staat gaat er enkel een notify naar de back-office, niet naar de klant.</div>';
+        else if(!tokenOk) h+='<div class="hint">⚠ Graph-login faalt: '+esc(j.token||'')+'</div>';
+        el.innerHTML=h;
+      }catch(e){ el.innerHTML='<span class="sub">Graph-status kon niet laden: '+esc(e.message)+'</span>'; }
     }
     async function authHeaders(){
       var tok = SESSION && SESSION.access_token;
