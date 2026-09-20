@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factuurmails · Fluctus</title>
+<!-- inbound-stats.html v1.2.0 (2026-09-20) — + diagnose-log "Laatste verwerkte mails" (GET /api/graph/inbound-log,
+     server v15.156.7): per inkomende factuurmail het resultaat (nieuwe lead / abonnement / geen EAN / fout) met
+     afzender, onderwerp, klant/EAN en tijd. Zo zie je meteen waarom een mail wél/niet een project/mail opleverde.
+     v1.1.0 (2026-09-20) — + Graph-status strook bovenaan (GET /api/graph/diag): toont in één
+     oogopslag of Graph actief is, of auto-rapport AAN staat (GRAPH_INBOUND_AUTOREPORT), of de login lukt, welke
+     mailbox + poll-interval. Zo hoeft de manager het diag-endpoint niet handmatig met een token op te vragen.
+     v1.0.0 (2026-09-20) — MANAGER-DASHBOARD factuurmail-intake: hoeveel factuurmails kwamen
+     binnen op de intake-mailbox (energiekompas@fluctus.net), van hoeveel VERSCHILLENDE afzenders, en per afzender
+     (aantal + eerste/laatste). Bron: GET /api/graph/inbound-stats (server v15.156, gevoed door _inboundStatsBump →
+     stats/inbound.json in Supabase Storage). Manager-only (Bearer via Supabase-sessie), zelfde bootstrap als
+     projecten.html. Additief, read-only. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .links{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .wrap{ max-width:1000px; margin:0 auto; padding:16px 20px 60px; }
+  .bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .bar input[type=search]{ flex:1; min-width:200px; border:1.5px solid var(--line); border-radius:9px; padding:9px 12px; font-size:13.5px; }
+  .bar .sub{ font-size:12.5px; color:var(--muted); }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:7px 11px; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .diag{ display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 14px; margin-bottom:14px; }
+  .chip{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; padding:4px 10px; border-radius:999px; }
+  .chip.on{ background:#D1FAE5; color:#065f46; } .chip.off{ background:#FEE2E2; color:#9b1c1c; } .chip.neu{ background:#EEF2F8; color:#42506a; font-weight:600; }
+  .diag .hint{ font-size:12px; color:var(--amber); font-weight:600; width:100%; }
+  .kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px; }
+  .kpi{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .kpi .lab{ font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); font-weight:700; }
+  .kpi .val{ font-size:30px; font-weight:800; color:var(--navy); margin-top:4px; line-height:1.1; }
+  .kpi .foot{ font-size:11.5px; color:var(--muted); margin-top:4px; }
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th,td{ text-align:left; padding:10px 12px; font-size:13px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ background:#f7f9fd; color:var(--navy2); font-size:11.5px; text-transform:uppercase; letter-spacing:.02em; cursor:pointer; }
+  th.num,td.num{ text-align:right; }
+  tr:last-child td{ border-bottom:none; }
+  .mail{ font-weight:600; color:var(--navy); word-break:break-all; }
+  .cnt{ font-weight:800; color:var(--navy2); font-variant-numeric:tabular-nums; }
+  .sub{ font-size:11.5px; color:var(--muted); }
+  .state{ padding:34px; text-align:center; color:var(--muted); } .fout{ padding:28px; text-align:center; color:#b23; }
+  @media(max-width:640px){ .kpis{ grid-template-columns:1fr; } table,thead,tbody,th,td,tr{ display:block; } thead{ display:none; } tr{ border-bottom:1px solid var(--line); padding:6px 0; } td{ border:none; padding:4px 12px; } td.num{ text-align:left; } }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>📧 Factuurmails</h1>
+    <div class="links">
+      <span class="who" id="who"></span>
+      <a href="/apps/projecten.html">📁 Projecten</a>
+      <a href="/apps/leads.html">Leads</a>
+      <a href="/apps/mailtemplates.html">✉️ Mails</a>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="diag" id="diag"><span class="sub">Graph-status laden…</span></div>
+    <div class="kpis" id="kpis">
+      <div class="kpi"><div class="lab">Factuurmails</div><div class="val" id="k-total">—</div><div class="foot">totaal ontvangen op de intake-mailbox</div></div>
+      <div class="kpi"><div class="lab">Unieke afzenders</div><div class="val" id="k-uniek">—</div><div class="foot">verschillende e-mailadressen</div></div>
+      <div class="kpi"><div class="lab">Gem. per afzender</div><div class="val" id="k-gem">—</div><div class="foot" id="k-bij">—</div></div>
+    </div>
+    <div class="bar">
+      <input type="search" id="zoek" placeholder="Zoek op e-mailadres…">
+      <span class="sub" id="telling"></span>
+      <button class="btn ghost" onclick="laad();laadDiag();laadLog()">↻ Ververs</button>
+    </div>
+    <div id="root"><div class="state">Laden…</div></div>
+
+    <h2 style="font-size:15px;color:var(--navy2);margin:26px 0 8px">Laatste verwerkte mails</h2>
+    <div class="sub" style="margin-bottom:8px">Wat er met elke inkomende factuurmail gebeurde (nieuwe lead / abonnement / geen EAN / fout).</div>
+    <div id="log"><div class="state">Laden…</div></div>
+  </div>
+
+  <script>
+    var $ = function(id){ return document.getElementById(id); };
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', SORT={k:'aantal',dir:-1};
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return '—'; } }
+
+    async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+    async function initAuth(){
+      if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      var d = await sb.auth.getSession(); SESSION = d.data.session;
+      if(!SESSION){ window.location.href='/portal.html'; return; }
+      $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+      laadDiag();
+      laadLog();
+      await laad();
+    }
+    // Resultaat-labels per mail-status (voor de diagnose-log).
+    var LOGLABEL = {
+      nieuwe_lead_rapport1: ['✓ nieuwe klant — mail verstuurd','on'],
+      nieuwe_lead_dryrun: ['nieuwe klant — dry-run (geen mail)','neu'],
+      abonnement_herrekend: ['✓ abonnement — mail verstuurd','on'],
+      gekoppeld_dryrun: ['gekoppeld — dry-run (geen mail)','neu'],
+      gekoppeld_geen_adres: ['gekoppeld — geen geldig adres','off'],
+      gekoppeld_onbevestigd: ['gekoppeld — niet bevestigd','neu'],
+      gekoppeld_opt_out: ['gekoppeld — uitgeschreven','neu'],
+      geen_ean: ['⚠ geen EAN gevonden','off'],
+      onbekende_ean_geen_klantid: ['⚠ EAN maar geen klant-id','off'],
+      onbekende_ean_geen_afzender: ['⚠ EAN maar geen geldig afzenderadres','off'],
+      geen_pdf: ['geen PDF-bijlage','neu'],
+      geen_apikey: ['⚠ geen API-key (leest niet)','off'],
+      fout: ['⚠ fout (retry volgt)','off'],
+      fout_opgegeven: ['✕ fout — opgegeven','off']
+    };
+    async function laadLog(){
+      var el=$('log'); if(!el) return;
+      var r;
+      try{ r=await fetch(PROXY+'/api/graph/inbound-log?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' }); }
+      catch(e){ el.innerHTML='<div class="fout">Kan de log niet laden: '+esc(e.message)+'</div>'; return; }
+      if(!r.ok){ el.innerHTML='<div class="state">Log niet beschikbaar ('+r.status+').</div>'; return; }
+      var j=await r.json(); var mails=(j&&j.mails)||[];
+      if(!mails.length){ el.innerHTML='<div class="state">Nog geen verwerkte mails.</div>'; return; }
+      var h='<table><thead><tr><th>Afzender</th><th>Onderwerp</th><th>Resultaat</th><th>Klant / EAN</th><th>Ontvangen</th></tr></thead><tbody>';
+      mails.forEach(function(m){
+        var lab=LOGLABEL[m.status]||[m.status||'—','neu'];
+        var kl=lab[1]==='on'?'chip on':(lab[1]==='off'?'chip off':'chip neu');
+        h+='<tr>'+
+          '<td class="mail">'+esc(m.from||'—')+'</td>'+
+          '<td class="sub">'+esc(m.subject||'—')+'</td>'+
+          '<td><span class="'+kl+'">'+esc(lab[0])+'</span>'+(m.fout?('<div class="sub" style="color:#9b1c1c;margin-top:3px">'+esc(m.fout)+'</div>'):'')+'</td>'+
+          '<td class="sub">'+esc(m.klant||'—')+(m.ean?('<br>'+esc(m.ean)):'')+'</td>'+
+          '<td class="sub">'+kort(m.ontvangen)+'</td>'+
+        '</tr>';
+      });
+      h+='</tbody></table>';
+      el.innerHTML=h;
+    }
+    async function laadDiag(){
+      var el=$('diag'); if(!el) return;
+      try{
+        var r=await fetch(PROXY+'/api/graph/diag?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' });
+        if(!r.ok){ el.innerHTML='<span class="sub">Graph-status niet beschikbaar ('+r.status+').</span>'; return; }
+        var j=await r.json();
+        var tokenOk = /^OK/i.test(String(j.token||''));
+        var chip=function(on,txt){ return '<span class="chip '+(on?'on':'off')+'">'+(on?'✓':'✕')+' '+esc(txt)+'</span>'; };
+        var h='';
+        h+=chip(!!j.enabled,'Graph '+(j.enabled?'actief':'uit'));
+        h+=chip(!!j.autoreport,'Auto-rapport '+(j.autoreport?'AAN':'UIT'));
+        h+=chip(tokenOk,'Login '+(tokenOk?'ok':'fout'));
+        h+='<span class="chip neu">📬 '+esc(j.mailbox||'—')+'</span>';
+        h+='<span class="chip neu">poll '+(+j.poll_min||'?')+' min</span>';
+        if(!j.autoreport) h+='<div class="hint">⚠ Auto-rapport staat UIT — zet ENV GRAPH_INBOUND_AUTOREPORT=1 op Railway (fluctus-proxy) + redeploy. Zolang dit uit staat gaat er enkel een notify naar de back-office, niet naar de klant.</div>';
+        else if(!tokenOk) h+='<div class="hint">⚠ Graph-login faalt: '+esc(j.token||'')+'</div>';
+        el.innerHTML=h;
+      }catch(e){ el.innerHTML='<span class="sub">Graph-status kon niet laden: '+esc(e.message)+'</span>'; }
+    }
+    async function authHeaders(){
+      var tok = SESSION && SESSION.access_token;
+      try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }
+
+    async function laad(){
+      $('root').innerHTML='<div class="state">Statistieken laden…</div>';
+      var r;
+      try{ r = await fetch(PROXY+'/api/graph/inbound-stats?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' }); }
+      catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+      if(r.status===403){ $('root').innerHTML='<div class="fout">Enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a></div>'; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+      var j = await r.json();
+      DATA = (j&&j.per_afzender)||[];
+      var total=(+j.total_facturen||0), uniek=(+j.unieke_afzenders||0);
+      $('k-total').textContent = total;
+      $('k-uniek').textContent = uniek;
+      $('k-gem').textContent = uniek ? (Math.round((total/uniek)*10)/10).toString().replace('.',',') : '—';
+      $('k-bij').textContent = j.bijgewerkt ? ('laatste: '+kort(j.bijgewerkt)) : 'nog geen factuurmail';
+      render();
+    }
+
+    function render(){
+      var rows = DATA.filter(function(x){ return !ZOEK || String(x.mail||'').toLowerCase().indexOf(ZOEK)>=0; });
+      rows.sort(function(a,b){
+        var k=SORT.k, va, vb;
+        if(k==='aantal'){ va=+a.aantal||0; vb=+b.aantal||0; }
+        else if(k==='mail'){ va=String(a.mail||''); vb=String(b.mail||''); return SORT.dir*va.localeCompare(vb); }
+        else { va=String(a[k]||''); vb=String(b[k]||''); return SORT.dir*va.localeCompare(vb); }
+        return SORT.dir*(va-vb);
+      });
+      $('telling').textContent = rows.length + ' afzender'+(rows.length===1?'':'s');
+      if(!rows.length){ $('root').innerHTML='<div class="state">'+(ZOEK?'Geen afzender gevonden.':'Nog geen factuurmails ontvangen.')+'</div>'; return; }
+      var pijl=function(k){ return SORT.k===k ? (SORT.dir<0?' ▾':' ▴') : ''; };
+      var h='<table><thead><tr>'+
+        '<th onclick="sorteer(\'mail\')">Afzender'+pijl('mail')+'</th>'+
+        '<th class="num" onclick="sorteer(\'aantal\')">Facturen'+pijl('aantal')+'</th>'+
+        '<th onclick="sorteer(\'eerste\')">Eerste'+pijl('eerste')+'</th>'+
+        '<th onclick="sorteer(\'laatste\')">Laatste'+pijl('laatste')+'</th></tr></thead><tbody>';
+      rows.forEach(function(x){
+        h+='<tr>'+
+          '<td class="mail">'+esc(x.mail)+'</td>'+
+          '<td class="num cnt">'+(+x.aantal||0)+'</td>'+
+          '<td class="sub">'+kort(x.eerste)+'</td>'+
+          '<td class="sub">'+kort(x.laatste)+'</td>'+
+        '</tr>';
+      });
+      h+='</tbody></table>';
+      $('root').innerHTML=h;
+    }
+    window.sorteer=function(k){ if(SORT.k===k) SORT.dir*=-1; else { SORT.k=k; SORT.dir=(k==='aantal')?-1:1; } render(); };
+
+    window.addEventListener('DOMContentLoaded', async function(){
+      $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
+      try{ await loadConfig(); await initAuth(); }
+      catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+    });
+  </script>
+</body>
+</html>
