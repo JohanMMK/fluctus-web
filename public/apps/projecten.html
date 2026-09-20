@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
-<!-- projecten.html v0.5.1 (2026-09-20) — navlink toegevoegd naar het factuurmail-dashboard (inbound-stats.html).
+<!-- projecten.html v0.6.0 (2026-09-20) — EK-ENGAGEMENT FILTERS: twee filters "👁 bezocht op EK" en "✍ input op EK"
+     (server v15.156.4 geeft ek_bezocht/ek_input per project) + pills in de statuskolom. Zo isoleer je de dossiers waar
+     de klant de EK-link effectief opende resp. aanvulde.
+     v0.5.1 (2026-09-20) — navlink toegevoegd naar het factuurmail-dashboard (inbound-stats.html).
      v0.5.0 (2026-09-15) — ARCHIEF-CACHE FIX: de lijst-reload na archiveren/herstellen haalt het
      overzicht + de wachtrij nu op met cache-buster (?_=<ts>) + cache:'no-store', zodat gearchiveerde projecten
      meteen verdwijnen i.p.v. een gecachte (pre-archief) lijst te tonen. Samen met server v15.154 (verse Supabase-read).
@@ -82,6 +85,8 @@
   <div class="wrap">
     <div class="bar">
       <input type="search" id="zoek" placeholder="Zoek op naam, klant, adviseur, partner of project-ID…">
+      <label><input type="checkbox" id="fEkBezocht"> 👁 bezocht op EK</label>
+      <label><input type="checkbox" id="fEkInput"> ✍ input op EK</label>
       <label><input type="checkbox" id="toonArchief"> toon archief</label>
       <span class="telling" id="telling"></span>
     </div>
@@ -98,7 +103,7 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, SEL=new Set(), EANMAP={};
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, EKBEZ=false, EKINP=false, SEL=new Set(), EANMAP={};
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
     function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear(); }catch(e){ return '—'; } }
 
@@ -162,9 +167,13 @@
         h+='<span class="pill '+mk+'">mandaat: '+esc(p.mandaat_status)+(p.mandaat_eans>1?(' ('+p.mandaat_eans+')'):'')+'</span>';
       }
       h+= p.studies_count>0 ? '<span class="pill p-info">'+p.studies_count+' studie'+(p.studies_count>1?'s':'')+'</span>' : '';
+      if(p.ek_input) h+='<span class="pill p-ok">✍ input op EK</span>';
+      else if(p.ek_bezocht) h+='<span class="pill p-info">👁 bezocht op EK'+(p.ek_bezoek_count>1?(' ('+p.ek_bezoek_count+')'):'')+'</span>';
       return h;
     }
     function matchZoek(p){
+      if(EKBEZ && !p.ek_bezocht) return false;   // v0.6: filter op EK-engagement
+      if(EKINP && !p.ek_input) return false;
       if(!ZOEK) return true;
       var hay=[p.naam,p.klant,p.adviseur,p.partner,p.id,p.klant_mail].join(' ').toLowerCase();
       return hay.indexOf(ZOEK)>=0;
@@ -273,6 +282,8 @@
 
     window.addEventListener('DOMContentLoaded', async function(){
       $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
+      $('fEkBezocht').addEventListener('change', function(){ EKBEZ=this.checked; render(); });
+      $('fEkInput').addEventListener('change', function(){ EKINP=this.checked; render(); });
       $('toonArchief').addEventListener('change', function(){ ARCHIEF=this.checked; laad(); });
       try{ await loadConfig(); FLXModal.init({proxy:PROXY, authHeaders:authHeaders, onDone:laad}); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
