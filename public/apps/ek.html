@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.8.0 (2026-09-20) — ANALOGE METER (Johan): een factuur zonder capaciteitstarief/maandpiek =
+<!-- ek.html v0.9.0 (2026-09-20) — HEATMAP-CONSISTENTIE (Johan: "rendement hoger maar TVT langer?"): het rendement
+     op de heatmap + de aanbeveling (dashed cel) rekenden op de ENGINE-capex (enkel PV+batterij), terwijl de TVT en de
+     investeringstabel op de TOTALE klant-investering (PV+batt+palen+kabeltracé) rekenden. Daardoor kon een cel een hoger
+     rendement tonen maar een LANGERE terugverdientijd. Nu één noemer: rendement = besparing ÷ totale investering, dus
+     rendement = 100/TVT en de aanbeveling kiest altijd de beste terugverdientijd (_invBreakdown/_rendNetto, gedeeld door
+     renderRapport én renderHeatmap én _besteAnker).
+     ── v0.8.0 (2026-09-20) — ANALOGE METER (Johan): een factuur zonder capaciteitstarief/maandpiek =
      analoge meter (extract.js meterType) → geen gemeten piek, geen Fluvius-kwartierdata/mandaat mogelijk. Flow past
      zich aan: profiel = residentieel (afgeleid), toegangsvermogen afgeleid als standaard residentiële aansluiting
      (1×40A≈8 / 3×25A≈14 / 3×32A≈17 kW, geschaald op verbruik, gelabeld "afgeleid"), kwartierdata-opt-in verborgen +
@@ -298,9 +304,24 @@
   function _wagens(ev){ var a=[]; for(var i=0;i<ev;i++) a.push({km:STUB.km_per_wagen,kwhkm:STUB.kwh_per_km,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); return a; }
   function _pleinen(ev){ return ev>0 ? [{naam:'Wagenpark',type_plein:'wagenpark',betalend:false,type:'personenwagen',voertuig:'Personenwagen',aantal:ev,km_per_jaar:STUB.km_per_wagen,kwh_per_km:STUB.kwh_per_km,venster_start:19,venster_eind:7,dagen_per_week:5,creg:true}] : []; }
   function _anchorKwp(a){ return (a.pvKwp!=null)?a.pvKwp:((+a.pvPan||0)*P_TL.PANEEL_WP/1000); }
-  function _besteAnker(anchors){ var c=(anchors||[]).filter(function(a){return a&&a.besparing>0&&a.rendement!=null;});
+  // Totale KLANT-investering (PV + batterij + palen + kabeltracé) voor een cel, uit CTX (ev/particulier).
+  // Eén bron van waarheid: renderRapport én de rendement-metriek gebruiken exact deze noemer, zodat
+  // rendement = besparing/investering ALTIJD = 100/TVT (geen cel met hoger rendement maar langere TVT meer).
+  function _invBreakdown(pvKwp, battKwh){
+    var C=CTX||{}; var ev=+C.ev||0, particulier=!!C.particulier;
+    var palen=Math.max(0, Math.ceil(ev/2));
+    var pvKva=pvKwp*0.75, battKva=battKwh/2;
+    var kt=kabeltrace(ev, particulier, pvKva, battKva);
+    var invPv=Math.round(pvKwp*STUB.pv_eur_kwp), invBatt=Math.round(battKwh*STUB.batt_eur_kwh), invPalen=palen*STUB.ac_paal_eur;
+    return { palen:palen, kt:kt, invPv:invPv, invBatt:invBatt, invPalen:invPalen, invTot:invPv+invBatt+invPalen+kt.totaal };
+  }
+  function _invTotVoor(pvKwp, battKwh){ return _invBreakdown(pvKwp, battKwh).invTot; }
+  // Netto-rendement op de TOTALE investering (dezelfde noemer als TVT). null bij besparing/inv ≤ 0.
+  function _rendNetto(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0), besp=(+a.besparing||0);
+    var inv=_invTotVoor(pvKwp, battKwh); return (besp>0&&inv>0)?Math.round(besp/inv*100*100)/100:null; }
+  function _besteAnker(anchors){ var c=(anchors||[]).filter(function(a){return a&&a.besparing>0&&_rendNetto(a)!=null;});
     if(!c.length) return (anchors&&anchors[0])||null;
-    c.sort(function(a,b){ return (b.rendement-a.rendement)||(b.besparing-a.besparing); }); return c[0]; }
+    c.sort(function(a,b){ return (_rendNetto(b)-_rendNetto(a))||(b.besparing-a.besparing); }); return c[0]; }
 
   // ══ Heatmap-machinerie (faithful port uit energiekompas.html — zelfde engine) ══
   var CTX=null;        // cel-onafhankelijke context (kost, €/100km, km, loadfactor, inputs) — gezet in toonRapport
@@ -337,12 +358,13 @@
   function renderHeatmap(){
     var H=HM; if(!H||!H.real){ var c=$('heatmap-card'); if(c) c.classList.add('hidden'); return; }
     var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;}), mx=HMMETRIC;
+    var _mval=function(a){ return mx==='rendement' ? _rendNetto(a) : (a?a[mx]:null); };   // rendement = op TOTALE investering (= 100/TVT)
     var cells=[]; rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); if(a) cells.push(a); }); });
-    var vals=cells.map(function(a){return a[mx];}).filter(function(v){return v!=null&&isFinite(v);});
+    var vals=cells.map(_mval).filter(function(v){return v!=null&&isFinite(v);});
     var min=vals.length?Math.min.apply(null,vals):0, max=vals.length?Math.max.apply(null,vals):1, best=H.best||{}, sel=H.sel||best;
     var html='<tr><th></th>'+cols.map(function(c){ return '<th>'+(H.colLabel?H.colLabel(c):c)+'</th>'; }).join('')+'</tr>';
     rows.forEach(function(ry){ html+='<tr><td class="axis">'+(H.rowLabel?H.rowLabel(ry):ry)+'</td>';
-      cols.forEach(function(cx){ var a=_cellAt(H,ry,cx), v=a?a[mx]:null;
+      cols.forEach(function(cx){ var a=_cellAt(H,ry,cx), v=_mval(a);
         var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' hmopt':'');
         html+='<td class="'+cls+'" style="background:'+_hmKleur(v,min,max)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+_hmFmt(v,mx)+'</td>'; });
       html+='</tr>'; });
@@ -362,11 +384,8 @@
     var pvKwp = a?Math.round(_anchorKwp(a)*10)/10 : C.pvKwpFb;
     var battKwh = a?(+a.battKwh||0) : C.battKwhFb;
     var bespJaar = a?Math.round(+a.besparing||0) : C.bespFb;
-    var palen = Math.max(0, Math.ceil(ev/2));
-    var pvKva=pvKwp*0.75, battKva=battKwh/2;
-    var kt=kabeltrace(ev, particulier, pvKva, battKva);
-    var invPv=Math.round(pvKwp*STUB.pv_eur_kwp), invBatt=Math.round(battKwh*STUB.batt_eur_kwh), invPalen=palen*STUB.ac_paal_eur;
-    var invTot=invPv+invBatt+invPalen+kt.totaal;
+    var _bd=_invBreakdown(pvKwp, battKwh);
+    var palen=_bd.palen, kt=_bd.kt, invPv=_bd.invPv, invBatt=_bd.invBatt, invPalen=_bd.invPalen, invTot=_bd.invTot;
     var tvt = bespJaar>0 ? Math.round(invTot/bespJaar*10)/10 : null;
     LAST={ pvKwp:pvKwp, battKwh:battKwh, palen:palen, invTot:invTot };
     // 1-A4
