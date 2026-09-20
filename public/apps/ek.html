@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.10.6 (2026-09-20) — PV/BATTERIJ-BESPARING TOEGEREKEND AAN HET RIJDEN (Johan). €/100 km + besparing vs diesel
+<!-- ek.html v0.10.7 (2026-09-20) — FACTUUR + €/100km MOGEN NEGATIEF (Johan: "als de factuur onder nul gaat, laat ze onder
+     nul; en de km-kost wordt negatief"). Klemmen op 0 weg: factuur na PV+batterij = kostNieuw − besparing (mag < 0 →
+     netto-inkomst), en de incrementele laadkost/€100km mag negatief (je verdient aan elektrisch rijden als het
+     systeemvoordeel groter is dan de laadkost). _fmtEurK toont negatieve k-bedragen ook (€-2,1k).
+     ── v0.10.6 (2026-09-20) — PV/BATTERIJ-BESPARING TOEGEREKEND AAN HET RIJDEN (Johan). €/100 km + besparing vs diesel
      rekenen nu op de INCREMENTELE laadkost NA PV+batterij = (factuur gebouw+laden mét PV/batterij) − (oude factuur
      gebouw-only), gedeeld door de km. Dus die dalen mee als je meer PV/batterij zet (combi-afhankelijk, verplaatst naar
      "Varieert per combinatie"). Bij de 0/0-cel = de kale laadkost (zoals vroeger). _laadNaVan(a) is de gedeelde noemer.
@@ -461,13 +465,13 @@
   function _invVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invTotVoor(pvKwp, battKwh); }        // totale investering (tegel + investering-metriek)
   function _invPvBattVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invPvBattVoor(pvKwp, battKwh); } // PV+batterij (TVT/ROI)
   function _tvtVan(a){ var b=+((a&&a.besparing)||0), inv=_invPvBattVan(a); return (b>0&&inv>0)?Math.round(inv/b*10)/10:null; }   // TVT op PV+batterij
-  function _fmtEurK(v){ return v>=1000?('€'+String(Math.round(v/100)/10).replace('.',',')+'k'):('€'+Math.round(v)); }
+  function _fmtEurK(v){ return Math.abs(v)>=1000?('€'+String(Math.round(v/100)/10).replace('.',',')+'k'):('€'+Math.round(v)); }   // ook negatief (bv. €-2,1k)
   var HM_METRICS = {
     // combi-AFHANKELIJK (variëren per PV/batterij-cel)
     tvt:         { val:function(a){return _tvtVan(a);}, fmt:function(v){return String(Math.round(v*10)/10).replace('.',',')+' j';}, goedHoog:false },
     rendement:   { val:function(a){return _rendNetto(a);}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },
     besparing:   { val:function(a){return (a&&+a.besparing)||0;}, fmt:_fmtEurK, goedHoog:true },
-    factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?Math.max(0,CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing van deze combi
+    factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?(CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing (mag < 0 → netto-inkomst)
     investering: { val:function(a){return _invVan(a);}, fmt:_fmtEurK, goedHoog:false },
     // combi-AFHANKELIJK via de factuur-na-PV+batterij: de PV/batterij-besparing wordt aan het rijden toegerekend (Johan)
     km100:       { val:function(a){ return CTX ? (CTX.kmBehoefte>0 ? _laadNaVan(a)/CTX.kmBehoefte*100 : 0) : null; }, fmt:function(v){return '€'+v.toFixed(1).replace('.',',');}, goedHoog:false },   // 1 decimaal, geen /100km-suffix (anders te breed)
@@ -478,7 +482,7 @@
     kost_nieuw:  { val:function(){return CTX?CTX.kostNieuw:null;}, fmt:function(v){return _fmtEurK(v)+'/j';}, goedHoog:false, vast:true }
   };
   // incrementele laadkost NA PV+batterij voor cel a = (factuur met laadplein − besparing van a) − oude factuur gebouw-only
-  function _laadNaVan(a){ if(!CTX) return 0; var b=(a&&+a.besparing)||0; return Math.max(0, (CTX.kostNieuw - b) - CTX.kostNu); }
+  function _laadNaVan(a){ if(!CTX) return 0; var b=(a&&+a.besparing)||0; return (CTX.kostNieuw - b) - CTX.kostNu; }   // mag < 0 → €/100km negatief (je verdient aan rijden)
   function _hmKleurT(t){ if(t==null||!isFinite(t)) return '#eef2f8'; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
   function _hmKies(ry,cx){ var H=HM; if(!H) return; var a=_cellAt(H,ry,cx); if(!a) return; H.sel=a; renderRapport(a); _hmDetail(a); renderHeatmap();
@@ -527,11 +531,12 @@
     var tvt = bespJaar>0 ? Math.round(invPvBatt/bespJaar*10)/10 : null;
     // v0.10.5 (Johan): de nieuwe factuur MET PV+batterij = factuur met laadplein − de besparing van deze combi. Beweegt mee
     //   met de PV/batterij-keuze (meer batterij → meer besparing → lagere factuur), zodat het verhaal klopt.
-    var factuurNa = Math.max(0, Math.round(C.kostNieuw - bespJaar));
-    // v0.10.6 (Johan): €/100km + besparing vs diesel rekenen op de INCREMENTELE laadkost NA alle PV+batterij-besparing =
-    //   (nieuwe factuur gebouw+laden mét PV/batterij) − (oude factuur gebouw-only). Zo daalt de €/100km als je meer PV/
-    //   batterij zet (het systeemvoordeel wordt aan het rijden toegerekend). Bij de 0/0-cel = de kale laadkost (zoals vroeger).
-    var _laadNa = Math.max(0, factuurNa - C.kostNu);
+    // v0.10.7 (Johan): factuur MAG onder nul (PV/batterij-besparing > totale kost → netto-inkomst). Niet klemmen op 0.
+    var factuurNa = Math.round(C.kostNieuw - bespJaar);
+    // €/100km + besparing vs diesel rekenen op de INCREMENTELE laadkost NA alle PV+batterij-besparing =
+    //   (nieuwe factuur gebouw+laden mét PV/batterij) − (oude factuur gebouw-only). Die MAG negatief worden → je verdient
+    //   aan elektrisch rijden (het systeemvoordeel is groter dan de laadkost). Bij de 0/0-cel = de kale laadkost.
+    var _laadNa = factuurNa - C.kostNu;
     var km100Cell = (ev>0 && C.kmBehoefte>0) ? (_laadNa/C.kmBehoefte*100) : 0;
     var bespDieselCell = Math.max(0, Math.round((C.dieselKost||0) - _laadNa));
     var bespCregCell   = Math.max(0, Math.round((C.cregKost||0) - _laadNa));
