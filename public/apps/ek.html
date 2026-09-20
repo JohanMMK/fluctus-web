@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.4.1 (2026-09-20) — inbound-case fetch draagt nu ?src=ek zodat de server dit als een echte KLANT-view
+<!-- ek.html v0.6.0 (2026-09-20) — REKENMODEL-CORRECTIE mobiliteit (Johan): (1) twee prijzen = huidige factuur op huidig
+     volume → nieuw slim contract op TOTAAL volume incl. laden (gebouw + laadplein), elk met MWh gelabeld; (2) €/100 km =
+     netto meerkost op de totale factuur / elektrische km ("louter energiekost, all-in") i.p.v. de all-in bruto-laadkost
+     (was fors overschat, bv. €2,00 → ~€0,37); (3) "elektrische km/jaar" toont behoefte vs laadplafond bij loadfactor-doel
+     60% op de bestaande aansluiting → "geen verzwaring nodig"; (4) laadvenster-aanname expliciet: ≤2 wagens 's nachts/
+     daluren, >2 wagens overdag (kantooruren). NB: spot-prijs-per-venster in de engine = volgende stap.
+     ── v0.5.0 (2026-09-20) — offerte-CTA als expliciete opt-in met scherpere boodschap: definitief rapport op maat
+     zodra kwartierdata (+ eventuele offertes) binnen zijn → mail met link naar de KPI-pagina; offertes → échte
+     leveranciersprijzen in de eindsimulatie, anders de prijs uit deze simulatie.
+     ── v0.4.1 (2026-09-20) — inbound-case fetch draagt nu ?src=ek zodat de server dit als een echte KLANT-view
      (bezocht op EK) op het project markeert (manager-opens via energiekompas.html tellen niet mee). Server v15.156.4.
      ── v0.4.0 (2026-09-20) — ?case= prefilt nu ook e-mail + telefoon (uit inbound-case: we kennen het adres uit
      de factuurmail) i.p.v. lege contactvelden. Bugfix: bedrijfscase zette profiel op 'kmo' (bestaat niet als optie) →
@@ -185,12 +194,12 @@
       <h2 style="color:var(--navy)">Wat gebeurt er nu?</h2>
       <div style="font-size:14px;line-height:1.65">
         <div>📁 Uw dossier: <b class="code" id="next-code" style="font-family:ui-monospace,Menlo,Consolas,monospace">FLX-···-····</b> <span class="sub">— hieraan koppelen we uw profieldata én eventuele offertes.</span></div>
-        <div style="margin-top:4px" id="next-mailline">✔ Uw rapport is ook per e-mail verstuurd naar <b id="next-mail">uw e-mailadres</b>.</div>
-        <div id="next-upd" style="margin-top:2px">⏳ Zodra we uw kwartierdata van Fluvius hebben, krijgt u automatisch een <b>bijgewerkte, exacte</b> versie.</div>
+        <div style="margin-top:4px" id="next-mailline">✔ Deze analyse is ook per e-mail bevestigd naar <b id="next-mail">uw e-mailadres</b>.</div>
+        <div id="next-upd" style="margin-top:2px">⏳ Zodra we uw <b>kwartierdata van Fluvius</b> (en eventuele offertes) hebben, maken we uw <b>definitieve rapport op maat</b>. U krijgt dan een e-mail met een link naar uw bijgewerkte KPI-pagina.</div>
       </div>
       <div id="offerte-cta" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--greenln)">
-        <div style="font-weight:700;margin-bottom:3px">Offertes voor deze samenstelling?</div>
-        <div class="sub" style="margin-bottom:11px">Wilt u dat we voor uw <b>PV + batterij + laadpalen</b> vrijblijvend offertes opvragen bij onze partners? Dan verwerken we die meteen mee in uw update.</div>
+        <div style="font-weight:700;margin-bottom:3px">Offertes voor deze samenstelling? (optioneel)</div>
+        <div class="sub" style="margin-bottom:11px">Wilt u dat we voor uw <b>PV + batterij + laadpalen</b> vrijblijvend offertes opvragen bij onze partners? Dan rekenen we uw definitieve rapport met de <b>échte leveranciersprijzen</b> — anders met de prijs uit deze simulatie.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn sm" type="button" onclick="vraagOffertes()">Ja, vraag offertes aan →</button>
           <button class="btn ghost sm" type="button" onclick="offerteNee()">Liever niet</button>
@@ -348,18 +357,18 @@
     LAST={ pvKwp:pvKwp, battKwh:battKwh, palen:palen, invTot:invTot };
     // 1-A4
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+toegangKw+' kW toegang'+(ev?(' · '+ev+' EV'):'');
-    $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="arrow">→</span> '+eur(C.kostDyn)+'/j';
+    $('a4-kost').innerHTML=eur(C.kostNu)+'/j <span class="sub" style="font-weight:600">('+String(C.afnameMwh).replace('.',',')+' MWh)</span> <span class="arrow">→</span> '+eur(C.kostNieuw)+'/j <span class="sub" style="font-weight:600">('+String(C.totaalMwh).replace('.',',')+' MWh, gebouw + laadplein)</span>';
     $('a4-besp').innerHTML=eur(bespJaar)+'/j'+(tvt!=null?(' <span class="sub" style="font-weight:600">· TVT '+String(tvt).replace('.',',')+' j</span>'):'');
     $('a4-km100').textContent=ev>0?('€ '+eur2(C.km100)+' /100 km'):'geen EV opgegeven';
-    $('a4-km').textContent=ev>0?(num0(C.kmTot)+' km/j · '+num0(C.kmPerAuto)+' km/wagen'):('tot ± '+num0(C.kmPlafond)+' km/j mogelijk');
+    $('a4-km').textContent=ev>0?(num0(C.kmBehoefte)+' km/j nodig · tot ± '+num0(C.kmPlafond)+' km/j op uw aansluiting (geen verzwaring)'):('tot ± '+num0(C.kmPlafond)+' km/j mogelijk');
     $('a4-lf').textContent=C.loadfactor!=null?(C.loadfactor+' %'):'—';
     $('a4-inv').textContent=eur(invTot);
     // KPI-grid
     var K=[
-      {hero:true,t:'Energiekost vandaag → nieuw',v:eur(C.kostNu)+' → '+eur(C.kostDyn),vs:true,s:'all-in per jaar'+(NETHEF>0?' · netkosten uit uw factuur':', zelfde verbruik')},
+      {hero:true,t:'Energiekost vandaag → met laadplein',v:eur(C.kostNu)+' → '+eur(C.kostNieuw),vs:true,s:String(C.afnameMwh).replace('.',',')+' MWh → '+String(C.totaalMwh).replace('.',',')+' MWh (gebouw + laadplein) · all-in'+(NETHEF>0?', netkosten uit uw factuur':'')},
       {t:'Besparing per jaar',v:eur(bespJaar),s:(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'op uw aansluiting')},
-      {t:'Energiekost mobiliteit',v:(ev>0?('€ '+eur2(C.km100)+' /100 km'):'—'),s:(ev>0?('± '+(Math.round(C.laadMwh*10)/10)+' MWh/j · '+(C.isMS?'spot, binnen toegangsvermogen':'all-in achter de meter')):'geen EV')},
-      {t:'Elektrische km/jaar',v:(ev>0?num0(C.kmTot)+' km':('≤ '+num0(C.kmPlafond)+' km')),s:(ev>0?(num0(C.kmPerAuto)+' km per wagen'):'plafond op vrije capaciteit')},
+      {t:'Energiekost mobiliteit',v:(ev>0?('€ '+eur2(C.km100)+' /100 km'):'—'),s:(ev>0?('louter energiekost, all-in · laden '+C.laadVenster):'geen EV')},
+      {t:'Elektrische km/jaar',v:(ev>0?num0(C.kmBehoefte)+' km':('≤ '+num0(C.kmPlafond)+' km')),s:(ev>0?('tot ± '+num0(C.kmPlafond)+' km mogelijk → geen verzwaring'):'plafond op vrije capaciteit')},
       {t:'Loadfactor',v:(C.loadfactor!=null?C.loadfactor+' %':'—'),s:'toekomstvastheid van deze kost'},
       {t:'Investering',v:eur(invTot),s:'PV + batterij + palen + aansluiting'}
     ];
@@ -437,20 +446,23 @@
     var netHef = NETHEF>0 ? NETHEF : ((kpiR&&kpiR.markt&&+kpiR.markt.net_heffing_eur_mwh)||STUB.net_heffing_eur_mwh);
     var refMwh=(ond&&+ond.energiekost_nu_mwh>0)?+ond.energiekost_nu_mwh:(kost>0&&afnameMwh>0?Math.round(kost/afnameMwh):STUB.kost_nu_eur_mwh);
     var dynMwh=(ond&&+ond.energiekost_dyn_mwh>0)?+ond.energiekost_dyn_mwh:STUB.kost_dyn_eur_mwh;
-    var kostNu = Math.round((refMwh+netHef)*afnameMwh);
-    var kostDyn= Math.round((dynMwh+netHef)*afnameMwh);
-    var margeContract = Math.max(0, kostNu-kostDyn);
-
-    // Mobiliteit — €/100 km. MS/bedrijf laadt op de goedkoopste spot-uren BINNEN het toegangsvermogen: de marginale
-    // kost is ~enkel de commodity (heel laag). Particulier (LS) betaalt volumetrische netkosten mee → all-in.
-    var kmComm=(kpiR&&kpiR.kpi&&kpiR.kpi.kilometerkost_energie_eur_per_km!=null)?kpiR.kpi.kilometerkost_energie_eur_per_km:null;
-    var kmAllin=(kpiR&&kpiR.kpi&&kpiR.kpi.kilometerkost_eur_per_km!=null)?kpiR.kpi.kilometerkost_eur_per_km:null;
-    var km100 = (isMS && kmComm!=null) ? (kmComm*100) : (kmAllin!=null ? (kmAllin*100) : STUB.km100_eur);
+    // Laadvraag (MWh) + elektrische km-behoefte (aantal wagens × jaarkilometrage).
     var laadMwh=(kpiR&&kpiR.kpi&&+kpiR.kpi.laadvraag_mwh>=0)?+kpiR.kpi.laadvraag_mwh:(ev*STUB.km_per_wagen*STUB.kwh_per_km/1000);
-    var kmTot=ev*STUB.km_per_wagen, kmPerAuto=ev>0?STUB.km_per_wagen:0;
-    var gemKw=afnameMwh*1000/8760, vrijKw=Math.max(0,toegangKw-gemKw);
-    var kmPlafond=Math.round(vrijKw*8760*0.85/STUB.kwh_per_km);
-
+    var kmBehoefte=ev*STUB.km_per_wagen, kmPerAuto=ev>0?STUB.km_per_wagen:0;
+    var totaalMwh=Math.round((afnameMwh+laadMwh)*100)/100;
+    // Twee prijzen (Johan): (1) huidige factuur op het HUIDIGE volume; (2) nieuw slim contract op het TOTALE volume
+    //   incl. laden (gebouw + laadplein). Beide all-in (energie + netkosten/heffingen). De stijging = louter het extra volume.
+    var kostNu = Math.round((refMwh+netHef)*afnameMwh);
+    var kostNieuw= Math.round((dynMwh+netHef)*(afnameMwh+laadMwh));
+    // €/100 km = de NETTO meerkost op de TOTALE factuur / elektrische km. Louter energiekost, maar wel all-in.
+    //   (= (kostNieuw − kostNu) / km ; komt overeen met wat de klant de facto méér op zijn factuur ziet.)
+    var deltaFactuur = kostNieuw - kostNu;
+    var km100 = kmBehoefte>0 ? Math.max(0, deltaFactuur)/kmBehoefte*100 : 0;
+    // Laadplafond op de BESTAANDE aansluiting bij een loadfactor-DOEL van 60% → toont dat er geen verzwaring nodig is.
+    var LF_DOEL=0.60;
+    var kmPlafond=Math.max(0, Math.round((toegangKw*8760*LF_DOEL - afnameMwh*1000)/STUB.kwh_per_km));
+    // Laadvenster-aanname (Johan): tot 2 wagens = thuis, 's nachts/daluren; meer dan 2 = wagenpark, overdag (kantooruren).
+    var laadVenster = ev>2 ? 'overdag (kantooruren)' : "'s nachts / daluren";
     // Loadfactor (met laadvraag) op het toegangsvermogen
     var noemer=toegangKw*8760, loadfactor = noemer>0 ? Math.round((afnameMwh+laadMwh)*1000/noemer*100) : null;
 
@@ -458,8 +470,9 @@
 
     // Cel-onafhankelijke context (verandert niet met de PV/batterij-keuze in de heatmap).
     CTX={ ev:ev, particulier:particulier, afnameMwh:afnameMwh, toegangKw:toegangKw, profiel:profiel,
-      kostNu:kostNu, kostDyn:kostDyn, km100:km100, laadMwh:laadMwh, kmTot:kmTot, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
-      loadfactor:loadfactor, isMS:isMS,
+      kostNu:kostNu, kostNieuw:kostNieuw, totaalMwh:totaalMwh, deltaFactuur:deltaFactuur,
+      km100:km100, laadMwh:laadMwh, kmBehoefte:kmBehoefte, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
+      loadfactor:loadfactor, isMS:isMS, laadVenster:laadVenster,
       pvKwpFb:(particulier?4.5:Math.min(200,Math.round(afnameMwh*0.9))),
       battKwhFb:(particulier?10:Math.min(400,Math.round(afnameMwh*0.6))),
       bespFb:Math.round(kostNu*STUB.besp_pct_van_kost) };
@@ -525,7 +538,7 @@
   // Offerte-CTA (skelet — wordt /api/lead-bevraging: geanonimiseerd mini-bestek → partners, verwerkt in de update).
   function vraagOffertes(){
     $('offerte-cta').innerHTML='<div style="font-weight:700;color:var(--green)">✔ Offertes aangevraagd</div>'+
-      '<div class="sub" style="margin-top:3px">We vragen vrijblijvend offertes op bij onze partners en verwerken ze mee in uw bijgewerkte rapport.</div>';
+      '<div class="sub" style="margin-top:3px">We vragen vrijblijvend offertes op bij onze partners en verwerken de échte prijzen mee in uw definitieve rapport. Zodra dat klaar is (samen met uw kwartierdata), krijgt u een e-mail met de link naar uw KPI-pagina.</div>';
     // Koppelt aan hetzelfde dossier (token → rec.kamino_project_id) + de gekozen samenstelling.
     if(TOKEN){ try{ fetch(API+'/api/lead-bevraging',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
       token:TOKEN, samenstelling: LAST?{ pv_kwp:LAST.pvKwp, batt_kwh:LAST.battKwh, palen:LAST.palen, investering_eur:LAST.invTot }:undefined }) }); }catch(e){} }
