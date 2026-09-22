@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EnergieKompas — snel</title>
-<!-- ek.html v0.13.0 (2026-09-22) — BLOK "KWALITEIT VAN EEN BATTERIJ" + SCHERMBESCHERMING (Johan). Nieuw inklapbaar blok
+<!-- ek.html v0.13.2 (2026-09-22) — WATERMERK NAAR DE ACHTERGROND (Johan): #wm nu z-index:0 (achter .wrap, die z-index:1 kreeg)
+     + opacity 0,10→0,07 → het dossier-watermerk verschijnt enkel in de achtergrond/tussenruimte, nooit over de info-blokken.
+     ── v0.13.1 (2026-09-22) — BATT_REF geijkt op de ECHTE engine-aannames (Johan): DoD 0,90 (_BATT_DOD) beide flows,
+     RTE 0,90 particulier (P_TL.RTE) / 0,92 bedrijf (server rte_pct:92). Was 0,90/1,00 → absolute 10-jaarbedragen kloppen nu
+     exact met de simulator; rangschikking/verschil waren al onafhankelijk van de referentie.
+     ── v0.13.0 (2026-09-22) — BLOK "KWALITEIT VAN EEN BATTERIJ" + SCHERMBESCHERMING (Johan). Nieuw inklapbaar blok
      net onder "Wat gebeurt er nu?": merkvergelijking (RTE/DoD) met besparing over 10 jaar geschaald op de geselecteerde
      heatmap-combi (bespJaar × 10 × RTE·DoD / referentie), gerangschikt hoog→laag + "verschil t.o.v. #1". Twee sets: C&I
      (Vergelijking_CI_Huawei241, zonder BYD Chess Plus [niet EU] en SMA [kleinere klasse]) voor bedrijf, residentieel voor
@@ -188,7 +193,7 @@
   }
   *{box-sizing:border-box}
   body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--navy);background:var(--bg)}
-  .wrap{max-width:960px;margin:0 auto;padding:22px 18px 80px}
+  .wrap{max-width:960px;margin:0 auto;padding:22px 18px 80px;position:relative;z-index:1}
   .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:17px;letter-spacing:.2px;margin-bottom:14px}
   .brand .dot{width:12px;height:12px;border-radius:50%;background:var(--green)}
   .brand .p{margin-left:auto;font-size:11.5px;color:var(--muted);font-weight:600}
@@ -305,7 +310,8 @@
   #dash{-webkit-user-select:none;user-select:none}
   #dash.blurred{filter:blur(9px);transition:filter .12s}
   /* Watermerk over het resultaatscherm */
-  #wm{position:fixed;inset:0;z-index:40;pointer-events:none;overflow:hidden;opacity:.10;
+  /* v0.13.2: watermerk ACHTER de inhoud — enkel zichtbaar in de achtergrond/tussenruimte, niet over de info-blokken */
+  #wm{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;opacity:.07;
       background-repeat:repeat;background-position:center;
       display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:70px 90px;transform:rotate(-30deg) scale(1.4);transform-origin:center}
   #wm span{font:700 15px ui-monospace,Menlo,Consolas,monospace;color:#12305c;white-space:nowrap}
@@ -935,7 +941,9 @@
   // ══ Kwaliteit van een batterij — merkvergelijking (RTE/DoD) + besparing over 10 jaar volgens geselecteerd scenario ══
   // Bronnen: publieke datasheets + onafhankelijke metingen HTW Berlin "Stromspeicher-Inspektion". rte/dod = fractie (of null=onbekend → min-regel).
   // C&I-set = Vergelijking_CI_batterijen_Huawei241 (zonder BYD Chess Plus [niet in EU] en SMA [kleinere klasse]).
-  var BATT_REF = { rte:0.90, dod:1.00 };   // standaard batterij-aanname waarop de getoonde besparing/jaar berust (schaal-anker)
+  // Engine-aannames waarop de getoonde besparing/jaar berust (schaal-anker), per flow:
+  //   particulier RTE 0,90 (P_TL.RTE, thuisladen) · bedrijf RTE 0,92 (server _ekBedrijfCtx rte_pct:92) · DoD 0,90 (_BATT_DOD) beide.
+  var BATT_REF = { res:{ rte:0.90, dod:0.90 }, ci:{ rte:0.92, dod:0.90 } };
   var BATT_CI = [
     { merk:'Huawei LUNA2000-241-2S1', kwh:241, rte:0.913, dod:1.00, koeling:'hybride / IP55', ds:'https://www.wattkraft.com/app/uploads/2026/01/HUAWEI-LUNA2000-241-2S1-Datasheet-2025.12.3112.pdf' },
     { merk:'Sungrow PowerStack ST255CS-2H', kwh:257, rte:0.90, dod:0.95, koeling:'vloeistof / IP55', ds:'https://liriksolar.com/image/uploads/Sungrow%20ST255CS-2H%20Datasheet.pdf' },
@@ -968,8 +976,9 @@
     var rows = set.map(function(b,i){ var rte=(b.rte!=null?b.rte:minR), dod=(b.dod!=null?b.dod:minD);
       var kwal=rte*dod;
       return { i:i, merk:b.merk, rte:rte, dod:dod, rteFb:(b.rte==null), dodFb:(b.dod==null), kwal:kwal }; });
-    // besparing over 10 jaar, geschaald op de batterijkwaliteit t.o.v. de standaardaanname (BATT_REF)
-    var ref = BATT_REF.rte*BATT_REF.dod;
+    // besparing over 10 jaar, geschaald op de batterijkwaliteit t.o.v. de engine-aanname (BATT_REF per flow)
+    var R = particulier ? BATT_REF.res : BATT_REF.ci;
+    var ref = R.rte*R.dod;
     rows.forEach(function(r){ r.besp10 = (bespJaar>0) ? (bespJaar*10*r.kwal/ref) : 0; });
     rows.sort(function(a,b){ return b.besp10-a.besp10 || b.kwal-a.kwal; });
     var best = rows.length?rows[0].besp10:0;
