@@ -1,4 +1,11 @@
 <!doctype html>
+<!-- energiemarkt.html v1.3.1 — 2026-09-22 08:46 (Europe/Brussels) — FIX 4-JAAR-EVOLUTIE TERUGVERDIENTIJD (bug uit v1.3.0):
+     bij een wijziging van kWp/kWh hertekende de open evolutiegrafiek met de GECACHTE €-reeksen van de OUDE kVA,
+     maar met de NIEUWE investering → terugverdientijden die niets met de tegels te maken hadden (live gereproduceerd:
+     cache op 0,77 kVA + investering voor 20 kWp → 94,5 j in jul 23 en daarna leeg; na herberekening = tegels 7,7/7,2/5,9 j).
+     Nu: bij gewijzigde kVA wordt de evolutie automatisch (700 ms debounce) herberekend, met generatie-guard tegen
+     verouderde resultaten. Daarnaast geen afronding meer op 0,1 j in de reeks zelf (gaf trappen bij kleine
+     terugverdientijden); afronding enkel nog in tooltip/as. -->
 <!-- energiemarkt.html v1.3.0 — 2026-09-12 16:33 (Europe/Brussels) — TERUGVERDIENTIJD IN DE WAARDEBEREKENING:
      PV-invoer is nu kWp + prijs (€/kWp) + kVA (kVA = kWp/1,3, auto), batterij-invoer kWh + prijs (€/kWh) + kVA
      (kVA = 50% van kWh, auto). Bij elk van de zes opbrengstcijfers staat de terugverdientijd in jaren:
@@ -1489,7 +1496,10 @@ window.fdShowEvolution=function(){
   btn.textContent='Berekenen... 0%';
   btn.disabled=true;
 
+  clearTimeout(_evoDebounce);
+  var gen=++_evoGen;
   _evoCompute(pvKva, batKva, function(result){
+    if(gen!==_evoGen)return;                // verouderd resultaat → negeren
     _evoCache=result;
     wrapSa.style.display='block';
     wrapBc.style.display='block';
@@ -1498,7 +1508,7 @@ window.fdShowEvolution=function(){
     btn.textContent='✕ Verberg evolutie';
     btn.disabled=false;
   }, function(pct){
-    btn.textContent='Berekenen... '+pct+'%';
+    if(gen===_evoGen)btn.textContent='Berekenen... '+pct+'%';
   });
 };
 
@@ -1589,15 +1599,44 @@ function _evoTvtReeks(arr, invest){
   return arr.map(function(v){
     if(!isFinite(invest)||invest<=0||!isFinite(v)||v<=0)return null;
     var j=invest/v;
-    return (isFinite(j)&&j<=99)?Math.round(j*10)/10:null;
+    return (isFinite(j)&&j<=99)?j:null;   // géén afronding hier: gaf trappen bij kleine waarden
   });
 }
-// Hertekent de evolutiegrafieken met de huidige prijzen, zonder herberekening.
+// Hertekent de open evolutiegrafieken na een invoerwijziging.
+// - Enkel prijs gewijzigd (kVA gelijk): de gecachte €-reeksen blijven geldig →
+//   meteen hertekenen met de nieuwe investering, zonder herberekening.
+// - kVA gewijzigd (via kWp/kWh of rechtstreeks): de €-reeksen horen bij een
+//   ANDERE installatie en mogen NIET hergebruikt worden → herberekenen, met
+//   700 ms debounce (tikken in het veld) en een generatieteller zodat een
+//   trager, verouderd resultaat een nieuwer nooit overschrijft.
+var _evoGen=0, _evoDebounce=null;
 function _evoRerenderIfVisible(){
   var w=document.getElementById('fd-sa-evo-wrap');
-  if(!_evoCache||!w||w.style.display!=='block')return;
-  _evoRenderOne('sa', _evoCache);
-  _evoRenderOne('bc', _evoCache);
+  if(!w||w.style.display!=='block')return;
+  var pvKva =parseFloat((document.getElementById('fd-pv-kva') ||{}).value)||0;
+  var batKva=parseFloat((document.getElementById('fd-bat-kva')||{}).value)||0;
+  var key=pvKva+'|'+batKva;
+  if(_evoCache && key===_evoKvaKey){
+    _evoRenderOne('sa', _evoCache);
+    _evoRenderOne('bc', _evoCache);
+    return;
+  }
+  var btn=document.getElementById('fd-evo-btn');
+  if(btn){btn.textContent='Herberekenen...'; btn.disabled=true;}
+  clearTimeout(_evoDebounce);
+  _evoDebounce=setTimeout(function(){
+    var gen=++_evoGen;
+    _evoCache=null; _evoKvaKey=key;
+    _evoCompute(pvKva, batKva, function(result){
+      if(gen!==_evoGen)return;              // intussen opnieuw gewijzigd
+      _evoCache=result;
+      _evoRenderOne('sa', result);
+      _evoRenderOne('bc', result);
+      if(btn){btn.textContent='✕ Verberg evolutie'; btn.disabled=false;}
+    }, function(pct){
+      if(gen===_evoGen&&btn)btn.textContent='Herberekenen... '+pct+'%';
+    });
+  },700);
 }
 
 function _evoRenderOne(kind, result){
