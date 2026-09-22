@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profiel-import · Fluctus</title>
+<!-- profiel-import.html v1.1.0 (2026-09-22) — MANUELE REVIEW + JAARVERBRUIK-BRON: een bestand dat niet automatisch te converteren is,
+     komt in de lijst "Manuele review" (bestand bewaard, downloadbaar). Daar vul/corrigeer je de conversie-spec (JSON, voorgevuld
+     met de beste poging), test je ze op het bewaarde bestand en loopt de analyse verder. Het formaat is daarna gekend. Analyse toont
+     ook of het jaarverbruik uit het profiel of uit de jaarfactuur komt (server v15.160.0).
+     v1.0.0 (2026-09-22) — PROFIEL-IMPORT (manager-only). Upload een verbruiksprofiel (afname, verplicht)
+     + optioneel injectie (CSV of Excel) bij een FLX-project. De server (v15.159.0, profiel/import.js) herkent het formaat
+     (builtin / converter-registry / AI-spec uit enkel een sample / heuristiek), converteert deterministisch naar 35.040
+     kwartieren (2025-kalenderindex, som=1), vult ontbrekende data aan met herkomst-tracking en labelt de dekking eerlijk
+     ("gemeten" vs "12-maand profiel op basis van X metingen"). Niets wordt bewaard tot "Gebruik als gemeten profiel".
+     Excel wordt IN DE BROWSER naar rijen geparst (SheetJS, lazy geladen) — geen Excel-lib op de server.
+     Endpoints: POST /api/profiel/analyse · POST /api/profiel/bevestig · GET /api/kamino/projecten-overzicht · GET /api/profielen-lijst.
+     Los van de EnergieKompas-flow; dezelfde /api/profiel/* kan later door de EK-intake aangeroepen worden. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E;
+         --h0:#1F3864; --h1:#5B8BD0; --h2:#8FB3E6; --h3:#E0A458; --h4:#7FB8A4; --h5:#C07AB8; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  .top{ background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .top h1{ color:var(--navy); font-size:19px; margin:0; }
+  .top .links{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .top a{ color:var(--navy2); font-size:13px; text-decoration:none; font-weight:600; }
+  .top .who{ font-size:12.5px; color:var(--muted); }
+  .wrap{ max-width:1100px; margin:0 auto; padding:16px 20px 60px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .card h2{ font-size:15px; color:var(--navy); margin:0 0 10px; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+  label.f{ display:block; font-size:12px; color:var(--muted); font-weight:600; margin-bottom:4px; }
+  input[type=text],input[type=number],input[type=search],select{ width:100%; border:1.5px solid var(--line); border-radius:9px; padding:8px 10px; font-size:13.5px; background:#fff; color:var(--ink); }
+  input[type=file]{ font-size:12.5px; width:100%; }
+  .drop{ border:2px dashed var(--line); border-radius:10px; padding:12px; background:#FAFCFF; }
+  .drop.req{ border-color:#b8c9e6; }
+  .sub{ font-size:11.5px; color:var(--muted); }
+  .id{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:var(--muted); }
+  .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:9px 14px; font-size:13px; font-weight:700; cursor:pointer; }
+  .btn:disabled{ opacity:.5; cursor:default; }
+  .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
+  .btn.warn{ background:#fff; color:var(--amber); border:1.5px solid #f0d9bf; }
+  .btn.go{ background:var(--green); }
+  .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pill{ display:inline-block; border-radius:999px; padding:3px 10px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .p-ok{ background:#D1FAE5; color:#065f46; } .p-wacht{ background:#FEF3C7; color:#92610a; } .p-mis{ background:#FEE2E2; color:#9b1c1c; }
+  .p-neu{ background:#EEF2F8; color:#42506a; } .p-info{ background:#E0ECFB; color:#1F3864; }
+  .label-big{ font-size:15px; font-weight:800; padding:6px 12px; border-radius:10px; display:inline-block; }
+  .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; margin:10px 0; }
+  .kpi{ background:#F7F9FD; border:1px solid var(--line); border-radius:9px; padding:8px 10px; }
+  .kpi b{ display:block; font-size:16px; color:var(--navy); }
+  .kpi span{ font-size:11px; color:var(--muted); }
+  .stack{ display:flex; height:14px; border-radius:7px; overflow:hidden; background:#eef2f8; margin:6px 0 4px; }
+  .stack div{ height:100%; }
+  .legend{ display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--muted); }
+  .legend i{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .flags{ background:#FEF2F2; border:1px solid #f5c2c2; color:#8a1c1c; border-radius:9px; padding:8px 12px; font-size:12.5px; margin:8px 0; }
+  .warn-box{ background:#FFF8EB; border:1px solid #f3dcae; color:#7a4a06; border-radius:9px; padding:8px 12px; font-size:12.5px; margin:8px 0; }
+  .ok-box{ background:#ECFDF5; border:1px solid #a7e3c4; color:#065f46; border-radius:9px; padding:10px 12px; font-size:13px; margin:8px 0; }
+  .fout{ background:#FEF2F2; border:1px solid #f5c2c2; color:#9b1c1c; border-radius:9px; padding:10px 12px; font-size:13px; margin:8px 0; white-space:pre-wrap; }
+  .state{ padding:20px; text-align:center; color:var(--muted); }
+  table.per{ width:100%; border-collapse:collapse; font-size:12px; }
+  table.per td,table.per th{ text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  table.per th{ color:var(--navy2); font-size:11px; text-transform:uppercase; }
+  .viz{ display:grid; grid-template-columns:1.4fr 1fr; gap:12px; margin-top:8px; }
+  @media(max-width:760px){ .viz{ grid-template-columns:1fr; } }
+  svg text{ font-size:9px; fill:var(--muted); }
+  details summary{ cursor:pointer; font-size:12.5px; color:var(--navy2); font-weight:600; margin-top:6px; }
+  textarea.spec{ width:100%; min-height:260px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; border:1.5px solid var(--line); border-radius:9px; padding:8px; }
+  pre.sample{ background:#F7F9FD; border:1px solid var(--line); border-radius:9px; padding:8px; font-size:11px; max-height:260px; overflow:auto; white-space:pre; }
+  .spin{ display:inline-block; width:14px; height:14px; border:2px solid #fff; border-right-color:transparent; border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes sp{ to{ transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>📈 Profiel-import</h1>
+    <div class="links">
+      <span class="who" id="who"></span>
+      <a href="/apps/projecten.html">📁 Projecten</a>
+      <a href="/apps/fluvius-acties.html">⚡ Acties</a>
+      <a href="/portal.html">← Mijn Fluctus</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="card">
+      <h2>1 · Project en bestanden</h2>
+      <div class="grid">
+        <div>
+          <label class="f" for="projZoek">Project (FLX-dossier)</label>
+          <input type="search" id="projZoek" list="projLijst" placeholder="Zoek op naam of FLX-ID…" autocomplete="off">
+          <datalist id="projLijst"></datalist>
+          <div class="sub" id="projInfo">Projecten laden…</div>
+        </div>
+        <div>
+          <label class="f" for="slp">Standaardprofiel voor aanvulling</label>
+          <select id="slp"><option value="">auto (profiel van het project)</option></select>
+          <div class="sub">Enkel gebruikt voor ontbrekende perioden.</div>
+        </div>
+        <div class="row" style="align-items:flex-start">
+          <div style="flex:1"><label class="f" for="kwp">PV kWp (optioneel)</label><input type="number" id="kwp" min="0" step="0.1" placeholder="auto"></div>
+          <div style="flex:1"><label class="f" for="kva">Omvormer kVA</label><input type="number" id="kva" min="0" step="0.1" placeholder="auto"></div>
+        </div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div class="drop req">
+          <label class="f" for="fAfname">Afname-profiel <b style="color:var(--amber)">(verplicht)</b></label>
+          <input type="file" id="fAfname" accept=".csv,.txt,.xlsx,.xls,.xlsm">
+          <div class="sub">CSV of Excel — elk formaat (Fluvius, energiemonitor, datalogger…). Mag ook de injectie bevatten.</div>
+        </div>
+        <div class="drop">
+          <label class="f" for="fInjectie">Injectie-profiel (optioneel)</label>
+          <input type="file" id="fInjectie" accept=".csv,.txt,.xlsx,.xls,.xlsm">
+          <div class="sub">Enkel als de injectie in een apart bestand staat.</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="bAnalyse" onclick="analyse()">🔍 Analyseer</button>
+        <span class="sub" id="status"></span>
+      </div>
+    </div>
+    <div id="out"></div>
+    <div class="card" id="reviewCard">
+      <h2>🛠 Manuele review <span class="sub" id="reviewTel"></span></h2>
+      <div class="sub" style="margin-bottom:8px">Bestanden die niet automatisch te converteren waren. Het bestand is bewaard; vul de conversie-spec in en test ze — slaagt ze, dan is het formaat voortaan gekend en loopt de analyse gewoon verder.</div>
+      <div id="reviewLijst"><div class="state">Laden…</div></div>
+      <div id="reviewDetail"></div>
+    </div>
+  </div>
+
+<script>
+  var $ = function(id){ return document.getElementById(id); };
+  var CFG=null, sb=null, SESSION=null, PROXY='', PROJ=[], RES=null, XLSX_URL='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+  var HCOL=['var(--h0)','var(--h1)','var(--h2)','var(--h3)','var(--h4)','var(--h5)'];
+  var HLAB=['gemeten','interpolatie (kort gat)','typische dag','SLP / PV-vorm','uurresolutie (verdeeld)','energiebalans'];
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function nf(v,d){ if(v==null||isNaN(v)) return '—'; return Number(v).toLocaleString('nl-BE',{maximumFractionDigits:d==null?1:d, minimumFractionDigits:0}); }
+
+  async function loadConfig(){ var r=await fetch('/api/config'); CFG=await r.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }
+  async function initAuth(){
+    if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('out').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return false; }
+    sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+    var d = await sb.auth.getSession(); SESSION = d.data.session;
+    if(!SESSION){ window.location.href='/portal.html'; return false; }
+    $('who').textContent = (SESSION.user && SESSION.user.email) || '';
+    return true;
+  }
+  async function authHeaders(){
+    var tok = SESSION && SESSION.access_token;
+    try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+    return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+  }
+
+  async function laadProjecten(){
+    try{
+      var r = await fetch(PROXY+'/api/kamino/projecten-overzicht?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' });
+      if(r.status===403){ $('projInfo').innerHTML='<b style="color:#9b1c1c">Enkel voor managers.</b>'; $('bAnalyse').disabled=true; return; }
+      if(r.status===401){ window.location.href='/portal.html'; return; }
+      var j = await r.json(); PROJ = (j && j.projecten) || [];
+      $('projLijst').innerHTML = PROJ.map(function(p){ return '<option value="'+esc(p.id)+'">'+esc((p.naam||'')+(p.klant&&p.klant!==p.naam?' — '+p.klant:''))+'</option>'; }).join('');
+      $('projInfo').textContent = PROJ.length+' projecten — kies of typ een FLX-ID.';
+      var q = new URLSearchParams(location.search).get('project'); if(q){ $('projZoek').value=q.toUpperCase(); toonProj(); }
+    }catch(e){ $('projInfo').textContent='Projectenlijst niet beschikbaar ('+e.message+') — typ het FLX-ID.'; }
+    try{
+      var r2 = await fetch(PROXY+'/api/profielen-lijst'); var j2 = await r2.json();
+      (j2.profielen||[]).forEach(function(p){ var o=document.createElement('option'); o.value=p.naam; o.textContent=p.naam; $('slp').appendChild(o); });
+    }catch(e){}
+  }
+  function projId(){ var v=String($('projZoek').value||'').trim().toUpperCase(); var m=v.match(/FLX-[A-Z0-9]{3}-[A-Z0-9]{3,4}/); return m?m[0]:''; }
+  function toonProj(){
+    var id=projId(), p=PROJ.find(function(x){ return x.id===id; });
+    if(!id){ $('projInfo').textContent='Geen geldig FLX-ID.'; return; }
+    $('projInfo').innerHTML = p ? ('<b>'+esc(p.naam||p.id)+'</b> · '+(p.profiel_afname?'<span class="pill p-info">heeft al een afname-profiel</span>':'<span class="pill p-neu">nog geen gemeten profiel</span>')+(p.profiel_injectie?' <span class="pill p-info">injectie</span>':'')) : ('<span class="id">'+esc(id)+'</span> (niet in de lijst — de server controleert)');
+  }
+  $('projZoek').addEventListener('change', toonProj); $('projZoek').addEventListener('input', function(){ if(projId()) toonProj(); });
+
+  // ─── bestand → payload (CSV-tekst of Excel-rijen, gzip + base64) ───
+  function laadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=function(){ nok(new Error('kon Excel-lezer niet laden')); }; document.head.appendChild(s); }); }
+  function b64(buf){ var bin='', u=new Uint8Array(buf), C=0x8000; for(var i=0;i<u.length;i+=C) bin+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(bin); }
+  async function gz(txt){
+    if(typeof CompressionStream==='undefined') return null;
+    var cs=new CompressionStream('gzip'); var w=cs.writable.getWriter(); w.write(new TextEncoder().encode(txt)); w.close();
+    return b64(await new Response(cs.readable).arrayBuffer());
+  }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function datumTxt(d){ var t=new Date(Math.round(d.getTime()/300000)*300000); /* SheetJS-datums kunnen seconden afwijken → afronden op 5 min */ return t.getFullYear()+'-'+p2(t.getMonth()+1)+'-'+p2(t.getDate())+' '+p2(t.getHours())+':'+p2(t.getMinutes())+':00'; }
+  async function leesBestand(f){
+    var naam=f.name, isX=/\.(xlsx|xls|xlsm)$/i.test(naam);
+    if(!isX){
+      var buf=await f.arrayBuffer(), txt;
+      try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }catch(e){ txt=new TextDecoder('windows-1252').decode(buf); }
+      var g=await gz(txt);
+      return g ? { naam:naam, soort:'csv', gz_b64:g } : { naam:naam, soort:'csv', tekst:txt };
+    }
+    if(!window.XLSX) await laadScript(XLSX_URL);
+    var wb=window.XLSX.read(await f.arrayBuffer(), { type:'array', cellDates:true });
+    var best=null, bestN=-1;
+    wb.SheetNames.forEach(function(sn){ var ws=wb.Sheets[sn]; var ref=ws['!ref']; if(!ref) return; var rg=window.XLSX.utils.decode_range(ref); var n=rg.e.r-rg.s.r; if(n>bestN){ bestN=n; best=sn; } });
+    var rows=window.XLSX.utils.sheet_to_json(wb.Sheets[best], { header:1, raw:true, defval:'', blankrows:false });
+    rows=rows.map(function(r){ return r.map(function(c){ return (c instanceof Date) ? datumTxt(c) : (typeof c==='number' ? c : String(c==null?'':c)); }); });
+    var json=JSON.stringify(rows), g2=await gz(json);
+    return g2 ? { naam:naam+' ['+best+']', soort:'rows', gz_b64:g2 } : { naam:naam+' ['+best+']', soort:'rows', rows:rows };
+  }
+
+  async function analyse(){
+    var id=projId(); if(!id){ $('status').textContent='Kies eerst een project (FLX-ID).'; return; }
+    var fa=$('fAfname').files[0], fi=$('fInjectie').files[0];
+    if(!fa){ $('status').textContent='Het afname-bestand is verplicht.'; return; }
+    $('bAnalyse').disabled=true; $('bAnalyse').innerHTML='<span class="spin"></span>Analyseren…'; $('status').textContent='Bestand(en) inlezen…'; $('out').innerHTML='';
+    try{
+      var body={ project_id:id, afname: await leesBestand(fa) };
+      if(fi) body.injectie = await leesBestand(fi);
+      if($('slp').value) body.slp_profiel=$('slp').value;
+      if(+$('kwp').value>0) body.pv_kwp=+$('kwp').value;
+      if(+$('kva').value>0) body.omvormer_kva=+$('kva').value;
+      $('status').textContent='Formaat herkennen + converteren (nieuw formaat → AI-spec, kan ~20 s duren)…';
+      var r=await fetch(PROXY+'/api/profiel/analyse',{ method:'POST', headers: await authHeaders(), body: JSON.stringify(body) });
+      var j=await r.json().catch(function(){ return { error:'ongeldig antwoord ('+r.status+')' }; });
+      if(!r.ok){ toonFout(r.status,j); return; }
+      RES=j; render(j); $('status').textContent='Klaar in '+nf((j.elapsed_ms||0)/1000,1)+' s — nog niets bewaard.';
+    }catch(e){ $('out').innerHTML='<div class="fout">Fout: '+esc(e.message)+'</div>'; $('status').textContent=''; }
+    finally{ $('bAnalyse').disabled=false; $('bAnalyse').innerHTML='🔍 Analyseer'; }
+  }
+  function toonFout(st,j){
+    var h='<div class="fout"><b>'+esc(j.error||('Fout '+st))+'</b>'+(j.rol?' ('+esc(j.rol)+(j.bestand?' — '+esc(j.bestand):'')+')':'');
+    if(j.manuele_review) h+='\nDit formaat past niet in de automatische conversie-spec. Het project blijft op het bestaande profiel (standaard-SLP of vorig gemeten profiel).'+(j.review_id?'\nHet bestand is bewaard in de lijst "Manuele review" hieronder.':'');
+    if(j.header && j.header.length) h+='\nHeader: '+esc(j.header.join(' | '));
+    if(j.pogingen && j.pogingen.length) h+='\nPogingen: '+esc(j.pogingen.map(function(p){ return p.bron+': '+(p.fout||[]).join('; '); }).join(' · '));
+    if(j.review_id) h+='\n<button class="btn" style="margin-top:8px" onclick="openReview(\''+esc(j.review_id)+'\')">🛠 Nu reviewen</button>';
+    $('out').innerHTML=h+'</div>'; $('status').textContent='';
+    laadReviews();
+  }
+
+  // ─── render ───
+  var BRON={ builtin:['gekend formaat','p-ok'], registry:['uit registry (hergebruikt)','p-ok'], ai:['nieuw — spec door AI gebouwd','p-info'], heuristiek:['heuristiek — review aanbevolen','p-wacht'] };
+  function render(j){
+    var h='<div class="card"><h2>2 · Herkend formaat</h2>';
+    j.formaten.forEach(function(f){
+      var b=BRON[f.bron]||[f.bron,'p-neu'];
+      h+='<div style="margin-bottom:8px"><b>'+esc(f.rol)+'</b> · '+esc(f.bestand)+' <span class="pill '+b[1]+'">'+esc(b[0])+'</span><div class="sub">'+esc(f.spec_naam)+' · '+f.resolutie_min+' min · eenheid '+esc(f.spec_kort.unit||'per rij')+' · '+(f.spec_kort.timezone==='utc'?'UTC→lokaal':'lokale tijd')+(f.spec_kort.label==='end'?' · tijdstempel = einde interval':'')+(f.spec_kort.long_format?' · lang formaat (registers)':'')+' · '+nf(f.parse_rate)+'% rijen geparst · bevat '+esc((f.bevat||[]).join(' + '))+' · <span class="id">'+esc(f.fingerprint)+'</span></div>';
+      if(f.manuele_review_aanbevolen) h+='<div class="warn-box">De AI-herkenning was niet beschikbaar; een heuristiek herkende het formaat. Controleer eenheid (kW vs kWh) en kolommen hieronder vóór je bevestigt.</div>';
+      if(f.waarschuwingen && f.waarschuwingen.length) h+='<div class="warn-box">'+f.waarschuwingen.map(esc).join('<br>')+'</div>';
+      h+='</div>';
+    });
+    h+='<div class="sub">Aanvulling met standaardprofiel: <b>'+esc(j.slp_profiel)+'</b>'+(j.pv_opts&&j.pv_opts.pv_kwp?' · PV '+nf(j.pv_opts.pv_kwp)+' kWp':'')+'</div></div>';
+    ['afname','injectie'].forEach(function(t){ if(j.types[t]) h+=renderType(t,j.types[t]); });
+    if(j.energiebalans){
+      var e=j.energiebalans;
+      h+='<div class="card"><h2>Energiebalans-reconstructie (prosument)</h2><div class="sub">C = A + (P − I) · per kwartier S = min(C, P) · P gekalibreerd op de gemeten injectie.</div><div class="kpis">'+
+        kpi(nf(e.pv.kwp_gekalibreerd)+' kWp','PV gekalibreerd (start '+nf(e.pv.kwp_start)+')')+kpi(nf(e.pv.jaarproductie_mwh)+' MWh','jaarproductie P')+
+        kpi(nf(e.pv.verbruik_totaal_mwh)+' MWh','totaal verbruik C')+kpi(nf(e.pv.zelfconsumptie_pct)+' %','zelfconsumptie Z')+
+        kpi(nf(e.kwaliteit.injectie_afwijking_pct)+' %','restafwijking injectie')+kpi(nf(e.kwaliteit.afname_afwijking_pct)+' %','restafwijking afname')+'</div>'+
+        ((!j.pv_opts||!j.pv_opts.pv_kwp)?'<div class="warn-box">Geen kWp opgegeven — de reconstructie schat PV uit de injectie. Geef het echte kWp op (boven) en analyseer opnieuw voor een betrouwbaarder resultaat.</div>':'')+'</div>';
+    }
+    var hu=j.huidig||{};
+    h+='<div class="card"><h2>3 · Bevestigen</h2>';
+    if(hu.afname||hu.injectie){
+      h+='<div class="sub" style="margin-bottom:8px">Huidig op het project: '+['afname','injectie'].filter(function(t){ return hu[t]; }).map(function(t){ var x=hu[t]; return '<b>'+t+'</b> — '+esc(x.label)+(x.pct_gemeten!=null?' ('+nf(x.pct_gemeten)+'% gemeten)':'')+(x.tot?' · t/m '+esc(x.tot):''); }).join(' · ')+'. Het vorige profiel blijft in de historie.</div>';
+    }
+    if(j.jaarverbruik) h+='<div class="'+(j.jaarverbruik.bron==='factuur'?'warn-box':'ok-box')+'" style="font-size:12.5px">Jaarverbruik in de simulaties: <b>'+(j.jaarverbruik.bron==='factuur'?'factuurvolume (jaarfactuur)':'jaartotaal van dit profiel ('+nf(j.types.afname.coverage.jaar_mwh)+' MWh)')+'</b> — '+esc(j.jaarverbruik.uitleg)+'. De vorm komt altijd uit het profiel.</div>';
+    if(j.review_id) h+='<div class="sub" style="margin-bottom:6px">Via manuele review '+esc(j.review_id)+' — formaat is nu gekend.</div>';
+    h+='<div class="row"><button class="btn go" id="bBev" onclick="bevestig(false)">✅ Gebruik als gemeten profiel</button><span class="sub" id="bevStatus"></span></div><div id="bevOut"></div></div>';
+    $('out').innerHTML=h;
+  }
+  function kpi(v,l){ return '<div class="kpi"><b>'+v+'</b><span>'+esc(l)+'</span></div>'; }
+  function renderType(t,x){
+    var c=x.coverage, onb=(c.flags&&c.flags.length), cls=onb?'p-mis':(c.label_type==='gemeten'?'p-ok':'p-wacht');
+    var parts=[c.pct_gemeten,c.pct_interpolatie,c.pct_typische_dag,c.pct_slp,c.pct_uurresolutie,c.pct_energiebalans];
+    var h='<div class="card"><h2>'+(t==='afname'?'Afname':'Injectie')+'</h2><span class="label-big '+cls+'">'+esc(c.label)+'</span>';
+    h+='<div class="stack">'+parts.map(function(p,i){ return p>0?'<div title="'+HLAB[i]+' '+p+'%" style="width:'+p+'%;background:'+HCOL[i]+'"></div>':''; }).join('')+'</div>';
+    h+='<div class="legend">'+parts.map(function(p,i){ return p>0?'<span><i style="background:'+HCOL[i]+'"></i>'+HLAB[i]+' '+nf(p)+'%</span>':''; }).join('')+'</div>';
+    if(onb) h+='<div class="flags">⚠ '+c.flags.map(esc).join('<br>⚠ ')+'</div>';
+    h+='<div class="kpis">'+kpi(nf(c.jaar_mwh,1)+' MWh','jaarvolume (12 mnd)')+kpi(nf(c.maandpiek_kw)+' kW','maandpiek (profiel)')+kpi(nf(c.maandpiek_kw_gemeten)+' kW','hoogste gemeten piek')+
+      kpi(esc(c.gemeten_span),'effectief gemeten')+kpi('<span style="font-size:12px">'+esc(c.van||'—')+'<br>'+esc(c.tot||'—')+'</span>','venster van – tot')+kpi(nf(c.pct_gemeten+c.pct_uurresolutie)+' %','gemeten (drempel label '+(100-c.drempel_pct)+'%)')+'</div>';
+    h+='<div class="viz"><div>'+weekSvg(x.preview)+'</div><div>'+heatSvg(x.preview.heatmap_kw)+'</div></div>';
+    h+=maandSvg(c.maand_mwh,c.maand_pct_gemeten);
+    if(c.periodes && c.periodes.length){
+      h+='<details><summary>Afgeleide periodes ('+c.periodes.length+')</summary><table class="per"><tr><th>van</th><th>tot</th><th>methode</th><th>kwartieren</th></tr>'+
+        c.periodes.map(function(p){ return '<tr><td>'+esc(p.van)+'</td><td>'+esc(p.tot)+'</td><td>'+esc(p.methode)+'</td><td>'+p.kwartieren+'</td></tr>'; }).join('')+'</table></details>';
+    }
+    return h+'</div>';
+  }
+  function weekSvg(pv){
+    var d=pv.week_kw, W=520, H=120, mx=Math.max.apply(null,d.concat([0.001]));
+    var pts=d.map(function(v,i){ return (i/(d.length-1)*W).toFixed(1)+','+(H-8-v/mx*(H-22)).toFixed(1); }).join(' ');
+    var days=['ma','di','wo','do','vr','za','zo'], g='';
+    for(var k=0;k<7;k++){ var x=k*W/7; g+='<line x1="'+x+'" y1="10" x2="'+x+'" y2="'+(H-8)+'" stroke="#e6ecf5"/><text x="'+(x+3)+'" y="'+(H-1)+'">'+days[k]+'</text>'; }
+    return '<div class="sub">Typische week vanaf '+esc(pv.week_van)+' ('+pv.week_gemeten_pct+'% gemeten) · kW</div><svg viewBox="0 0 '+W+' '+H+'" width="100%" preserveAspectRatio="none" role="img" aria-label="Typische week">'+g+
+      '<polyline points="'+pts+'" fill="none" stroke="var(--navy)" stroke-width="1.5"/><text x="'+(W-2)+'" y="10" text-anchor="end">max '+nf(mx,1)+' kW</text></svg>';
+  }
+  function heatSvg(hm){
+    var W=24*12, H=12*12, mx=Math.max.apply(null,hm.concat([0.001])), g='', M=['j','f','m','a','m','j','j','a','s','o','n','d'];
+    for(var m=0;m<12;m++){ for(var h=0;h<24;h++){ var v=hm[m*24+h]/mx, l=Math.round(96-v*62); g+='<rect x="'+(14+h*11)+'" y="'+(m*11)+'" width="11" height="11" fill="hsl(215,55%,'+l+'%)"><title>'+M[m]+' '+h+'u: '+nf(hm[m*24+h],2)+' kW</title></rect>'; } g+='<text x="2" y="'+(m*11+9)+'">'+M[m]+'</text>'; }
+    return '<div class="sub">Gemiddeld kW per maand × uur</div><svg viewBox="0 0 '+(W+20)+' '+(H+4)+'" width="100%" role="img" aria-label="Heatmap maand x uur">'+g+'</svg>';
+  }
+  function maandSvg(mwh,pct){
+    var W=520, H=70, mx=Math.max.apply(null,mwh.concat([0.001])), bw=W/12, g='', M=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+    mwh.forEach(function(v,i){ var h=v/mx*(H-22), x=i*bw+3, y=H-12-h; var col=pct[i]>=90?'var(--h0)':(pct[i]>0?'var(--h1)':'var(--h3)');
+      g+='<rect x="'+x+'" y="'+y+'" width="'+(bw-6)+'" height="'+h+'" fill="'+col+'"><title>'+M[i]+': '+nf(v,2)+' MWh · '+pct[i]+'% gemeten</title></rect><text x="'+(x+(bw-6)/2)+'" y="'+(H-2)+'" text-anchor="middle">'+M[i]+'</text>'; });
+    return '<div class="sub" style="margin-top:8px">Volume per maand (donker = ≥ 90% gemeten · licht = deels · oranje = volledig afgeleid)</div><svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Volume per maand">'+g+'</svg>';
+  }
+
+  async function bevestig(forceer){
+    if(!RES) return;
+    $('bBev').disabled=true; $('bevStatus').textContent='Bewaren…'; $('bevOut').innerHTML='';
+    try{
+      var r=await fetch(PROXY+'/api/profiel/bevestig',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ concept_id: RES.concept_id, forceer: !!forceer }) });
+      var j=await r.json().catch(function(){ return { error:'ongeldig antwoord ('+r.status+')' }; });
+      if(r.status===409 && j.conflict){
+        $('bevOut').innerHTML='<div class="warn-box"><b>'+esc(j.error)+'</b><br>'+Object.keys(j.conflicten).map(function(t){ return esc(t)+': '+esc(j.conflicten[t].reden); }).join('<br>')+
+          '<div style="margin-top:8px"><button class="btn warn" onclick="bevestig(true)">Toch gebruiken</button></div></div>';
+        $('bevStatus').textContent=''; $('bBev').disabled=false; return;
+      }
+      if(!r.ok){ $('bevOut').innerHTML='<div class="fout">'+esc(j.error||('Fout '+r.status))+'</div>'; $('bevStatus').textContent=''; $('bBev').disabled=false; return; }
+      $('bevOut').innerHTML='<div class="ok-box">✅ Bewaard bij <b>'+esc(j.project_id)+'</b>: '+Object.keys(j.bewaard).map(function(t){ return esc(t)+' — '+esc(j.bewaard[t].label); }).join(' · ')+
+        '.<br>Alle simulaties op dit project rekenen vanaf nu op dit profiel (tot een beter gedekte upload).'+(j.rapport2&&j.rapport2.ok?' De klant kreeg de "simulatie klaar"-mail.':'')+' <a href="/apps/projecten.html">→ Projecten</a></div>';
+      $('bevStatus').textContent='';
+    }catch(e){ $('bevOut').innerHTML='<div class="fout">Fout: '+esc(e.message)+'</div>'; $('bevStatus').textContent=''; $('bBev').disabled=false; }
+  }
+
+  // ─── manuele review ───
+  async function laadReviews(){
+    try{
+      var r=await fetch(PROXY+'/api/profiel/review?_='+Date.now(),{ headers: await authHeaders(), cache:'no-store' });
+      if(!r.ok){ $('reviewLijst').innerHTML='<div class="sub">Reviewlijst niet beschikbaar ('+r.status+').</div>'; return; }
+      var j=await r.json(), it=j.items||[];
+      $('reviewTel').textContent=it.length?('('+it.length+' open)'):'';
+      if(!it.length){ $('reviewLijst').innerHTML='<div class="sub">Geen openstaande bestanden. 👍</div>'; return; }
+      $('reviewLijst').innerHTML='<table class="per"><tr><th>datum</th><th>project</th><th>bestand</th><th>reden</th><th></th></tr>'+it.map(function(x){
+        return '<tr><td>'+esc((x.ts||'').slice(0,16).replace('T',' '))+'</td><td class="id">'+esc(x.project_id)+'</td><td>'+esc(x.rol)+': '+esc(x.bestand)+'</td><td class="sub">'+esc(x.reden)+'</td><td><button class="btn ghost" onclick="openReview(\''+esc(x.rid)+'\')">Review</button></td></tr>'; }).join('')+'</table>';
+    }catch(e){ $('reviewLijst').innerHTML='<div class="sub">Reviewlijst niet beschikbaar.</div>'; }
+  }
+  var SPEC_HULP='Velden: delimiter (";" "," "\\t"), decimal ("," of "."), has_header, skip_rows (rijen vóór de header), datetime {col, time_col|null, date_order DMY|YMD|MDY|ISO|EXCEL_SERIAL, label start|end}, value_columns {afname:[kol], injectie:[kol]|null} (kolommen 0-geteld, meerdere = opgeteld), sign_convention positief|netto_signed, long_format null | {key_col, value_col, afname:["tekst"], injectie:["tekst"], match contains|exact}, unit kWh|kW|Wh|W|MWh, unit_col|null, resolution kwartier|uur|auto, timezone local|utc.';
+  function specSjabloon(f){   // geen poging beschikbaar → sjabloon met wat gedetecteerd werd
+    return { naam:'omschrijving bron/formaat', delimiter:f.delimiter||';', decimal:f.decimal||',', has_header:!!f.has_header, skip_rows:f.skip_rows||0,
+      datetime:{ col:0, time_col:null, date_order:'DMY', label:'start' }, value_columns:{ afname:[1], injectie:null }, sign_convention:'positief',
+      long_format:null, unit:'kWh', unit_col:null, resolution:'auto', timezone:'local' };
+  }
+  async function openReview(rid){
+    $('reviewDetail').innerHTML='<div class="state">Laden…</div>';
+    try{
+      var r=await fetch(PROXY+'/api/profiel/review/'+encodeURIComponent(rid),{ headers: await authHeaders(), cache:'no-store' });
+      var x=await r.json(); if(!r.ok){ $('reviewDetail').innerHTML='<div class="fout">'+esc(x.error||r.status)+'</div>'; return; }
+      var f=x.failing||{};
+      var h='<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px"><b>Review '+esc(x.rid)+'</b> · <span class="id">'+esc(x.project_id)+'</span> · '+esc(f.rol)+': '+esc(f.bestand)+' <span class="pill '+(x.status==='open'?'p-wacht':'p-ok')+'">'+esc(x.status)+'</span>'+
+        '<div class="fout" style="margin-top:6px">'+esc(f.reden)+(f.pogingen&&f.pogingen.length?'\n'+f.pogingen.map(function(p){ return p.bron+': '+(p.fout||[]).join('; '); }).join('\n'):'')+'</div>'+
+        '<div class="row" style="margin:6px 0">'+(x.files||[]).map(function(fl){ return fl.download_url?'<a class="btn ghost" href="'+esc(fl.download_url)+'" target="_blank" rel="noopener">⬇ '+esc(fl.rol)+' ('+esc(fl.soort)+')</a>':''; }).join(' ')+'</div>'+
+        '<div class="sub">Gedetecteerd: '+esc(f.ncol)+' kolommen · delimiter '+esc(JSON.stringify(f.delimiter))+' · decimaal '+esc(f.decimal)+' · header '+(f.has_header?'ja (rij '+esc(f.skip_rows)+')':'nee')+' · types '+esc((f.types||[]).join(','))+'</div>'+
+        '<pre class="sample">'+esc(f.sample||'')+'</pre>'+
+        '<label class="f" style="margin-top:8px">Conversie-spec (JSON)</label><textarea class="spec" id="specTxt">'+esc(JSON.stringify(x.spec||x.suggestie||specSjabloon(f),null,2))+'</textarea>'+
+        '<div class="sub">'+esc(SPEC_HULP)+'</div>'+
+        '<div class="row" style="margin-top:8px"><button class="btn" id="bSpec" onclick="testSpec(\''+esc(x.rid)+'\')">▶ Test & gebruik deze spec</button><button class="btn warn" onclick="afwijzen(\''+esc(x.rid)+'\')">Afwijzen</button><span class="sub" id="specStatus"></span></div><div id="specOut"></div></div>';
+      $('reviewDetail').innerHTML=h; $('reviewDetail').scrollIntoView({behavior:'smooth'});
+    }catch(e){ $('reviewDetail').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; }
+  }
+  async function testSpec(rid){
+    var spec; try{ spec=JSON.parse($('specTxt').value); }catch(e){ $('specOut').innerHTML='<div class="fout">Geen geldige JSON: '+esc(e.message)+'</div>'; return; }
+    $('bSpec').disabled=true; $('specStatus').textContent='Testen op het bewaarde bestand…'; $('specOut').innerHTML='';
+    try{
+      var r=await fetch(PROXY+'/api/profiel/review/'+encodeURIComponent(rid)+'/spec',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ spec: spec }) });
+      var j=await r.json().catch(function(){ return { error:'ongeldig antwoord ('+r.status+')' }; });
+      if(!r.ok){ $('specOut').innerHTML='<div class="fout"><b>'+esc(j.error||r.status)+'</b>'+(j.fout?'\n'+esc(j.fout.join('\n')):'')+(j.test?'\nTest: '+esc(JSON.stringify(j.test)):'')+'</div>'; return; }
+      RES=j; $('specStatus').textContent='Spec OK — formaat bewaard in de registry. Resultaat staat bovenaan.';
+      render(j); window.scrollTo({top:0,behavior:'smooth'}); laadReviews();
+    }catch(e){ $('specOut').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; }
+    finally{ $('bSpec').disabled=false; }
+  }
+  async function afwijzen(rid){
+    var reden=prompt('Reden (optioneel):','')||'';
+    try{ await fetch(PROXY+'/api/profiel/review/'+encodeURIComponent(rid)+'/afwijzen',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ reden: reden }) }); }catch(e){}
+    $('reviewDetail').innerHTML=''; laadReviews();
+  }
+
+  (async function(){
+    try{ await loadConfig(); if(await initAuth()){ await laadProjecten(); laadReviews(); var rv=new URLSearchParams(location.search).get('review'); if(rv) openReview(rv); } }
+    catch(e){ $('out').innerHTML='<div class="fout">Opstartfout: '+esc(e.message)+'</div>'; }
+  })();
+</script>
+</body>
+</html>
