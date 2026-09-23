@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.13.7 (2026-09-23) — DIRECT-OP-RESULTAAT ZONDER INTAKE-FLITS (Johan): bij ?adv=1 wordt het intake-scherm
+<!-- ek.html v0.13.8 (2026-09-23) — DEEL-LINK-KNOP + KLANT/BTW (Johan): (1) de "Kopieer adviseur-link"-balk verschijnt nu
+     óók bij ?adv=1 (niet enkel ?prep=1), en kopieert bij een factuur-case de nette case-link (?case=<token>&adv=1) die
+     de ontvanger direct op deze analyse brengt. (2) Op start- én resultaatscherm tonen we naast de dossier-ID ook de
+     klantnaam en (indien aanwezig) het BTW-nummer, uit de factuur-case. Additief.
+     ek.html v0.13.7 (2026-09-23) — DIRECT-OP-RESULTAAT ZONDER INTAKE-FLITS (Johan): bij ?adv=1 wordt het intake-scherm
      meteen verborgen + een "laden"-status getoond → je landt visueel direct op het resultaat (heatmap wordt onzichtbaar
      herberekend; ek.html bewaart geen resultaat). Safety-timeout herstelt het intake-scherm bij een fout. Additief.
      ek.html v0.13.6 (2026-09-23) — CASE-DEEPLINK DIRECT OP RESULTAAT (Johan): ?case=<token>&adv=1 laadt de factuur-case,
@@ -377,6 +381,8 @@
     <div id="factuur-ok" class="chk hidden" style="border-color:var(--greenln)">
       <span>✔ <b>Uw factuur is ingelezen.</b> <span id="factuur-detail">—</span> Vul enkel nog uw profiel en aantal wagens aan.</span>
     </div>
+    <!-- v0.13.8: dossier-ID + klant (+ BTW) zodra een factuur-case geladen is -->
+    <div id="intake-doss" class="hint hidden" style="margin-top:8px;font-weight:600;color:#1F3864"></div>
 
     <!-- Uit uw factuur (ingelezen) -->
     <div class="row2" style="margin-top:6px">
@@ -440,6 +446,7 @@
     <!-- Uw Energie-Compas: kerngetallen + drie tegels onder één titel (dossier in de titel) -->
     <div class="ekhead">
       <h2 class="ektitle">Uw Energie-Compas <span class="doss" id="ek-doss"></span></h2>
+      <div class="ekmeta" id="ek-klant" style="font-weight:600;color:var(--navy)"></div>
       <div class="ekmeta" id="a4-meta">—</div>
     </div>
     <div class="sig">
@@ -588,6 +595,9 @@
   var TOKEN='';        // lead-token (uit ?case= of /api/ek-intake)
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
+  var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
+  var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
+  var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
   var NETHEF=0;        // netkosten+heffingen €/MWh uit de factuur (case-pad); 0 = onbekend → val terug op markt-default
   var PIEK_IS_SLP=false; // true = piek is afgeleid uit het SLP (analoge meter, geen meting) → toegangsvermogen = piek × factor
   function eur(n){ try{ return '€ '+Math.round(n).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(n); } }
@@ -792,6 +802,7 @@
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
     if($('ek-doss')) $('ek-doss').textContent = STATE_CODE || '';
+    if($('ek-klant')){ var _kb=_dossierBits(); $('ek-klant').textContent=_kb; $('ek-klant').style.display=_kb?'':'none'; }   // v0.13.8: klant + BTW
     $('sig-besp').textContent=eur(bespJaar);
     if($('sig-besp-tvt')) $('sig-besp-tvt').textContent=(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'');
     $('sig-km').textContent=(ev>0?('€ '+eur2(km100Cell)):'—');
@@ -865,6 +876,7 @@
   }
   (function(){ try{
     if((new URLSearchParams(location.search).get('adv'))==='1'){
+      ADV_MODE=true;   // v0.13.8: adviseur/manager-context → deel-link-balk tonen
       _advOverlay(true);
       setTimeout(function(){ try{ if($('dash') && $('dash').classList.contains('hidden')){ var ik=$('intake'); if(ik) ik.classList.remove('hidden'); } }catch(e){} _advOverlay(false); }, 9000);
     }
@@ -986,7 +998,7 @@
     renderRapport(_sel);
     renderHeatmap();
     _hmDetail(_sel);
-    if(PREP_MODE){ var pb=$('prepbar'); if(pb) pb.classList.remove('hidden'); _updAdvLink(); }
+    if(PREP_MODE||ADV_MODE){ var pb=$('prepbar'); if(pb) pb.classList.remove('hidden'); _updAdvLink(); }   // v0.13.8: deel-link-balk ook in adviseur/manager-context
     window.scrollTo({top:0,behavior:'smooth'});
   }
   function esc0(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -994,7 +1006,13 @@
   // ══ Adviseur-link: deel een link die rechtstreeks op dit (uitgerekende) resultaatscherm landt ══
   //   ?adv=1 + profiel/ev/afname/toegang/kost (+ optioneel pv/batt) → prefill + auto-simulatie + evt. cel voorselecteren.
   //   ?prep=1 → toont de "adviseur-link"-balk zodat je die link kan bouwen/kopiëren.
+  // v0.13.8: "Klantnaam · BTW BE0…" (enkel de delen die we kennen) — getoond naast de dossier-ID op start + resultaat.
+  function _dossierBits(){ var b=[]; if(STATE_KLANT) b.push(STATE_KLANT); if(STATE_BTW) b.push('BTW '+STATE_BTW); return b.join(' · '); }
   function _updAdvLink(){ var inp=$('prep-link'); if(!inp) return;
+    // v0.13.8: is er een factuur-case (TOKEN, bv. vanuit "Open" in projecten of de mail-link), deel dan de nette,
+    //   stabiele case-link — die landt via de case-loader meteen op dit resultaat. Anders de parameter-link (adviseur
+    //   die zelf invulde, geen case).
+    if(TOKEN){ inp.value = location.origin + location.pathname + '?case=' + encodeURIComponent(TOKEN) + '&adv=1'; return; }
     var p=new URLSearchParams();
     p.set('adv','1');
     p.set('profiel', ($('i-profiel')&&$('i-profiel').value)||'');
@@ -1168,6 +1186,12 @@
         // v0.6.1: onthoud het eerder gekozen profiel; bij analoge meter → residentieel (geen andere info); anders default.
         $('i-profiel').value = analoog ? 'residentieel' : (j.profiel || (bedr?'kantoor':'residentieel'));
         if(j.project_id) STATE_CODE=j.project_id;
+        // v0.13.8: klantnaam + BTW uit de factuur-case onthouden en op het start-scherm tonen naast de dossier-ID.
+        STATE_KLANT = (bc.klantNaam || j.naam || '').trim();
+        STATE_BTW = (bc.klantBtw || bc.btw || '').trim();
+        var _idz=$('intake-doss');
+        if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb);
+          if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
         var u=$('upl'); if(u) u.classList.add('hidden');
         var ok=$('factuur-ok'); if(ok) ok.classList.remove('hidden');
         if(analoog){   // geen kwartierdata/mandaat mogelijk → opt-in verbergen + uitzetten, en de melding tonen
