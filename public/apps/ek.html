@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.13.4 (2026-09-22) — MERKNAAM "EnergieKompas" → "Energie-Compas" (Johan). Alle klant-zichtbare "EnergieKompas"
+<!-- ek.html v0.13.6 (2026-09-23) — CASE-DEEPLINK DIRECT OP RESULTAAT (Johan): ?case=<token>&adv=1 laadt de factuur-case,
+     prefilt en rekent meteen door → landt op de resultatenpagina (gebruikt door de "Open"-knop in projecten). _advLoad
+     wijkt voor case-links; de case-loader doet de auto-simulatie. Additief.
+     ek.html v0.13.5 (2026-09-23) — ADVISEUR-LINK / PREP-MODUS (Johan). ?adv=1 + profiel/ev/afname/toegang/kost (+ optioneel
+     pv/batt) → prefill + auto-simulatie → landt meteen op het uitgerekende resultaatscherm, evt. met de voorbereide
+     combinatie voorgeselecteerd. ?prep=1 toont een "Adviseur-link"-balk bovenaan het dashboard waarmee je die link
+     bouwt/kopieert (volgt de gekozen heatmap-cel). Additief; geen impact op de gewone flow.
+     ── v0.13.4 (2026-09-22) — MERKNAAM "EnergieKompas" → "Energie-Compas" (Johan). Alle klant-zichtbare "EnergieKompas"
      (title, merk-header, intake, contact-opt-in, dashboard-titel "Uw Energie-Compas", watermerk) hernoemd; lowercase
      /api/energiekompas-paden ONGEMOEID (echte endpoints). Fluctus volledig weg uit klant-tekst.
      ── v0.13.3 (2026-09-22) — DE-BRANDING "Fluctus" → "Energie-Compas" (klant-zichtbaar, Johan): merk-header, intake-intro,
@@ -417,6 +424,16 @@
   <!-- ══ DASHBOARD ══ -->
   <div id="dash" class="hidden">
 
+    <!-- Prep-balk (enkel in ?prep=1): bouw een adviseur-link die rechtstreeks op dit uitgerekende scherm landt -->
+    <div id="prepbar" class="hidden noprint" style="background:#EEF3FB;border:1px solid #C7D3E2;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:6px">🔗 Adviseur-link (opent dit uitgerekende scherm)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="prep-link" type="text" readonly style="flex:1;min-width:220px;height:38px" onclick="this.select()">
+        <button class="btn sm" type="button" onclick="kopieerAdviseurLink()">Kopieer</button>
+      </div>
+      <div class="sub" id="prep-status" style="margin-top:6px">De link opent meteen op dit scherm, voor de huidige combinatie. Wijzig de heatmap en de link volgt.</div>
+    </div>
+
     <!-- Uw Energie-Compas: kerngetallen + drie tegels onder één titel (dossier in de titel) -->
     <div class="ekhead">
       <h2 class="ektitle">Uw Energie-Compas <span class="doss" id="ek-doss"></span></h2>
@@ -567,6 +584,7 @@
   var STATE_CODE='';   // dossiernummer = FLX-project-id (uit /api/ek-intake → _ensureSeedProjectVoorLead)
   var TOKEN='';        // lead-token (uit ?case= of /api/ek-intake)
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
+  var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
   var NETHEF=0;        // netkosten+heffingen €/MWh uit de factuur (case-pad); 0 = onbekend → val terug op markt-default
   var PIEK_IS_SLP=false; // true = piek is afgeleid uit het SLP (analoge meter, geen meting) → toegangsvermogen = piek × factor
   function eur(n){ try{ return '€ '+Math.round(n).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(n); } }
@@ -806,6 +824,8 @@
     if($('off-combo')) $('off-combo').textContent = String(pvKwp).replace('.',',')+' kWp PV · '+battKwh+' kWh batterij'+(palen>0?(' · '+palen+' '+(palen>1?'laadpalen':'laadpaal')):'');
     // Kwaliteit-van-een-batterij-blok (merkvergelijking, geschaald op deze combi)
     renderBattQ(bespJaar, battKwh, particulier);
+    // Prep-modus: houd de adviseur-link in sync met de huidige combinatie
+    if(PREP_MODE) _updAdvLink();
   }
 
   // Max-CX: klant komt via de mail-link (echt: ek.html?case=<token> → inbound-case prefilt de factuur).
@@ -939,9 +959,53 @@
     renderRapport(_sel);
     renderHeatmap();
     _hmDetail(_sel);
+    if(PREP_MODE){ var pb=$('prepbar'); if(pb) pb.classList.remove('hidden'); _updAdvLink(); }
     window.scrollTo({top:0,behavior:'smooth'});
   }
   function esc0(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  // ══ Adviseur-link: deel een link die rechtstreeks op dit (uitgerekende) resultaatscherm landt ══
+  //   ?adv=1 + profiel/ev/afname/toegang/kost (+ optioneel pv/batt) → prefill + auto-simulatie + evt. cel voorselecteren.
+  //   ?prep=1 → toont de "adviseur-link"-balk zodat je die link kan bouwen/kopiëren.
+  function _updAdvLink(){ var inp=$('prep-link'); if(!inp) return;
+    var p=new URLSearchParams();
+    p.set('adv','1');
+    p.set('profiel', ($('i-profiel')&&$('i-profiel').value)||'');
+    p.set('ev', ($('i-ev')&&$('i-ev').value)||'0');
+    p.set('afname', ($('i-afname')&&$('i-afname').value)||'');
+    p.set('toegang', ($('i-toegang')&&$('i-toegang').value)||'');
+    p.set('kost', ($('i-kost')&&$('i-kost').value)||'');
+    if(LAST){ if(LAST.pvKwp!=null) p.set('pv', LAST.pvKwp); if(LAST.battKwh!=null) p.set('batt', LAST.battKwh); }
+    inp.value = location.origin + location.pathname + '?' + p.toString();
+  }
+  function kopieerAdviseurLink(){ var inp=$('prep-link'), st=$('prep-status'); if(!inp) return; _updAdvLink();
+    var done=function(){ if(st){ st.style.color='var(--green)'; st.textContent='✔ Link gekopieerd — plak ze in je mail naar de adviseur.'; } };
+    try{ navigator.clipboard.writeText(inp.value).then(done, function(){ inp.select(); document.execCommand&&document.execCommand('copy'); done(); }); }
+    catch(e){ inp.select(); try{ document.execCommand('copy'); done(); }catch(_){ if(st) st.textContent='Selecteer de link en kopieer manueel.'; } }
+  }
+  async function _advLoad(){
+    var q; try{ q=new URLSearchParams(location.search); }catch(e){ return; }
+    // v0.13.6: een case-deeplink (?case=…&adv=1, bv. de "Open"-knop in projecten) wordt door de case-loader
+    //   afgehandeld — die haalt de factuur op, prefilt én rekent dan pas door. Hier niet vroegtijdig vuren.
+    if(q.get('case')) return;
+    var isAdv=q.get('adv')==='1', isPrep=q.get('prep')==='1';
+    if(!isAdv && !isPrep) return;
+    if(isPrep) PREP_MODE=true;
+    var hasParams = (q.get('afname')!=null || q.get('profiel')!=null);
+    if(isPrep && !hasParams) return;   // Johan vult zelf in; de balk verschijnt na "Start mijn simulatie"
+    var set=function(id,v){ var e=$(id); if(e&&v!=null&&v!=='') e.value=v; };
+    set('i-profiel', q.get('profiel')); set('i-ev', q.get('ev')); set('i-afname', q.get('afname'));
+    set('i-toegang', q.get('toegang')); set('i-kost', q.get('kost'));
+    set('i-mail', q.get('mail')); set('i-tel', q.get('tel'));
+    try{ await toonRapport(); }catch(e){ return; }
+    // optioneel: de door de adviseur/Johan voorbereide combinatie voorselecteren
+    var pv=parseFloat(q.get('pv')), bt=parseFloat(q.get('batt'));
+    if(HM && HM.real && HM.real.length && isFinite(pv) && isFinite(bt)){
+      var best=null, bd=1e9;
+      HM.real.forEach(function(a){ var apv=Math.round(_anchorKwp(a)*10)/10, abt=(+a.battKwh||0); var d=Math.abs(apv-pv)+Math.abs(abt-bt); if(d<bd){bd=d;best=a;} });
+      if(best) _hmKies(best._ry, best._cx);
+    }
+  }
 
   // ══ Kwaliteit van een batterij — merkvergelijking (RTE/DoD) + besparing over 10 jaar volgens geselecteerd scenario ══
   // Bronnen: publieke datasheets + onafhankelijke metingen HTW Berlin "Stromspeicher-Inspektion". rte/dod = fractie (of null=onbekend → min-regel).
@@ -1089,6 +1153,9 @@
         $('intake-intro').textContent=analoog
           ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
           : 'We ontvingen uw factuur en lazen ze in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
+        // v0.13.6: adviseur/manager-deeplink ek.html?case=<token>&adv=1 → meteen doorrekenen en direct op de
+        //   resultatenpagina landen (geen intake-tussenstap). De prefills hierboven leveren profiel/afname/toegang/kost.
+        try{ if((new URLSearchParams(location.search).get('adv'))==='1'){ toonRapport(); } }catch(e){}
       }).catch(function(){});
     }catch(e){}
   })();
@@ -1121,6 +1188,9 @@
       .then(function(j){ if(st){ if(j&&j.ok){ st.style.color='var(--green)'; st.textContent=(j.throttled?'✔ Al recent gemaild':'✔ Rapport gemaild')+(j.mail?(' naar '+j.mail):'')+'.'; } else { st.style.color='var(--muted)'; st.textContent='Mailen lukte niet — controleer uw e-mailadres of probeer later opnieuw.'; } } })
       .catch(function(){ if(st){ st.style.color='var(--muted)'; st.textContent='Mailen lukte niet — probeer later opnieuw.'; } });
   }
+
+  // Adviseur-link / prep-modus activeren bij het laden (na alle definities).
+  _advLoad();
 </script>
 </body>
 </html>
