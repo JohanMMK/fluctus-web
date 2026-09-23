@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.13.8 (2026-09-23) — DEEL-LINK-KNOP + KLANT/BTW (Johan): (1) de "Kopieer adviseur-link"-balk verschijnt nu
+<!-- ek.html v0.13.10 (2026-09-23) — HEATMAP-DEFAULT (Johan): resultaatscherm toont standaard links "Investering (€)"
+     en rechts "Energiekost mobiliteit (€/100 km)" (HMMETRIC_L='investering', HMMETRIC_R='km100' + dropdown-selected).
+     ek.html v0.13.9 (2026-09-23) — ADVISEUR KAN KLANT+BTW ZELF INVULLEN (Johan): in adviseur/prep-modus verschijnen
+     optionele velden Klantnaam + BTW; ze gaan mee in de deel-link (?adv=1&klant=&btw=) en tonen op start + resultaat.
+     Bij een factuur-case komen ze uit de case en zijn ze aanpasbaar. Additief.
+     ek.html v0.13.8 (2026-09-23) — DEEL-LINK-KNOP + KLANT/BTW (Johan): (1) de "Kopieer adviseur-link"-balk verschijnt nu
      óók bij ?adv=1 (niet enkel ?prep=1), en kopieert bij een factuur-case de nette case-link (?case=<token>&adv=1) die
      de ontvanger direct op deze analyse brengt. (2) Op start- én resultaatscherm tonen we naast de dossier-ID ook de
      klantnaam en (indien aanwezig) het BTW-nummer, uit de factuur-case. Additief.
@@ -383,6 +388,11 @@
     </div>
     <!-- v0.13.8: dossier-ID + klant (+ BTW) zodra een factuur-case geladen is -->
     <div id="intake-doss" class="hint hidden" style="margin-top:8px;font-weight:600;color:#1F3864"></div>
+    <!-- v0.13.9: adviseur/manager kan zelf klant + BTW invullen (enkel getoond in adviseur/prep-modus) → mee in de deel-link -->
+    <div id="adv-klant-blok" class="row2 hidden" style="margin-top:6px">
+      <div><label class="fld">Klantnaam (optioneel)</label><input type="text" id="i-klant" placeholder="Bedrijf of persoon" autocomplete="off"></div>
+      <div><label class="fld">BTW-nummer (optioneel)</label><input type="text" id="i-btw" placeholder="BE0123456789" autocomplete="off"></div>
+    </div>
 
     <!-- Uit uw factuur (ingelezen) -->
     <div class="row2" style="margin-top:6px">
@@ -467,13 +477,13 @@
       <div class="hmpair">
         <div class="hmside">
           <div class="hmpick"><select id="hm-mx-L">
-            <option value="tvt" selected>Terugverdientijd PV+batt (j)</option>
+            <option value="tvt">Terugverdientijd PV+batt (j)</option>
             <option value="rendement">Rendement PV+batt (%)</option>
             <option value="besparing">Besparing/jaar (€)</option>
             <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
             <option value="km100">Energiekost mobiliteit (€/100 km)</option>
             <option value="besp_creg">Besparing slim laden (€/j)</option>
-            <option value="investering">Investering (€)</option>
+            <option value="investering" selected>Investering (€)</option>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-L"></table></div>
           <div class="sub" id="hm-note-L" style="margin-top:4px"></div>
@@ -481,10 +491,10 @@
         <div class="hmside">
           <div class="hmpick"><select id="hm-mx-R">
             <option value="tvt">Terugverdientijd PV+batt (j)</option>
-            <option value="rendement" selected>Rendement PV+batt (%)</option>
+            <option value="rendement">Rendement PV+batt (%)</option>
             <option value="besparing">Besparing/jaar (€)</option>
             <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
-            <option value="km100">Energiekost mobiliteit (€/100 km)</option>
+            <option value="km100" selected>Energiekost mobiliteit (€/100 km)</option>
             <option value="besp_creg">Besparing slim laden (€/j)</option>
             <option value="investering">Investering (€)</option>
           </select></div>
@@ -685,7 +695,7 @@
   // ══ Heatmap-machinerie (faithful port uit energiekompas.html — zelfde engine) ══
   var CTX=null;        // cel-onafhankelijke context (kost, €/100km, km, loadfactor, inputs) — gezet in toonRapport
   var HM=null;         // huidige heatmap-state
-  var HMMETRIC_L='tvt', HMMETRIC_R='rendement';   // twee heatmaps naast elkaar, elk een kengetal
+  var HMMETRIC_L='investering', HMMETRIC_R='km100';   // twee heatmaps naast elkaar, elk een kengetal (v0.13.10: default links=investering, rechts=€/100km)
   function _hmKleur(v,min,max){ if(v==null||!isFinite(v)) return '#eef2f8'; var t=(max>min)?((v-min)/(max-min)):0.5; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
   function _hmFmt(v,mx){ if(v==null||!isFinite(v)) return ''; return mx==='rendement'?(Math.round(v)+'%'):(v>=1000?(Math.round(v/100)/10+'k'):Math.round(v)); }
@@ -802,6 +812,9 @@
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
     if($('ek-doss')) $('ek-doss').textContent = STATE_CODE || '';
+    // v0.13.9: klant/BTW ook uit de (adviseur-)invoervelden als er geen factuur-case is die ze al leverde.
+    if(!STATE_KLANT && $('i-klant')) STATE_KLANT=($('i-klant').value||'').trim();
+    if(!STATE_BTW && $('i-btw')) STATE_BTW=($('i-btw').value||'').trim();
     if($('ek-klant')){ var _kb=_dossierBits(); $('ek-klant').textContent=_kb; $('ek-klant').style.display=_kb?'':'none'; }   // v0.13.8: klant + BTW
     $('sig-besp').textContent=eur(bespJaar);
     if($('sig-besp-tvt')) $('sig-besp-tvt').textContent=(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'');
@@ -875,7 +888,10 @@
     } else if(ov){ ov.remove(); }
   }
   (function(){ try{
-    if((new URLSearchParams(location.search).get('adv'))==='1'){
+    var _q0=new URLSearchParams(location.search);
+    // v0.13.9: in adviseur/prep-modus de klant+BTW-velden tonen zodat de adviseur ze zelf kan invullen (→ deel-link).
+    if(_q0.get('prep')==='1' || _q0.get('adv')==='1'){ var _kb0=document.getElementById('adv-klant-blok'); if(_kb0) _kb0.classList.remove('hidden'); }
+    if(_q0.get('adv')==='1'){
       ADV_MODE=true;   // v0.13.8: adviseur/manager-context → deel-link-balk tonen
       _advOverlay(true);
       setTimeout(function(){ try{ if($('dash') && $('dash').classList.contains('hidden')){ var ik=$('intake'); if(ik) ik.classList.remove('hidden'); } }catch(e){} _advOverlay(false); }, 9000);
@@ -1020,6 +1036,8 @@
     p.set('afname', ($('i-afname')&&$('i-afname').value)||'');
     p.set('toegang', ($('i-toegang')&&$('i-toegang').value)||'');
     p.set('kost', ($('i-kost')&&$('i-kost').value)||'');
+    if(STATE_KLANT) p.set('klant', STATE_KLANT);   // v0.13.9: klant + BTW mee in de deel-link (geen case)
+    if(STATE_BTW) p.set('btw', STATE_BTW);
     if(LAST){ if(LAST.pvKwp!=null) p.set('pv', LAST.pvKwp); if(LAST.battKwh!=null) p.set('batt', LAST.battKwh); }
     inp.value = location.origin + location.pathname + '?' + p.toString();
   }
@@ -1042,6 +1060,8 @@
     set('i-profiel', q.get('profiel')); set('i-ev', q.get('ev')); set('i-afname', q.get('afname'));
     set('i-toegang', q.get('toegang')); set('i-kost', q.get('kost'));
     set('i-mail', q.get('mail')); set('i-tel', q.get('tel'));
+    if(q.get('klant')){ STATE_KLANT=q.get('klant'); set('i-klant', q.get('klant')); }   // v0.13.9: klant + BTW uit de deel-link
+    if(q.get('btw')){ STATE_BTW=q.get('btw'); set('i-btw', q.get('btw')); }
     try{ await toonRapport(); }catch(e){ return; }
     // optioneel: de door de adviseur/Johan voorbereide combinatie voorselecteren
     var pv=parseFloat(q.get('pv')), bt=parseFloat(q.get('batt'));
@@ -1189,6 +1209,8 @@
         // v0.13.8: klantnaam + BTW uit de factuur-case onthouden en op het start-scherm tonen naast de dossier-ID.
         STATE_KLANT = (bc.klantNaam || j.naam || '').trim();
         STATE_BTW = (bc.klantBtw || bc.btw || '').trim();
+        if($('i-klant')&&STATE_KLANT) $('i-klant').value=STATE_KLANT;   // v0.13.9: adviseur ziet/kan de klant + BTW aanpassen
+        if($('i-btw')&&STATE_BTW) $('i-btw').value=STATE_BTW;
         var _idz=$('intake-doss');
         if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb);
           if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
