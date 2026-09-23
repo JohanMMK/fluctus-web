@@ -1,6 +1,9 @@
-// portal.js v1.10.0 — 2026-09-22 (Europe/Brussels) — manager-tegel 'Profiel-import'
+// portal.js v1.11.0 — 2026-09-23 (Europe/Brussels) — tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
+// v1.11.0 — 2026-09-23 — nieuwe tegel 'ek' (📊 Energie-Compas) → /apps/ek.html?prep=1: de snelle energie-analyse
+//          met adviseur-link (deel een URL waarmee de klant het resultaat direct ziet). gatedBy:'energiekompas'
+//          → zelfde toegang als de EnergieKompas-tegel, geen aparte app_id/grant. Additief; RBAC-filter ongewijzigd.
 // v1.10.0 — 2026-09-22 — nieuwe managerOnly-tegel 'profiel-import' (📈 Profiel-import) → /apps/profiel-import.html:
 //          verbruiks-/injectieprofiel (CSV/Excel, elk formaat) uploaden bij een FLX-project → gemeten profiel met
 //          dekkingslabel (server v15.159.0). Additief: enkel een catalogus-rij bij; RBAC-filter ongewijzigd.
@@ -70,6 +73,11 @@ const APP_CATALOG = [
   // krijgt van de proxy (v15.95.0) automatisch toegang tot ENKEL deze app_id → het is de enige tool die hij ziet.
   // Managers zien ze impliciet; adviseurs/sellers enkel na toekenning. De onderliggende pagina is de Fase 4-schil.
   { id: 'energiekompas', naam: 'EnergieKompas',  ico: '🔆', beschrijving: 'Uw energie-advies in één schil: particulier of bedrijf → besparing, rendement en advies.', url: '/apps/energiekompas.html' },
+  // v1.11.0 (23-09): Energie-Compas (ek.html) — de snelle energie-analyse. Opent in adviseur-prep (?prep=1): reken
+  // door en kopieer een link waarmee de klant het resultaat DIRECT ziet (niet opnieuw uitrekenen). gatedBy:'energiekompas'
+  // → exact dezelfde toegang als de EnergieKompas-tegel (managers + partnermanagers auto + toegekende adviseurs),
+  // geen aparte app_id/proxy-grant nodig. Additief.
+  { id: 'ek',          naam: 'Energie-Compas',   ico: '📊', beschrijving: 'Snelle energie-analyse → besparing & rendement in één scherm, met adviseur-link om het resultaat te delen.', url: '/apps/ek.html?prep=1', gatedBy: 'energiekompas' },
   { id: 'kamino',      naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',   naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   // Betalend laadplein: dezelfde simulator in een gefocuste flow (?flow=betaalplein). Zelfde toegang als de
