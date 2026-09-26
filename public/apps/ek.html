@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.17.0 (2026-09-26) — EV-INVOER: TYPE KLANT + LAADMOMENTEN + VOERTUIGTYPES (Johan): het ene veld "aantal wagens"
+<!-- ek.html v0.18.0 (2026-09-26) — RTE/DoD INSTELBAAR + DC 300 kVA VOOR ZWARE VOERTUIGEN + EK-CONFIG SERVER-BREED (Johan):
+     (1) In het resultaat (investeringsblok) een "Batterij-parameters"-blok met RTE % + DoD % + "🔄 Opslaan & herbereken",
+     ENKEL voor oekene@gmail.com (login-gate). Wijzigen → nieuwe simulatie (rte_pct/dod_pct in de sweep/rapport-body →
+     server v15.167 past ze toe). (2) Vrachtwagens + bussen krijgen automatisch genoeg DC-laadpalen van 300 kVA (fastDC):
+     lichte voertuigen → AC (2/paal), zware → DC 300 kVA (2/paal) via _acDefault/_dcDefault + CTX.evHeavy/evLight;
+     STUB.dc_paal_eur is een PLACEHOLDER (300 kVA fastDC realistisch €40–90k) → Johan tunet. (3) De voertuig-defaults én
+     RTE/DoD zijn nu SERVER-BREED (GET/POST /api/ek-config, Supabase): de schil leest ze bij het laden en stuurt ze mee,
+     zodat ze op elk toestel + voor elke gebruiker/rapport gelden (localStorage = enkel snelle cache). Opslaan = manager/oekene.
+     ── v0.17.0 (2026-09-26) — EV-INVOER: TYPE KLANT + LAADMOMENTEN + VOERTUIGTYPES (Johan): het ene veld "aantal wagens"
      is vervangen door een rijkere invoer. "Type klant" (Particulier/Bedrijf) staat als conclusie bovenaan, afgeleid uit het
      profiel (residentieel → particulier) maar wijzigbaar. PARTICULIER: 3 aantallen — 's nachts (19–7) / overdag (7–19) / 24 u —
      personenwagen (0,16 kWh/km · 15.000 km/j). BEDRIJF: flexibele rijen (voertuigtype + aantal + laadmoment + weekend-vinkje);
@@ -648,6 +656,15 @@
       <div class="inv-tools"><button type="button" id="inv-edit-btn" class="btn ghost sm">✏️ Pas aan</button>
         <span class="sub" id="inv-edit-hint"></span></div>
       <table class="inv"><tbody id="invrows"></tbody></table>
+      <div id="batt-params" class="hidden" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--greenln)">
+        <b style="color:var(--navy)">Batterij-parameters (sim)</b> <span class="sub">— server-breed, geldt voor elke simulatie/rapport</span>
+        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:6px">
+          <label class="fld sub" style="margin:0">RTE %<br><input type="number" id="bp-rte" min="50" max="100" step="1" style="width:82px"></label>
+          <label class="fld sub" style="margin:0">DoD %<br><input type="number" id="bp-dod" min="10" max="100" step="1" style="width:82px"></label>
+          <button type="button" id="bp-herbereken" class="btn sm">🔄 Opslaan &amp; herbereken</button>
+          <span class="sub" id="bp-status"></span>
+        </div>
+      </div>
       <p class="foot" id="inv-foot"></p>
       <p class="foot" style="margin-top:14px;color:var(--navy)">Terugverdientijd en rendement rekenen op de <b>totale investering</b> (PV + batterij + laadpalen) t.o.v. uw <b>totale jaarbesparing</b>: vandaag laadt u elders aan CREG-tarief; met deze opstelling laadt u <b>aan het gebouw</b> samen met uw verbruik, gestuurd op zelfconsumptie, piek en spotmarkt.</p>
       <div class="paycards">
@@ -747,6 +764,7 @@
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
   var EK_IS_OEKENE=false, EK_PREPADV=false;  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
+  var BATT_RTE=92, BATT_DOD=90;  // v0.18: batterij RTE + DoD (sim) — server-breed via /api/ek-config (oekene tunet), gecachet in localStorage
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
   var STATE_EAN_AFNAME='', STATE_EAN_INJECTIE='', STATE_ADRES='', STATE_METER='';  // v0.13.12: aansluiting-gegevens uit de factuur-case (EAN-keuze) → klantrapport
@@ -767,7 +785,7 @@
     creg_eur_mwh:322,                         // gewoon/regulier laden (CREG-tarief)
     res_piek_kw_per_mwh:0.55,  // residentieel SLP: vaste loadfactor ~0,21 → kwartierpiek ≈ 0,55 kW per MWh afname (gemeten op data/profielen/residentieel.json)
     res_piek_naar_aansluiting:3,  // een individuele woning piekt ~3× het gladde SLP-profiel → toegangsvermogen/maandpiek ≈ SLP-piek × 3 (Johan)
-    pv_eur_kwp:350, batt_eur_kwh:300, ac_paal_eur:2600, dc_paal_eur:10000,   // richtprijzen (Jacops/E+Drive-stijl; DC = fastDC-richtprijs, Johan kan tunen)
+    pv_eur_kwp:350, batt_eur_kwh:300, ac_paal_eur:2600, dc_paal_eur:10000,   // richtprijzen — LET OP: dc_paal_eur is nu een 300 kVA fastDC-paal (v0.18, vrachtwagen/bus); €10.000 is een PLACEHOLDER, een 300 kVA fastDC is realistisch €40–90k → Johan moet dit tunen
     kabel_eur_m:45, ontk_eur:2500,   // kabeltracé-heuristiek
     besp_pct_van_kost:0.35            // stub: jaarbesparing ≈ 35% van huidige kost (komt uit sweep)
   };
@@ -808,14 +826,32 @@
     { key:'vrachtwagen',   label:'Vrachtwagen',        kwhkm:1.10, kmjaar:60000 },
     { key:'bus',           label:'Bus',                kwhkm:1.30, kmjaar:50000 }
   ];
-  function _evTypesLoad(){ try{ var s=localStorage.getItem('EK_EV_TYPES'); if(s){ var o=JSON.parse(s); if(Array.isArray(o)) EV_TYPES_DEF=EV_TYPES_DEF.map(function(t){ var m=o.filter(function(x){return x.key===t.key;})[0]; return m?{key:t.key,label:t.label,kwhkm:(+m.kwhkm||t.kwhkm),kmjaar:(+m.kmjaar||t.kmjaar)}:t; }); } }catch(e){} }
-  function _evTypesSave(){ try{ localStorage.setItem('EK_EV_TYPES', JSON.stringify(EV_TYPES_DEF.map(function(t){return {key:t.key,kwhkm:t.kwhkm,kmjaar:t.kmjaar};}))); }catch(e){} }
+  // v0.18: EK-config server-breed (voertuig-defaults + batterij RTE/DoD). localStorage = snelle cache; server is bron.
+  function _ekCfgApply(cfg){ if(!cfg) return; try{
+      if(Array.isArray(cfg.ev_types)) EV_TYPES_DEF=EV_TYPES_DEF.map(function(t){ var m=cfg.ev_types.filter(function(x){return x.key===t.key;})[0]; return m?{key:t.key,label:t.label,kwhkm:(+m.kwhkm||t.kwhkm),kmjaar:(+m.kmjaar||t.kmjaar)}:t; });
+      if(cfg.batt){ BATT_RTE=Math.max(50,Math.min(100,+cfg.batt.rte_pct||BATT_RTE)); BATT_DOD=Math.max(10,Math.min(100,+cfg.batt.dod_pct||BATT_DOD)); }
+    }catch(e){} }
+  function _ekCfgFromState(){ return { ev_types:EV_TYPES_DEF.map(function(t){return {key:t.key,kwhkm:t.kwhkm,kmjaar:t.kmjaar};}), batt:{rte_pct:BATT_RTE,dod_pct:BATT_DOD} }; }
+  function _evTypesLoad(){ try{ var s=localStorage.getItem('EK_CFG'); if(s) _ekCfgApply(JSON.parse(s)); }catch(e){} }   // snelle cache; server overschrijft
+  async function _ekCfgLoad(){ try{ var r=await fetch(API+'/api/ek-config'); var j=await r.json(); if(j&&j.ok&&j.config){ _ekCfgApply(j.config); try{ localStorage.setItem('EK_CFG', JSON.stringify(j.config)); }catch(e){} if(KLANTTYPE==='bedrijf') _evRenderRows(); _evSync(); _battParamsSync(); } }catch(e){} }
+  async function _ekCfgSave(){ var hdr=await _ekAuthHeaders(); var r=await fetch(API+'/api/ek-config',{method:'POST',headers:hdr,body:JSON.stringify({config:_ekCfgFromState()})}); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('opslaan faalde ('+r.status+')')); try{ localStorage.setItem('EK_CFG', JSON.stringify(j.config)); }catch(e){} _ekCfgApply(j.config); return j.config; }
   function _evType(key){ return EV_TYPES_DEF.filter(function(t){return t.key===key;})[0]||EV_TYPES_DEF[0]; }
   var EV_MOMENT = { nacht:{label:"'s nachts (19–7 u)",vs:19,ve:7}, overdag:{label:'overdag (7–19 u)',vs:7,ve:19}, h24:{label:'24 u',vs:0,ve:24} };
   var KLANTTYPE=null, EV_ROWS=[], _KTYPE_USER=false;
   function _evNum(v){ return String(v).replace('.',','); }
+  // v0.18: batterij RTE/DoD-control in het resultaat (enkel oekene) → opslaan (server-breed) + herberekenen
+  function _battParamsSync(){ var a=$('bp-rte'),b=$('bp-dod'); if(a)a.value=BATT_RTE; if(b)b.value=BATT_DOD; }
+  function _battHerbereken(){
+    var a=$('bp-rte'),b=$('bp-dod'); if(!a||!b) return;
+    BATT_RTE=Math.max(50,Math.min(100,Math.round(+a.value||BATT_RTE)));
+    BATT_DOD=Math.max(10,Math.min(100,Math.round(+b.value||BATT_DOD)));
+    _battParamsSync();
+    var st=$('bp-status'); if(st){ st.style.color='var(--muted)'; st.textContent='⏳ opslaan + herberekenen…'; }
+    _ekCfgSave().catch(function(){}).then(function(){ return toonRapport(); }).then(function(){ var s=$('bp-status'); if(s){ s.style.color='var(--green)'; s.textContent='✔ herberekend — RTE '+BATT_RTE+'% · DoD '+BATT_DOD+'%'; } }).catch(function(e){ var s=$('bp-status'); if(s){ s.style.color='#C0392B'; s.textContent='Mislukt: '+((e&&e.message)||e); } });
+  }
   function _evPartTotal(){ return (+(($('ev-p-nacht')||{}).value)||0)+(+(($('ev-p-dag')||{}).value)||0)+(+(($('ev-p-24')||{}).value)||0); }
   function _evBedrTotal(){ return EV_ROWS.reduce(function(s,r){return s+Math.max(0,+r.aantal||0);},0); }
+  function _evHeavyCount(){ if(KLANTTYPE!=='bedrijf') return 0; return EV_ROWS.reduce(function(s,r){ return s+((r.type==='vrachtwagen'||r.type==='bus')?Math.max(0,+r.aantal||0):0); },0); }   // v0.18: zware voertuigen → DC 300 kVA
   function _evTotal(){ return KLANTTYPE==='bedrijf'?_evBedrTotal():_evPartTotal(); }
   function _evSync(){ var n=_evTotal(); var h=$('i-ev'); if(h) h.value=n; var pt=$('ev-part-tot');
     if(pt) pt.textContent = (KLANTTYPE==='particulier') ? ('Totaal: '+n+' personenwagen'+(n===1?'':'s')+' · '+_evNum(_evType('personenwagen').kwhkm)+' kWh/km · '+_evType('personenwagen').kmjaar+' km/j') : ''; }
@@ -867,15 +903,18 @@
   function _evDefModal(){ if(!EK_IS_OEKENE) return;
     var bg=document.createElement('div'); bg.className='ekmodal-bg';
     var rows=EV_TYPES_DEF.map(function(t){ return '<tr><td>'+_ekEsc(t.label)+'</td><td><input type="number" step="0.01" min="0" data-k="'+t.key+'" data-f="kwhkm" value="'+t.kwhkm+'"> kWh/km</td><td><input type="number" step="500" min="0" data-k="'+t.key+'" data-f="kmjaar" value="'+t.kmjaar+'"> km/j</td></tr>'; }).join('');
-    bg.innerHTML='<div class="ekmodal"><h3>Voertuig-defaults</h3><div class="sub">Reken-defaults per voertuigtype (verbruik + jaarkilometrage). Lokaal bewaard op dit toestel.</div>'+
+    bg.innerHTML='<div class="ekmodal"><h3>Voertuig-defaults</h3><div class="sub">Reken-defaults per voertuigtype (verbruik + jaarkilometrage). <b>Server-breed</b> bewaard — geldt voor iedereen en elke simulatie/rapport.</div>'+
       '<table><thead><tr><th>Type</th><th>Verbruik</th><th>Jaarkilometrage</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+      '<div class="sub" id="evdef-err" style="color:#C0392B;min-height:14px"></div>'+
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button type="button" class="btn ghost sm" id="evdef-cancel">Annuleren</button><button type="button" class="btn sm" id="evdef-save">💾 Opslaan</button></div></div>';
     document.body.appendChild(bg);
     bg.addEventListener('click',function(e){ if(e.target===bg) bg.remove(); });
     bg.querySelector('#evdef-cancel').onclick=function(){ bg.remove(); };
     bg.querySelector('#evdef-save').onclick=function(){
       Array.prototype.forEach.call(bg.querySelectorAll('input[data-k]'),function(inp){ var k=inp.getAttribute('data-k'),f=inp.getAttribute('data-f'),t=_evType(k); if(t){ if(f==='kwhkm') t.kwhkm=Math.max(0,+inp.value||t.kwhkm); else t.kmjaar=Math.max(0,Math.round(+inp.value||t.kmjaar)); } });
-      _evTypesSave(); if(KLANTTYPE==='bedrijf') _evRenderRows(); _evSync(); bg.remove(); };
+      var sb=bg.querySelector('#evdef-save'); sb.disabled=true; sb.textContent='⏳ Opslaan…'; var er=bg.querySelector('#evdef-err'); if(er) er.textContent='';
+      _ekCfgSave().then(function(){ if(KLANTTYPE==='bedrijf') _evRenderRows(); _evSync(); bg.remove(); })
+        .catch(function(e){ sb.disabled=false; sb.textContent='💾 Opslaan'; if(er) er.textContent='Opslaan mislukt: '+e.message; }); };
   }
   // Init-wiring voor de EV-invoer (radio's, knoppen, profiel-afleiding)
   (function(){ try{
@@ -886,7 +925,9 @@
     var add=$('ev-add'); if(add) add.onclick=function(){ EV_ROWS.push({type:'personenwagen',aantal:1,moment:'nacht',weekend:false}); _evRenderRows(); };
     ['ev-p-nacht','ev-p-dag','ev-p-24'].forEach(function(id){ var e=$(id); if(e){ e.oninput=_evSync; e.onchange=_evSync; } });
     var db=$('ev-def-btn'); if(db) db.onclick=_evDefModal;
+    var hb=$('bp-herbereken'); if(hb) hb.onclick=_battHerbereken;
     _evAfleiden();
+    _ekCfgLoad();   // v0.18: server-brede config (voertuig-defaults + RTE/DoD) ophalen en toepassen
   }catch(e){} })();
   function _anchorKwp(a){ return (a.pvKwp!=null)?a.pvKwp:((+a.pvPan||0)*P_TL.PANEEL_WP/1000); }
   // Totale KLANT-investering (PV + batterij + palen + kabeltracé) voor een cel, uit CTX (ev/particulier).
@@ -1020,7 +1061,9 @@
   // Render alle KPI's + 1-A4 + investering voor het gekozen anker a (cel-onafhankelijke waarden uit CTX).
   // ── v0.15: bewerkbaar "Wat u investeert"-blok — hoofdcomponenten + specs, prijs enkel op totaal, "Pas aan"→"Opslaan" ──
   var INV_EDIT=false, INV_OV=null;   // INV_OV={pvKwp,battKw,ac,dc} na Opslaan → stuurt investering + rapport-voorstel + standaardkeuze
-  function _acDefault(){ return Math.max(0, Math.ceil((+(CTX&&CTX.ev)||0)/2)); }   // AC-palen uit het wagenpark (2 wagens/paal)
+  // v0.18: lichte voertuigen → AC-palen (2/paal); zware (vrachtwagen/bus) → DC-palen 300 kVA (2/paal). Split uit CTX.
+  function _acDefault(){ var n=(CTX&&CTX.evLight!=null)?CTX.evLight:(+(CTX&&CTX.ev)||0); return Math.max(0, Math.ceil(n/2)); }
+  function _dcDefault(){ var h=(CTX&&CTX.evHeavy)||0; return h>0?Math.max(1,Math.ceil(h/2)):0; }   // genoeg DC 300 kVA voor vrachtwagens/bussen
   function _invTotMajor(pvKwp, battKwh, ac, dc){
     var pv=Math.round((+pvKwp||0)*STUB.pv_eur_kwp), bt=Math.round((+battKwh||0)*STUB.batt_eur_kwh);
     var acE=Math.max(0,ac|0)*STUB.ac_paal_eur, dcE=Math.max(0,dc|0)*(STUB.dc_paal_eur||0);
@@ -1043,8 +1086,8 @@
     } else {
       rows+=_invRij('Zonnepanelen', num0(pvKwp)+' kWp');
       rows+=_invRij('Batterij', battKw>0?(String(battKw).replace('.',',')+' kW · '+num0(battKwh)+' kWh'):'geen');
-      rows+=_invRij('Laadpalen AC', ac>0?(ac+' × AC'):'geen');
-      rows+=_invRij('Laadpalen DC', dc>0?(dc+' × DC'):'geen');
+      rows+=_invRij('Laadpalen AC', ac>0?(ac+' × 22 kVA AC'):'geen');
+      rows+=_invRij('Laadpalen DC', dc>0?(dc+' × 300 kVA DC (fastDC)'):'geen');
       rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
     }
     rows+='<tr class="tot"><td>Totale investering (indicatief)</td><td class="r" id="inv-tot">'+eur(m.tot)+'</td></tr>';
@@ -1088,7 +1131,7 @@
     var battKwh = a?(+a.battKwh||0) : C.battKwhFb;
     var bespJaar = a?Math.round(+a.besparing||0) : C.bespFb;
     var acN = INV_OV ? INV_OV.ac : _acDefault();   // v0.15: AC/DC-palen uit de bewerkte combi (INV_OV), anders uit het wagenpark
-    var dcN = INV_OV ? INV_OV.dc : 0;
+    var dcN = INV_OV ? INV_OV.dc : _dcDefault();   // v0.18: DC 300 kVA voor vrachtwagens/bussen
     var _m=_invTotMajor(pvKwp, battKwh, acN, dcN);
     var palen=acN+dcN, kt=_m.kt, invTot=_m.tot, invPvBatt=_m.invPvBatt;
     // v0.16.1 (Johan): één all-in TVT/rendement = TOTALE investering (PV+batt+laadpalen+kabel) ÷ besparing/jaar.
@@ -1228,7 +1271,7 @@
     var _sweepPath = particulier?'/api/thuisladen':'/api/energiekompas/bedrijf-sweep';
     var _sweepBody = particulier
       ? { in:{ profiel:'residentieel', jaarverbruik_mwh:afnameMwh, piek_kw:piekKw, fasen:3, regio:'VL', bestaand_pv_kwp:0, bestaand_inj_mwh:0, wagens:_wagensV2() }, params:P_TL }
-      : { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:toegangKw, spanning:(toegangKw>63?'MS':'LS'), toegangsvermogen_kw:toegangKw, profielNaam:profiel, pleinen:_pleinenV2(), generator:{} };
+      : { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:toegangKw, spanning:(toegangKw>63?'MS':'LS'), toegangsvermogen_kw:toegangKw, profielNaam:profiel, pleinen:_pleinenV2(), generator:{}, rte_pct:BATT_RTE, dod_pct:BATT_DOD };   // v0.18: RTE/DoD → sweep + (via _RAP_PAYLOAD) cel + rapport
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
       _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(aansluitingKw>0?aansluitingKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
@@ -1279,7 +1322,8 @@
     if(_btn){ _btn.disabled=false; _btn.textContent='Start mijn simulatie →'; }
 
     // Cel-onafhankelijke context (verandert niet met de PV/batterij-keuze in de heatmap).
-    CTX={ ev:ev, particulier:particulier, afnameMwh:afnameMwh, toegangKw:toegangKw, piekKw:piekKw, aansluitingKw:aansluitingKw, profiel:profiel,
+    var _evHeavy=_evHeavyCount(), _evLight=Math.max(0, ev-_evHeavy);   // v0.18: zware voertuigen (vrachtwagen/bus) → DC 300 kVA; rest → AC
+    CTX={ ev:ev, evHeavy:_evHeavy, evLight:_evLight, particulier:particulier, afnameMwh:afnameMwh, toegangKw:toegangKw, piekKw:piekKw, aansluitingKw:aansluitingKw, profiel:profiel,
       kostNu:kostNu, kostNieuw:kostNieuw, totaalMwh:totaalMwh, deltaFactuur:deltaFactuur,
       km100:km100, laadMwh:laadMwh, kmBehoefte:kmBehoefte, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
       loadfactor:loadfactor, isMS:isMS, laadVenster:laadVenster,
@@ -1708,6 +1752,7 @@
       var t=document.querySelector('.inv-tools'); if(t) t.style.display=EK_IS_OEKENE?'flex':'none';
       var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV) pu.classList.remove('hidden'); else pu.classList.add('hidden'); }
       var eb=$('ev-def-btn'); if(eb) eb.style.display=EK_IS_OEKENE?'inline-flex':'none';   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
+      var bpc=$('batt-params'); if(bpc){ bpc.classList.toggle('hidden', !EK_IS_OEKENE); if(EK_IS_OEKENE) _battParamsSync(); }   // v0.18: RTE/DoD-control enkel voor oekene
     }catch(e){}
   }
   async function _ekResolveGate(){
@@ -1914,7 +1959,7 @@
     var battKwh=(j.combi&&+j.combi.batt_kwh)||Math.round(battKw*2);
     var ev=+C.ev||0;
     var acAantal = INV_OV ? INV_OV.ac : (ev>0?Math.max(1,Math.ceil(ev/2)):0);   // v0.15: bewerkte laadpaal-aantallen (Pas aan → Opslaan)
-    var dcAantal = INV_OV ? INV_OV.dc : 0;
+    var dcAantal = INV_OV ? INV_OV.dc : _dcDefault();   // v0.18: DC 300 kVA voor vrachtwagens/bussen
     var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
     // v0.16.1 (Johan): all-in investering (PV + batterij + laadpalen AC/DC + overige) → dezelfde totale investering als
     //   op het EK-scherm, zodat de klantrapport-terugverdientijd all-in is en gelijkloopt met EK (niet enkel PV+batt-capex).
@@ -1922,8 +1967,8 @@
     var posten=[];
     if(pvKwp) posten.push({label:'Zonnepanelen ('+pvKwp+' kWp)',bedrag:_mfull.pv});
     if(battKwh) posten.push({label:'Batterij ('+battKwh+' kWh)',bedrag:_mfull.bt});
-    if(acAantal) posten.push({label:'Laadpalen AC ('+acAantal+'×)',bedrag:_mfull.acE});
-    if(dcAantal) posten.push({label:'Laadpalen DC ('+dcAantal+'×)',bedrag:_mfull.dcE});
+    if(acAantal) posten.push({label:'Laadpalen AC ('+acAantal+' × 22 kVA)',bedrag:_mfull.acE});
+    if(dcAantal) posten.push({label:'Laadpalen DC ('+dcAantal+' × 300 kVA)',bedrag:_mfull.dcE});
     if(_mfull.overige) posten.push({label:'Overige (kabel, ontkoppelbord, toebehoren)',bedrag:_mfull.overige});
     return {
       project_id: STATE_CODE||'', datum: datum,
@@ -1940,7 +1985,7 @@
       },
       voorstel: {
         pv_kwp: pvKwp, batt_kw: battKw, batt_kwh: battKwh, batt_cycli:(j.cycli!=null?j.cycli:null),
-        laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: dcAantal ? { kva:60, aantal:dcAantal } : null
+        laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: dcAantal ? { kva:300, aantal:dcAantal } : null
       },
       onderhandeling: { afname_marge_jaar:(+ (C.afname_marge_jaar)||0), injectie_marge_jaar:(+(C.injectie_marge_jaar)||0), digitale_meter:true },
       heeftLaadplein: !!j.heeftLaadplein,
