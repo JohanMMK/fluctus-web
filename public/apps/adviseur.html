@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-<!-- adviseur.html v1.0.0 (2026-09-26) — Adviseur-dashboard "Mijn klanten" (Johan).
-     EK-eigen login (Supabase grant_type=password, zelfde project als FluctusAppAuth; GEEN Academy). Ingelogde adviseur
-     nodigt klanten uit → /api/adviseur/klant-uitnodigen (lead met adviseur-koppeling + klant-mail "stuur uw factuur
-     vanaf DIT adres"). Lijst + status via /api/adviseur/klanten. Manager ziet extra een "Adviseur aanmaken"-paneel
-     (/api/adviseur/aanmaken). Server v15.170+. -->
+<!-- adviseur.html v1.1.0 (2026-09-26) — Adviseur-dashboard "Mijn klanten" (Johan).
+     EK-eigen login via MAGIC 6-CODE (Supabase OTP via supabase-js, zelfde project als FluctusAppAuth; GEEN Academy, GEEN
+     wachtwoord). Ingelogde adviseur nodigt klanten uit → /api/adviseur/klant-uitnodigen (lead met adviseur-koppeling +
+     klant-mail "stuur uw factuur vanaf DIT adres"). Lijst + status via /api/adviseur/klanten. Manager ziet extra een
+     "Adviseur aanmaken"-paneel (/api/adviseur/aanmaken). KLANTEN loggen nooit in. Server v15.171+. -->
 <html lang="nl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mijn klanten — Energie-Compas</title>
 <style>
-  :root{ --navy:#1F3864; --green:#05B050; --ink:#1F3864; --muted:#5A6577; --line:#D6E0EC; --bg:#F4F7FB; --card:#fff; --amber:#C26A12; }
+  :root{ --navy:#1F3864; --green:#05B050; --ink:#1F3864; --muted:#5A6577; --line:#D6E0EC; --bg:#F4F7FB; --card:#fff; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   .wrap{max-width:860px;margin:0 auto;padding:24px 16px 64px}
@@ -42,19 +42,26 @@
   .who b{color:var(--navy)}
   #login{max-width:420px;margin:8vh auto 0}
   .hide{display:none}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <!-- LOGIN -->
+  <!-- LOGIN (magic 6-code) -->
   <div id="login" class="card hide">
     <div class="t" style="font-size:20px;font-weight:700;color:var(--navy)">Adviseur — aanmelden</div>
-    <div class="s" style="color:var(--muted);font-size:13.5px;margin:4px 0 8px">Log in met uw e-mailadres en wachtwoord.</div>
-    <label for="l-email">E-mailadres</label>
-    <input id="l-email" type="email" autocomplete="username" placeholder="u@bedrijf.be">
-    <label for="l-pw">Wachtwoord</label>
-    <input id="l-pw" type="password" autocomplete="current-password" placeholder="Uw wachtwoord">
-    <button id="l-btn" style="margin-top:16px;width:100%">Aanmelden</button>
+    <div class="s" style="color:var(--muted);font-size:13.5px;margin:4px 0 8px">Meld u aan met uw e-mailadres. U ontvangt een 6-cijfercode per mail.</div>
+    <div id="stap-email">
+      <label for="l-email">E-mailadres</label>
+      <input id="l-email" type="email" autocomplete="username" placeholder="u@bedrijf.be">
+      <button id="l-code" style="margin-top:16px;width:100%">Stuur mij een code</button>
+    </div>
+    <div id="stap-code" class="hide">
+      <label for="l-token">6-cijfercode</label>
+      <input id="l-token" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+      <button id="l-verify" style="margin-top:16px;width:100%">Aanmelden</button>
+      <div class="hint">Geen code ontvangen? <a href="#" id="l-opnieuw" class="link">Opnieuw versturen</a></div>
+    </div>
     <div id="l-msg" class="msg"></div>
   </div>
 
@@ -90,7 +97,7 @@
       </div>
       <button id="k-btn" style="margin-top:14px">Uitnodiging versturen</button>
       <div id="k-msg" class="msg"></div>
-      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">De klant krijgt de vraag om zijn factuur te sturen naar <b>dossier@energie-compas.eu</b> <b>vanaf dit e-mailadres</b> — zo koppelen wij zijn analyse automatisch aan u.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">De klant krijgt de vraag om zijn factuur te sturen naar <b>dossier@energie-compas.eu</b> <b>vanaf dit e-mailadres</b> — zo koppelen wij zijn analyse automatisch aan u. De klant hoeft zelf niet in te loggen.</p>
     </div>
 
     <!-- lijst -->
@@ -104,40 +111,47 @@
 <script>
 (function(){
   'use strict';
-  var API = 'https://lucid-amazement-production.up.railway.app';
-  var FA_SB = 'https://haagysosdaorrxkrwkcj.supabase.co';
-  var FA_KEY = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
-  var SB_REF = 'haagysosdaorrxkrwkcj';
   var $ = function(id){ return document.getElementById(id); };
+  var sb=null, CFG={}, API='';
   function toon(id, kind, tekst){ var m=$(id); m.className='msg '+kind; m.textContent=tekst; }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
-  // ── sessie (zelfde formaat als FluctusAppAuth) ──
-  function sessie(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(/^sb-.+-auth-token$/.test(k)){ var v=JSON.parse(localStorage.getItem(k)); if(v&&v.currentSession) v=v.currentSession; if(v&&v.access_token) return {key:k,s:v}; } } }catch(e){} return null; }
-  function geldig(s){ return !!(s.expires_at && s.expires_at*1000 > Date.now()+60000); }
-  async function vernieuw(o){ if(!o||!o.s.refresh_token) return null; try{ var r=await fetch(FA_SB+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{'Content-Type':'application/json','apikey':FA_KEY},body:JSON.stringify({refresh_token:o.s.refresh_token})}); if(!r.ok) return null; var n=await r.json(); if(!n.access_token) return null; if(!n.expires_at&&n.expires_in) n.expires_at=Math.floor(Date.now()/1000)+n.expires_in; var merged={}; for(var a in o.s) merged[a]=o.s[a]; for(var b in n) merged[b]=n[b]; localStorage.setItem(o.key, JSON.stringify(merged)); return n.access_token; }catch(e){ return null; } }
-  async function token(){ var o=sessie(); if(!o) return null; if(geldig(o.s)) return o.s.access_token; return await vernieuw(o); }
-  async function api(pad, opts){ var t=await token(); if(!t) throw {code:401}; var o=opts||{}; var r=await fetch(API+pad,{method:o.method||'GET',headers:Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+t},o.headers||{}),body:o.body?JSON.stringify(o.body):undefined}); var j=await r.json().catch(function(){return {};}); if(r.status===401) throw {code:401,j:j}; return {status:r.status, ok:r.ok, j:j}; }
+  function injectSupabase(){ return new Promise(function(resolve,reject){ if(window.supabase&&window.supabase.createClient) return resolve(); var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'; s.onload=resolve; s.onerror=function(){ reject(new Error('Aanmeldmodule kon niet laden.')); }; document.head.appendChild(s); }); }
 
-  // ── login ──
-  function toonLogin(){ $('login').classList.remove('hide'); $('app').classList.add('hide'); }
+  async function apiCall(pad, opts){
+    var d=await sb.auth.getSession(); var t=d && d.data && d.data.session && d.data.session.access_token;
+    if(!t) throw {code:401};
+    var o=opts||{};
+    var r=await fetch(API+pad,{method:o.method||'GET',headers:Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+t},o.headers||{}),body:o.body?JSON.stringify(o.body):undefined});
+    var j=await r.json().catch(function(){return {};});
+    if(r.status===401) throw {code:401,j:j};
+    return {status:r.status, ok:r.ok, j:j};
+  }
+
+  // ── login (magic 6-code) ──
+  function toonLogin(){ $('login').classList.remove('hide'); $('app').classList.add('hide'); $('stap-code').classList.add('hide'); $('stap-email').classList.remove('hide'); }
   function toonApp(){ $('login').classList.add('hide'); $('app').classList.remove('hide'); }
-  $('l-btn').addEventListener('click', async function(){
-    var email=($('l-email').value||'').trim().toLowerCase(), pw=$('l-pw').value||'';
-    if(!email||!pw){ toon('l-msg','err','Vul e-mailadres en wachtwoord in.'); return; }
-    $('l-btn').disabled=true; toon('l-msg','ok','Bezig met aanmelden…');
-    try{
-      var r=await fetch(FA_SB+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':FA_KEY},body:JSON.stringify({email:email,password:pw})});
-      var j=await r.json().catch(function(){return {};});
-      if(r.ok&&j.access_token){ if(!j.expires_at&&j.expires_in) j.expires_at=Math.floor(Date.now()/1000)+j.expires_in; localStorage.setItem('sb-'+SB_REF+'-auth-token', JSON.stringify(j)); $('l-btn').disabled=false; init(); }
-      else { toon('l-msg','err', (j.error_description||j.msg||'Aanmelden mislukt — controleer uw gegevens.')); $('l-btn').disabled=false; }
-    }catch(e){ toon('l-msg','err','Er ging iets mis: '+e.message); $('l-btn').disabled=false; }
-  });
-  $('l-pw').addEventListener('keydown', function(e){ if(e.key==='Enter') $('l-btn').click(); });
-  $('uitloggen').addEventListener('click', function(e){ e.preventDefault(); var o=sessie(); if(o) try{ localStorage.removeItem(o.key); }catch(_){}
-    toonLogin(); });
+  async function sendCode(){
+    var email=($('l-email').value||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('l-msg','err','Vul een geldig e-mailadres in.'); return; }
+    $('l-code').disabled=true; toon('l-msg','ok','Bezig met versturen…');
+    var res=await sb.auth.signInWithOtp({ email:email, options:{ shouldCreateUser:true } });
+    $('l-code').disabled=false;
+    if(res.error){ toon('l-msg','err','Kon geen code sturen: '+res.error.message); return; }
+    $('stap-email').classList.add('hide'); $('stap-code').classList.remove('hide'); toon('l-msg','ok','We hebben u een 6-cijfercode gemaild. Vul ze hierboven in.'); $('l-token').focus();
+  }
+  async function verifyCode(){
+    var email=($('l-email').value||'').trim().toLowerCase(), token=($('l-token').value||'').trim();
+    if(!token){ toon('l-msg','err','Vul de code uit uw e-mail in.'); return; }
+    $('l-verify').disabled=true; toon('l-msg','ok','Bezig met aanmelden…');
+    var res=await sb.auth.verifyOtp({ email:email, token:token, type:'email' });
+    if(res.error) res=await sb.auth.verifyOtp({ email:email, token:token, type:'signup' });
+    $('l-verify').disabled=false;
+    if(res.error){ toon('l-msg','err','Code klopt niet of is verlopen: '+res.error.message); return; }
+    toon('l-msg','ok',''); init();
+  }
 
-  // ── klanten laden + renderen ──
+  // ── klanten ──
   function statusPill(st){ return st==='factuur_ontvangen' ? '<span class="pill ok">factuur ontvangen</span>' : '<span class="pill wacht">wacht op factuur</span>'; }
   function renderLijst(klanten){
     $('k-count').textContent = klanten.length;
@@ -154,39 +168,60 @@
     $('lijst').innerHTML=h;
   }
   async function laadKlanten(){
-    try{ var r=await api('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; if((g.rol||'')==='manager'){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
+    try{ var r=await apiCall('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; if((g.rol||'')==='manager'){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
     catch(e){ if(e.code===401){ toonLogin(); } }
   }
 
   // ── klant uitnodigen ──
-  $('k-btn').addEventListener('click', async function(){
+  async function nodigKlantUit(){
     var naam=($('k-naam').value||'').trim(), email=($('k-email').value||'').trim().toLowerCase(), bedrijf=($('k-bedrijf').value||'').trim();
     if(!naam){ toon('k-msg','err','Vul de naam van de klant in.'); return; }
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('k-msg','err','Vul een geldig e-mailadres in.'); return; }
     $('k-btn').disabled=true; toon('k-msg','ok','Bezig met versturen…');
     try{
-      var r=await api('/api/adviseur/klant-uitnodigen',{method:'POST',body:{naam:naam,email:email,bedrijf:bedrijf}});
-      if(r.ok&&r.j.ok){ toon('k-msg','ok','Uitnodiging verstuurd naar '+email+(r.j.mail&&r.j.mail.sent?'':' (let op: mail-verzending gaf geen bevestiging)')+'.'); $('k-naam').value='';$('k-email').value='';$('k-bedrijf').value=''; laadKlanten(); }
+      var r=await apiCall('/api/adviseur/klant-uitnodigen',{method:'POST',body:{naam:naam,email:email,bedrijf:bedrijf}});
+      if(r.ok&&r.j.ok){ toon('k-msg','ok','Uitnodiging verstuurd naar '+email+'.'); $('k-naam').value='';$('k-email').value='';$('k-bedrijf').value=''; laadKlanten(); }
       else { toon('k-msg','err', r.j.error||'Versturen mislukt.'); }
     }catch(e){ if(e.code===401){ toonLogin(); } else { toon('k-msg','err','Er ging iets mis: '+e.message); } }
     $('k-btn').disabled=false;
-  });
+  }
 
   // ── manager: adviseur aanmaken ──
-  $('a-btn').addEventListener('click', async function(){
+  async function maakAdviseur(){
     var naam=($('a-naam').value||'').trim(), email=($('a-email').value||'').trim().toLowerCase(), bedrijf=($('a-bedrijf').value||'').trim();
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('a-msg','err','Vul een geldig e-mailadres in.'); return; }
     $('a-btn').disabled=true; toon('a-msg','ok','Bezig…');
     try{
-      var r=await api('/api/adviseur/aanmaken',{method:'POST',body:{naam:naam,email:email,company:bedrijf}});
-      if(r.ok&&r.j.ok){ toon('a-msg','ok','Adviseur aangemaakt. '+(r.j.mail&&r.j.mail.sent?('Uitnodigingsmail verstuurd naar '+email+'.'):('Mail niet bevestigd — set-up-link: '+r.j.setup_link))); $('a-naam').value='';$('a-email').value='';$('a-bedrijf').value=''; }
+      var r=await apiCall('/api/adviseur/aanmaken',{method:'POST',body:{naam:naam,email:email,company:bedrijf}});
+      if(r.ok&&r.j.ok){ toon('a-msg','ok','Adviseur aangemaakt. '+(r.j.mail&&r.j.mail.sent?('Uitnodigingsmail verstuurd naar '+email+'.'):'Mail niet bevestigd — hij kan zelf aanmelden op deze pagina met zijn e-mailadres.')); $('a-naam').value='';$('a-email').value='';$('a-bedrijf').value=''; }
       else { toon('a-msg','err', r.j.error||'Aanmaken mislukt.'); }
     }catch(e){ if(e.code===401){ toonLogin(); } else { toon('a-msg','err','Er ging iets mis: '+e.message); } }
     $('a-btn').disabled=false;
-  });
+  }
 
   // ── init ──
-  async function init(){ var t=await token(); if(!t){ toonLogin(); return; } toonApp(); laadKlanten(); }
+  async function init(){
+    try{
+      if(!sb){
+        await injectSupabase();
+        try{ CFG=await fetch('/api/config').then(function(r){return r.json();}); }catch(e){ CFG={}; }
+        API=(CFG.fluctusProxyUrl||'https://lucid-amazement-production.up.railway.app').replace(/\/+$/,'');
+        var sbUrl=CFG.supabaseUrl||'https://haagysosdaorrxkrwkcj.supabase.co';
+        var sbKey=CFG.supabaseAnonKey||'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
+        sb=window.supabase.createClient(sbUrl, sbKey);
+        // knoppen koppelen (één keer)
+        $('l-code').onclick=sendCode; $('l-verify').onclick=verifyCode;
+        $('l-opnieuw').onclick=function(e){ e.preventDefault(); sendCode(); };
+        $('l-email').addEventListener('keydown',function(e){ if(e.key==='Enter' && $('stap-code').classList.contains('hide')) sendCode(); });
+        $('l-token').addEventListener('keydown',function(e){ if(e.key==='Enter') verifyCode(); });
+        $('k-btn').onclick=nodigKlantUit; $('a-btn').onclick=maakAdviseur;
+        $('uitloggen').onclick=async function(e){ e.preventDefault(); try{ await sb.auth.signOut(); }catch(_){ } toonLogin(); };
+      }
+      var d=await sb.auth.getSession();
+      if(d && d.data && d.data.session && d.data.session.access_token){ toonApp(); laadKlanten(); }
+      else { toonLogin(); }
+    }catch(e){ toonLogin(); toon('l-msg','err','Aanmelden is tijdelijk niet beschikbaar: '+e.message); }
+  }
   init();
 })();
 </script>

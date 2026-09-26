@@ -1,95 +1,19 @@
 <!DOCTYPE html>
-<!-- adviseur-setup.html v1.0.0 (2026-09-26) — EK-EIGEN set-password-scherm voor nieuwe adviseurs (los van de Academy).
-     Leest ?token, POST /api/adviseur/set-password → zet wachtwoord via Supabase admin (server) → logt daarna meteen
-     in met grant_type=password en schrijft de sb-<ref>-auth-token naar localStorage (formaat dat FluctusAppAuth leest)
-     → doorsturen naar adviseur.html. Server v15.170+. -->
+<!-- adviseur-setup.html v2.0.0 (2026-09-26) — DEPRECATED. De adviseur-login gebruikt nu een magic 6-code (OTP) op
+     adviseur.html; er is geen wachtwoord-instelscherm meer. Deze pagina stuurt oude uitnodigingslinks door. -->
 <html lang="nl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wachtwoord instellen — Energie-Compas</title>
-<style>
-  :root{ --navy:#1F3864; --green:#05B050; --ink:#1F3864; --muted:#5A6577; --line:#D6E0EC; --bg:#F4F7FB; --card:#fff; }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;padding:32px 28px;box-shadow:0 6px 24px rgba(31,56,100,.08)}
-  h1{font-size:21px;margin:0 0 6px;color:var(--navy)}
-  p.sub{color:var(--muted);font-size:14px;margin:0 0 22px}
-  label{display:block;font-size:13px;font-weight:600;color:var(--navy);margin:14px 0 5px}
-  input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;color:var(--ink);background:#fff}
-  input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(5,176,80,.12)}
-  button{width:100%;margin-top:20px;background:var(--green);color:#fff;border:0;border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer}
-  button:disabled{opacity:.55;cursor:default}
-  .msg{margin-top:16px;font-size:13.5px;padding:11px 13px;border-radius:9px;display:none}
-  .msg.err{display:block;background:#FDECEC;color:#B4231F;border:1px solid #F5C2C0}
-  .msg.ok{display:block;background:#E7F6EE;color:#0B7A45;border:1px solid #B9E4CC}
-  .hint{font-size:12px;color:var(--muted);margin-top:5px}
-  .brand{font-size:12px;color:var(--muted);text-align:center;margin-top:18px}
-</style>
+<title>Aanmelden — Energie-Compas</title>
+<meta http-equiv="refresh" content="0; url=/apps/adviseur.html">
+<style>body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1F3864;background:#F4F7FB;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px}a{color:#05B050;font-weight:700}</style>
 </head>
 <body>
-<div class="card">
-  <h1>Stel uw wachtwoord in</h1>
-  <p class="sub">Kies een wachtwoord om uw adviseur-account te activeren. Daarna kan u meteen klanten uitnodigen.</p>
-  <div id="form">
-    <label for="pw">Wachtwoord</label>
-    <input id="pw" type="password" autocomplete="new-password" placeholder="Minstens 8 tekens">
-    <div class="hint">Minstens 8 tekens.</div>
-    <label for="pw2">Herhaal wachtwoord</label>
-    <input id="pw2" type="password" autocomplete="new-password" placeholder="Nogmaals">
-    <button id="btn">Wachtwoord instellen &amp; inloggen</button>
-  </div>
-  <div id="msg" class="msg"></div>
-  <div class="brand">Energie-Compas</div>
+<div>
+  <p>Aanmelden gebeurt nu met een <b>6-cijfercode</b> — geen wachtwoord meer.</p>
+  <p>U wordt doorgestuurd… <a href="/apps/adviseur.html">Klik hier</a> als dat niet automatisch gebeurt.</p>
 </div>
-<script>
-(function(){
-  'use strict';
-  var API = 'https://lucid-amazement-production.up.railway.app';
-  var FA_SB = 'https://haagysosdaorrxkrwkcj.supabase.co';
-  var FA_KEY = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
-  var SB_REF = 'haagysosdaorrxkrwkcj';
-  var $ = function(id){ return document.getElementById(id); };
-  var q = new URLSearchParams(location.search);
-  var token = (q.get('token')||'').trim();
-  function toon(kind, tekst){ var m=$('msg'); m.className='msg '+kind; m.textContent=tekst; }
-  if(!token){ toon('err','Deze link is ongeldig — geen token gevonden. Vraag een nieuwe uitnodiging aan uw manager.'); $('btn').disabled=true; }
-
-  function bewaarSessie(sess){
-    // Schrijf in het formaat dat FluctusAppAuth (_sessie) verwacht: sb-<ref>-auth-token met access_token/refresh_token/expires_at.
-    try{
-      if(!sess.expires_at && sess.expires_in){ sess.expires_at = Math.floor(Date.now()/1000) + sess.expires_in; }
-      localStorage.setItem('sb-'+SB_REF+'-auth-token', JSON.stringify(sess));
-      return true;
-    }catch(e){ return false; }
-  }
-
-  $('btn').addEventListener('click', async function(){
-    var pw = $('pw').value||'', pw2 = $('pw2').value||'';
-    if(pw.length < 8){ toon('err','Uw wachtwoord moet minstens 8 tekens bevatten.'); return; }
-    if(pw !== pw2){ toon('err','De twee wachtwoorden komen niet overeen.'); return; }
-    $('btn').disabled = true; toon('ok','Bezig met instellen…');
-    try{
-      var r = await fetch(API+'/api/adviseur/set-password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token: token, password: pw }) });
-      var j = await r.json().catch(function(){ return {}; });
-      if(!r.ok || !j.ok){ toon('err', j.melding || j.error || ('Instellen mislukt (HTTP '+r.status+')')); $('btn').disabled=false; return; }
-      var email = j.email;
-      // Meteen inloggen (grant_type=password) → sessie wegschrijven → door naar het klanten-scherm.
-      toon('ok','Wachtwoord ingesteld — bezig met inloggen…');
-      var lr = await fetch(FA_SB+'/auth/v1/token?grant_type=password', { method:'POST', headers:{'Content-Type':'application/json','apikey':FA_KEY}, body: JSON.stringify({ email: email, password: pw }) });
-      var lj = await lr.json().catch(function(){ return {}; });
-      if(lr.ok && lj.access_token){
-        bewaarSessie(lj);
-        toon('ok','Gelukt! U wordt doorgestuurd…');
-        setTimeout(function(){ location.href = '/apps/adviseur.html'; }, 700);
-      } else {
-        toon('ok','Uw wachtwoord is ingesteld. Ga naar het adviseur-scherm en log in.');
-        setTimeout(function(){ location.href = '/apps/adviseur.html'; }, 1400);
-      }
-    }catch(e){ toon('err','Er ging iets mis: '+e.message); $('btn').disabled=false; }
-  });
-  $('pw2').addEventListener('keydown', function(e){ if(e.key==='Enter') $('btn').click(); });
-})();
-</script>
+<script>setTimeout(function(){ location.href='/apps/adviseur.html'; }, 300);</script>
 </body>
 </html>
