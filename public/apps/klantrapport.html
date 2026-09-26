@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
-<!-- klantrapport.html v0.7.0 (2026-09-25) — FACTUUR-CONTRACT afgestemd op /api/energiekompas/bedrijf-rapport:
+<!-- klantrapport.html v0.8.0 (2026-09-26) — COMBI-AFSTEMMING + DYNAMISCHE BIJLAGENUMMERS (Johan): het rapport toont/benoemt
+     nu enkel wat écht in de gekozen combi zit. HAS_PV/HAS_BATT/HAS_LP/HAS_INJ sturen alle labels (hero, kop, factuurkolom,
+     cover-sub, onderhandelingsnota-checklist, investeringsregel) via CN/CS/CN_PROSE — geen "+ batterij" meer als er geen
+     batterij is. Besparingskaarten (Zelfconsumptie=PV, Piekafvlakking/Arbitrage=batt, Onbalans=batt|injectie) enkel indien
+     van toepassing. Bijlagen krijgen een lopende teller (_bijlage) → geen gaten in de nummering als er één wegvalt;
+     injectiesturing enkel bij PV, laadplein enkel bij laadplein, batterij enkel bij batterij (batt-arrays komen altijd mee,
+     dus gate op de hardware, niet op de nul-heatmaps). A5-afname past a/b/c + teksten aan de combi/laadplein aan.
+     v0.7.1 (2026-09-26) — leest payload uit localStorage én sessionStorage (Safari-fix, geen demo-fallback meer).
+     v0.7.0 (2026-09-25) — FACTUUR-CONTRACT afgestemd op /api/energiekompas/bedrijf-rapport:
      factuurposten nu energie / netkosten / heffingen / injectie_opbrengst / saldo (i.p.v. afname/injectie/laden).
      De energiepost is na injectie-verrekening; injectie-opbrengst apart vermeld onder de tabel.
      v0.6.0 (2026-09-25) — AANSLUITING + VOORGESTELDE VERBETERING op p2 (Johan): onder de drie tegels
@@ -246,6 +254,20 @@ function _cycliJaar(){
   return kwh/cap;
 }
 var CYCLI=_cycliJaar();
+// v0.8.0: stem het rapport af op de ECHTE combi. Batterij-arrays komen altijd mee (emit_batt_profielen), dus
+//   gate op de gekozen hardware, niet op de aanwezigheid van (nul-)heatmaps.
+var _V0=D.voorstel||{};
+var HAS_PV   = ((+combi.pv_kwp||0)>0)   || ((+_V0.pv_kwp||0)>0);
+var HAS_BATT = ((+combi.batt_kwh||0)>0) || ((+_V0.batt_kwh||0)>0) || ((+_V0.batt_kw||0)>0);
+var HAS_LP   = !!D.heeftLaadplein || (Array.isArray(HT.laadplein)&&HT.laadplein.length>0);
+var HAS_INJ  = HAS_PV || !!(D.aansluiting&&D.aansluiting.injectie);
+function _combiNoun(){ var p=[]; if(HAS_PV)p.push('zonnepanelen'); if(HAS_BATT)p.push('batterij'); return p.length?p.join(' + '):'de voorgestelde installatie'; }
+function _combiShort(){ var p=[]; if(HAS_PV)p.push('PV'); if(HAS_BATT)p.push('batterij'); return p.length?p.join(' + '):'installatie'; }
+var CN=_combiNoun(), CS=_combiShort(), CN_BR=CN.replace(' + ','<br>+ ');
+var CN_CAP=CN.charAt(0).toUpperCase()+CN.slice(1);
+var CN_PROSE=(HAS_PV&&HAS_BATT)?'zonnepanelen én een batterij':(HAS_PV?'zonnepanelen':(HAS_BATT?'een batterij':'de voorgestelde installatie'));
+// bijlage-teller → dynamische nummering (geen gaten als een bijlage wegvalt)
+var _bijNr=0; function _bijlage(t){ _bijNr++; return kop('Bijlage '+_bijNr+' — '+t); }
 function _combiTekst(){
   var t=(combi.pv_kwp?_num(combi.pv_kwp,0)+' kWp zonnepanelen':'')+
         (combi.pv_kwp&&combi.batt_kwh?' · ':'')+(combi.batt_kwh?_num(combi.batt_kwh,0)+' kWh batterij':'');
@@ -263,7 +285,7 @@ function _combiTekst(){
   var hero='<div class="hero" style="margin:22px 0 0">'+
        '<div class="box"><span class="l">Jaarfactuur vandaag<br>(laden @ CREG)</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
        '<div class="arr">→</div>'+
-       '<div class="box win"><span class="l">Met zonnepanelen<br>+ batterij</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
+       '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
        '<div class="arr">=</div>'+
        '<div class="box"><span class="l">U bespaart</span><div class="v win">'+eur(besp)+'</div><span class="u">per jaar · '+pct(bespPct,0)+'</span></div>'+
      '</div>';   // voorblad: géén vermelding van batterij/cycli
@@ -271,7 +293,7 @@ function _combiTekst(){
       (IMG.desk?'<img class="band-top" src="'+IMG.desk+'" alt="">':'')+
       '<div class="cover-eyebrow">Onafhankelijke energie-analyse</div>'+
       '<h1 class="cover-t">Uw energiefactuur van morgen, vandaag berekend</h1>'+
-      '<div class="cover-sub">Wat zonnepanelen, een batterij en slim laden voor u betekenen — becijferd op kwartierbasis over een volledig jaar.</div>'+
+      '<div class="cover-sub">'+(function(){var p=[]; if(HAS_PV)p.push('zonnepanelen'); if(HAS_BATT)p.push('een batterij'); if(HAS_LP)p.push('slim laden'); var lst=p.length?(p.length>1?p.slice(0,-1).join(', ')+' en '+p[p.length-1]:p[0]):'de voorgestelde installatie'; return 'Wat '+lst+' voor u betekenen — becijferd op kwartierbasis over een volledig jaar.';})()+'</div>'+
       hero+
       '<div class="cover-id">'+(idlines||'<div>Energie-analyse</div>')+'</div>'+
     '</div>';
@@ -281,14 +303,14 @@ function _combiTekst(){
 // P2 — samenvatting (de kernvergelijking staat nu op de voorpagina)
 (function(){
   var h='';
-  h+=kop('Uw energiefactuur: vandaag versus met zonnepanelen en batterij');
+  h+=kop('Uw energiefactuur: vandaag versus met '+CN);
   h+='<p class="lead">Deze analyse vergelijkt uw <b>jaarfactuur zonder eigen productie</b> — waarbij u laadt aan het '+
-     'referentietarief (CREG) — met uw <b>jaarfactuur met zonnepanelen én een batterij</b> die slim wordt aangestuurd '+
+     'referentietarief (CREG) — met uw <b>jaarfactuur met '+CN_PROSE+'</b> die slim wordt aangestuurd '+
      'op de energiemarkt. Alle cijfers komen uit een simulatie op kwartierbasis over een volledig jaar.</p>';
   h+='<div class="hero">'+
        '<div class="box"><span class="l">Jaarfactuur vandaag<br>(laden @ CREG)</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
        '<div class="arr">→</div>'+
-       '<div class="box win"><span class="l">Met zonnepanelen<br>+ batterij</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
+       '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
        '<div class="arr">=</div>'+
        '<div class="box"><span class="l">U bespaart</span><div class="v win">'+eur(besp)+'</div><span class="u">per jaar · '+pct(bespPct,0)+'</span></div>'+
      '</div>';
@@ -326,21 +348,21 @@ function _combiTekst(){
     h+='</tbody></table>';
   }
   h+='<p class="note">De bijlage bij dit rapport toont, per aspect, hoe uw installatie zich over het jaar gedraagt '+
-     '(afname, injectie, laden en batterijgebruik).</p>';
+     '('+(function(){var p=['afname']; if(HAS_INJ)p.push('injectie'); if(HAS_LP)p.push('laden'); if(HAS_BATT)p.push('batterijgebruik'); return p.length>1?p.slice(0,-1).join(', ')+' en '+p[p.length-1]:p[0];})()+').</p>';
   pagina(h);
 })();
 
 // P2 — factuurvergelijking
 (function(){
   var h=kop('Factuurvergelijking in detail');
-  h+='<p class="lead">Onderstaande tabel splitst uw jaarfactuur uit per post. Kolom links = vandaag (zonder PV/batterij, '+
-     'laden aan CREG-tarief). Kolom rechts = met zonnepanelen en batterij.</p>';
+  h+='<p class="lead">Onderstaande tabel splitst uw jaarfactuur uit per post. Kolom links = vandaag (zonder '+CS+', '+
+     'laden aan CREG-tarief). Kolom rechts = met '+CN+'.</p>';
   function rij(label, a, b, win){
     var v=(+a||0)-(+b||0);
     return '<tr><td>'+esc(label)+'</td><td>'+eur(a)+'</td><td'+(win?' class="win"':'')+'>'+eur(b)+'</td>'+
       '<td class="'+(v>=0?'pos':'neg')+'">'+signEur(v)+'</td></tr>';
   }
-  h+='<table class="f"><thead><tr><th>Post</th><th>Vandaag (CREG)</th><th>Met PV + batterij</th><th>Verschil</th></tr></thead><tbody>';
+  h+='<table class="f"><thead><tr><th>Post</th><th>Vandaag (CREG)</th><th>Met '+CS+'</th><th>Verschil</th></tr></thead><tbody>';
   h+=rij('Energie (incl. laden, na injectie)', NUL.energie, OPT.energie);
   h+=rij('Netgebruik & capaciteit', NUL.netkosten, OPT.netkosten);
   h+=rij('Heffingen & bijdragen', NUL.heffingen, OPT.heffingen);
@@ -348,17 +370,16 @@ function _combiTekst(){
   h+='</tbody></table>';
   if((OPT.injectie_opbrengst||0)>0 || (NUL.injectie_opbrengst||0)>0){
     h+='<p class="muted" style="margin-top:8px">Waarvan injectie-opbrengst (reeds in de energiepost verrekend): '+
-       'vandaag '+eur(NUL.injectie_opbrengst||0)+' → met PV + batterij '+eur(OPT.injectie_opbrengst||0)+' per jaar.</p>';
+       'vandaag '+eur(NUL.injectie_opbrengst||0)+' → met '+CS+' '+eur(OPT.injectie_opbrengst||0)+' per jaar.</p>';
   }
   h+='<p class="note">Bedragen exclusief btw, op jaarbasis. De energiepost is na verrekening van de injectie-opbrengst; '+
      'een negatieve waarde betekent een netto-opbrengst. Het referentie-laadtarief (CREG) bedraagt '+_num(D.creg_eur_per_mwh||322,0)+' €/MWh.</p>';
-  h+='<h2>Zo is de besparing opgebouwd</h2>';
-  h+='<div class="grid2">'+
-       '<div class="card"><div class="t">Zelfconsumptie</div><p>Zonnestroom die u zelf gebruikt hoeft u niet duur van het net te kopen.</p></div>'+
-       '<div class="card"><div class="t">Piekafvlakking</div><p>De batterij dekt korte afnamepieken → lagere capaciteitskost.</p></div>'+
-       '<div class="card"><div class="t">Arbitrage spotmarkt</div><p>Laden/ontladen op prijsverschillen binnen de dag.</p></div>'+
-       '<div class="card"><div class="t">Onbalans (windfall)</div><p>Passieve respons op onbalansmomenten — een extra, opportunistische opbrengst.</p></div>'+
-     '</div>';
+  var _kaarten=[];
+  if(HAS_PV)   _kaarten.push('<div class="card"><div class="t">Zelfconsumptie</div><p>Zonnestroom die u zelf gebruikt hoeft u niet duur van het net te kopen.</p></div>');
+  if(HAS_BATT) _kaarten.push('<div class="card"><div class="t">Piekafvlakking</div><p>De batterij dekt korte afnamepieken → lagere capaciteitskost.</p></div>');
+  if(HAS_BATT) _kaarten.push('<div class="card"><div class="t">Arbitrage spotmarkt</div><p>Laden/ontladen op prijsverschillen binnen de dag.</p></div>');
+  if(HAS_BATT||HAS_INJ) _kaarten.push('<div class="card"><div class="t">Onbalans (windfall)</div><p>Passieve respons op onbalansmomenten — een extra, opportunistische opbrengst.</p></div>');
+  if(_kaarten.length){ h+='<h2>Zo is de besparing opgebouwd</h2><div class="grid2">'+_kaarten.join('')+'</div>'; }
   pagina(h);
 })();
 
@@ -379,7 +400,7 @@ function _combiTekst(){
     posten.forEach(function(p){ var b=+p.bedrag||0; var aand=totaal>0?(b/totaal*100):0;
       h+='<tr><td>'+esc(p.label||'')+'</td><td>'+eur(b)+'</td><td>'+pct(aand,0)+'</td></tr>'; });
   } else {
-    h+='<tr><td>Volledige installatie (zonnepanelen + batterij + toebehoren)</td><td>'+eur(totaal)+'</td><td>100 %</td></tr>';
+    h+='<tr><td>Volledige installatie ('+CN+' + toebehoren)</td><td>'+eur(totaal)+'</td><td>100 %</td></tr>';
   }
   h+='<tr class="tot"><td>Totale investering</td><td class="win">'+eur(totaal)+'</td><td>100 %</td></tr>';
   h+='</tbody></table>';
@@ -473,7 +494,7 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 // A1 — onderhandelingsnota
 (function(){
   var o=D.onderhandeling||{};
-  var h=kop('Bijlage 1 — Onderhandelingsnota energiecontract');
+  var h=_bijlage('Onderhandelingsnota energiecontract');
   h+='<p class="lead">Met de juiste installatie wordt u een aantrekkelijke klant voor uw energieleverancier: u neemt '+
      'gerichter af en injecteert waardevoller. Gebruik onderstaande punten om bij uw eigen leverancier een scherper, '+
      '<b>dynamisch (spot) contract</b> te bespreken.</p>';
@@ -487,14 +508,14 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
   h+='<h2>Vraag dit aan uw leverancier</h2>';
   h+='<ul class="check">'+
        '<li><b>Dynamisch (spot) afnametarief</b> gekoppeld aan de day-ahead-marktprijs, met een zo laag mogelijke opslag (€/MWh) en transparante doorrekening.</li>'+
-       '<li><b>Marktconforme injectievergoeding</b> — bij voorkeur eveneens spot-gekoppeld, zodat u profiteert op uren met hoge prijzen.</li>'+
+       (HAS_INJ?'<li><b>Marktconforme injectievergoeding</b> — bij voorkeur eveneens spot-gekoppeld, zodat u profiteert op uren met hoge prijzen.</li>':'')+
        '<li><b>Geen of lage vaste vergoeding</b> en geen onnodige capaciteits- of abonnementskosten bovenop het netgedeelte.</li>'+
-       '<li><b>Kwartierafrekening</b> op uw digitale meter, zodat uw slim laden en uw batterij effectief verrekend worden.</li>'+
-       '<li><b>Correcte capaciteitscomponent</b>: laat uw afgevlakte piek (dankzij de batterij) meenemen in de tarifering.</li>'+
+       '<li><b>Kwartierafrekening</b> op uw digitale meter, zodat uw slim laden'+(HAS_BATT?' en uw batterij':'')+' effectief verrekend worden.</li>'+
+       (HAS_BATT?'<li><b>Correcte capaciteitscomponent</b>: laat uw afgevlakte piek (dankzij de batterij) meenemen in de tarifering.</li>':'')+
        '<li><b>Looptijd & opzeg</b> die u toelaten mee te bewegen met de markt (vermijd lange vaste contracten net nu).</li>'+
      '</ul>';
   if(o.digitale_meter){
-    h+='<p class="note">Een <b>digitale meter</b> is nodig voor een dynamisch contract en voor de slimme sturing van PV + batterij. '+
+    h+='<p class="note">Een <b>digitale meter</b> is nodig voor een dynamisch contract en voor de slimme sturing van '+CS+'. '+
        'Zonder digitale meter is een dynamisch tarief niet mogelijk.</p>';
   }
   pagina(h);
@@ -502,8 +523,9 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 
 // A2 — injectiesturing (3 heatmaps)
 (function(){
+  if(!HAS_INJ) return;
   if(!(HT.injectie_gewoon||HT.injectie_spot||HT.injectie_onbalans)) return;
-  var h=kop('Bijlage 2 — Sturing van uw injectie op de markt');
+  var h=_bijlage('Sturing van uw injectie op de markt');
   h+='<p class="lead">De grafieken tonen, per uur (verticaal, 0–23u) en per dag van het jaar (horizontaal), hoeveel u '+
      'op het net injecteert. Donkerder = meer kW. Door de injectie af te remmen op momenten dat het niets opbrengt, '+
      'houdt u die energie in de batterij voor een waardevoller moment.</p>';
@@ -515,8 +537,8 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 
 // A3 — laadplein
 (function(){
-  var lp=HT.laadplein||[]; if(!lp.length) return;
-  var h=kop('Bijlage 3 — Laadprofiel van uw laadplein(en)');
+  var lp=HT.laadplein||[]; if(!HAS_LP || !lp.length) return;
+  var h=_bijlage('Laadprofiel van uw laadplein(en)');
   h+=band(IMG.office);
   h+='<p class="lead">Wanneer en hoe hard uw voertuigen laden over het jaar. Donkerder = meer laadvermogen (kW) op dat uur.</p>';
   lp.forEach(function(p){ h+=heatBlok(esc(p.naam||'Laadplein')+' — laadvermogen', p.mat, (p.eenheid||'kW'), ''); });
@@ -525,8 +547,9 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 
 // A4 — batterij (SOC / ontladen / laden)
 (function(){
+  if(!HAS_BATT) return;
   if(!(HT.batt_soc||HT.batt_ontladen||HT.batt_laden)) return;
-  var h=kop('Bijlage 4 — Werking van uw batterij');
+  var h=_bijlage('Werking van uw batterij');
   h+='<p class="lead">Hoe uw batterij het jaar door werkt: haar vullingsgraad, en wanneer ze laadt of ontlaadt. '+
      'Zo ziet u dat ze koopt wanneer het goedkoop is en levert wanneer het duur is.</p>';
   if(CYCLI!=null){
@@ -546,12 +569,13 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 // A5 — load op afname
 (function(){
   if(!(HT.afname_asis||HT.afname_laden_zonder||HT.afname_met_sturing)) return;
-  var h=kop('Bijlage 5 — Uw afname van het net');
-  h+='<p class="lead">Hoeveel u van het net afneemt over het jaar, in drie situaties. U ziet hoe laden de afname '+
-     'verzwaart, en hoe PV + batterij met slimme sturing die weer afvlakt.</p>';
-  if(HT.afname_asis) h+=heatBlok('a. Gebouw vandaag (zonder laden)', HT.afname_asis.mat||HT.afname_asis, (HT.afname_asis.eenheid||'kW'), 'Uw huidige verbruiksprofiel.');
-  if(HT.afname_laden_zonder) h+=heatBlok('b. Gebouw + laden, zonder PV/batterij', HT.afname_laden_zonder.mat||HT.afname_laden_zonder, (HT.afname_laden_zonder.eenheid||'kW'), 'Het laden verhoogt en verbreedt uw afnamepieken.');
-  if(HT.afname_met_sturing) h+=heatBlok('c. Gebouw + laden, met PV + batterij (gestuurd)', HT.afname_met_sturing.mat||HT.afname_met_sturing, (HT.afname_met_sturing.eenheid||'kW'), 'PV en batterij vlakken de afname af — lagere pieken, lagere kosten.');
+  var h=_bijlage('Uw afname van het net');
+  h+='<p class="lead">Hoeveel u van het net afneemt over het jaar. '+
+     (HAS_LP?'U ziet hoe laden de afname verzwaart, en hoe ':'U ziet hoe ')+CS+' met slimme sturing uw afnamepieken afvlakt.</p>';
+  var _al=0, _ltr=function(){ return String.fromCharCode(97+(_al++)); };
+  if(HT.afname_asis) h+=heatBlok(_ltr()+'. Gebouw vandaag'+(HAS_LP?' (zonder laden)':''), HT.afname_asis.mat||HT.afname_asis, (HT.afname_asis.eenheid||'kW'), 'Uw huidige verbruiksprofiel.');
+  if(HAS_LP && HT.afname_laden_zonder) h+=heatBlok(_ltr()+'. Gebouw + laden, zonder '+CS, HT.afname_laden_zonder.mat||HT.afname_laden_zonder, (HT.afname_laden_zonder.eenheid||'kW'), 'Het laden verhoogt en verbreedt uw afnamepieken.');
+  if(HT.afname_met_sturing) h+=heatBlok(_ltr()+'. Gebouw'+(HAS_LP?' + laden':'')+', met '+CS+' (gestuurd)', HT.afname_met_sturing.mat||HT.afname_met_sturing, (HT.afname_met_sturing.eenheid||'kW'), CN_CAP+' vlakt de afname af — lagere pieken, lagere kosten.');
   pagina(h);
 })();
 
