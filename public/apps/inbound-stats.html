@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Factuurmails · Fluctus</title>
-<!-- inbound-stats.html v1.1.0 (2026-09-20) — + Graph-status strook bovenaan (GET /api/graph/diag): toont in één
+<!-- inbound-stats.html v1.2.0 (2026-09-20) — + diagnose-log "Laatste verwerkte mails" (GET /api/graph/inbound-log,
+     server v15.156.7): per inkomende factuurmail het resultaat (nieuwe lead / abonnement / geen EAN / fout) met
+     afzender, onderwerp, klant/EAN en tijd. Zo zie je meteen waarom een mail wél/niet een project/mail opleverde.
+     v1.1.0 (2026-09-20) — + Graph-status strook bovenaan (GET /api/graph/diag): toont in één
      oogopslag of Graph actief is, of auto-rapport AAN staat (GRAPH_INBOUND_AUTOREPORT), of de login lukt, welke
      mailbox + poll-interval. Zo hoeft de manager het diag-endpoint niet handmatig met een token op te vragen.
      v1.0.0 (2026-09-20) — MANAGER-DASHBOARD factuurmail-intake: hoeveel factuurmails kwamen
@@ -29,7 +32,7 @@
   .btn{ background:var(--navy); color:#fff; border:none; border-radius:8px; padding:7px 11px; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-block; }
   .btn.ghost{ background:#fff; color:var(--navy2); border:1.5px solid var(--line); }
   .diag{ display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 14px; margin-bottom:14px; }
-  .diag .chip{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; padding:4px 10px; border-radius:999px; }
+  .chip{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; padding:4px 10px; border-radius:999px; }
   .chip.on{ background:#D1FAE5; color:#065f46; } .chip.off{ background:#FEE2E2; color:#9b1c1c; } .chip.neu{ background:#EEF2F8; color:#42506a; font-weight:600; }
   .diag .hint{ font-size:12px; color:var(--amber); font-weight:600; width:100%; }
   .kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px; }
@@ -70,9 +73,13 @@
     <div class="bar">
       <input type="search" id="zoek" placeholder="Zoek op e-mailadres…">
       <span class="sub" id="telling"></span>
-      <button class="btn ghost" onclick="laad();laadDiag()">↻ Ververs</button>
+      <button class="btn ghost" onclick="laad();laadDiag();laadLog()">↻ Ververs</button>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
+
+    <h2 style="font-size:15px;color:var(--navy2);margin:26px 0 8px">Laatste verwerkte mails</h2>
+    <div class="sub" style="margin-bottom:8px">Wat er met elke inkomende factuurmail gebeurde (nieuwe lead / abonnement / geen EAN / fout).</div>
+    <div id="log"><div class="state">Laden…</div></div>
   </div>
 
   <script>
@@ -89,7 +96,48 @@
       if(!SESSION){ window.location.href='/portal.html'; return; }
       $('who').textContent = (SESSION.user && SESSION.user.email) || '';
       laadDiag();
+      laadLog();
       await laad();
+    }
+    // Resultaat-labels per mail-status (voor de diagnose-log).
+    var LOGLABEL = {
+      nieuwe_lead_rapport1: ['✓ nieuwe klant — mail verstuurd','on'],
+      nieuwe_lead_dryrun: ['nieuwe klant — dry-run (geen mail)','neu'],
+      abonnement_herrekend: ['✓ abonnement — mail verstuurd','on'],
+      gekoppeld_dryrun: ['gekoppeld — dry-run (geen mail)','neu'],
+      gekoppeld_geen_adres: ['gekoppeld — geen geldig adres','off'],
+      gekoppeld_onbevestigd: ['gekoppeld — niet bevestigd','neu'],
+      gekoppeld_opt_out: ['gekoppeld — uitgeschreven','neu'],
+      geen_ean: ['⚠ geen EAN gevonden','off'],
+      onbekende_ean_geen_klantid: ['⚠ EAN maar geen klant-id','off'],
+      onbekende_ean_geen_afzender: ['⚠ EAN maar geen geldig afzenderadres','off'],
+      geen_pdf: ['geen PDF-bijlage','neu'],
+      geen_apikey: ['⚠ geen API-key (leest niet)','off'],
+      fout: ['⚠ fout (retry volgt)','off'],
+      fout_opgegeven: ['✕ fout — opgegeven','off']
+    };
+    async function laadLog(){
+      var el=$('log'); if(!el) return;
+      var r;
+      try{ r=await fetch(PROXY+'/api/graph/inbound-log?_='+Date.now(), { headers: await authHeaders(), cache:'no-store' }); }
+      catch(e){ el.innerHTML='<div class="fout">Kan de log niet laden: '+esc(e.message)+'</div>'; return; }
+      if(!r.ok){ el.innerHTML='<div class="state">Log niet beschikbaar ('+r.status+').</div>'; return; }
+      var j=await r.json(); var mails=(j&&j.mails)||[];
+      if(!mails.length){ el.innerHTML='<div class="state">Nog geen verwerkte mails.</div>'; return; }
+      var h='<table><thead><tr><th>Afzender</th><th>Onderwerp</th><th>Resultaat</th><th>Klant / EAN</th><th>Ontvangen</th></tr></thead><tbody>';
+      mails.forEach(function(m){
+        var lab=LOGLABEL[m.status]||[m.status||'—','neu'];
+        var kl=lab[1]==='on'?'chip on':(lab[1]==='off'?'chip off':'chip neu');
+        h+='<tr>'+
+          '<td class="mail">'+esc(m.from||'—')+'</td>'+
+          '<td class="sub">'+esc(m.subject||'—')+'</td>'+
+          '<td><span class="'+kl+'">'+esc(lab[0])+'</span>'+(m.fout?('<div class="sub" style="color:#9b1c1c;margin-top:3px">'+esc(m.fout)+'</div>'):'')+'</td>'+
+          '<td class="sub">'+esc(m.klant||'—')+(m.ean?('<br>'+esc(m.ean)):'')+'</td>'+
+          '<td class="sub">'+kort(m.ontvangen)+'</td>'+
+        '</tr>';
+      });
+      h+='</tbody></table>';
+      el.innerHTML=h;
     }
     async function laadDiag(){
       var el=$('diag'); if(!el) return;

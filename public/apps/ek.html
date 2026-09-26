@@ -4,7 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.13.10 (2026-09-23) — HEATMAP-DEFAULT (Johan): resultaatscherm toont standaard links "Investering (€)"
+<!-- ek.html v0.14.0 (2026-09-26) — PROFIEL OPLADEN IN DE PREP-TEGEL (Johan): adviseur/manager-only knop "📈 Profiel opladen"
+     in #upl (enkel ?prep=1/?adv=1). Leest CSV/Excel → POST /api/profiel/detect (herkent formaat + identificeert de
+     meetreeksen) → reeks-mapping-modal (afname/injectie/niet gebruiken + FLX-dossier) → POST /api/profiel/analyse met de
+     mapping als spec-override → coverage-preview → POST /api/profiel/bevestig (bewaart op het dossier, 409-conflict → "toch
+     overschrijven"). Auth: lui geladen Supabase-sessie (same-origin met de portal). Helpers _ekAuthHeaders/_ekLeesBestand/
+     _ekProfielUpload/_ekReeksModal/_ekProfielAnalyse/_ekProfielResultaat/_ekProfielBevestig. Alle klant-facing flows ongemoeid.
+     ── v0.13.13 (2026-09-26) — FACTUUR OPLADEN IN EK (Johan): echte upload-knop in het intake-scherm (#upl) →
+     /api/factuur-extract → _ekApplyBaseCase prefilt het startscherm (afname/toegang/kost/profiel/klant/BTW/adres/meter)
+     → EAN-keuze-modal bij meerdere EAN's. Werkt in de prep-tegel én de gewone intake. (Profiel-upload met kolom-mapping:
+     apart, vereist profiel/import.js-bron — nog niet in de mirror.)
+     ek.html v0.13.12 (2026-09-26) — EAN-KEUZE-MODAL (Johan): bij een factuur-case met meerdere EAN's toont de
+     case-loader _eanKiesModal (per adres, gevonden rol, afname/injectie/niet-gebruiken; gas uitgesloten). De keuze +
+     verbruiksadres + metertype (STATE_EAN_AFNAME/INJECTIE/ADRES/METER) vloeien in het klantrapport-Aansluiting-blok.
+     ek.html v0.13.11 (2026-09-25) — TOON RAPPORT + CYCLI-HEATMAP (Johan): (1) knop "📄 Toon rapport" op het
+     resultaatscherm → POST /api/energiekompas/bedrijf-rapport (gekozen combi) → payload naar sessionStorage
+     ['KLANTRAPPORT_DATA'] → opent /apps/klantrapport.html (nieuw tabblad; pop-up-fallbacklink). Het rapport-tabblad
+     genereert zelf de PDF en mailt die (via /api/ek-rapport-mail, pdf_base64). (2) Nieuwe heatmap-parameter
+     "Batterijcycli (/jaar)" (cel.cycli uit bedrijf-cel, geïnterpoleerd). window._RAP_PAYLOAD = sweep-body.
+     ek.html v0.13.10 (2026-09-23) — HEATMAP-DEFAULT (Johan): resultaatscherm toont standaard links "Investering (€)"
      en rechts "Energiekost mobiliteit (€/100 km)" (HMMETRIC_L='investering', HMMETRIC_R='km100' + dropdown-selected).
      ek.html v0.13.9 (2026-09-23) — ADVISEUR KAN KLANT+BTW ZELF INVULLEN (Johan): in adviseur/prep-modus verschijnen
      optionele velden Klantnaam + BTW; ze gaan mee in de deel-link (?adv=1&klant=&btw=) en tonen op start + resultaat.
@@ -374,10 +392,22 @@
 
     <!-- Cold path: nog geen factuur ingelezen -->
     <div class="upl" id="upl">
-      📄 <b>Laad uw jaarafrekening op</b> (PDF)
-      <div class="ex">— of simuleer de flow —</div>
+      📄 <b>Laad uw jaarafrekening op</b> (PDF of foto)
+      <div style="margin-top:10px">
+        <input type="file" id="upl-file" accept="application/pdf,image/*" multiple style="display:none" onchange="_ekFactuurUpload(this.files)">
+        <button class="btn sm" type="button" onclick="var f=document.getElementById('upl-file'); if(f) f.click();">📄 Factuur opladen</button>
+      </div>
+      <div class="sub" id="upl-status" style="margin-top:6px"></div>
+      <!-- v0.14.0: PROFIEL OPLADEN (enkel adviseur/prep-modus) — meetgegevens-import met reeks-mapping (afname/injectie). -->
+      <div id="prof-upl-blok" class="hidden" style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--greenln)">
+        <div class="sub" style="margin-bottom:6px">📈 <b>Meetprofiel opladen</b> (adviseur) — CSV of Excel met kwartier/uur-meetgegevens. De analyser herkent het formaat en toont de reeksen zodat u afname/injectie kan aanduiden.</div>
+        <input type="file" id="prof-file" accept=".csv,.txt,.tsv,.xlsx,.xls,.xlsm,text/csv" style="display:none" onchange="_ekProfielUpload(this.files)">
+        <button class="btn ghost sm" type="button" onclick="var f=document.getElementById('prof-file'); if(f){ f.value=''; f.click(); }">📈 Profiel opladen</button>
+        <div class="sub" id="prof-status" style="margin-top:6px"></div>
+      </div>
+      <div class="ex">— of —</div>
       <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-        <button class="btn sm" type="button" onclick="viaMail()">📧 Ik kom via de mail-link</button>
+        <button class="btn ghost sm" type="button" onclick="viaMail()">📧 Ik kom via de mail-link</button>
         <button class="btn ghost sm" type="button" onclick="vulVoorbeeld('part')">Voorbeeld particulier</button>
         <button class="btn ghost sm" type="button" onclick="vulVoorbeeld('bedr')">Voorbeeld bedrijf</button>
       </div>
@@ -484,6 +514,7 @@
             <option value="km100">Energiekost mobiliteit (€/100 km)</option>
             <option value="besp_creg">Besparing slim laden (€/j)</option>
             <option value="investering" selected>Investering (€)</option>
+            <option value="cycli">Batterijcycli (/jaar)</option>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-L"></table></div>
           <div class="sub" id="hm-note-L" style="margin-top:4px"></div>
@@ -497,6 +528,7 @@
             <option value="km100" selected>Energiekost mobiliteit (€/100 km)</option>
             <option value="besp_creg">Besparing slim laden (€/j)</option>
             <option value="investering">Investering (€)</option>
+            <option value="cycli">Batterijcycli (/jaar)</option>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-R"></table></div>
           <div class="sub" id="hm-note-R" style="margin-top:4px"></div>
@@ -532,8 +564,10 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn sm" type="button" onclick="vraagOffertes()">Ja, vraag offertes aan →</button>
           <button class="btn ghost sm hidden" id="btn-profieldata" type="button" onclick="gebruikProfieldata()">Gebruik mijn profieldata</button>
+          <button class="btn sm" type="button" onclick="toonKlantrapport()">📄 Toon rapport</button>
           <button class="btn ghost sm" type="button" onclick="mailRapport()">📧 Rapport mailen</button>
         </div>
+        <div class="sub" id="rapport-status" style="margin-top:8px"></div>
         <div class="sub" id="mail-status" style="margin-top:8px"></div>
       </div>
     </div>
@@ -608,6 +642,7 @@
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
+  var STATE_EAN_AFNAME='', STATE_EAN_INJECTIE='', STATE_ADRES='', STATE_METER='';  // v0.13.12: aansluiting-gegevens uit de factuur-case (EAN-keuze) → klantrapport
   var NETHEF=0;        // netkosten+heffingen €/MWh uit de factuur (case-pad); 0 = onbekend → val terug op markt-default
   var PIEK_IS_SLP=false; // true = piek is afgeleid uit het SLP (analoge meter, geen meting) → toegangsvermogen = piek × factor
   function eur(n){ try{ return '€ '+Math.round(n).toLocaleString('nl-BE'); }catch(e){ return '€ '+Math.round(n); } }
@@ -706,7 +741,8 @@
     if(!c00||!c01||!c10||!c11) return null;
     function bil(f){ var a=f(c00)+(f(c01)-f(c00))*p.t,d=f(c10)+(f(c11)-f(c10))*p.t; return a+(d-a)*b.t; }
     var besp=bil(function(c){return c.besparing||0;}),capex=bil(function(c){return c.capex||0;}),kost=bil(function(c){return c.kost||0;}),rend=(capex>0)?(besp/capex*100):null;
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:ry,battKwh:Math.round(ry*(H.crate||2)),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),rendement:(rend!=null?Math.round(rend*100)/100:null) }; }
+    var cyc=bil(function(c){return c.cycli||0;});   // v0.13.11: cycli/jaar (interpolatie uit de ankers)
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:ry,battKwh:Math.round(ry*(H.crate||2)),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc) }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -715,6 +751,7 @@
       rowLabel:function(v){return v>0?(v+' kWh'):'geen batt';}, colLabel:function(v){return (Math.round((v||0)*P_TL.PANEEL_WP/1000*10)/10)+' kWp';},
       realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best }; }
   function _hmBedrijf(sw,payload){ var A=sw.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKw,_cx:a.pvKwp}); });
+    window._RAP_PAYLOAD=payload;   // v0.13.11: sweep-body bewaren voor het klantrapport-endpoint (toon rapport)
     var best=_besteAnkerKm(A); var rR=(sw.grid&&sw.grid.batt_kw_as)||[], rC=(sw.grid&&sw.grid.pv_kwp_as)||[];
     HM={ real:A, rows:_subdiv(rR), cols:_subdiv(rC), realRows:rR, realCols:rC, computed:{}, interp:true, crate:2, refKost:sw.referentie_kost,
       rowLabel:function(v){return v>0?(v+' kW'):'geen batt';}, colLabel:function(v){return v+' kWp';},
@@ -722,7 +759,7 @@
     HM.compute=function(ry,cx,done){ var key=ry+'|'+cx; if(HM.computed[key]){ done&&done(HM.computed[key]); return; }
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:ry})).then(function(j){
         if(j&&j.ok&&j.cel){ var c=j.cel, besp=(HM.refKost!=null)?(HM.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
-          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),rendement:(rend!=null?Math.round(rend*100)/100:null) };
+          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null) };
           HM.computed[key]=cell; done&&done(cell); } else done&&done(null); }).catch(function(){ done&&done(null); }); }; }
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   function _invVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invTotVoor(pvKwp, battKwh); }        // totale investering (tegel + investering-metriek)
@@ -736,6 +773,7 @@
     besparing:   { val:function(a){return (a&&+a.besparing)||0;}, fmt:_fmtEurK, goedHoog:true },
     factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?(CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing (mag < 0 → netto-inkomst)
     investering: { val:function(a){return _invVan(a);}, fmt:_fmtEurK, goedHoog:false },
+    cycli:       { val:function(a){ return (a&&a.cycli!=null)?+a.cycli:null; }, fmt:function(v){return Math.round(v)+'/j';}, goedHoog:false },   // v0.13.11: batterijcycli/jaar
     // combi-AFHANKELIJK via de factuur-na-PV+batterij: de PV/batterij-besparing wordt aan het rijden toegerekend (Johan)
     km100:       { val:function(a){ return CTX ? (CTX.kmBehoefte>0 ? _laadNaVan(a)/CTX.kmBehoefte*100 : 0) : null; }, fmt:function(v){return '€'+v.toFixed(1).replace('.',',');}, goedHoog:false },   // 1 decimaal, geen /100km-suffix (anders te breed)
     besp_creg:   { val:function(a){ return CTX ? Math.max(0, (CTX.cregKost||0) - _laadNaVan(a)) : null; }, fmt:function(v){return _fmtEurK(v);}, goedHoog:true }   // slim laden vs gewoon laden (CREG) → betaalt PV + batterij; eenheid (€/j) staat in de titel
@@ -890,7 +928,10 @@
   (function(){ try{
     var _q0=new URLSearchParams(location.search);
     // v0.13.9: in adviseur/prep-modus de klant+BTW-velden tonen zodat de adviseur ze zelf kan invullen (→ deel-link).
-    if(_q0.get('prep')==='1' || _q0.get('adv')==='1'){ var _kb0=document.getElementById('adv-klant-blok'); if(_kb0) _kb0.classList.remove('hidden'); }
+    if(_q0.get('prep')==='1' || _q0.get('adv')==='1'){
+      var _kb0=document.getElementById('adv-klant-blok'); if(_kb0) _kb0.classList.remove('hidden');
+      var _pu0=document.getElementById('prof-upl-blok'); if(_pu0) _pu0.classList.remove('hidden');   // v0.14.0: profiel-upload (adviseur)
+    }
     if(_q0.get('adv')==='1'){
       ADV_MODE=true;   // v0.13.8: adviseur/manager-context → deel-link-balk tonen
       _advOverlay(true);
@@ -1168,6 +1209,72 @@
     if(R) R.onchange=function(){ HMMETRIC_R=R.value; renderHeatmap(); }; })();
 
 
+  // ══ v0.13.13 — FACTUUR OPLADEN IN EK (adviseur/prep + intake). Leest de factuur via /api/factuur-extract, past de
+  //   baseCase toe op het startscherm (zelfde mapping als de case-loader) en opent de EAN-keuze-modal bij meerdere EAN's.
+  function _ekApplyBaseCase(bc, opt){
+    opt=opt||{}; if(!bc) return;
+    var dg=(function(){ try{ var a=new Date(bc.periodeVan),b=new Date(bc.periodeTot),d=Math.round((b-a)/86400000)+1; return d>0?d:365; }catch(e){ return 365; } })();
+    var jf=365/dg;
+    var afn=bc.afnameKwh?Math.round(bc.afnameKwh/1000*jf*100)/100:0;
+    var inj=bc.injectieKwh?Math.round(bc.injectieKwh/1000*jf*100)/100:0;
+    var toe=+bc.toegangsvermogenKw||Math.round((+bc.aansluitVermogenKva||0)*0.9)||0;
+    var kst=bc.totaalEnergieExclBtw?Math.round(bc.totaalEnergieExclBtw*jf):(bc.totaalExclBtw?Math.round(bc.totaalExclBtw*jf):0);
+    var analoog=(bc.meterType==='analoog')||(bc.heeftPiekmeting===false);
+    if(analoog){ var _mwh=afn||((+bc.afnameKwh||0)/1000); toe=Math.max(1,Math.round(_mwh*STUB.res_piek_kw_per_mwh*10)/10); PIEK_IS_SLP=true; }
+    var _vol=(+bc.afnameKwh||0)/1000; var _nh=_vol>0?Math.round(((+bc.totaalDistributieExclBtw||0)+(+bc.totaalHeffingenExclBtw||0))/_vol):0;
+    if(_nh>0) NETHEF=_nh;
+    if(afn) $('i-afname').value=afn;
+    if(toe) $('i-toegang').value=toe;
+    if(kst) $('i-kost').value=kst;
+    var bedr=(opt.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
+    $('i-profiel').value = analoog ? 'residentieel' : (opt.profiel || (bedr?'kantoor':'residentieel'));
+    if(opt.project_id) STATE_CODE=opt.project_id;
+    STATE_KLANT=(bc.klantNaam||opt.naam||'').trim();
+    STATE_BTW=(bc.klantBtw||bc.btw||'').trim();
+    if($('i-klant')&&STATE_KLANT) $('i-klant').value=STATE_KLANT;
+    if($('i-btw')&&STATE_BTW) $('i-btw').value=STATE_BTW;
+    STATE_ADRES=(bc.leveringsadres||bc.klantAdres||'').trim();
+    STATE_METER=analoog?'Analoge meter (standaardprofiel)':'Digitale meter (kwartierregistratie)';
+    var _eb=(bc.eanBlokken||[]).map(function(b){ return { ean:String((b&&b.ean)||'').replace(/\s/g,''), rol:String((b&&b.rol)||'') }; }).filter(function(b){ return /^\d{18}$/.test(b.ean)&&b.rol.indexOf('gas')<0; });
+    STATE_EAN_AFNAME=((_eb.filter(function(b){return b.rol.indexOf('afn')>=0;})[0]||_eb[0]||{}).ean)||'';
+    STATE_EAN_INJECTIE=((_eb.filter(function(b){return b.rol.indexOf('inj')>=0;})[0]||{}).ean)||'';
+    var _idz=$('intake-doss');
+    if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb); if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
+    var u=$('upl'); if(u) u.classList.add('hidden');
+    var ok=$('factuur-ok'); if(ok) ok.classList.remove('hidden');
+    if(analoog){ var _ob=$('optout-blok'); if(_ob) _ob.classList.add('hidden'); var _oc=$('i-optout'); if(_oc) _oc.checked=false; var _an=$('analoog-note'); if(_an) _an.classList.remove('hidden'); }
+    var _det=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?(analoog?(String(toe).replace('.',',')+' kW piek (uit standaardprofiel)'):(toe+' kW toegang')):''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ');
+    if($('factuur-detail')) $('factuur-detail').textContent=_det+(analoog?' — analoge meter, standaardprofiel (residentieel).':' (uit uw factuur).');
+    if($('intake-intro')) $('intake-intro').textContent=analoog
+      ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
+      : 'We lazen uw factuur in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
+  }
+  function _ekFactuurUpload(fileList){
+    var files=Array.prototype.slice.call(fileList||[]); var st=$('upl-status'); if(!files.length) return;
+    var okTypes={'application/pdf':1,'image/jpeg':1,'image/png':1,'image/webp':1,'image/gif':1};
+    if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Factuur wordt ingelezen…'; }
+    var payload=[], pending=files.length;
+    files.forEach(function(f){
+      if(!okTypes[f.type]){ pending--; if(pending<=0) _ekDoExtract(payload, st); return; }
+      var rd=new FileReader();
+      rd.onload=function(){ try{ var b64=String(rd.result).split(',')[1]||''; if(b64) payload.push({ base64:b64, mediaType:f.type }); }catch(e){} pending--; if(pending<=0) _ekDoExtract(payload, st); };
+      rd.onerror=function(){ pending--; if(pending<=0) _ekDoExtract(payload, st); };
+      rd.readAsDataURL(f);
+    });
+  }
+  function _ekDoExtract(payload, st){
+    if(!payload.length){ if(st){ st.style.color='var(--muted)'; st.textContent='Geen geldig bestand (PDF of foto).'; } return; }
+    fetch(API+'/api/factuur-extract',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ files:payload }) })
+      .then(function(r){ return r.json().catch(function(){return{};}); })
+      .then(function(j){
+        if(!j || !j.baseCase){ if(st){ st.style.color='var(--muted)'; st.textContent=(j&&j.error)?('Inlezen mislukte: '+j.error):'Inlezen mislukte — probeer een duidelijkere scan.'; } return; }
+        _ekApplyBaseCase(j.baseCase, {});
+        if(st) st.textContent='';
+        try{ _eanKiesModal((j.baseCase.eanBlokken||[]), function(keuze){ if(keuze){ STATE_EAN_AFNAME=keuze.afname||STATE_EAN_AFNAME; STATE_EAN_INJECTIE=keuze.injectie||''; } }); }catch(e){}
+      })
+      .catch(function(){ if(st){ st.style.color='var(--muted)'; st.textContent='Inlezen mislukte — probeer later opnieuw.'; } });
+  }
+
   // ── Max-CX: aankomst via de mail-link ek.html?case=<token>. De factuur is al ingelezen (Graph-intake) → we
   //    prefillen afname/toegang/kost en tonen "factuur ingelezen"; de klant vult enkel profiel + wagens aan. ──
   (function(){
@@ -1211,6 +1318,15 @@
         STATE_BTW = (bc.klantBtw || bc.btw || '').trim();
         if($('i-klant')&&STATE_KLANT) $('i-klant').value=STATE_KLANT;   // v0.13.9: adviseur ziet/kan de klant + BTW aanpassen
         if($('i-btw')&&STATE_BTW) $('i-btw').value=STATE_BTW;
+        // v0.13.12: aansluiting-gegevens voor het klantrapport + EAN-keuze bij meerdere EAN's.
+        STATE_ADRES = (bc.leveringsadres || bc.klantAdres || '').trim();
+        STATE_METER = analoog ? 'Analoge meter (standaardprofiel)' : 'Digitale meter (kwartierregistratie)';
+        (function(){
+          var _eb=(bc.eanBlokken||[]).map(function(b){ return { ean:String((b&&b.ean)||'').replace(/\s/g,''), rol:String((b&&b.rol)||'') }; })
+            .filter(function(b){ return /^\d{18}$/.test(b.ean) && b.rol.indexOf('gas')<0; });
+          STATE_EAN_AFNAME = ((_eb.filter(function(b){return b.rol.indexOf('afn')>=0;})[0]||_eb[0]||{}).ean)||'';
+          STATE_EAN_INJECTIE = ((_eb.filter(function(b){return b.rol.indexOf('inj')>=0;})[0]||{}).ean)||'';
+        })();
         var _idz=$('intake-doss');
         if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb);
           if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
@@ -1226,9 +1342,16 @@
         $('intake-intro').textContent=analoog
           ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
           : 'We ontvingen uw factuur en lazen ze in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
-        // v0.13.6: adviseur/manager-deeplink ek.html?case=<token>&adv=1 → meteen doorrekenen en direct op de
-        //   resultatenpagina landen (geen intake-tussenstap). De prefills hierboven leveren profiel/afname/toegang/kost.
-        try{ if((new URLSearchParams(location.search).get('adv'))==='1'){ toonRapport(); } }catch(e){}
+        // v0.13.12: staat de factuur op MEERDERE EAN's, dan opent de EAN-keuze-modal hier — op het startscherm, terwijl de
+        //   klant profiel + wagens ziet. Pas ná de keuze (of meteen bij één EAN) rekent een adviseur-deeplink (?adv=1) door.
+        // v0.13.6: adviseur/manager-deeplink ek.html?case=<token>&adv=1 → meteen doorrekenen en direct op de resultatenpagina.
+        try{
+          var _adv=(new URLSearchParams(location.search).get('adv'))==='1';
+          _eanKiesModal((bc.eanBlokken||[]), function(keuze){
+            if(keuze){ STATE_EAN_AFNAME=keuze.afname||STATE_EAN_AFNAME; STATE_EAN_INJECTIE=keuze.injectie||''; }
+            if(_adv) toonRapport();
+          });
+        }catch(e){ try{ if((new URLSearchParams(location.search).get('adv'))==='1') toonRapport(); }catch(_){} }
       }).catch(function(){});
     }catch(e){}
   })();
@@ -1253,6 +1376,280 @@
         if(st){ st.style.color='var(--muted)'; st.textContent='Aanvraag lukte niet — probeer later opnieuw.'; } });
   }
   // Rapport mailen — stuurt de klant de deeplink naar dit rapport (ek.html?case=<token>) via de EK-mailbox (Graph, geen banner).
+  // ══ EAN-keuze-modal (v0.13.12) — bij een factuur-case met meerdere EAN's: laat afname/injectie kiezen ══
+  function _ekEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function _eanKiesModal(blokken, done){
+    var lst=(blokken||[]).map(function(b){ return { ean:String((b&&b.ean)||'').replace(/\s/g,''), rol:String((b&&b.rol)||''), adres:String((b&&b.leveringsadres)||'') }; })
+      .filter(function(b){ return /^\d{18}$/.test(b.ean) && b.rol.indexOf('gas')<0; });
+    var seen={}, eans=[]; lst.forEach(function(b){ if(!seen[b.ean]){ seen[b.ean]=1; eans.push(b); } });
+    var nInj=eans.filter(function(b){ return b.rol.indexOf('inj')>=0; }).length;
+    if(eans.length<2 && nInj===0){ done(null); return; }   // geen keuze nodig
+    var groepen={}; eans.forEach(function(b){ var k=b.adres||'(adres onbekend)'; (groepen[k]=groepen[k]||[]).push(b); });
+    var idx=0, idMap=[], rows='';
+    Object.keys(groepen).forEach(function(adres){
+      rows+='<div style="font-weight:700;color:#1F3864;margin:12px 0 4px;font-size:13px">📍 '+_ekEsc(adres)+'</div>';
+      groepen[adres].forEach(function(b){
+        var def=b.rol.indexOf('inj')>=0?'injectie':(b.rol.indexOf('afn')>=0?'afname':'geen'), id='eanrol_'+(idx++);
+        idMap.push({id:id, ean:b.ean});
+        rows+='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid #D5DBE3;border-radius:8px;margin:5px 0">'+
+          '<div><div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#1A1F2B">'+_ekEsc(b.ean)+'</div>'+
+          '<div style="font-size:11px;color:#8A94A6">gevonden als: '+_ekEsc(b.rol||'onbekend')+'</div></div>'+
+          '<select id="'+id+'" style="padding:7px 9px;border:1px solid #D5DBE3;border-radius:7px;font:inherit">'+
+            '<option value="afname"'+(def==='afname'?' selected':'')+'>Afname</option>'+
+            '<option value="injectie"'+(def==='injectie'?' selected':'')+'>Injectie</option>'+
+            '<option value="geen"'+(def==='geen'?' selected':'')+'>Niet gebruiken</option>'+
+          '</select></div>';
+      });
+    });
+    var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,40,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.3);font-family:inherit">'+
+      '<div style="font-size:18px;font-weight:800;color:#1F3864;margin-bottom:4px">Welke aansluiting nemen we?</div>'+
+      '<div style="font-size:12.5px;color:#5A6577;margin-bottom:8px">Op deze factuur staan meerdere EAN-nummers. Duid per EAN aan of het de <b>afname</b> of de <b>injectie</b> voor dit dossier is (of niet meenemen).</div>'+
+      rows+
+      '<div id="eanrol_msg" style="font-size:12px;color:#C0392B;margin-top:8px;min-height:1em"></div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'+
+        '<button id="eanrol_annul" type="button" style="padding:9px 14px;border:1px solid #D5DBE3;background:#fff;border-radius:8px;font:inherit;cursor:pointer">Annuleren</button>'+
+        '<button id="eanrol_ok" type="button" style="padding:9px 16px;border:none;background:#05B050;color:#fff;border-radius:8px;font:inherit;font-weight:700;cursor:pointer">Bevestig</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+    function sluit(){ try{ document.body.removeChild(ov); }catch(e){} }
+    $('eanrol_annul').onclick=function(){ sluit(); done(null); };
+    $('eanrol_ok').onclick=function(){
+      var afname=null, injectie=null, dubbelA=false, dubbelI=false;
+      idMap.forEach(function(m){ var v=($(m.id)||{}).value;
+        if(v==='afname'){ if(afname) dubbelA=true; else afname=m.ean; }
+        else if(v==='injectie'){ if(injectie) dubbelI=true; else injectie=m.ean; } });
+      var msg=$('eanrol_msg');
+      if(!afname){ if(msg) msg.textContent='Kies minstens één EAN als afname.'; return; }
+      if(dubbelA||dubbelI){ if(msg) msg.textContent='Slechts één EAN per rol (afname / injectie).'; return; }
+      sluit(); done({ afname:afname, injectie:injectie });
+    };
+  }
+
+  // ══ v0.14.0 — PROFIEL OPLADEN IN DE EK-PREP-TEGEL (adviseur/manager). Upload een meetprofiel (CSV/Excel); de server
+  //   (/api/profiel/detect) herkent het formaat en identificeert de MEETREEKSEN; de adviseur duidt in de modal aan welke
+  //   reeks afname en welke injectie is. Die mapping gaat als spec-override mee naar /api/profiel/analyse (bron 'manueel');
+  //   na de coverage-preview kan de adviseur het profiel op het dossier bewaren (/api/profiel/bevestig). ══
+  //   AUTH: de prep-tegel draait same-origin met de portal → dezelfde Supabase-sessie (manager) wordt lui geladen.
+  var _EK_SB=null, _EK_SB_CFG=null;
+  function _ekLaadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=function(){ nok(new Error('kon script niet laden')); }; document.head.appendChild(s); }); }
+  async function _ekAuthHeaders(){
+    try{
+      if(!_EK_SB_CFG){ var rc=await fetch('/api/config'); _EK_SB_CFG=await rc.json(); }
+      if(!_EK_SB && _EK_SB_CFG && _EK_SB_CFG.supabaseUrl && _EK_SB_CFG.supabaseAnonKey){
+        if(!window.supabase) await _ekLaadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+        _EK_SB=window.supabase.createClient(_EK_SB_CFG.supabaseUrl, _EK_SB_CFG.supabaseAnonKey);
+      }
+      var tok=null; if(_EK_SB){ var d=await _EK_SB.auth.getSession(); if(d&&d.data&&d.data.session) tok=d.data.session.access_token; }
+      if(!tok) throw new Error('geen manager-sessie — meld u aan via de portal en open de prep-tegel opnieuw.');
+      return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
+    }catch(e){ throw e; }
+  }
+  function _ekB64(buf){ var bin='',u=new Uint8Array(buf),C=0x8000; for(var i=0;i<u.length;i+=C) bin+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(bin); }
+  async function _ekGz(txt){ if(typeof CompressionStream==='undefined') return null; var cs=new CompressionStream('gzip'); var w=cs.writable.getWriter(); w.write(new TextEncoder().encode(txt)); w.close(); return _ekB64(await new Response(cs.readable).arrayBuffer()); }
+  function _ekP2(n){ return (n<10?'0':'')+n; }
+  function _ekDatumTxt(d){ var t=new Date(Math.round(d.getTime()/300000)*300000); return t.getFullYear()+'-'+_ekP2(t.getMonth()+1)+'-'+_ekP2(t.getDate())+' '+_ekP2(t.getHours())+':'+_ekP2(t.getMinutes())+':00'; }
+  async function _ekLeesBestand(f){
+    var naam=f.name, isX=/\.(xlsx|xls|xlsm)$/i.test(naam);
+    if(!isX){
+      var buf=await f.arrayBuffer(), txt;
+      try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }catch(e){ txt=new TextDecoder('windows-1252').decode(buf); }
+      var g=await _ekGz(txt);
+      return g ? { naam:naam, soort:'csv', gz_b64:g } : { naam:naam, soort:'csv', tekst:txt };
+    }
+    if(!window.XLSX) await _ekLaadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    var wb=window.XLSX.read(await f.arrayBuffer(), { type:'array', cellDates:true });
+    var best=null,bestN=-1;
+    wb.SheetNames.forEach(function(sn){ var ws=wb.Sheets[sn]; var ref=ws['!ref']; if(!ref) return; var rg=window.XLSX.utils.decode_range(ref); var n=rg.e.r-rg.s.r; if(n>bestN){ bestN=n; best=sn; } });
+    var rows=window.XLSX.utils.sheet_to_json(wb.Sheets[best], { header:1, raw:true, defval:'', blankrows:false });
+    rows=rows.map(function(r){ return r.map(function(c){ return (c instanceof Date)?_ekDatumTxt(c):(typeof c==='number'?c:String(c==null?'':c)); }); });
+    var json=JSON.stringify(rows), g2=await _ekGz(json);
+    return g2 ? { naam:naam+' ['+best+']', soort:'rows', gz_b64:g2 } : { naam:naam+' ['+best+']', soort:'rows', rows:rows };
+  }
+  var _EK_PROF_BESTAND=null;   // laatste ingelezen bestand (voor analyse na de mapping)
+  async function _ekProfielUpload(fileList){
+    var files=Array.prototype.slice.call(fileList||[]); var st=$('prof-status'); if(!files.length) return;
+    if(files.length>1 && st){ st.style.color='var(--muted)'; st.textContent='Eén meetbestand per keer — het eerste wordt ingelezen. (Aparte afname/injectie-bestanden? Gebruik de portaltegel Profiel-import.)'; }
+    var f=files[0];
+    if(st){ st.style.color='var(--muted)'; st.textContent='⏳ '+_ekEsc(f.name)+' inlezen…'; }
+    try{
+      var bestand=await _ekLeesBestand(f); _EK_PROF_BESTAND=bestand;
+      var hdr=await _ekAuthHeaders();
+      if(st) st.textContent='⏳ Formaat herkennen + reeksen identificeren…';
+      var r=await fetch(API+'/api/profiel/detect',{ method:'POST', headers:hdr, body:JSON.stringify({ bestand:bestand }) });
+      var j=await r.json().catch(function(){return{};});
+      if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('detect faalde ('+r.status+')'));
+      if(st) st.textContent='';
+      _ekReeksModal(j, function(res){
+        if(!res){ if(st){ st.style.color='var(--muted)'; st.textContent='Geannuleerd.'; } return; }
+        _ekProfielAnalyse(bestand, j, res);
+      });
+    }catch(e){ if(st){ st.style.color='#C0392B'; st.textContent='Mislukt: '+_ekEsc(e.message); } }
+  }
+  // Mapping-modal: toont de geïdentificeerde meetreeksen; adviseur duidt afname/injectie aan. Bij een herkend lang formaat
+  // (Fluvius-registers, SMR één EAN) bevat het bestand afname+injectie al → enkel bevestigen. + FLX-dossier-id.
+  function _ekReeksModal(det, done){
+    var herkendBadge = det.herkend
+      ? '<span style="background:#E8F6EE;color:#1E7A42;border:1px solid #B7E0C6;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700">herkend formaat</span>'
+      : '<span style="background:#FFF4E5;color:#9A5B00;border:1px solid #F0D6A8;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700">nieuw formaat</span>';
+    var naam = det.spec_naam ? ('<div style="font-size:12px;color:#5A6577;margin-top:3px">'+_ekEsc(det.spec_naam)+'</div>') : '';
+    var body='', idMap=[];
+    if(det.long_format){
+      var la=(det.long_reeksen&&det.long_reeksen.afname||[]).join(', '), li=(det.long_reeksen&&det.long_reeksen.injectie||[]).join(', ');
+      body='<div style="padding:10px 12px;border:1px solid #D5DBE3;border-radius:8px;margin:6px 0;font-size:12.5px;color:#1A1F2B">'+
+        'Dit is een <b>lang formaat</b> (registers per rij). Afname en injectie zitten in hetzelfde bestand op één EAN (Fluvius SMR) — geen mapping nodig.'+
+        (la?'<div style="font-size:11px;color:#5A6577;margin-top:4px">afname-sleutel(s): '+_ekEsc(la)+(li?' · injectie-sleutel(s): '+_ekEsc(li):'')+'</div>':'')+'</div>';
+    } else {
+      var reeksen=(det.reeksen||[]);
+      if(!reeksen.length){ body='<div style="color:#C0392B;font-size:12.5px">Geen numerieke meetreeksen gevonden in dit bestand.</div>'; }
+      reeksen.forEach(function(x,i){
+        var def=x.rol||'geen', id='ekreeks_'+i; idMap.push({id:id, idx:x.idx});
+        body+='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid #D5DBE3;border-radius:8px;margin:5px 0">'+
+          '<div><div style="font-weight:600;font-size:13px;color:#1A1F2B">'+_ekEsc(x.naam)+'</div>'+
+          '<div style="font-size:11px;color:#8A94A6">kolom '+x.idx+(x.rol?(' · voorstel: '+x.rol):'')+'</div></div>'+
+          '<select id="'+id+'" style="padding:7px 9px;border:1px solid #D5DBE3;border-radius:7px;font:inherit">'+
+            '<option value="afname"'+(def==='afname'?' selected':'')+'>Afname</option>'+
+            '<option value="injectie"'+(def==='injectie'?' selected':'')+'>Injectie</option>'+
+            '<option value="geen"'+(def==='geen'?' selected':'')+'>Niet gebruiken</option>'+
+          '</select></div>';
+      });
+    }
+    var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,40,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:580px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.3);font-family:inherit">'+
+      '<div style="font-size:18px;font-weight:800;color:#1F3864;margin-bottom:4px;display:flex;align-items:center;gap:8px">📈 Meetreeksen '+herkendBadge+'</div>'+
+      naam+
+      '<div style="font-size:12.5px;color:#5A6577;margin:8px 0">Duid aan welke meetreeks de <b>afname</b> is en welke de <b>injectie</b>. Reeksen op "niet gebruiken" worden genegeerd.</div>'+
+      body+
+      '<div style="margin-top:12px"><label style="font-size:11px;color:#5A6577;font-weight:700;display:block;margin-bottom:3px">Dossier (FLX-id)</label>'+
+        '<input id="ekreeks_flx" value="'+_ekEsc(STATE_CODE||'')+'" placeholder="FLX-XXX-XXXX" style="width:100%;padding:8px 10px;border:1px solid #D5DBE3;border-radius:7px;font:inherit;text-transform:uppercase"></div>'+
+      '<div id="ekreeks_msg" style="font-size:12px;color:#C0392B;margin-top:8px;min-height:1em"></div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'+
+        '<button id="ekreeks_annul" type="button" style="padding:9px 14px;border:1px solid #D5DBE3;background:#fff;border-radius:8px;font:inherit;cursor:pointer">Annuleren</button>'+
+        '<button id="ekreeks_ok" type="button" style="padding:9px 16px;border:none;background:#05B050;color:#fff;border-radius:8px;font:inherit;font-weight:700;cursor:pointer">Analyseer</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+    function sluit(){ try{ document.body.removeChild(ov); }catch(e){} }
+    $('ekreeks_annul').onclick=function(){ sluit(); done(null); };
+    $('ekreeks_ok').onclick=function(){
+      var flx=(($('ekreeks_flx')||{}).value||'').trim().toUpperCase();
+      var msg=$('ekreeks_msg');
+      if(!/^FLX-[A-Z0-9]{3}-[A-Z0-9]{3,4}$/.test(flx)){ if(msg) msg.textContent='Geef een geldig dossiernummer (FLX-XXX-XXXX).'; return; }
+      var mapping={ afname:[], injectie:[] };
+      if(!det.long_format){
+        var dubbelA=false;
+        idMap.forEach(function(m){ var v=($(m.id)||{}).value; if(v==='afname') mapping.afname.push(m.idx); else if(v==='injectie') mapping.injectie.push(m.idx); });
+        if(!mapping.afname.length){ if(msg) msg.textContent='Duid minstens één reeks aan als afname.'; return; }
+      }
+      sluit(); done({ flx:flx, mapping:mapping });
+    };
+  }
+  async function _ekProfielAnalyse(bestand, det, res){
+    var st=$('prof-status'); if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Converteren + aanvullen (kan even duren)…'; }
+    try{
+      var body={ project_id:res.flx, afname:bestand };
+      var prof=($('i-profiel')&&$('i-profiel').value)||''; if(prof) body.slp_profiel=prof;
+      // Adviseur-mapping als spec-override (enkel breed formaat; lang formaat wordt door de builtin herkend).
+      if(!det.long_format && det.voorstel_spec){
+        var spec=JSON.parse(JSON.stringify(det.voorstel_spec));
+        spec.value_columns={ afname: res.mapping.afname, injectie: (res.mapping.injectie&&res.mapping.injectie.length)?res.mapping.injectie:null };
+        spec.long_format=null;
+        body.specs={ afname: spec };
+      }
+      var hdr=await _ekAuthHeaders();
+      var r=await fetch(API+'/api/profiel/analyse',{ method:'POST', headers:hdr, body:JSON.stringify(body) });
+      var j=await r.json().catch(function(){return{};});
+      if(!r.ok||!j||!j.ok){
+        var em=(j&&j.error)||('analyse faalde ('+r.status+')');
+        if(j&&j.manuele_review) em+=' — dit formaat past niet in een automatische conversie. Gebruik de portaltegel Profiel-import voor manuele review.';
+        throw new Error(em);
+      }
+      _ekProfielResultaat(j);
+    }catch(e){ if(st){ st.style.color='#C0392B'; st.textContent='Mislukt: '+_ekEsc(e.message); } }
+  }
+  function _ekProfielResultaat(j){
+    var st=$('prof-status'); if(!st) return;
+    var nf1=function(v){ return (v==null||isNaN(v))?'—':Number(v).toLocaleString('nl-BE',{maximumFractionDigits:1}); };
+    var lijn=function(t){ var c=j.types&&j.types[t]&&j.types[t].coverage; if(!c) return '';
+      return '<div style="font-size:12.5px;color:#1A1F2B;margin:2px 0">• <b>'+(t==='afname'?'Afname':'Injectie')+'</b>: '+nf1(c.jaar_mwh)+' MWh/j · piek '+nf1(c.maandpiek_kw)+' kW · '+_ekEsc(c.label||'')+(c.pct_gemeten!=null?(' ('+nf1(c.pct_gemeten)+'% gemeten)'):'')+'</div>'; };
+    var fmt=(j.formaten||[]).map(function(f){ return _ekEsc(f.rol)+'='+_ekEsc(f.bron); }).join(', ');
+    var jv=j.jaarverbruik?('<div style="font-size:11.5px;color:#5A6577;margin-top:4px">Jaarverbruik in de simulaties: <b>'+(j.jaarverbruik.bron==='factuur'?'factuurvolume':'jaartotaal van dit profiel')+'</b> — '+_ekEsc(j.jaarverbruik.uitleg||'')+'</div>'):'';
+    st.style.color='#1E7A42';
+    st.innerHTML='<div style="border:1px solid #B7E0C6;background:#F3FBF6;border-radius:8px;padding:10px 12px;margin-top:4px;text-align:left">'+
+      '<div style="font-weight:700;color:#1E7A42;margin-bottom:4px">✔ Profiel geanalyseerd ('+_ekEsc(fmt)+') — nog niets bewaard</div>'+
+      lijn('afname')+lijn('injectie')+jv+
+      '<div style="display:flex;gap:8px;margin-top:10px">'+
+        '<button id="prof-bevestig" type="button" class="btn sm" onclick="_ekProfielBevestig(\''+_ekEsc(j.concept_id)+'\')">💾 Bewaar op dossier '+_ekEsc(j.project_id)+'</button>'+
+      '</div></div>';
+  }
+  async function _ekProfielBevestig(cid, forceer){
+    var b=$('prof-bevestig'); if(b){ b.disabled=true; b.textContent='⏳ Bewaren…'; }
+    try{
+      var hdr=await _ekAuthHeaders();
+      var r=await fetch(API+'/api/profiel/bevestig',{ method:'POST', headers:hdr, body:JSON.stringify({ concept_id:cid, forceer:!!forceer }) });
+      var j=await r.json().catch(function(){return{};});
+      if(r.status===409 && j && j.conflict){
+        if(b){ b.disabled=false; b.textContent='⚠ Toch overschrijven'; b.onclick=function(){ _ekProfielBevestig(cid, true); }; }
+        var st0=$('prof-status'); if(st0){ var w=document.createElement('div'); w.style.cssText='font-size:11.5px;color:#9A5B00;margin-top:6px'; w.textContent='Er staat al een beter gedekt profiel op dit dossier. Klik "Toch overschrijven" om te vervangen (vorige versie blijft in de historie).'; st0.appendChild(w); }
+        return;
+      }
+      if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('bewaren faalde ('+r.status+')'));
+      var st=$('prof-status'); if(st){ st.style.color='#1E7A42'; st.innerHTML='<div style="border:1px solid #B7E0C6;background:#F3FBF6;border-radius:8px;padding:10px 12px;font-weight:700;color:#1E7A42">✔ Profiel bewaard op '+_ekEsc(j.project_id)+'. De studie rekent voortaan op deze meetgegevens.'+(j.rapport2?' Het definitieve rapport wordt automatisch bijgewerkt.':'')+'</div>'; }
+    }catch(e){ if(b){ b.disabled=false; b.textContent='💾 Bewaar op dossier'; } var st=$('prof-status'); if(st){ var er=document.createElement('div'); er.style.cssText='font-size:12px;color:#C0392B;margin-top:6px'; er.textContent='Bewaren mislukt: '+e.message; st.appendChild(er); } }
+  }
+
+  // ══ Klantrapport (v0.13.11) — "toon rapport": bouwt de gekozen combi op de server (bedrijf-rapport-endpoint),
+  //   schrijft de weergaveklare payload naar sessionStorage en opent /apps/klantrapport.html in een nieuw tabblad.
+  //   Het rapport-tabblad genereert zelf de PDF en laat die (fire-and-forget) naar de klant mailen. ══
+  function _klantrapportPayload(j, sel){
+    var P=window._RAP_PAYLOAD||{}, C=CTX||{};
+    var pvKwp=Math.round(_anchorKwp(sel)||0), battKw=Math.round(sel.battKw||0);
+    var battKwh=(j.combi&&+j.combi.batt_kwh)||Math.round(battKw*2);
+    var ev=+C.ev||0, acAantal=ev>0?Math.max(1,Math.ceil(ev/2)):0;
+    var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
+    var posten=[]; if(pvKwp) posten.push({label:'Zonnepanelen ('+pvKwp+' kWp)',bedrag:Math.round(pvKwp*600)});
+    if(battKwh) posten.push({label:'Batterij ('+battKwh+' kWh)',bedrag:Math.round(battKwh*350)});
+    return {
+      project_id: STATE_CODE||'', datum: datum,
+      klant: { naam: STATE_KLANT||'', btw: STATE_BTW||'' },
+      creg_eur_per_mwh: 322,
+      factuur: j.factuur, heat: j.heat, combi: j.combi,
+      financieel: Object.assign({ energieprijs_stijging_pct:3, posten:posten }, j.financieel||{}),
+      aansluiting: {
+        verbruiksadres: STATE_ADRES||P.verbruiksadres||'',
+        afname: { ean: STATE_EAN_AFNAME||'', piek_kw:(+P.toegangsvermogen_kw||0), verbruik_mwh:(+P.afname_mwh||0) },
+        injectie: (STATE_EAN_INJECTIE ? { ean:STATE_EAN_INJECTIE, piek_kw:0, injectie_mwh:0 } : null),
+        metertype: STATE_METER||P.metertype||'',
+        profiel: P.profielNaam||C.profielNaam||''
+      },
+      voorstel: {
+        pv_kwp: pvKwp, batt_kw: battKw, batt_kwh: battKwh, batt_cycli:(j.cycli!=null?j.cycli:null),
+        laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: null
+      },
+      onderhandeling: { afname_marge_jaar:(+ (C.afname_marge_jaar)||0), injectie_marge_jaar:(+(C.injectie_marge_jaar)||0), digitale_meter:true },
+      heeftLaadplein: !!j.heeftLaadplein,
+      token: TOKEN||'', mail: (($('i-mail')&&$('i-mail').value)||'').trim(), api: API
+    };
+  }
+  async function toonKlantrapport(){
+    var st=$('rapport-status');
+    if(!window._RAP_PAYLOAD){ if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
+    var sel=(HM&&(HM.sel||HM.best))||null;
+    if(!sel){ if(st){ st.style.color='var(--muted)'; st.textContent='Kies eerst een combinatie in de heatmap.'; } return; }
+    if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Rapport wordt opgebouwd…'; }
+    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0) });
+    try{
+      var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      var j=await r.json().catch(function(){return{};});
+      if(!j||!j.ok) throw new Error((j&&j.error)||'rapport faalde');
+      try{ sessionStorage.setItem('KLANTRAPPORT_DATA', JSON.stringify(_klantrapportPayload(j,sel))); }catch(e){}
+      var win=window.open('/apps/klantrapport.html','_blank');
+      if(st){ if(win){ st.style.color='var(--green)'; st.textContent='✔ Rapport geopend in een nieuw tabblad.'; }
+        else { st.style.color='var(--muted)'; st.innerHTML='Pop-up geblokkeerd — <a href="/apps/klantrapport.html" target="_blank" rel="noopener">open het rapport hier</a>.'; } }
+    }catch(e){ if(st){ st.style.color='var(--muted)'; st.textContent='Rapport opbouwen lukte niet — probeer later opnieuw.'; } }
+  }
+
   function mailRapport(){
     var st=$('mail-status'); var mail=($('i-mail')&&$('i-mail').value||'').trim();
     if(st) st.textContent='⏳ Rapport wordt gemaild…';
