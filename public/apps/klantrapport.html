@@ -458,35 +458,49 @@ function _cashflowSvg(rows, inv){
 }
 function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000) return s+'€ '+_num(a/1000,a>=100000?0:1)+'k'; return s+'€ '+_num(a,0); }
 (function(){
+  // v0.10 (Johan): batterijwaarde-model uit EK. TVT/rendement over 15 jaar met STIJGENDE netkosten (inflatie + extra%/jaar
+  //   + eenmalige verdubbeling), besparing = energie + vermeden capaciteitstarief; vermeden aansluitingsverzwaring (eenmalig)
+  //   in mindering op de investering. Valt terug op het oude energie-model als er geen battwaarde in de payload zit.
+  var BW=D.battwaarde||null;
   var FIN=D.financieel||{};
-  var inv=+FIN.investering||0;
-  var besp1=(+FIN.besparing_jaar)||besp;
-  var idx=(FIN.energieprijs_stijging_pct!=null?+FIN.energieprijs_stijging_pct:3)/100;
-  var HOR=15;
-  if(!(inv>0)) return;   // zonder investering geen financieel plan
-  var rows=[], cum=-inv, tvt=null, som=0;
-  for(var t=1;t<=HOR;t++){
-    var b=besp1*Math.pow(1+idx,t-1); som+=b; var prev=cum; cum+=b;
+  var invBruto=(BW&&+BW.invTot)||+FIN.investering||0;
+  if(!(invBruto>0)) return;
+  var verzw=(BW&&+BW.verzwaring)||0;
+  var netInv=(BW&&BW.netInv!=null)?+BW.netInv:invBruto;
+  var energie=(BW&&BW.energie!=null)?+BW.energie:((+FIN.besparing_jaar)||besp);
+  var cap=(BW&&+BW.cap)||0;
+  var HOR=(BW&&+BW.horizon)||15;
+  var infl=((BW&&BW.inflatie_pct!=null)?+BW.inflatie_pct:(FIN.energieprijs_stijging_pct!=null?+FIN.energieprijs_stijging_pct:3))/100;
+  var extra=((BW&&BW.net_extra_pct!=null)?+BW.net_extra_pct:0)/100;
+  var dubJ=(BW&&+BW.net_dubbel_jaar)||9999, dubF=(BW&&+BW.net_dubbel_factor)||1, y0=(new Date()).getFullYear();
+  var besp1=energie+cap;
+  var rows=[], cum=-netInv, tvt=null, som=0;
+  for(var t=1;t<=HOR;t++){ var jaar=y0+(t-1);
+    var eB=energie*Math.pow(1+infl,t-1);
+    var cB=cap*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1);
+    var b=eB+cB; som+=b; var prev=cum; cum+=b;
     if(tvt===null && cum>=0) tvt=(t-1)+(prev<0?(-prev/b):0);
     rows.push({ jaar:t, besparing:b, cumulatief:cum });
   }
-  var meerwaarde=som-inv;
-  var roi15=inv>0?(meerwaarde/inv*100):0;
-  var rendGem=inv>0?(som/HOR/inv*100):0;
-  var simpelTvt=besp1>0?inv/besp1:null;
+  var meerwaarde=som-netInv;
+  var roi15=netInv>0?(meerwaarde/netInv*100):0;
+  var rendGem=netInv>0?(som/HOR/netInv*100):0;
 
   var h=kop('Financieel plan over 15 jaar');
   h+='<p class="lead">Deze berekening gaat uit van een investering <b>uit eigen middelen</b> (geen lening of leasing). '+
-     'Ze toont wat u elk jaar bespaart en wanneer uw investering is terugverdiend.</p>';
+     'Ze toont wat u elk jaar bespaart en wanneer uw investering is terugverdiend.'+(BW?' De <b>netkosten stijgen</b> jaarlijks (inflatie + '+_num(extra*100,0)+' %'+(dubJ<9999?', met een eenmalige verdubbeling in '+dubJ:'')+') — dat maakt de batterij elk jaar waardevoller.':'')+'</p>';
   h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr 1fr">'+
-       '<div class="box"><span class="l">Investering<br>(eigen middelen)</span><div class="v">'+eur(inv)+'</div><span class="u">eenmalig</span></div>'+
+       '<div class="box"><span class="l">'+(verzw>0?'Netto-investering<br>(na vermeden verzwaring)':'Investering<br>(eigen middelen)')+'</span><div class="v">'+eur(netInv)+'</div><span class="u">'+(verzw>0?('bruto '+eur(invBruto)+' − '+eur(verzw)):'eenmalig')+'</span></div>'+
        '<div class="box win"><span class="l">Terugverdiend na</span><div class="v win">'+(tvt!=null?_num(tvt,1)+' j':'> 15 j')+'</div><span class="u">break-even</span></div>'+
        '<div class="box"><span class="l">Netto meerwaarde<br>na 15 jaar</span><div class="v">'+eur(meerwaarde)+'</div><span class="u">na aftrek investering</span></div>'+
        '<div class="box"><span class="l">Rendement<br>(gemiddeld/jaar)</span><div class="v">'+pct(rendGem,0)+'</div><span class="u">15j · ROI '+pct(roi15,0)+'</span></div>'+
      '</div>';
+  if(BW && (cap>0 || verzw>0)){
+    h+='<p class="note" style="margin-top:8px">Besparing jaar 1 = energie (spot + zelfconsumptie) '+eur(energie)+(cap>0?(' + vermeden capaciteitstarief '+eur(cap)):'')+' = <b>'+eur(besp1)+'/jaar</b>'+(verzw>0?('. Daarnaast vermijdt de batterij een <b>aansluitingsverzwaring</b> van '+eur(verzw)+' (eenmalig, in mindering op de investering)'):'')+'.</p>';
+  }
   h+='<div class="heat-wrap"><div class="heat-titel">Cumulatieve cashflow (eigen middelen)</div>'+
      '<div class="heat-duid">Onder de lijn = investering nog niet terugverdiend · boven de lijn = winst.</div>'+
-     _cashflowSvg(rows, inv)+'</div>';
+     _cashflowSvg(rows, netInv)+'</div>';
   h+='<h2>Jaar per jaar</h2>';
   h+='<table class="f"><thead><tr><th>Jaar</th><th>Besparing</th><th>Cumulatief resultaat</th></tr></thead><tbody>';
   rows.forEach(function(r){
@@ -494,9 +508,8 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
   });
   h+='</tbody></table>';
   h+='<p class="note">Aannames: investering uit eigen middelen, geen financieringskosten; besparing jaar 1 = '+eur(besp1)+
-     ', jaarlijks geïndexeerd met '+_num(idx*100,0)+' % (verwachte energieprijsstijging). Eenvoudige terugverdientijd '+
-     '(zonder indexatie) = '+(simpelTvt!=null?_num(simpelTvt,1)+' jaar':'n.v.t.')+'. Bedragen exclusief btw. Dit is een '+
-     'indicatieve raming, geen persoonlijk financieel advies.</p>';
+     '. Energie geïndexeerd met '+_num(infl*100,0)+' %/jaar'+(BW&&extra>0?(', netkosten met inflatie + '+_num(extra*100,0)+' %/jaar'+(dubJ<9999?' + eenmalige verdubbeling in '+dubJ:'')):'')+
+     '. Bedragen exclusief btw. Indicatieve raming, geen persoonlijk financieel advies.</p>';
   pagina(h);
 })();
 
