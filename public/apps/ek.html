@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.14.0 (2026-09-26) — PROFIEL OPLADEN IN DE PREP-TEGEL (Johan): adviseur/manager-only knop "📈 Profiel opladen"
+<!-- ek.html v0.14.1 (2026-09-26) — FIX klantrapport toonde DEMO-data (Johan): Safari kopieert sessionStorage NIET naar een
+     via window.open geopend tabblad → de payload kwam niet aan → klantrapport.html viel terug op _demo() (Voorbeeld NV,
+     laadplein 216 kW enz.). toonKlantrapport() geeft de payload nu via localStorage door (betrouwbaar gedeeld binnen de
+     origin) + sessionStorage als fallback, en opent het rapport NIET meer als het opbouwen/bewaren faalt (geen demo meer
+     getoond/gemaild). Vereist klantrapport.html v0.7.1 (leest localStorage).
+     ── v0.14.0 (2026-09-26) — PROFIEL OPLADEN IN DE PREP-TEGEL (Johan): adviseur/manager-only knop "📈 Profiel opladen"
      in #upl (enkel ?prep=1/?adv=1). Leest CSV/Excel → POST /api/profiel/detect (herkent formaat + identificeert de
      meetreeksen) → reeks-mapping-modal (afname/injectie/niet gebruiken + FLX-dossier) → POST /api/profiel/analyse met de
      mapping als spec-override → coverage-preview → POST /api/profiel/bevestig (bewaart op het dossier, 409-conflict → "toch
@@ -1643,7 +1648,14 @@
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
       if(!j||!j.ok) throw new Error((j&&j.error)||'rapport faalde');
-      try{ sessionStorage.setItem('KLANTRAPPORT_DATA', JSON.stringify(_klantrapportPayload(j,sel))); }catch(e){}
+      // v0.14.1: payload via localStorage (Safari kopieert sessionStorage NIET naar een window.open-tabblad → demo-fallback).
+      //   Faalt het opbouwen/bewaren → NIET openen, zodat er nooit een demo-rapport wordt getoond/gemaild.
+      var _pl; try{ _pl=JSON.stringify(_klantrapportPayload(j,sel)); }catch(ePl){ _pl=null; }
+      if(!_pl){ if(st){ st.style.color='var(--muted)'; st.textContent='Rapportgegevens onvolledig — probeer opnieuw.'; } return; }
+      var _stored=false;
+      try{ localStorage.setItem('KLANTRAPPORT_DATA', _pl); _stored=true; }catch(e){}
+      try{ sessionStorage.setItem('KLANTRAPPORT_DATA', _pl); _stored=true; }catch(e){}
+      if(!_stored){ if(st){ st.style.color='var(--muted)'; st.textContent='Kon het rapport niet klaarzetten (opslag geblokkeerd in de browser).'; } return; }
       var win=window.open('/apps/klantrapport.html','_blank');
       if(st){ if(win){ st.style.color='var(--green)'; st.textContent='✔ Rapport geopend in een nieuw tabblad.'; }
         else { st.style.color='var(--muted)'; st.innerHTML='Pop-up geblokkeerd — <a href="/apps/klantrapport.html" target="_blank" rel="noopener">open het rapport hier</a>.'; } }
