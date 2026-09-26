@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.19.1 (2026-09-26) — KLANTRAPPORT-UITLIJNING (Johan): _klantrapportPayload stuurt nu een `battwaarde`-blok mee
+<!-- ek.html v0.20.0 (2026-09-26) — TWEE-FACTUREN GESPLITSTE INDEXATIE (Johan): de jaarbesparing (base-factuur − scenario-factuur)
+     wordt gesplitst in een netkosten-deel (besp_net, uit de sweep) en de rest (commodity/heffingen). De rest indexeert op inflatie (2%);
+     het netkosten-deel + het vermeden capaciteitstarief indexeren op het snellere netkostenpad (inflatie + 2% + eenmalige verdubbeling 2029).
+     _escCashflow(restJ, netJ); _battValue splitst energie→besp_rest/besp_net; battwaarde-payload draagt besp_net mee. Vereist klantrapport.html v0.11 + server v15.169.
+     ── v0.19.1 (2026-09-26) — KLANTRAPPORT-UITLIJNING (Johan): _klantrapportPayload stuurt nu een `battwaarde`-blok mee
      (energie + vermeden capaciteitstarief + vermeden verzwaring + escalatie-parameters) zodat het klantrapport-financieel-plan
      dezelfde 15-jaar cashflow met stijgende netkosten toont als het EK-scherm. Vereist klantrapport.html v0.10.
      ── v0.19.0 (2026-09-26) — BATTERIJWAARDE-MODEL + 15-JAAR ESCALERENDE CASHFLOW (Johan): CREG "laden elders"-referentie
@@ -777,7 +781,7 @@
   var EK_IS_OEKENE=false, EK_PREPADV=false;  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
   var BATT_RTE=92, BATT_DOD=90;  // v0.18: batterij RTE + DoD (sim) — server-breed via /api/ek-config (oekene tunet), gecachet in localStorage
   var NET_TARIEF=null;   // v0.19: net-tarieven van de sweep-response (toegangsvermogen + maandpiek €/kW/jaar, échte DNB-kaart)
-  var NET_CFG={ verzwaring_eur_kva:150, ms_stap_eur:35000, ms_drempel_kva:250, gelijktijd_ac:0.5, gelijktijd_dc:1.0, ac_paal_kva:22, dc_paal_kva:300, horizon_jaar:15, inflatie_pct:3, net_extra_pct:4, net_dubbel_jaar:2029, net_dubbel_factor:2 };  // v0.19: server-breed via /api/ek-config
+  var NET_CFG={ verzwaring_eur_kva:150, ms_stap_eur:35000, ms_drempel_kva:250, gelijktijd_ac:0.5, gelijktijd_dc:1.0, ac_paal_kva:22, dc_paal_kva:300, horizon_jaar:15, inflatie_pct:2, net_extra_pct:2, net_dubbel_jaar:2029, net_dubbel_factor:2 };  // v0.20: server-breed via /api/ek-config (alle kosten +2%; netkosten +2% bovenop inflatie + 2029-verdubbeling)
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
   var STATE_EAN_AFNAME='', STATE_EAN_INJECTIE='', STATE_ADRES='', STATE_METER='';  // v0.13.12: aansluiting-gegevens uit de factuur-case (EAN-keuze) → klantrapport
@@ -979,33 +983,39 @@
   //  TVT + rendement over 15 jaar met escalerende netkosten (+inflatie +4%/j + eenmalige verdubbeling in 2029).
   function _pChargeKva(){ var acN=INV_OV?INV_OV.ac:_acDefault(), dcN=INV_OV?INV_OV.dc:_dcDefault();
     return acN*(+NET_CFG.ac_paal_kva||22)*(+NET_CFG.gelijktijd_ac||0.5) + dcN*(+NET_CFG.dc_paal_kva||300)*(+NET_CFG.gelijktijd_dc||1); }
-  function _escCashflow(energieJ, capJ){   // 15-jaar cumulatief; energie op inflatie, netkosten op inflatie+4% + 2029-verdubbeling
+  // v0.20 (Johan): TWEE-FACTUREN-cashflow. restJ = commodity/heffingen-deel van de besparing → indexeert op inflatie.
+  //   netJ = netkosten-deel van de besparing + vermeden capaciteitstarief → indexeert op inflatie + net_extra% + 2029-verdubbeling.
+  function _escCashflow(restJ, netJ){   // 15-jaar cumulatief
     var N=Math.max(1,Math.round(+NET_CFG.horizon_jaar||15)), infl=(+NET_CFG.inflatie_pct||0)/100, extra=(+NET_CFG.net_extra_pct||0)/100;
     var y0=(new Date()).getFullYear(), dubJ=+NET_CFG.net_dubbel_jaar||9999, dubF=+NET_CFG.net_dubbel_factor||1;
     var som=0, cum=0, rows=[];
     for(var t=0;t<N;t++){ var jaar=y0+t; var eF=Math.pow(1+infl,t); var nF=Math.pow((1+infl)*(1+extra),t)*(jaar>=dubJ?dubF:1);
-      var s=energieJ*eF + capJ*nF; som+=s; cum+=s; rows.push({jaar:jaar,s:s,cum:cum}); }
+      var s=restJ*eF + netJ*nF; som+=s; cum+=s; rows.push({jaar:jaar,s:s,cum:cum}); }
     return { som:som, rows:rows, N:N };
   }
   function _battValue(a){
     if(!a) return null;
     var battKw=(+a.battKw||((+a.battKwh||0)/2)||0);
-    var energie=Math.round(+a.besparing||0);
+    var energie=Math.round(+a.besparing||0);                          // totale factuurbesparing jaar 1 (base − scenario)
+    // v0.20 (Johan): splits de factuurbesparing in het netkosten-deel (besp_net) en de rest (commodity/heffingen).
+    var bespNet=Math.round(+a.besp_net||0); bespNet=Math.max(0, Math.min(bespNet, energie));
+    var bespRest=energie-bespNet;
     var pCharge=_pChargeKva();
     var shaved=Math.min(battKw, Math.max(0,pCharge));                 // batterij shaaft tot ZIJN vermogen
     var capRate=(NET_TARIEF&&+NET_TARIEF.cap_eur_kw_jaar)||0;
-    var capJ=Math.round(shaved*capRate);                              // vermeden capaciteitstarief/jaar
+    var capJ=Math.round(shaved*capRate);                              // vermeden capaciteitstarief/jaar (= netkosten)
     var toegang=(CTX&&+CTX.toegangKw)||0;
     var domNeed=toegang+pCharge, metBatt=domNeed-shaved;
     var msDrempel=+NET_CFG.ms_drempel_kva||250;
     var msStap=(domNeed>msDrempel && metBatt<=msDrempel)?(+NET_CFG.ms_stap_eur||0):0;
     var verzwaring=Math.round(shaved*(+NET_CFG.verzwaring_eur_kva||0) + msStap);   // vermeden verzwaring (eenmalig)
     var invTot=_invVan(a), netInv=Math.max(0, invTot - verzwaring);
-    var cf=_escCashflow(energie, capJ);
+    // rest → inflatie; netkosten-deel (besp_net) + vermeden capaciteitstarief → sneller netkostenpad + 2029.
+    var cf=_escCashflow(bespRest, bespNet+capJ);
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;   // gemiddeld rendement/jaar over 15 jaar
-    return { energie:energie, cap:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
+    return { energie:energie, besp_net:bespNet, besp_rest:bespRest, cap:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
              invTot:invTot, netInv:netInv, bespJaar1:energie+capJ, som15:Math.round(cf.som), tvt:tvt, rend:rend };
   }
   function _bespTot(a){ var v=_battValue(a); return v?v.bespJaar1:((a&&+a.besparing)||0); }   // besparing jaar 1 = energie + vermeden capaciteit
@@ -1039,8 +1049,9 @@
     if(!c00||!c01||!c10||!c11) return null;
     function bil(f){ var a=f(c00)+(f(c01)-f(c00))*p.t,d=f(c10)+(f(c11)-f(c10))*p.t; return a+(d-a)*b.t; }
     var besp=bil(function(c){return c.besparing||0;}),capex=bil(function(c){return c.capex||0;}),kost=bil(function(c){return c.kost||0;}),rend=(capex>0)?(besp/capex*100):null;
+    var bespNet=bil(function(c){return c.besp_net||0;});   // v0.20: netkosten-deel van de besparing (voor de gesplitste indexatie)
     var cyc=bil(function(c){return c.cycli||0;});   // v0.13.11: cycli/jaar (interpolatie uit de ankers)
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:ry,battKwh:Math.round(ry*(H.crate||2)),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc) }; }
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:ry,battKwh:Math.round(ry*(H.crate||2)),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc) }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -1052,13 +1063,14 @@
     window._RAP_PAYLOAD=payload;   // v0.13.11: sweep-body bewaren voor het klantrapport-endpoint (toon rapport)
     NET_TARIEF=sw.net_tarief||null;   // v0.19: échte DNB-net-tarieven (toegangsvermogen + maandpiek) voor de batterijwaarde
     var best=_besteAnkerKm(A); var rR=(sw.grid&&sw.grid.batt_kw_as)||[], rC=(sw.grid&&sw.grid.pv_kwp_as)||[];
-    HM={ real:A, rows:_subdiv(rR), cols:_subdiv(rC), realRows:rR, realCols:rC, computed:{}, interp:true, crate:2, refKost:sw.referentie_kost,
+    HM={ real:A, rows:_subdiv(rR), cols:_subdiv(rC), realRows:rR, realCols:rC, computed:{}, interp:true, crate:2, refKost:sw.referentie_kost, refNetk:(sw.referentie_netk!=null?sw.referentie_netk:null),
       rowLabel:function(v){return v>0?(v+' kW'):'geen batt';}, colLabel:function(v){return v+' kWp';},
       realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
     HM.compute=function(ry,cx,done){ var key=ry+'|'+cx; if(HM.computed[key]){ done&&done(HM.computed[key]); return; }
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:ry})).then(function(j){
         if(j&&j.ok&&j.cel){ var c=j.cel, besp=(HM.refKost!=null)?(HM.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
-          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null) };
+          var bespNet=(HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;   // v0.20: netkosten-deel van de besparing (exacte cel)
+          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null) };
           HM.computed[key]=cell; done&&done(cell); } else done&&done(null); }).catch(function(){ done&&done(null); }); }; }
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   // v0.16.2 (Johan): heatmap-investering (+ TVT/rendement) op EXACT dezelfde functie als de tegel/paycard (_invTotMajor)
@@ -1241,7 +1253,7 @@
     if($('pay-tvt-all')) $('pay-tvt-all').textContent = (tvt!=null?(String(tvt).replace('.',',')+' j'):'> 15 j');
     if($('pay-rend-all')) $('pay-rend-all').textContent = (_rendCell!=null?(_rendCell+'%'):'—');
     if($('pay-foot')){ var _bf=''; if(BV && (BV.cap>0 || BV.verzwaring>0)){ _bf='Batterijwaarde: energiebesparing '+eur(BV.energie)+'/j'+(BV.cap>0?(' · vermeden capaciteitstarief '+eur(BV.cap)+'/j'):'')+(BV.verzwaring>0?(' · vermeden aansluitingsverzwaring '+eur(BV.verzwaring)+' eenmalig'):'')+'. '; }
-      $('pay-foot').textContent=_bf+'Terugverdientijd en rendement over 15 jaar; netkosten stijgen met inflatie + 4%/jaar en verdubbelen eenmalig in '+(NET_CFG.net_dubbel_jaar||2029)+'. Base = dom laden (aansluiting moet stijgen); de batterij shaaft de piek tot haar vermogen.'; }
+      $('pay-foot').textContent=_bf+'Terugverdientijd en rendement over 15 jaar; alle kosten +'+(NET_CFG.inflatie_pct||2)+'% inflatie, netkosten +'+(NET_CFG.net_extra_pct||2)+'% bovenop inflatie en eenmalige verdubbeling in '+(NET_CFG.net_dubbel_jaar||2029)+'. Base = dom laden (aansluiting moet stijgen); de batterij shaaft de piek tot haar vermogen.'; }
     // Offerte-combo naast de titel (klein, niet vet)
     if($('off-combo')) $('off-combo').textContent = String(pvKwp).replace('.',',')+' kWp PV · '+battKwh+' kWh batterij'+(palen>0?(' · '+palen+' '+(palen>1?'laadpalen':'laadpaal')):'');
     // Kwaliteit-van-een-batterij-blok (merkvergelijking, geschaald op deze combi)
@@ -2035,9 +2047,9 @@
     if(_mfull.overige) posten.push({label:'Overige (kabel, ontkoppelbord, toebehoren)',bedrag:_mfull.overige});
     // v0.19 (Johan): batterijwaarde meesturen zodat het klantrapport dezelfde 15-jaar cashflow toont als EK (energie +
     //   vermeden capaciteitstarief; escalerende netkosten +inflatie +4%/j + 2029-verdubbeling; vermeden verzwaring eenmalig).
-    var _bv=_battValue(sel)||{energie:Math.round(sel.besparing||0),cap:0,verzwaring:0};
+    var _bv=_battValue(sel)||{energie:Math.round(sel.besparing||0),besp_net:0,cap:0,verzwaring:0};
     var battwaarde={ invTot:_mfull.tot, verzwaring:_bv.verzwaring, netInv:Math.max(0,_mfull.tot-_bv.verzwaring),
-      energie:_bv.energie, cap:_bv.cap, shaved:_bv.shaved||0, pCharge:_bv.pCharge||0,
+      energie:_bv.energie, besp_net:_bv.besp_net||0, cap:_bv.cap, shaved:_bv.shaved||0, pCharge:_bv.pCharge||0,
       horizon:NET_CFG.horizon_jaar, inflatie_pct:NET_CFG.inflatie_pct, net_extra_pct:NET_CFG.net_extra_pct,
       net_dubbel_jaar:NET_CFG.net_dubbel_jaar, net_dubbel_factor:NET_CFG.net_dubbel_factor, cap_eur_kw_jaar:(NET_TARIEF&&NET_TARIEF.cap_eur_kw_jaar)||0 };
     return {
