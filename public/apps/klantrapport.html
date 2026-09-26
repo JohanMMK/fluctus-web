@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
-<!-- klantrapport.html v0.8.0 (2026-09-26) — COMBI-AFSTEMMING + DYNAMISCHE BIJLAGENUMMERS (Johan): het rapport toont/benoemt
+<!-- klantrapport.html v0.9.0 (2026-09-26) — EXTRA BIJLAGE "Alle kengetallen per combinatie" (Johan): de PV×batterij-roosters
+     per kengetal (terugverdientijd, rendement, besparing, factuur na, €/100 km, besparing slim laden, investering, cycli),
+     elk als gekleurde tabel in rapportstijl (heatKleur), onder elkaar, ~3 per A4 (vervolg-pagina's met "(vervolg)"-kop).
+     Data uit EK-payload D.kengetallen {pv_as,batt_as,roosters:[{titel,mat:[[{t,txt,best}]]}]}; rooster valt weg als het
+     geen enkele waarde heeft (bv. cycli zonder batterij). Dynamisch bijlagenummer via _bijlage.
+     ── v0.8.0 (2026-09-26) — COMBI-AFSTEMMING + DYNAMISCHE BIJLAGENUMMERS (Johan): het rapport toont/benoemt
      nu enkel wat écht in de gekozen combi zit. HAS_PV/HAS_BATT/HAS_LP/HAS_INJ sturen alle labels (hero, kop, factuurkolom,
      cover-sub, onderhandelingsnota-checklist, investeringsregel) via CN/CS/CN_PROSE — geen "+ batterij" meer als er geen
      batterij is. Besparingskaarten (Zelfconsumptie=PV, Piekafvlakking/Arbitrage=batt, Onbalans=batt|injectie) enkel indien
@@ -88,6 +93,15 @@
   table.f tr.tot td{font-weight:800;color:var(--navy);border-top:2px solid var(--navy);border-bottom:none;font-size:13.5px}
   table.f td.win{color:var(--accent-d);font-weight:700}
   .pos{color:var(--accent-d)} .neg{color:var(--rood)}
+  /* kengetallen-roosters (bijlage): PV×batterij per kengetal, gekleurde tabel in rapportstijl */
+  .kg{margin:14px 0 6px;break-inside:avoid}
+  .kg-t{font-size:13.5px;color:var(--navy);margin:0 0 6px;font-weight:700}
+  .kg-scroll{overflow-x:auto}
+  table.kg-tab{border-collapse:separate;border-spacing:2px;font-size:11px;table-layout:auto}
+  table.kg-tab th{background:#f3f6fa;color:var(--navy);font-size:9.5px;font-weight:700;padding:4px 6px;text-align:center;white-space:nowrap}
+  table.kg-tab td.kg-ax{background:#f3f6fa;color:var(--muted);font-size:9.5px;text-align:right;padding:4px 8px;white-space:nowrap}
+  table.kg-tab td.kg-cel{text-align:center;padding:5px 8px;border-radius:5px;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+  table.kg-tab td.kg-best{outline:2px dashed var(--navy);outline-offset:-3px}
   /* uitleg-blokken */
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
   .card{border:1px solid var(--lijn);border-radius:10px;padding:12px 14px;background:#fff}
@@ -577,6 +591,39 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
   if(HAS_LP && HT.afname_laden_zonder) h+=heatBlok(_ltr()+'. Gebouw + laden, zonder '+CS, HT.afname_laden_zonder.mat||HT.afname_laden_zonder, (HT.afname_laden_zonder.eenheid||'kW'), 'Het laden verhoogt en verbreedt uw afnamepieken.');
   if(HT.afname_met_sturing) h+=heatBlok(_ltr()+'. Gebouw'+(HAS_LP?' + laden':'')+', met '+CS+' (gestuurd)', HT.afname_met_sturing.mat||HT.afname_met_sturing, (HT.afname_met_sturing.eenheid||'kW'), CN_CAP+' vlakt de afname af — lagere pieken, lagere kosten.');
   pagina(h);
+})();
+
+// A6 — kengetallen-roosters (PV×batterij per kengetal). Elk rooster een gekleurde tabel in rapportstijl, onder elkaar.
+//   Data: D.kengetallen = { pv_as:[kolomlabels], batt_as:[rijlabels], roosters:[{key,titel,mat:[[{t,txt,best}]]}] } uit EK.
+(function(){
+  var K=D.kengetallen; if(!K || !Array.isArray(K.roosters) || !K.roosters.length) return;
+  var pvAs=K.pv_as||[], battAs=K.batt_as||[];
+  function tabel(R){
+    var s='<div class="kg"><h3 class="kg-t">'+esc(R.titel)+'</h3><div class="kg-scroll"><table class="kg-tab"><thead><tr><th class="kg-hoek"></th>';
+    pvAs.forEach(function(c){ s+='<th>'+esc(c)+'</th>'; });
+    s+='</tr></thead><tbody>';
+    (R.mat||[]).forEach(function(row,ri){
+      s+='<tr><td class="kg-ax">'+esc(battAs[ri]||'')+'</td>';
+      (row||[]).forEach(function(cel){
+        var t=(cel&&cel.t!=null)?cel.t:null;
+        var bg=(t==null)?'#F2F5F8':heatKleur(t);
+        var fg=(t!=null&&t>0.55)?'#fff':'#12305c';
+        s+='<td class="kg-cel'+(cel&&cel.best?' kg-best':'')+'" style="background:'+bg+';color:'+fg+'">'+esc(cel?cel.txt:'')+'</td>';
+      });
+      s+='</tr>';
+    });
+    return s+'</tbody></table></div></div>';
+  }
+  // ~3 roosters per A4 → over meerdere pagina's; eerste pagina krijgt het bijlagenummer, vervolg een "(vervolg)"-kop.
+  var per=3;
+  for(var i=0;i<K.roosters.length;i+=per){
+    var grp=K.roosters.slice(i,i+per);
+    var h=(i===0)?_bijlage('Alle kengetallen per combinatie'):kop('Alle kengetallen per combinatie (vervolg)');
+    if(i===0) h+='<p class="lead">Voor elke combinatie van zonnepanelen (horizontaal) en batterij (verticaal) tonen we per kengetal het resultaat. '+
+      '<b>Donkerder = gunstiger.</b> Het <b>gestreepte</b> vakje is onze aanbeveling.</p>';
+    grp.forEach(function(R){ h+=tabel(R); });
+    pagina(h);
+  }
 })();
 
 // WAIVER — als laatste inhoudspagina, onderaan, kleine nette tekst op wit (geen kader, geen titel)

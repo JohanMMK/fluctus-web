@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.14.2 (2026-09-26) — FIX toegangsvermogen-prefill (Johan): bij een factuur-case/-upload vulde EK het veld
+<!-- ek.html v0.14.4 (2026-09-26) — KENGETALLEN-ROOSTERS IN HET RAPPORT (Johan): _kengetallenGrids() serialiseert de
+     PV×batterij-heatmaps per kengetal (kleurintensiteit t + opgemaakte tekst per cel; roosters zonder waarde vallen weg)
+     → payload.kengetallen → klantrapport v0.9.0 toont ze als extra bijlage, onder elkaar.
+     ── v0.14.3 (2026-09-26) — RESULTAAT-HEATMAPS ONDER ELKAAR (Johan): .hmpair stapelt nu verticaal (volle breedte per rooster)
+     en cellen kappen niet meer af (table-layout:auto, geen ellipsis) → cijfers volluit i.p.v. afgekapt naast elkaar.
+     ── v0.14.2 (2026-09-26) — FIX toegangsvermogen-prefill (Johan): bij een factuur-case/-upload vulde EK het veld
      "Piek / toegangsvermogen" met aansluitVermogenKva×0,9 wanneer bc.toegangsvermogenKw ontbrak → te lage piek (bv. 461 i.p.v.
      703) → te lage netkosten in het bedrijf-rapport, terwijl de simulator de manueel ingegeven factuurpiek gebruikt. De
      extractor consolideert de factuurpiek als bc._aansluitvermogenBron.gekozenMaxKw (max van toegangsvermogen/maandpiek/
@@ -1612,6 +1617,36 @@
     }catch(e){ if(b){ b.disabled=false; b.textContent='💾 Bewaar op dossier'; } var st=$('prof-status'); if(st){ var er=document.createElement('div'); er.style.cssText='font-size:12px;color:#C0392B;margin-top:6px'; er.textContent='Bewaren mislukt: '+e.message; st.appendChild(er); } }
   }
 
+  // v0.14.4: serialiseer de kengetallen-roosters (PV×batterij per kengetal) uit de heatmap-state, zodat het
+  //   klantrapport ze als extra bijlage kan tonen (elk rooster als gekleurde tabel in rapportstijl, onder elkaar).
+  //   We geven per cel de kleurintensiteit t (0..1, al gedraaid naar "donker = gunstiger") + de opgemaakte tekst mee,
+  //   zodat het rapport niets hoeft te herrekenen. Roosters zonder enige waarde (bv. cycli zonder batterij) vallen weg.
+  function _kengetallenGrids(){
+    try{
+      var H=HM; if(!H||!H.real||!H.real.length) return null;
+      var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;});
+      var order=['tvt','rendement','besparing','factuur_na','km100','besp_creg','investering','cycli'];
+      var titel={tvt:'Terugverdientijd PV + batterij (jaar)',rendement:'Rendement PV + batterij (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',besp_creg:'Besparing slim laden t.o.v. CREG (€/jaar)',investering:'Totale investering (€)',cycli:'Batterijcycli per jaar'};
+      var best=H.best||{};
+      var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
+      var batt_as=rows.map(function(r){return H.rowLabel?H.rowLabel(r):String(r);});
+      var roosters=[];
+      order.forEach(function(mx){
+        var M=HM_METRICS[mx]; if(!M) return;
+        var flat=[]; rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); flat.push(a?M.val(a):null); }); });
+        var vals=flat.filter(function(v){return v!=null&&isFinite(v);}); if(!vals.length) return;
+        var mn=Math.min.apply(null,vals), mx2=Math.max.apply(null,vals);
+        var mat=rows.map(function(ry){ return cols.map(function(cx){
+          var a=_cellAt(H,ry,cx), v=(a?M.val(a):null);
+          var t=(v==null||!isFinite(v))?null:((mx2>mn)?((v-mn)/(mx2-mn)):0.5); if(t!=null && !M.goedHoog) t=1-t;
+          return { t:(t==null?null:Math.round(t*100)/100), txt:((v==null||!isFinite(v))?'':M.fmt(v)), best:!!(a&&best&&a._ry===best._ry&&a._cx===best._cx) };
+        }); });
+        roosters.push({ key:mx, titel:titel[mx], mat:mat });
+      });
+      return roosters.length ? { pv_as:pv_as, batt_as:batt_as, roosters:roosters } : null;
+    }catch(e){ return null; }
+  }
+
   // ══ Klantrapport (v0.13.11) — "toon rapport": bouwt de gekozen combi op de server (bedrijf-rapport-endpoint),
   //   schrijft de weergaveklare payload naar sessionStorage en opent /apps/klantrapport.html in een nieuw tabblad.
   //   Het rapport-tabblad genereert zelf de PDF en laat die (fire-and-forget) naar de klant mailen. ══
@@ -1642,6 +1677,7 @@
       },
       onderhandeling: { afname_marge_jaar:(+ (C.afname_marge_jaar)||0), injectie_marge_jaar:(+(C.injectie_marge_jaar)||0), digitale_meter:true },
       heeftLaadplein: !!j.heeftLaadplein,
+      kengetallen: _kengetallenGrids(),   // v0.14.4: PV×batterij-roosters per kengetal → extra bijlage in het rapport
       token: TOKEN||'', mail: (($('i-mail')&&$('i-mail').value)||'').trim(), api: API
     };
   }
