@@ -4,7 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.14.4 (2026-09-26) — KENGETALLEN-ROOSTERS IN HET RAPPORT (Johan): _kengetallenGrids() serialiseert de
+<!-- ek.html v0.15.0 (2026-09-26) — BEWERKBAAR INVESTERINGSBLOK (Johan): "Wat u investeert — detail" toont nu enkel de
+     hoofdcomponenten (Zonnepanelen kWp · Batterij kW+kWh · Laadpalen AC (×) · Laadpalen DC (×) · Overige = kabel/ontkoppelbord/
+     toebehoren) met specs i.p.v. detailprijzen; prijs staat ENKEL op het totaal. Knop "✏️ Pas aan" maakt kWp/kW/aantal AC/DC
+     bewerkbaar (totaal herrekent live) → "💾 Opslaan" snapt PV+batterij naar de dichtstbijzijnde heatmap-cel, selecteert die
+     (= standaardkeuze voor "toon rapport") en bewaart de laadpaal-aantallen (INV_OV) → mee in het rapport-voorstel (AC + DC).
+     STUB.dc_paal_eur (richtprijs, tunebaar). Helpers _invTotMajor/_invBlok/_invEditToggle/_invSave. Heatmap-metrieken ongemoeid.
+     LOGIN-GATE (Johan): de nieuwe features (Pas aan-investeringsblok, profiel-upload, kengetallen-bijlage) zijn ENKEL zichtbaar
+     als oekene@gmail.com op de portal is ingelogd. _ekResolveGate() leest de same-origin Supabase-sessie (session.user.email) →
+     EK_IS_OEKENE → _ekApplyGate() toont/verbergt .inv-tools + #prof-upl-blok; _klantrapportPayload zet kengetallen enkel dan.
+     Alle klant-facing flows (heatmap, toon rapport, mail) blijven ongewijzigd voor iedereen.
+     ── v0.14.4 (2026-09-26) — KENGETALLEN-ROOSTERS IN HET RAPPORT (Johan): _kengetallenGrids() serialiseert de
      PV×batterij-heatmaps per kengetal (kleurintensiteit t + opgemaakte tekst per cel; roosters zonder waarde vallen weg)
      → payload.kengetallen → klantrapport v0.9.0 toont ze als extra bijlage, onder elkaar.
      ── v0.14.3 (2026-09-26) — RESULTAAT-HEATMAPS ONDER ELKAAR (Johan): .hmpair stapelt nu verticaal (volle breedte per rooster)
@@ -318,6 +328,11 @@
   table.inv td{padding:9px 4px;border-bottom:1px solid var(--line);vertical-align:top}
   table.inv td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
   table.inv tr.tot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:800;padding-top:11px}
+  /* v0.15: bewerkbaar investeringsblok (Pas aan → Opslaan) */
+  .inv-tools{display:none;align-items:center;gap:10px;margin:2px 0 8px}   /* v0.15: standaard verborgen → enkel zichtbaar voor oekene@gmail.com (login-gate) */
+  #inv-edit-btn.saving{background:var(--green);color:#fff;border-color:var(--green)}
+  input.invin{width:96px;text-align:right;border:1px solid #C7D3E2;border-radius:7px;padding:6px 8px;font:inherit;font-size:14px;font-variant-numeric:tabular-nums}
+  table.inv td .invspec{color:var(--muted);font-size:12.5px;margin-top:2px}
   .sub{color:var(--muted);font-size:12px}
   /* 1-A4 samenvatting */
   .a4{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px}
@@ -559,6 +574,8 @@
     <!-- Investering / capex-details (inklapbaar onder de heatmaps) -->
     <details>
       <summary>Wat u investeert — detail</summary>
+      <div class="inv-tools"><button type="button" id="inv-edit-btn" class="btn ghost sm">✏️ Pas aan</button>
+        <span class="sub" id="inv-edit-hint"></span></div>
       <table class="inv"><tbody id="invrows"></tbody></table>
       <p class="foot" id="inv-foot"></p>
       <p class="foot" style="margin-top:14px;color:var(--navy)">Hoe dit terugverdient: de overstap <b>van diesel naar elektrisch (gewoon laden, CREG-tarief)</b> betaalt de <b>laadpalen + aansluiting</b> terug; de overstap <b>van gewoon naar slim laden (PV + batterij)</b> betaalt de <b>batterij + PV</b> terug.</p>
@@ -658,6 +675,7 @@
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
+  var EK_IS_OEKENE=false, EK_PREPADV=false;  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
   var STATE_EAN_AFNAME='', STATE_EAN_INJECTIE='', STATE_ADRES='', STATE_METER='';  // v0.13.12: aansluiting-gegevens uit de factuur-case (EAN-keuze) → klantrapport
@@ -678,7 +696,7 @@
     creg_eur_mwh:322,                         // gewoon/regulier laden (CREG-tarief)
     res_piek_kw_per_mwh:0.55,  // residentieel SLP: vaste loadfactor ~0,21 → kwartierpiek ≈ 0,55 kW per MWh afname (gemeten op data/profielen/residentieel.json)
     res_piek_naar_aansluiting:3,  // een individuele woning piekt ~3× het gladde SLP-profiel → toegangsvermogen/maandpiek ≈ SLP-piek × 3 (Johan)
-    pv_eur_kwp:350, batt_eur_kwh:300, ac_paal_eur:2600,   // richtprijzen (Jacops/E+Drive-stijl)
+    pv_eur_kwp:350, batt_eur_kwh:300, ac_paal_eur:2600, dc_paal_eur:10000,   // richtprijzen (Jacops/E+Drive-stijl; DC = fastDC-richtprijs, Johan kan tunen)
     kabel_eur_m:45, ontk_eur:2500,   // kabeltracé-heuristiek
     besp_pct_van_kost:0.35            // stub: jaarbesparing ≈ 35% van huidige kost (komt uit sweep)
   };
@@ -835,6 +853,65 @@
     if(card) card.classList.remove('hidden');
   }
   // Render alle KPI's + 1-A4 + investering voor het gekozen anker a (cel-onafhankelijke waarden uit CTX).
+  // ── v0.15: bewerkbaar "Wat u investeert"-blok — hoofdcomponenten + specs, prijs enkel op totaal, "Pas aan"→"Opslaan" ──
+  var INV_EDIT=false, INV_OV=null;   // INV_OV={pvKwp,battKw,ac,dc} na Opslaan → stuurt investering + rapport-voorstel + standaardkeuze
+  function _acDefault(){ return Math.max(0, Math.ceil((+(CTX&&CTX.ev)||0)/2)); }   // AC-palen uit het wagenpark (2 wagens/paal)
+  function _invTotMajor(pvKwp, battKwh, ac, dc){
+    var pv=Math.round((+pvKwp||0)*STUB.pv_eur_kwp), bt=Math.round((+battKwh||0)*STUB.batt_eur_kwh);
+    var acE=Math.max(0,ac|0)*STUB.ac_paal_eur, dcE=Math.max(0,dc|0)*(STUB.dc_paal_eur||0);
+    var kt=kabeltrace((ac|0)+(dc|0), (CTX&&CTX.particulier), (+pvKwp||0)*0.75, (+battKwh||0)/2);
+    return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt, invInfra:acE+dcE+kt.totaal, kt:kt };
+  }
+  function _invBtnLabel(){ var b=$('inv-edit-btn'); if(!b) return; b.textContent=INV_EDIT?'💾 Opslaan':'✏️ Pas aan'; b.classList.toggle('saving',INV_EDIT);
+    var hint=$('inv-edit-hint'); if(hint) hint.textContent=INV_EDIT?'Pas de waarden aan; bij Opslaan komt de combi op de heatmap en wordt ze de standaardkeuze.':''; }
+  function _invRij(label, spec){ return '<tr><td>'+esc0(label)+'<div class="invspec">'+spec+'</div></td><td class="r"></td></tr>'; }
+  function _invRijEdit(label, id, val, unit, step, extra){
+    return '<tr><td>'+esc0(label)+'</td><td class="r"><input type="number" id="'+id+'" value="'+val+'" step="'+step+'" min="0" inputmode="decimal" class="invin"> '+unit+(extra||'')+'</td></tr>'; }
+  function _invBlok(pvKwp, battKwh, ac, dc){
+    var battKw=Math.round((+battKwh||0)/(P_TL.BATT_CRATE||2)*10)/10, m=_invTotMajor(pvKwp,battKwh,ac,dc), rows='';
+    if(INV_EDIT){
+      rows+=_invRijEdit('Zonnepanelen','inv-pv',(+pvKwp||0),'kWp',1);
+      rows+=_invRijEdit('Batterij','inv-bkw',battKw,'kW',1,' <span id="inv-bkwh" class="sub"></span>');
+      rows+=_invRijEdit('Laadpalen AC','inv-ac',Math.max(0,ac|0),'×',1);
+      rows+=_invRijEdit('Laadpalen DC','inv-dc',Math.max(0,dc|0),'×',1);
+      rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
+    } else {
+      rows+=_invRij('Zonnepanelen', num0(pvKwp)+' kWp');
+      rows+=_invRij('Batterij', battKw>0?(String(battKw).replace('.',',')+' kW · '+num0(battKwh)+' kWh'):'geen');
+      rows+=_invRij('Laadpalen AC', ac>0?(ac+' × AC'):'geen');
+      rows+=_invRij('Laadpalen DC', dc>0?(dc+' × DC'):'geen');
+      rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
+    }
+    rows+='<tr class="tot"><td>Totale investering (indicatief)</td><td class="r" id="inv-tot">'+eur(m.tot)+'</td></tr>';
+    $('invrows').innerHTML=rows;
+    if(INV_EDIT){ var bk=$('inv-bkwh'); if(bk) bk.textContent='· '+num0(battKw*(P_TL.BATT_CRATE||2))+' kWh';
+      ['inv-pv','inv-bkw','inv-ac','inv-dc'].forEach(function(id){ var el=$(id); if(el) el.oninput=_invRecalc; }); }
+  }
+  function _invRecalc(){
+    var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
+    var ac=Math.max(0,Math.round(+($('inv-ac')&&$('inv-ac').value)||0)), dc=Math.max(0,Math.round(+($('inv-dc')&&$('inv-dc').value)||0));
+    var bkwh=Math.round(bkw*(P_TL.BATT_CRATE||2));
+    if($('inv-bkwh')) $('inv-bkwh').textContent='· '+num0(bkwh)+' kWh';
+    if($('inv-tot')) $('inv-tot').textContent=eur(_invTotMajor(pv,bkwh,ac,dc).tot);
+  }
+  function _invEditToggle(){
+    if(INV_EDIT){ _invSave(); return; }
+    INV_EDIT=true; _invBtnLabel();
+    var a=HM&&HM.sel; var pvKwp=a?Math.round(_anchorKwp(a)*10)/10:((CTX&&CTX.pvKwpFb)||0), battKwh=a?(+a.battKwh||0):((CTX&&CTX.battKwhFb)||0);
+    _invBlok(pvKwp, battKwh, (INV_OV?INV_OV.ac:_acDefault()), (INV_OV?INV_OV.dc:0));
+  }
+  function _invSave(){
+    var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
+    var ac=Math.max(0,Math.round(+($('inv-ac')&&$('inv-ac').value)||0)), dc=Math.max(0,Math.round(+($('inv-dc')&&$('inv-dc').value)||0));
+    INV_OV={ pvKwp:pv, battKw:bkw, ac:ac, dc:dc }; INV_EDIT=false; _invBtnLabel();
+    if(HM && HM.real && HM.real.length){
+      var best=null,bd=1e9;
+      HM.real.forEach(function(a){ var apv=Math.round(_anchorKwp(a)*10)/10, abt=(+a.battKw||(a.battKwh?a.battKwh/2:0)||0); var d=Math.abs(apv-pv)+Math.abs(abt-bkw); if(d<bd){bd=d;best=a;} });
+      if(best){ _hmKies(best._ry,best._cx); return; }   // _hmKies → renderRapport(sel) → _invBlok met INV_OV; sel = standaardkeuze
+    }
+    renderRapport(HM&&HM.sel);
+  }
+
   function renderRapport(a){
     var C=CTX; if(!C) return;
     var ev=C.ev, particulier=C.particulier, afnameMwh=C.afnameMwh, toegangKw=C.toegangKw, profiel=C.profiel;
@@ -845,8 +922,10 @@
     var pvKwp = a?Math.round(_anchorKwp(a)*10)/10 : C.pvKwpFb;
     var battKwh = a?(+a.battKwh||0) : C.battKwhFb;
     var bespJaar = a?Math.round(+a.besparing||0) : C.bespFb;
-    var _bd=_invBreakdown(pvKwp, battKwh);
-    var palen=_bd.palen, kt=_bd.kt, invPv=_bd.invPv, invBatt=_bd.invBatt, invPalen=_bd.invPalen, invTot=_bd.invTot, invPvBatt=_bd.invPvBatt;
+    var acN = INV_OV ? INV_OV.ac : _acDefault();   // v0.15: AC/DC-palen uit de bewerkte combi (INV_OV), anders uit het wagenpark
+    var dcN = INV_OV ? INV_OV.dc : 0;
+    var _m=_invTotMajor(pvKwp, battKwh, acN, dcN);
+    var palen=acN+dcN, kt=_m.kt, invTot=_m.tot, invPvBatt=_m.invPvBatt;
     // TVT/ROI slaan op de investering in PV + batterij (die genereert de besparing/jaar) — niet op palen/kabel.
     var tvt = bespJaar>0 ? Math.round(invPvBatt/bespJaar*10)/10 : null;
     // v0.10.5 (Johan): de nieuwe factuur MET PV+batterij = factuur met laadplein − de besparing van deze combi. Beweegt mee
@@ -889,15 +968,10 @@
     if($('pk-inst')) $('pk-inst').textContent = (_rendCell!=null)?(_rendCell+'%'):'—';
     if($('pk-lev'))  $('pk-lev').textContent  = (_verbrPct!=null)?('+'+_verbrPct+'%'):'—';
     if($('pk-net'))  $('pk-net').textContent  = (_verbrPct!=null)?('↑ '+_verbrPct+'%'):'—';
-    // Investering-tabel
-    var rows=[['Zonnepanelen', pvKwp+' kWp', invPv],['Batterij', battKwh+' kWh', invBatt]];
-    if(palen>0) rows.push(['Laadpalen (dubbele AC 22 kW)', palen+' × ('+ev+' wagens)', invPalen]);
-    rows.push(['Kabel naar aansluiting', kt.len_m+' m × € '+STUB.kabel_eur_m+'/m'+(kt.len_m===20?' (korte run)':' (lange run)'), kt.kabel_eur]);
-    if(kt.ontk_eur>0) rows.push(['Ontkoppelbord', (ev>=6?'≥ 6 laadpunten':'>30 kVA PV/batterij'), kt.ontk_eur]);
-    var h=rows.map(function(r){ return '<tr><td>'+esc0(r[0])+'<div class="sub">'+esc0(r[1])+'</div></td><td class="r">'+eur(r[2])+'</td></tr>'; }).join('');
-    h+='<tr class="tot"><td>Totale investering (indicatief)</td><td class="r">'+eur(invTot)+'</td></tr>';
-    $('invrows').innerHTML=h;
-    $('inv-foot').textContent='Richtprijzen. Kabeltracé indicatief op '+kt.len_m+' m luchtlijn'+(kt.ontk_eur>0?' + ontkoppelbord':'')+' — geen tracé getekend. De exacte kostprijs volgt uit de studie op uw echte meetgegevens.';
+    // Investering-blok: enkel hoofdcomponenten (PV, batterij, laadpalen AC/DC, overige) + specs; prijs enkel op het totaal.
+    //   Niet herbouwen tijdens "Pas aan" (dan staan er invulvelden die de gebruiker aan het bewerken is).
+    if(!INV_EDIT) _invBlok(pvKwp, battKwh, acN, dcN);
+    $('inv-foot').textContent='Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op uw echte meetgegevens.';
     // Terugverdien-tegels: laadpalen (diesel→CREG) + PV/batterij (gewoon→slim)
     if($('pay-cap-lp')) $('pay-cap-lp').textContent = (ev>0?eur(invLaadpaalInfra):'—');
     if($('pay-tvt-lp')) $('pay-tvt-lp').textContent = (tvtLaadpaal!=null?(String(tvtLaadpaal).replace('.',',')+' j'):'—');
@@ -948,7 +1022,7 @@
     // v0.13.9: in adviseur/prep-modus de klant+BTW-velden tonen zodat de adviseur ze zelf kan invullen (→ deel-link).
     if(_q0.get('prep')==='1' || _q0.get('adv')==='1'){
       var _kb0=document.getElementById('adv-klant-blok'); if(_kb0) _kb0.classList.remove('hidden');
-      var _pu0=document.getElementById('prof-upl-blok'); if(_pu0) _pu0.classList.remove('hidden');   // v0.14.0: profiel-upload (adviseur)
+      EK_PREPADV=true;   // v0.15: prof-upl-blok wordt door _ekApplyGate onthuld — enkel voor oekene@gmail.com
     }
     if(_q0.get('adv')==='1'){
       ADV_MODE=true;   // v0.13.8: adviseur/manager-context → deel-link-balk tonen
@@ -1225,6 +1299,7 @@
   (function(){ var L=$('hm-mx-L'), R=$('hm-mx-R');
     if(L) L.onchange=function(){ HMMETRIC_L=L.value; renderHeatmap(); };
     if(R) R.onchange=function(){ HMMETRIC_R=R.value; renderHeatmap(); }; })();
+  (function(){ var b=$('inv-edit-btn'); if(b) b.onclick=_invEditToggle; })();   // v0.15: "Pas aan" ↔ "Opslaan" investeringsblok
 
 
   // ══ v0.13.13 — FACTUUR OPLADEN IN EK (adviseur/prep + intake). Leest de factuur via /api/factuur-extract, past de
@@ -1464,6 +1539,26 @@
       return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
     }catch(e){ throw e; }
   }
+  // v0.15: login-gate. Leest de portal-Supabase-sessie (same-origin) en zet EK_IS_OEKENE als oekene@gmail.com ingelogd is.
+  //   Enkel dan zijn de nieuwe features zichtbaar (Pas aan-investeringsblok, profiel-upload, kengetallen-bijlage).
+  function _ekApplyGate(){
+    try{
+      var t=document.querySelector('.inv-tools'); if(t) t.style.display=EK_IS_OEKENE?'flex':'none';
+      var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV) pu.classList.remove('hidden'); else pu.classList.add('hidden'); }
+    }catch(e){}
+  }
+  async function _ekResolveGate(){
+    try{
+      if(!_EK_SB_CFG){ var rc=await fetch('/api/config'); _EK_SB_CFG=await rc.json(); }
+      if(!_EK_SB && _EK_SB_CFG && _EK_SB_CFG.supabaseUrl && _EK_SB_CFG.supabaseAnonKey){
+        if(!window.supabase) await _ekLaadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+        _EK_SB=window.supabase.createClient(_EK_SB_CFG.supabaseUrl, _EK_SB_CFG.supabaseAnonKey);
+      }
+      var email=null; if(_EK_SB){ var d=await _EK_SB.auth.getSession(); if(d&&d.data&&d.data.session&&d.data.session.user) email=(d.data.session.user.email||'').toLowerCase(); }
+      EK_IS_OEKENE=(email==='oekene@gmail.com');
+    }catch(e){ EK_IS_OEKENE=false; }
+    _ekApplyGate();
+  }
   function _ekB64(buf){ var bin='',u=new Uint8Array(buf),C=0x8000; for(var i=0;i<u.length;i+=C) bin+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(bin); }
   async function _ekGz(txt){ if(typeof CompressionStream==='undefined') return null; var cs=new CompressionStream('gzip'); var w=cs.writable.getWriter(); w.write(new TextEncoder().encode(txt)); w.close(); return _ekB64(await new Response(cs.readable).arrayBuffer()); }
   function _ekP2(n){ return (n<10?'0':'')+n; }
@@ -1654,7 +1749,9 @@
     var P=window._RAP_PAYLOAD||{}, C=CTX||{};
     var pvKwp=Math.round(_anchorKwp(sel)||0), battKw=Math.round(sel.battKw||0);
     var battKwh=(j.combi&&+j.combi.batt_kwh)||Math.round(battKw*2);
-    var ev=+C.ev||0, acAantal=ev>0?Math.max(1,Math.ceil(ev/2)):0;
+    var ev=+C.ev||0;
+    var acAantal = INV_OV ? INV_OV.ac : (ev>0?Math.max(1,Math.ceil(ev/2)):0);   // v0.15: bewerkte laadpaal-aantallen (Pas aan → Opslaan)
+    var dcAantal = INV_OV ? INV_OV.dc : 0;
     var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
     var posten=[]; if(pvKwp) posten.push({label:'Zonnepanelen ('+pvKwp+' kWp)',bedrag:Math.round(pvKwp*600)});
     if(battKwh) posten.push({label:'Batterij ('+battKwh+' kWh)',bedrag:Math.round(battKwh*350)});
@@ -1673,11 +1770,11 @@
       },
       voorstel: {
         pv_kwp: pvKwp, batt_kw: battKw, batt_kwh: battKwh, batt_cycli:(j.cycli!=null?j.cycli:null),
-        laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: null
+        laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: dcAantal ? { kva:60, aantal:dcAantal } : null
       },
       onderhandeling: { afname_marge_jaar:(+ (C.afname_marge_jaar)||0), injectie_marge_jaar:(+(C.injectie_marge_jaar)||0), digitale_meter:true },
       heeftLaadplein: !!j.heeftLaadplein,
-      kengetallen: _kengetallenGrids(),   // v0.14.4: PV×batterij-roosters per kengetal → extra bijlage in het rapport
+      kengetallen: (EK_IS_OEKENE?_kengetallenGrids():null),   // v0.14.4/v0.15: PV×batterij-roosters (extra bijlage) — enkel voor oekene@gmail.com
       token: TOKEN||'', mail: (($('i-mail')&&$('i-mail').value)||'').trim(), api: API
     };
   }
@@ -1717,6 +1814,7 @@
 
   // Adviseur-link / prep-modus activeren bij het laden (na alle definities).
   _advLoad();
+  _ekResolveGate();   // v0.15: login-gate resolven (async) → onthult nieuwe features enkel voor oekene@gmail.com
 </script>
 </body>
 </html>
