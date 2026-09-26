@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<!-- adviseur.html v1.0.0 (2026-09-26) — Adviseur-dashboard "Mijn klanten" (Johan).
+     EK-eigen login (Supabase grant_type=password, zelfde project als FluctusAppAuth; GEEN Academy). Ingelogde adviseur
+     nodigt klanten uit → /api/adviseur/klant-uitnodigen (lead met adviseur-koppeling + klant-mail "stuur uw factuur
+     vanaf DIT adres"). Lijst + status via /api/adviseur/klanten. Manager ziet extra een "Adviseur aanmaken"-paneel
+     (/api/adviseur/aanmaken). Server v15.170+. -->
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mijn klanten — Energie-Compas</title>
+<style>
+  :root{ --navy:#1F3864; --green:#05B050; --ink:#1F3864; --muted:#5A6577; --line:#D6E0EC; --bg:#F4F7FB; --card:#fff; --amber:#C26A12; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:24px 16px 64px}
+  header .t{font-size:22px;font-weight:700;color:var(--navy)}
+  header .s{color:var(--muted);font-size:13.5px;margin-top:2px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0;box-shadow:0 1px 2px rgba(31,56,100,.04)}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);margin:0 0 14px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--navy);margin:10px 0 5px}
+  input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;color:var(--ink);background:#fff}
+  input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(5,176,80,.12)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row > div{flex:1;min-width:200px}
+  button{background:var(--green);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer}
+  button.sec{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  button:disabled{opacity:.55;cursor:default}
+  .msg{margin-top:12px;font-size:13.5px;padding:10px 12px;border-radius:9px;display:none}
+  .msg.err{display:block;background:#FDECEC;color:#B4231F;border:1px solid #F5C2C0}
+  .msg.ok{display:block;background:#E7F6EE;color:#0B7A45;border:1px solid #B9E4CC}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  th,td{padding:9px 8px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:20px}
+  .pill.wacht{background:#FBEEDD;color:#9A5410}
+  .pill.ok{background:#E7F6EE;color:#0B7A45}
+  a.link{color:var(--green);font-weight:600;text-decoration:none;font-size:12.5px}
+  .empty{color:var(--muted);font-size:13.5px;padding:14px 4px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .who{font-size:12.5px;color:var(--muted)}
+  .who b{color:var(--navy)}
+  #login{max-width:420px;margin:8vh auto 0}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- LOGIN -->
+  <div id="login" class="card hide">
+    <div class="t" style="font-size:20px;font-weight:700;color:var(--navy)">Adviseur — aanmelden</div>
+    <div class="s" style="color:var(--muted);font-size:13.5px;margin:4px 0 8px">Log in met uw e-mailadres en wachtwoord.</div>
+    <label for="l-email">E-mailadres</label>
+    <input id="l-email" type="email" autocomplete="username" placeholder="u@bedrijf.be">
+    <label for="l-pw">Wachtwoord</label>
+    <input id="l-pw" type="password" autocomplete="current-password" placeholder="Uw wachtwoord">
+    <button id="l-btn" style="margin-top:16px;width:100%">Aanmelden</button>
+    <div id="l-msg" class="msg"></div>
+  </div>
+
+  <!-- APP -->
+  <div id="app" class="hide">
+    <header class="topbar">
+      <div>
+        <div class="t">Mijn klanten</div>
+        <div class="s">Nodig een klant uit — die krijgt een mail met de vraag zijn factuur door te sturen.</div>
+      </div>
+      <div class="who">Aangemeld als <b id="who-naam">—</b> <span id="who-rol"></span> · <a href="#" id="uitloggen" class="link">uitloggen</a></div>
+    </header>
+
+    <!-- MANAGER: adviseur aanmaken -->
+    <div id="mgr" class="card hide">
+      <h2>Adviseur aanmaken <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:12px">(manager)</span></h2>
+      <div class="row">
+        <div><label for="a-naam">Naam adviseur</label><input id="a-naam" placeholder="Voornaam Naam"></div>
+        <div><label for="a-email">E-mailadres</label><input id="a-email" type="email" placeholder="adviseur@epc.be"></div>
+        <div><label for="a-bedrijf">Bedrijf / EPC (optioneel)</label><input id="a-bedrijf" placeholder="Bedrijfsnaam"></div>
+      </div>
+      <button id="a-btn" style="margin-top:14px">Adviseur aanmaken &amp; uitnodigen</button>
+      <div id="a-msg" class="msg"></div>
+    </div>
+
+    <!-- klant uitnodigen -->
+    <div class="card">
+      <h2>Klant uitnodigen</h2>
+      <div class="row">
+        <div><label for="k-naam">Naam klant</label><input id="k-naam" placeholder="Bedrijfs- of contactnaam"></div>
+        <div><label for="k-email">E-mailadres klant</label><input id="k-email" type="email" placeholder="klant@bedrijf.be"></div>
+        <div><label for="k-bedrijf">Bedrijf (optioneel)</label><input id="k-bedrijf" placeholder="Bedrijfsnaam"></div>
+      </div>
+      <button id="k-btn" style="margin-top:14px">Uitnodiging versturen</button>
+      <div id="k-msg" class="msg"></div>
+      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">De klant krijgt de vraag om zijn factuur te sturen naar <b>dossier@energie-compas.eu</b> <b>vanaf dit e-mailadres</b> — zo koppelen wij zijn analyse automatisch aan u.</p>
+    </div>
+
+    <!-- lijst -->
+    <div class="card">
+      <h2>Uitgenodigde klanten (<span id="k-count">0</span>)</h2>
+      <div id="lijst"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var API = 'https://lucid-amazement-production.up.railway.app';
+  var FA_SB = 'https://haagysosdaorrxkrwkcj.supabase.co';
+  var FA_KEY = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
+  var SB_REF = 'haagysosdaorrxkrwkcj';
+  var $ = function(id){ return document.getElementById(id); };
+  function toon(id, kind, tekst){ var m=$(id); m.className='msg '+kind; m.textContent=tekst; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  // ── sessie (zelfde formaat als FluctusAppAuth) ──
+  function sessie(){ try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(/^sb-.+-auth-token$/.test(k)){ var v=JSON.parse(localStorage.getItem(k)); if(v&&v.currentSession) v=v.currentSession; if(v&&v.access_token) return {key:k,s:v}; } } }catch(e){} return null; }
+  function geldig(s){ return !!(s.expires_at && s.expires_at*1000 > Date.now()+60000); }
+  async function vernieuw(o){ if(!o||!o.s.refresh_token) return null; try{ var r=await fetch(FA_SB+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{'Content-Type':'application/json','apikey':FA_KEY},body:JSON.stringify({refresh_token:o.s.refresh_token})}); if(!r.ok) return null; var n=await r.json(); if(!n.access_token) return null; if(!n.expires_at&&n.expires_in) n.expires_at=Math.floor(Date.now()/1000)+n.expires_in; var merged={}; for(var a in o.s) merged[a]=o.s[a]; for(var b in n) merged[b]=n[b]; localStorage.setItem(o.key, JSON.stringify(merged)); return n.access_token; }catch(e){ return null; } }
+  async function token(){ var o=sessie(); if(!o) return null; if(geldig(o.s)) return o.s.access_token; return await vernieuw(o); }
+  async function api(pad, opts){ var t=await token(); if(!t) throw {code:401}; var o=opts||{}; var r=await fetch(API+pad,{method:o.method||'GET',headers:Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+t},o.headers||{}),body:o.body?JSON.stringify(o.body):undefined}); var j=await r.json().catch(function(){return {};}); if(r.status===401) throw {code:401,j:j}; return {status:r.status, ok:r.ok, j:j}; }
+
+  // ── login ──
+  function toonLogin(){ $('login').classList.remove('hide'); $('app').classList.add('hide'); }
+  function toonApp(){ $('login').classList.add('hide'); $('app').classList.remove('hide'); }
+  $('l-btn').addEventListener('click', async function(){
+    var email=($('l-email').value||'').trim().toLowerCase(), pw=$('l-pw').value||'';
+    if(!email||!pw){ toon('l-msg','err','Vul e-mailadres en wachtwoord in.'); return; }
+    $('l-btn').disabled=true; toon('l-msg','ok','Bezig met aanmelden…');
+    try{
+      var r=await fetch(FA_SB+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':FA_KEY},body:JSON.stringify({email:email,password:pw})});
+      var j=await r.json().catch(function(){return {};});
+      if(r.ok&&j.access_token){ if(!j.expires_at&&j.expires_in) j.expires_at=Math.floor(Date.now()/1000)+j.expires_in; localStorage.setItem('sb-'+SB_REF+'-auth-token', JSON.stringify(j)); $('l-btn').disabled=false; init(); }
+      else { toon('l-msg','err', (j.error_description||j.msg||'Aanmelden mislukt — controleer uw gegevens.')); $('l-btn').disabled=false; }
+    }catch(e){ toon('l-msg','err','Er ging iets mis: '+e.message); $('l-btn').disabled=false; }
+  });
+  $('l-pw').addEventListener('keydown', function(e){ if(e.key==='Enter') $('l-btn').click(); });
+  $('uitloggen').addEventListener('click', function(e){ e.preventDefault(); var o=sessie(); if(o) try{ localStorage.removeItem(o.key); }catch(_){}
+    toonLogin(); });
+
+  // ── klanten laden + renderen ──
+  function statusPill(st){ return st==='factuur_ontvangen' ? '<span class="pill ok">factuur ontvangen</span>' : '<span class="pill wacht">wacht op factuur</span>'; }
+  function renderLijst(klanten){
+    $('k-count').textContent = klanten.length;
+    if(!klanten.length){ $('lijst').innerHTML='<div class="empty">Nog geen klanten uitgenodigd. Gebruik het formulier hierboven.</div>'; return; }
+    var h='<table><thead><tr><th>Klant</th><th>E-mailadres</th><th>Status</th><th>Adviseur</th><th></th></tr></thead><tbody>';
+    klanten.forEach(function(k){
+      h+='<tr><td><b>'+esc(k.naam)+'</b>'+(k.bedrijf?'<br><span style="color:var(--muted);font-size:12px">'+esc(k.bedrijf)+'</span>':'')+'</td>'+
+         '<td>'+esc(k.email)+'</td>'+
+         '<td>'+statusPill(k.status)+'</td>'+
+         '<td style="font-size:12.5px;color:var(--muted)">'+esc(k.adviseur||'')+'</td>'+
+         '<td>'+(k.status==='factuur_ontvangen'?('<a class="link" href="'+esc(k.ek_link)+'" target="_blank">analyse openen →</a>'):'')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    $('lijst').innerHTML=h;
+  }
+  async function laadKlanten(){
+    try{ var r=await api('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; if((g.rol||'')==='manager'){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
+    catch(e){ if(e.code===401){ toonLogin(); } }
+  }
+
+  // ── klant uitnodigen ──
+  $('k-btn').addEventListener('click', async function(){
+    var naam=($('k-naam').value||'').trim(), email=($('k-email').value||'').trim().toLowerCase(), bedrijf=($('k-bedrijf').value||'').trim();
+    if(!naam){ toon('k-msg','err','Vul de naam van de klant in.'); return; }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('k-msg','err','Vul een geldig e-mailadres in.'); return; }
+    $('k-btn').disabled=true; toon('k-msg','ok','Bezig met versturen…');
+    try{
+      var r=await api('/api/adviseur/klant-uitnodigen',{method:'POST',body:{naam:naam,email:email,bedrijf:bedrijf}});
+      if(r.ok&&r.j.ok){ toon('k-msg','ok','Uitnodiging verstuurd naar '+email+(r.j.mail&&r.j.mail.sent?'':' (let op: mail-verzending gaf geen bevestiging)')+'.'); $('k-naam').value='';$('k-email').value='';$('k-bedrijf').value=''; laadKlanten(); }
+      else { toon('k-msg','err', r.j.error||'Versturen mislukt.'); }
+    }catch(e){ if(e.code===401){ toonLogin(); } else { toon('k-msg','err','Er ging iets mis: '+e.message); } }
+    $('k-btn').disabled=false;
+  });
+
+  // ── manager: adviseur aanmaken ──
+  $('a-btn').addEventListener('click', async function(){
+    var naam=($('a-naam').value||'').trim(), email=($('a-email').value||'').trim().toLowerCase(), bedrijf=($('a-bedrijf').value||'').trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('a-msg','err','Vul een geldig e-mailadres in.'); return; }
+    $('a-btn').disabled=true; toon('a-msg','ok','Bezig…');
+    try{
+      var r=await api('/api/adviseur/aanmaken',{method:'POST',body:{naam:naam,email:email,company:bedrijf}});
+      if(r.ok&&r.j.ok){ toon('a-msg','ok','Adviseur aangemaakt. '+(r.j.mail&&r.j.mail.sent?('Uitnodigingsmail verstuurd naar '+email+'.'):('Mail niet bevestigd — set-up-link: '+r.j.setup_link))); $('a-naam').value='';$('a-email').value='';$('a-bedrijf').value=''; }
+      else { toon('a-msg','err', r.j.error||'Aanmaken mislukt.'); }
+    }catch(e){ if(e.code===401){ toonLogin(); } else { toon('a-msg','err','Er ging iets mis: '+e.message); } }
+    $('a-btn').disabled=false;
+  });
+
+  // ── init ──
+  async function init(){ var t=await token(); if(!t){ toonLogin(); return; } toonApp(); laadKlanten(); }
+  init();
+})();
+</script>
+</body>
+</html>
