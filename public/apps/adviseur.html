@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!-- adviseur.html v1.2.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+<!-- adviseur.html v1.3.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+     v1.3.0: manager ziet openstaande overname-aanvragen ("overname gevraagd door X") + kan een klant overzetten naar een andere adviseur.
      v1.2.0: statuslabels voor geen_pdf / pdf_geen_factuur (klant + adviseur worden verwittigd door de server).
      v1.1.0 — Adviseur-dashboard "Mijn klanten" (Johan).
      EK-eigen login via MAGIC 6-CODE (Supabase OTP via supabase-js, zelfde project als FluctusAppAuth; GEEN Academy, GEEN
@@ -161,22 +162,40 @@
     if(st==='pdf_geen_factuur') return '<span class="pill fout">PDF geen factuur — klant verwittigd</span>';
     return '<span class="pill wacht">wacht op factuur</span>';
   }
+  var IS_MANAGER=false;
   function renderLijst(klanten){
     $('k-count').textContent = klanten.length;
     if(!klanten.length){ $('lijst').innerHTML='<div class="empty">Nog geen klanten uitgenodigd. Gebruik het formulier hierboven.</div>'; return; }
     var h='<table><thead><tr><th>Klant</th><th>E-mailadres</th><th>Status</th><th>Adviseur</th><th></th></tr></thead><tbody>';
     klanten.forEach(function(k){
+      var ov=k.overname_aangevraagd;
+      var advCel='<span style="font-size:12.5px;color:var(--muted)">'+esc(k.adviseur||'')+'</span>';
+      if(ov){ advCel+='<br><span class="pill fout" style="margin-top:4px;display:inline-block">overname gevraagd door '+esc(ov.door_naam||ov.door_email||'')+'</span>'; }
+      var actie = (k.status==='factuur_ontvangen') ? ('<a class="link" href="'+esc(k.ek_link)+'" target="_blank">analyse openen →</a>') : '';
+      if(IS_MANAGER){
+        var pre = ov ? esc(ov.door_email||'') : '';
+        actie += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center">'+
+          '<input data-oz="'+esc(k.token)+'" value="'+pre+'" placeholder="adviseur@epc.be" style="width:160px;padding:6px 8px;font-size:12px">'+
+          '<button class="sec" style="padding:6px 10px;font-size:12px" onclick="__overzet(\''+esc(k.token)+'\')">overzetten</button></div>';
+      }
       h+='<tr><td><b>'+esc(k.naam)+'</b>'+(k.bedrijf?'<br><span style="color:var(--muted);font-size:12px">'+esc(k.bedrijf)+'</span>':'')+'</td>'+
          '<td>'+esc(k.email)+'</td>'+
          '<td>'+statusPill(k.status)+'</td>'+
-         '<td style="font-size:12.5px;color:var(--muted)">'+esc(k.adviseur||'')+'</td>'+
-         '<td>'+(k.status==='factuur_ontvangen'?('<a class="link" href="'+esc(k.ek_link)+'" target="_blank">analyse openen →</a>'):'')+'</td></tr>';
+         '<td>'+advCel+'</td>'+
+         '<td>'+actie+'</td></tr>';
     });
     h+='</tbody></table>';
     $('lijst').innerHTML=h;
   }
+  window.__overzet = async function(token){
+    var inp=document.querySelector('input[data-oz="'+token+'"]'); var naar=(inp&&inp.value||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(naar)){ alert('Vul een geldig adviseur-e-mailadres in.'); return; }
+    try{ var r=await apiCall('/api/adviseur/klant-overzetten',{method:'POST',body:{token:token,naar_email:naar}});
+      if(r.ok&&r.j.ok){ laadKlanten(); } else { alert(r.j.error||'Overzetten mislukt.'); } }
+    catch(e){ if(e.code===401){ toonLogin(); } else { alert('Er ging iets mis: '+e.message); } }
+  };
   async function laadKlanten(){
-    try{ var r=await apiCall('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; if((g.rol||'')==='manager'){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
+    try{ var r=await apiCall('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; IS_MANAGER=((g.rol||'')==='manager'); if(IS_MANAGER){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
     catch(e){ if(e.code===401){ toonLogin(); } }
   }
 
