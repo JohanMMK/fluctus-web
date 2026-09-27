@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!-- adviseur.html v1.3.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+<!-- adviseur.html v1.4.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+     v1.4.0: bij adviseur-aanmaken (manager) koppeling aan een EPC (partner-dropdown) + "is EPC-manager" → /api/adviseur/aanmaken epc_id/epc_manager.
      v1.3.0: manager ziet openstaande overname-aanvragen ("overname gevraagd door X") + kan een klant overzetten naar een andere adviseur.
      v1.2.0: statuslabels voor geen_pdf / pdf_geen_factuur (klant + adviseur worden verwittigd door de server).
      v1.1.0 — Adviseur-dashboard "Mijn klanten" (Johan).
@@ -86,6 +87,11 @@
         <div><label for="a-naam">Naam adviseur</label><input id="a-naam" placeholder="Voornaam Naam"></div>
         <div><label for="a-email">E-mailadres</label><input id="a-email" type="email" placeholder="adviseur@epc.be"></div>
         <div><label for="a-bedrijf">Bedrijf / EPC (optioneel)</label><input id="a-bedrijf" placeholder="Bedrijfsnaam"></div>
+      </div>
+      <div class="row" style="margin-top:2px;align-items:flex-end">
+        <div><label for="a-epc">Koppel aan EPC (partner)</label><select id="a-epc"><option value="">— geen —</option></select></div>
+        <div style="flex:0 0 auto"><label style="display:flex;align-items:center;gap:7px;font-weight:600;color:var(--navy);cursor:pointer"><input type="checkbox" id="a-epcmgr" style="width:auto;margin:0"> is EPC-manager</label></div>
+        <div><span class="hint">Beheer EPC's in <a href="/apps/partners.html" target="_blank" class="link">Partners</a>.</span></div>
       </div>
       <button id="a-btn" style="margin-top:14px">Adviseur aanmaken &amp; uitnodigen</button>
       <div id="a-msg" class="msg"></div>
@@ -195,8 +201,13 @@
     catch(e){ if(e.code===401){ toonLogin(); } else { alert('Er ging iets mis: '+e.message); } }
   };
   async function laadKlanten(){
-    try{ var r=await apiCall('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; IS_MANAGER=((g.rol||'')==='manager'); if(IS_MANAGER){ $('mgr').classList.remove('hide'); } renderLijst(r.j.klanten||[]); } }
+    try{ var r=await apiCall('/api/adviseur/klanten'); if(r.ok&&r.j.ok){ var g=r.j.gebruiker||{}; $('who-naam').textContent=g.naam||g.email||'—'; $('who-rol').textContent=g.rol?('· '+g.rol):''; IS_MANAGER=((g.rol||'')==='manager'); if(IS_MANAGER){ $('mgr').classList.remove('hide'); laadEpcs(); } renderLijst(r.j.klanten||[]); } }
     catch(e){ if(e.code===401){ toonLogin(); } }
+  }
+  async function laadEpcs(){
+    try{ var r=await apiCall('/api/partners'); if(r.ok&&r.j.ok){ var sel=$('a-epc'); if(!sel) return; var opts='<option value="">— geen —</option>';
+      (r.j.partners||[]).forEach(function(p){ opts+='<option value="'+esc(p.id)+'">'+esc(p.naam||p.id)+'</option>'; }); sel.innerHTML=opts; } }
+    catch(e){ /* geen EPC's of geen recht — laat leeg */ }
   }
 
   // ── klant uitnodigen ──
@@ -216,11 +227,12 @@
   // ── manager: adviseur aanmaken ──
   async function maakAdviseur(){
     var naam=($('a-naam').value||'').trim(), email=($('a-email').value||'').trim().toLowerCase(), bedrijf=($('a-bedrijf').value||'').trim();
+    var epc=($('a-epc')&&$('a-epc').value||'').trim(), epcMgr=!!($('a-epcmgr')&&$('a-epcmgr').checked);
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('a-msg','err','Vul een geldig e-mailadres in.'); return; }
     $('a-btn').disabled=true; toon('a-msg','ok','Bezig…');
     try{
-      var r=await apiCall('/api/adviseur/aanmaken',{method:'POST',body:{naam:naam,email:email,company:bedrijf}});
-      if(r.ok&&r.j.ok){ toon('a-msg','ok','Adviseur aangemaakt. '+(r.j.mail&&r.j.mail.sent?('Uitnodigingsmail verstuurd naar '+email+'.'):'Mail niet bevestigd — hij kan zelf aanmelden op deze pagina met zijn e-mailadres.')); $('a-naam').value='';$('a-email').value='';$('a-bedrijf').value=''; }
+      var r=await apiCall('/api/adviseur/aanmaken',{method:'POST',body:{naam:naam,email:email,company:bedrijf,epc_id:epc,epc_manager:epcMgr}});
+      if(r.ok&&r.j.ok){ toon('a-msg','ok','Adviseur aangemaakt. '+(r.j.mail&&r.j.mail.sent?('Uitnodigingsmail verstuurd naar '+email+'.'):'Mail niet bevestigd — hij kan zelf aanmelden op deze pagina met zijn e-mailadres.')); $('a-naam').value='';$('a-email').value='';$('a-bedrijf').value=''; if($('a-epcmgr'))$('a-epcmgr').checked=false; }
       else { toon('a-msg','err', r.j.error||'Aanmaken mislukt.'); }
     }catch(e){ if(e.code===401){ toonLogin(); } else { toon('a-msg','err','Er ging iets mis: '+e.message); } }
     $('a-btn').disabled=false;

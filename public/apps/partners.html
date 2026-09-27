@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Partners · Fluctus</title>
-<!-- partners.html v0.1.0 (2026-09-12) — PARTNER-BEHEER (manager). CRUD partners (id, naam, thema, e-maildomeinen)
+<!-- partners.html v0.2.0 (2026-09-27) — EPC/PARTNER-BEHEER (manager). CRUD partners/EPC met NAW, btw, logo, contact,
+     EPC-manager (e-mail) + adviseurs[] — fundament voor de offerte/prijsvraag-flow. Server v15.176+.
+     v0.1.0 (2026-09-12) — PARTNER-BEHEER (manager). CRUD partners (id, naam, thema, e-maildomeinen)
      via GET/POST/DELETE /api/partners; toont de adviseurs (uit leads + losse mandaten) met hun expliciete én
      uit-mail-afgeleide partner via GET /api/partners/adviseurs. Voeg een e-maildomein aan een partner toe →
      adviseurs met dat domein hangen voortaan automatisch aan die partner (in nieuwe intakes). -->
@@ -89,25 +91,37 @@
     function render(){
       var h='';
       // 1) Partners-tabel
-      h+='<h2>Partners</h2><div class="tbl-wrap"><table><thead><tr><th>Id</th><th>Naam</th><th>Thema</th><th>E-maildomeinen</th><th></th></tr></thead><tbody>';
-      if(!PARTNERS.length){ h+='<tr><td colspan="5" class="sub" style="padding:14px">Nog geen partners gedefinieerd.</td></tr>'; }
+      h+='<h2>Partners / EPC-bedrijven</h2><div class="tbl-wrap"><table><thead><tr><th>Id</th><th>Naam</th><th>Btw</th><th>Thema</th><th>E-maildomeinen</th><th>EPC-manager (e-mail)</th><th>Adviseurs</th><th></th></tr></thead><tbody>';
+      if(!PARTNERS.length){ h+='<tr><td colspan="8" class="sub" style="padding:14px">Nog geen partners/EPC gedefinieerd.</td></tr>'; }
       PARTNERS.forEach(function(p){
+        var advN=(Array.isArray(p.adviseurs)?p.adviseurs.length:0);
         h+='<tr>'+
           '<td class="code">'+esc(p.id)+'</td>'+
           '<td><input value="'+esc(p.naam||'')+'" id="n_'+esc(p.id)+'"></td>'+
+          '<td><input value="'+esc(p.btw||'')+'" id="b_'+esc(p.id)+'" placeholder="BE0..." style="width:120px"></td>'+
           '<td><select id="t_'+esc(p.id)+'">'+themaOpts(p.thema||p.id)+'</select></td>'+
-          '<td><input value="'+esc((p.domeinen||[]).join(', '))+'" id="d_'+esc(p.id)+'" placeholder="bv. jacops.be, jacops.eu"></td>'+
+          '<td><input value="'+esc((p.domeinen||[]).join(', '))+'" id="d_'+esc(p.id)+'" placeholder="bv. jacops.be"></td>'+
+          '<td><input value="'+esc(p.manager_email||'')+'" id="mg_'+esc(p.id)+'" placeholder="manager@epc.be"></td>'+
+          '<td class="sub" title="'+esc((p.adviseurs||[]).join(', '))+'">'+advN+'</td>'+
           '<td style="white-space:nowrap"><button class="btn" onclick="bewaar(\''+esc(p.id)+'\')">Bewaar</button> <button class="btn del" onclick="verwijder(\''+esc(p.id)+'\')">✕</button> <span class="msg" id="m_'+esc(p.id)+'"></span></td>'+
         '</tr>';
       });
       h+='</tbody></table></div>';
-      // 2) Nieuwe partner
-      h+='<h2>Nieuwe partner</h2><div class="card"><div class="grid">'+
+      // 2) Nieuwe partner / EPC
+      h+='<h2>Nieuw EPC-bedrijf</h2><div class="card"><div class="grid">'+
         '<div><label>Id (kleine letters, uniek)</label><input id="np_id" placeholder="bv. jacops"></div>'+
-        '<div><label>Naam</label><input id="np_naam" placeholder="bv. Jacops"></div>'+
+        '<div><label>Naam</label><input id="np_naam" placeholder="bv. Jacops BV"></div>'+
+        '<div><label>Btw-nummer</label><input id="np_btw" placeholder="BE0123.456.789"></div>'+
         '<div><label>Thema (huisstijl)</label><select id="np_thema">'+themaOpts('fluctus')+'</select></div>'+
+        '<div><label>Straat + nr</label><input id="np_straat" placeholder="Straat 1"></div>'+
+        '<div><label>Postcode + gemeente</label><input id="np_pcgem" placeholder="2000 Antwerpen"></div>'+
+        '<div><label>Logo-URL</label><input id="np_logo" placeholder="https://…/logo.png"></div>'+
+        '<div><label>EPC-manager (e-mail)</label><input id="np_mg" placeholder="manager@epc.be"></div>'+
+        '<div><label>Contact e-mail</label><input id="np_cmail" placeholder="info@epc.be"></div>'+
+        '<div><label>Contact telefoon</label><input id="np_ctel" placeholder="+32…"></div>'+
         '<div><label>E-maildomeinen (komma-gescheiden)</label><input id="np_dom" placeholder="bv. jacops.be, jacops.eu"></div>'+
-        '</div><div style="margin-top:12px"><button class="btn" onclick="nieuw()">Partner toevoegen</button> <span class="msg" id="np_msg"></span></div></div>';
+        '</div><div style="margin-top:12px"><button class="btn" onclick="nieuw()">EPC toevoegen</button> <span class="msg" id="np_msg"></span></div>'+
+        '<p class="sub" style="margin-top:8px">Volledige NAW/logo bewerk je door hetzelfde Id opnieuw toe te voegen (upsert). In de tabel bewerk je snel naam, btw, domeinen en EPC-manager.</p></div>';
       // 3) Adviseurs
       h+='<h2>Adviseurs (uit leads + mandaten)</h2><div class="tbl-wrap"><table><thead><tr><th>E-mail</th><th>Naam</th><th>Partner (ingevuld)</th><th>Partner (uit e-mail)</th></tr></thead><tbody>';
       if(!ADVISEURS.length){ h+='<tr><td colspan="4" class="sub" style="padding:14px">Nog geen adviseurs gezien.</td></tr>'; }
@@ -129,9 +143,10 @@
 
     window.bewaar = async function(id){
       var naam=($('n_'+id)||{}).value, thema=($('t_'+id)||{}).value, dom=parseDom(($('d_'+id)||{}).value);
+      var btw=(($('b_'+id)||{}).value||'').trim(), mg=(($('mg_'+id)||{}).value||'').trim().toLowerCase();
       $('m_'+id).textContent='…';
       try{
-        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, naam:naam, thema:thema, domeinen:dom }) });
+        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, naam:naam, thema:thema, domeinen:dom, btw:btw, manager_email:mg }) });
         var j=await r.json().catch(function(){return {};});
         if(!r.ok){ $('m_'+id).innerHTML='<span class="warn">'+esc(j.error||r.status)+'</span>'; return; }
         $('m_'+id).innerHTML='<span class="ok">✓</span>'; await laad();
@@ -148,12 +163,17 @@
     window.nieuw = async function(){
       var id=$('np_id').value, naam=$('np_naam').value, thema=$('np_thema').value, dom=parseDom($('np_dom').value);
       if(!id.trim()){ $('np_msg').innerHTML='<span class="warn">Id verplicht</span>'; return; }
+      var pcgem=($('np_pcgem').value||'').trim(), m=pcgem.match(/^(\d{4})\s+(.*)$/);
+      var adres={ straat:($('np_straat').value||'').trim(), postcode:(m?m[1]:''), gemeente:(m?m[2]:pcgem), land:'BE' };
+      var body={ id:id, naam:naam, thema:thema, domeinen:dom, btw:($('np_btw').value||'').trim(), logo_url:($('np_logo').value||'').trim(),
+        manager_email:($('np_mg').value||'').trim().toLowerCase(), contact:{ mail:($('np_cmail').value||'').trim().toLowerCase(), tel:($('np_ctel').value||'').trim() }, adres:adres };
       $('np_msg').textContent='…';
       try{
-        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ id:id, naam:naam, thema:thema, domeinen:dom }) });
+        var r=await fetch(PROXY+'/api/partners',{ method:'POST', headers: await authHeaders(), body: JSON.stringify(body) });
         var j=await r.json().catch(function(){return {};});
         if(!r.ok){ $('np_msg').innerHTML='<span class="warn">'+esc(j.error||r.status)+'</span>'; return; }
-        $('np_id').value=$('np_naam').value=$('np_dom').value=''; $('np_msg').innerHTML='<span class="ok">✓ toegevoegd</span>'; await laad();
+        ['np_id','np_naam','np_btw','np_straat','np_pcgem','np_logo','np_mg','np_cmail','np_ctel','np_dom'].forEach(function(k){ if($(k))$(k).value=''; });
+        $('np_msg').innerHTML='<span class="ok">✓ toegevoegd</span>'; await laad();
       }catch(e){ $('np_msg').innerHTML='<span class="warn">'+esc(e.message)+'</span>'; }
     };
 
