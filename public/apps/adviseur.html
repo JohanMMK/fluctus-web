@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<!-- adviseur.html v1.4.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+<!-- adviseur.html v1.5.0 (2026-09-27) — Adviseur-dashboard "Mijn klanten" (Johan).
+     v1.5.0: login-code (6-cijfer OTP) wordt nu aangevraagd via POST /api/auth/otp-request (server genereert de code en mailt ze via
+     Graph vanaf dossier@ → betrouwbaar naar M365; de Supabase-mailer leverde slecht af). Verifiëren blijft sb.auth.verifyOtp (type email/signup).
+     Faalt het endpoint, dan valt sendCode terug op sb.auth.signInWithOtp. Vereist server v15.180+.
      v1.4.0: bij adviseur-aanmaken (manager) koppeling aan een EPC (partner-dropdown) + "is EPC-manager" → /api/adviseur/aanmaken epc_id/epc_manager.
      v1.3.0: manager ziet openstaande overname-aanvragen ("overname gevraagd door X") + kan een klant overzetten naar een andere adviseur.
      v1.2.0: statuslabels voor geen_pdf / pdf_geen_factuur (klant + adviseur worden verwittigd door de server).
@@ -145,10 +148,24 @@
     var email=($('l-email').value||'').trim().toLowerCase();
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toon('l-msg','err','Vul een geldig e-mailadres in.'); return; }
     $('l-code').disabled=true; toon('l-msg','ok','Bezig met versturen…');
-    var res=await sb.auth.signInWithOtp({ email:email, options:{ shouldCreateUser:true } });
+    // v15.180: code via ons eigen endpoint (server genereert + mailt via Graph → betrouwbaar naar M365).
+    //   Verifiëren gebeurt onveranderd met sb.auth.verifyOtp (type email/signup). Faalt het endpoint,
+    //   dan vallen we terug op de Supabase-mailer zodat aanmelden nooit volledig stukgaat.
+    var ok=false, foutmsg='';
+    try{
+      var r=await fetch(API+'/api/auth/otp-request',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email:email }) });
+      var j=await r.json().catch(function(){ return {}; });
+      if(r.ok && j.ok) ok=true;
+      else if(r.status===429){ ok=true; }   // net al een code gestuurd — laat de gebruiker ze invullen
+      else foutmsg=(j && j.error) || ('versturen faalde ('+r.status+')');
+    }catch(e){ foutmsg=e.message; }
+    if(!ok){
+      try{ var res=await sb.auth.signInWithOtp({ email:email, options:{ shouldCreateUser:true } }); if(res.error) throw new Error(res.error.message); ok=true; }
+      catch(e2){ foutmsg=foutmsg||e2.message; }
+    }
     $('l-code').disabled=false;
-    if(res.error){ toon('l-msg','err','Kon geen code sturen: '+res.error.message); return; }
-    $('stap-email').classList.add('hide'); $('stap-code').classList.remove('hide'); toon('l-msg','ok','We hebben u een 6-cijfercode gemaild. Vul ze hierboven in.'); $('l-token').focus();
+    if(!ok){ toon('l-msg','err','Kon geen code sturen: '+foutmsg); return; }
+    $('stap-email').classList.add('hide'); $('stap-code').classList.remove('hide'); toon('l-msg','ok','We hebben u een 6-cijfercode gemaild. Vul ze hierboven in (kijk ook in Ongewenst).'); $('l-token').focus();
   }
   async function verifyCode(){
     var email=($('l-email').value||'').trim().toLowerCase(), token=($('l-token').value||'').trim();
