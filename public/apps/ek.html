@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.20.0 (2026-09-26) — TWEE-FACTUREN GESPLITSTE INDEXATIE (Johan): de jaarbesparing (base-factuur − scenario-factuur)
+<!-- ek.html v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
+     met de gekozen samenstelling als scope (pv_kwp, batt_kw, batt_kwh, rte, dod, ac, dc, ontkoppelbord). LAST draagt battKw/ac/dc/rte/dod/ontkoppelbord.
+     Server routeert: adviseur op dossier → adviseur-mail met 2 knoppen (alleen mijn offerte / + last call), anders alle actieve partner-EPC's.
+     Installateurs vullen hun prijs in via offerte-tabel.html. Vereist server v15.177. /api/lead-bevraging blijft bestaan (niet meer gebruikt door de CTA).
+     ── v0.20.0 (2026-09-26) — TWEE-FACTUREN GESPLITSTE INDEXATIE (Johan): de jaarbesparing (base-factuur − scenario-factuur)
      wordt gesplitst in een netkosten-deel (besp_net, uit de sweep) en de rest (commodity/heffingen). De rest indexeert op inflatie (2%);
      het netkosten-deel + het vermeden capaciteitstarief indexeren op het snellere netkostenpad (inflatie + 2% + eenmalige verdubbeling 2029).
      _escCashflow(restJ, netJ); _battValue splitst energie→besp_rest/besp_net; battwaarde-payload draagt besp_net mee. Vereist klantrapport.html v0.11 + server v15.169.
@@ -1219,7 +1223,7 @@
     //   factuur gebouw-only). Mag negatief worden → je verdient aan elektrisch rijden. Bij de 0/0-cel = de kale laadkost.
     var _laadNa = factuurNa - C.kostNu;
     var km100Cell = (ev>0 && C.kmBehoefte>0) ? (_laadNa/C.kmBehoefte*100) : 0;
-    LAST={ pvKwp:pvKwp, battKwh:battKwh, palen:palen, invTot:invTot, invPvBatt:invPvBatt };
+    LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:Math.round((+battKwh||0)/(P_TL.BATT_CRATE||2)*10)/10, ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
     if($('ek-doss')) $('ek-doss').textContent = STATE_CODE || '';
@@ -1729,13 +1733,40 @@
       }).catch(function(){});
     }catch(e){}
   })();
-  // Offerte-CTA (skelet — wordt /api/lead-bevraging: geanonimiseerd mini-bestek → partners, verwerkt in de update).
+  // Offerte-CTA (v0.20 Fase 2) — deadline-keuze (5/10/15 d) → POST /api/offerte/start met de gekozen samenstelling als scope.
+  //   Server routeert: adviseur op dossier → adviseur-mail (2 knoppen), anders alle actieve partner-EPC's. Invul-tabel = offerte-tabel.html.
+  var _OFF_DL=10;
   function vraagOffertes(){
-    $('offerte-cta').innerHTML='<div style="font-weight:700;color:var(--green)">✔ Offertes aangevraagd</div>'+
-      '<div class="sub" style="margin-top:3px">We vragen vrijblijvend offertes op bij onze partners en verwerken de échte prijzen mee in uw definitieve rapport. Zodra dat klaar is (samen met uw kwartierdata), krijgt u een e-mail met de link naar uw KPI-pagina.</div>';
-    // Koppelt aan hetzelfde dossier (token → rec.kamino_project_id) + de gekozen samenstelling.
-    if(TOKEN){ try{ fetch(API+'/api/lead-bevraging',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-      token:TOKEN, samenstelling: LAST?{ pv_kwp:LAST.pvKwp, batt_kwh:LAST.battKwh, palen:LAST.palen, investering_eur:LAST.invTot }:undefined }) }); }catch(e){} }
+    if(!TOKEN){ var s=$('rapport-status'); if(s){ s.style.color='var(--muted)'; s.textContent='Rond eerst de intake af (dossier ontbreekt).'; } return; }
+    var combo = LAST ? (String(LAST.pvKwp).replace('.',',')+' kWp PV · '+LAST.battKwh+' kWh batterij'+(LAST.palen>0?(' · '+LAST.palen+' laadpunt(en)'):'')) : '';
+    $('offerte-cta').innerHTML =
+      '<div style="margin-bottom:3px"><b style="font-weight:700">Offertes voor deze samenstelling?</b> <span class="sub" style="font-weight:400">'+combo+'</span></div>'+
+      '<div class="sub" style="margin-bottom:9px">Kies binnen welke termijn de installateurs (EPC\'s) mogen indienen. Kabels en aansluitwerken tellen niet mee in de vergelijking.</div>'+
+      '<div id="off-dl" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:11px">'+
+        [5,10,15].map(function(d){ return '<button type="button" class="btn ghost sm off-dl-btn" data-d="'+d+'" onclick="_offDl('+d+')" style="'+(d===_OFF_DL?'background:var(--navy);color:#fff':'')+'">'+d+' dagen</button>'; }).join('')+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn sm" type="button" id="off-send" onclick="_offVerstuur()">Vraag offertes aan →</button>'+
+        '<button class="btn ghost sm" type="button" onclick="location.reload()">Annuleer</button>'+
+      '</div>'+
+      '<div class="sub" id="off-status" style="margin-top:8px"></div>';
+  }
+  function _offDl(d){ _OFF_DL=d; var b=document.querySelectorAll('.off-dl-btn'); for(var i=0;i<b.length;i++){ var on=(+b[i].getAttribute('data-d')===d); b[i].style.background=on?'var(--navy)':''; b[i].style.color=on?'#fff':''; } }
+  function _offScope(){ if(!LAST) return {}; return { pv_kwp:LAST.pvKwp, batt_kw:LAST.battKw, batt_kwh:LAST.battKwh, rte:LAST.rte, dod:LAST.dod, ac:LAST.ac, dc:LAST.dc, ontkoppelbord:!!LAST.ontkoppelbord }; }
+  function _offVerstuur(){
+    var st=$('off-status'), btn=$('off-send'); if(btn){ btn.disabled=true; btn.textContent='⏳ Aanvragen…'; }
+    fetch(API+'/api/offerte/start',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, deadline_dagen:_OFF_DL, scope:_offScope() }) })
+      .then(function(r){ return r.json().catch(function(){return {};}); })
+      .then(function(j){
+        if(!j||!j.ok){ if(btn){ btn.disabled=false; btn.textContent='Vraag offertes aan →'; } if(st){ st.style.color='var(--muted)'; st.textContent=(j&&j.error)||'Aanvraag lukte niet — probeer later opnieuw.'; } return; }
+        var adv = (j.status==='wacht_modus');
+        $('offerte-cta').innerHTML='<div style="font-weight:700;color:var(--green)">✔ Offerte-aanvraag gestart</div>'+
+          '<div class="sub" style="margin-top:3px">'+(adv
+            ? 'Uw adviseur kreeg een e-mail en kiest of hij zelf een offerte maakt of het openstelt naar meerdere installateurs. U hoeft niets te doen.'
+            : 'We nodigden onze partner-installateurs uit om een offerte in te dienen. Zodra de offertes binnen zijn, rekenen we uw definitieve rapport met de échte prijzen en krijgt u een e-mail.')+
+          '</div>';
+      })
+      .catch(function(){ if(btn){ btn.disabled=false; btn.textContent='Vraag offertes aan →'; } if(st){ st.style.color='var(--muted)'; st.textContent='Aanvraag lukte niet — probeer later opnieuw.'; } });
   }
   // "Gebruik mijn profieldata" — klant koos eerder geen profieldata te delen, maar wil nu tóch de exacte versie (digitale meter).
   //   Re-consent op hetzelfde dossier (idempotent op TOKEN) → Fluvius-mandaat; de klant bevestigt zelf via itsme.

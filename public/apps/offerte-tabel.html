@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Offerte indienen — Energie-Compas</title>
+<!-- offerte-tabel.html v0.1.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de invul-tabel waar een installateur (EPC) zijn prijs indient.
+     Leest GET /api/offerte/:token (scope + deadline + status). Adviseur-deeplink ?modus=alleen|lastcall → POST /api/offerte/kies-modus vóór het laden.
+     Per scope-post een rij (eenheden voorgevuld, prijs/eenheid invulbaar, totaal auto); kabels/aansluitwerken als optionele rijen (tellen niet mee in de
+     vergelijking). Indienen → POST /api/offerte/inzenden {token, epc_naam, indiener_mail, regels[]}. Deadline voorbij → 410 → vergrendeld. Vereist server v15.177. -->
+<style>
+  :root{--navy:#1F3864;--green:#0a7d3a;--greenbg:#EAF3EC;--greenln:#A9CDB4;--bg:#F4F7FB;--card:#fff;--line:#D6E0EC;--ink:#1A1F2B;--muted:#6B7688}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+  h1{color:var(--navy);font-size:22px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+  .scope{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:14px;color:var(--navy)}
+  label.fld{display:block;font-size:13px;color:var(--navy);font-weight:600;margin:0 0 10px}
+  input{font:inherit;border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+  input[type=number]{text-align:right}
+  table{width:100%;border-collapse:collapse;margin-top:6px;font-size:14px}
+  th{text-align:left;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;font-weight:700;padding:6px 6px;border-bottom:2px solid var(--line)}
+  td{padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  td.num{text-align:right;white-space:nowrap}
+  .postnaam{font-weight:600;color:var(--navy)}
+  .postnaam small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+  .cell-in{width:110px}
+  .tot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:800;color:var(--navy);font-size:16px;padding-top:10px}
+  .btn{display:inline-block;background:var(--navy);color:#fff;border:none;border-radius:9px;font:inherit;font-weight:700;padding:12px 20px;cursor:pointer}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  .pill{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px}
+  .pill.open{background:var(--greenbg);color:var(--green);border:1px solid var(--greenln)}
+  .pill.dicht{background:#FBE9E9;color:#B23A3A;border:1px solid #E7B9B9}
+  .msg{margin-top:12px;font-size:14px}
+  .msg.ok{color:var(--green);font-weight:700}
+  .msg.err{color:#B23A3A}
+  .foot{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
+  .hidden{display:none}
+  .addrow{background:none;border:1px dashed var(--line);color:var(--navy);border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Offerte indienen</h1>
+  <div class="sub">Energie-Compas · prijsvraag <span id="doss"></span></div>
+
+  <div id="laden" class="card">Bezig met laden…</div>
+
+  <div id="dicht" class="card hidden">
+    <div class="pill dicht">Gesloten</div>
+    <p style="margin:12px 0 0">De indientermijn voor deze prijsvraag is verstreken. U kunt geen offerte meer indienen.</p>
+  </div>
+
+  <div id="form" class="card hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div><b style="color:var(--navy)">Gevraagde installatie</b></div>
+      <div><span class="pill open">Open</span> <span class="sub" id="dl-txt"></span></div>
+    </div>
+    <div class="scope" id="scope-txt"></div>
+
+    <div style="margin-top:16px">
+      <label class="fld">Uw EPC-bedrijfsnaam *
+        <input id="epc" type="text" placeholder="bv. Zonnepro BV" autocomplete="organization">
+      </label>
+      <label class="fld">Uw e-mailadres *
+        <input id="mail" type="email" placeholder="naam@bedrijf.be" autocomplete="email">
+      </label>
+    </div>
+
+    <table id="tbl">
+      <thead><tr><th>Post</th><th style="text-align:right">Eenheden</th><th style="text-align:right">Prijs/eenheid (€)</th><th style="text-align:right">Totaal (€)</th></tr></thead>
+      <tbody id="rows"></tbody>
+      <tfoot><tr class="tot"><td colspan="3">Totaal offerte</td><td class="num" id="grand">€ 0</td></tr></tfoot>
+    </table>
+    <button type="button" class="addrow" onclick="addRow('', 1, true)">+ extra post toevoegen</button>
+
+    <div class="foot">Kabellengtes en aansluitwerken tellen <b>niet</b> mee in de vergelijking, maar u mag ze wel opnemen (voeg ze toe als extra post). De eenheden zijn de gevraagde samenstelling — pas ze enkel aan als uw voorstel afwijkt.</div>
+
+    <div style="margin-top:16px">
+      <button type="button" class="btn" id="send" onclick="verstuur()">Offerte indienen →</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<script>
+  var API='https://lucid-amazement-production.up.railway.app';
+  var $=function(id){return document.getElementById(id);};
+  var P=new URLSearchParams(location.search);
+  var TOKEN=(P.get('case')||P.get('token')||'').trim();
+  var MODUS=(P.get('modus')||'').trim();
+  var SCOPE=null, GESLOTEN=false;
+
+  function eur(n){ return '€ '+(Math.round(+n||0)).toLocaleString('nl-BE'); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  function scopeRijen(sc){
+    var r=[];
+    if(sc.pv_kwp>0) r.push({post:'Zonnepanelen (PV)', sub:'per kWp', eenheden:sc.pv_kwp});
+    if(sc.batt_kwh>0||sc.batt_kw>0) r.push({post:'Batterij', sub:sc.batt_kw+' kW · RTE '+sc.rte+'% · DoD '+sc.dod+'%', eenheden:(sc.batt_kwh||0), eenheid:'kWh'});
+    if(sc.ac>0) r.push({post:'AC-laadpunt(en)', sub:'per stuk', eenheden:sc.ac});
+    if(sc.dc>0) r.push({post:'DC-laadpunt(en)', sub:'per stuk', eenheden:sc.dc});
+    if(sc.ontkoppelbord) r.push({post:'Ontkoppelbord', sub:'forfait', eenheden:1});
+    return r;
+  }
+
+  function addRow(post, eenheden, verwijderbaar, sub){
+    var tb=$('rows'), tr=document.createElement('tr');
+    var pn = verwijderbaar
+      ? '<input type="text" class="r-post" value="'+esc(post||'')+'" placeholder="postomschrijving" style="width:100%">'+(sub?'<small>'+esc(sub)+'</small>':'')
+      : '<div class="postnaam">'+esc(post)+(sub?'<small>'+esc(sub)+'</small>':'')+'</div>'+'<input type="hidden" class="r-post" value="'+esc(post)+'">';
+    tr.innerHTML =
+      '<td>'+pn+(verwijderbaar?' <button type="button" class="addrow" style="padding:2px 8px;margin:4px 0 0" onclick="this.closest(\'tr\').remove();recalc()">verwijder</button>':'')+'</td>'+
+      '<td class="num"><input type="number" class="r-eh cell-in" min="0" step="0.01" value="'+(eenheden!=null?eenheden:'')+'"></td>'+
+      '<td class="num"><input type="number" class="r-pe cell-in" min="0" step="0.01" placeholder="0"></td>'+
+      '<td class="num r-tot">€ 0</td>';
+    tb.appendChild(tr);
+    tr.querySelector('.r-eh').addEventListener('input',recalc);
+    tr.querySelector('.r-pe').addEventListener('input',recalc);
+    recalc();
+  }
+
+  function recalc(){
+    var trs=$('rows').querySelectorAll('tr'), grand=0;
+    trs.forEach(function(tr){
+      var eh=+tr.querySelector('.r-eh').value||0, pe=+tr.querySelector('.r-pe').value||0, t=Math.round(eh*pe);
+      tr.querySelector('.r-tot').textContent=eur(t); grand+=t;
+    });
+    $('grand').textContent=eur(grand);
+  }
+
+  function verzamelRegels(){
+    var out=[];
+    $('rows').querySelectorAll('tr').forEach(function(tr){
+      var post=(tr.querySelector('.r-post').value||'').trim(); if(!post) return;
+      var eh=+tr.querySelector('.r-eh').value||0, pe=+tr.querySelector('.r-pe').value||0;
+      out.push({post:post, eenheden:eh, prijs_eenheid:pe, totaal:Math.round(eh*pe)});
+    });
+    return out;
+  }
+
+  function render(j){
+    $('laden').classList.add('hidden');
+    if($('doss')) $('doss').textContent = j.dossier ? ('· '+j.dossier) : '';
+    if(j.gesloten){ $('dicht').classList.remove('hidden'); return; }
+    SCOPE=j.scope||{};
+    $('form').classList.remove('hidden');
+    $('scope-txt').textContent = scopeTekst(SCOPE);
+    var dl=j.deadline_ts?new Date(j.deadline_ts):null;
+    $('dl-txt').textContent = dl ? ('indienen t.e.m. '+dl.toLocaleDateString('nl-BE')) : '';
+    var rijen=scopeRijen(SCOPE);
+    if(!rijen.length){ addRow('Installatie', 1, true); }
+    else rijen.forEach(function(r){ addRow(r.post, r.eenheden, false, r.sub); });
+    recalc();
+  }
+
+  function scopeTekst(sc){
+    var r=[];
+    if(sc.pv_kwp) r.push('PV '+sc.pv_kwp+' kWp');
+    if(sc.batt_kw||sc.batt_kwh) r.push('batterij '+(sc.batt_kw||0)+' kW / '+(sc.batt_kwh||0)+' kWh');
+    if(sc.ac) r.push(sc.ac+' AC-laadpunt(en)');
+    if(sc.dc) r.push(sc.dc+' DC-laadpunt(en)');
+    if(sc.ontkoppelbord) r.push('ontkoppelbord');
+    return r.join(' · ')||'(geen posten opgegeven)';
+  }
+
+  function verstuur(){
+    var epc=($('epc').value||'').trim(), mail=($('mail').value||'').trim();
+    var msg=$('msg'); msg.className='msg';
+    if(!epc){ msg.className='msg err'; msg.textContent='Vul uw EPC-bedrijfsnaam in.'; $('epc').focus(); return; }
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)){ msg.className='msg err'; msg.textContent='Vul een geldig e-mailadres in.'; $('mail').focus(); return; }
+    var regels=verzamelRegels();
+    if(!regels.length){ msg.className='msg err'; msg.textContent='Vul minstens één post met een prijs in.'; return; }
+    var b=$('send'); b.disabled=true; b.textContent='⏳ Indienen…';
+    fetch(API+'/api/offerte/inzenden',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, epc_naam:epc, indiener_mail:mail, regels:regels }) })
+      .then(function(r){ return r.json().then(function(j){ j._status=r.status; return j; }).catch(function(){return {_status:r.status};}); })
+      .then(function(j){
+        if(j._status===410){ b.textContent='Gesloten'; msg.className='msg err'; msg.textContent='De indientermijn is verstreken.'; return; }
+        if(!j||!j.ok){ b.disabled=false; b.textContent='Offerte indienen →'; msg.className='msg err'; msg.textContent=(j&&j.error)||'Indienen lukte niet — probeer later opnieuw.'; return; }
+        $('form').innerHTML='<div class="pill open">Ingediend</div>'+
+          '<p style="margin:12px 0 0">Bedankt — uw offerte van <b>'+eur(j.totaal)+'</b> is ontvangen'+(j.epc_onbekend?' (uw EPC wordt nog geregistreerd door Energie-Compas)':'')+'. Wij nemen contact op indien nodig.</p>';
+      })
+      .catch(function(){ b.disabled=false; b.textContent='Offerte indienen →'; msg.className='msg err'; msg.textContent='Indienen lukte niet — probeer later opnieuw.'; });
+  }
+
+  function laad(){
+    if(!TOKEN){ $('laden').innerHTML='<b style="color:#B23A3A">Ongeldige link</b> — het dossierkenmerk ontbreekt.'; return; }
+    fetch(API+'/api/offerte/'+encodeURIComponent(TOKEN))
+      .then(function(r){ if(!r.ok) throw new Error('geen offerte-aanvraag'); return r.json(); })
+      .then(render)
+      .catch(function(){ $('laden').innerHTML='<b style="color:#B23A3A">Niet gevonden</b> — deze prijsvraag bestaat niet (meer).'; });
+  }
+
+  // Adviseur-deeplink: eerst de modus kiezen (alleen mijn offerte / + last call), dan de tabel laden.
+  if(MODUS==='alleen'||MODUS==='lastcall'){
+    fetch(API+'/api/offerte/kies-modus',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:TOKEN, modus:MODUS }) })
+      .then(function(){ laad(); }).catch(function(){ laad(); });
+  } else { laad(); }
+</script>
+</body>
+</html>
