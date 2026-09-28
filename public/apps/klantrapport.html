@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
-<!-- klantrapport.html v0.11.1 (2026-09-28) — PDF-CONSISTENTIE (Johan, batch 4): _genPdf geeft inline-SVG's tijdelijk expliciete px-afmetingen vóór html2canvas (anders vielen de heatmaps weg in de gedownloade/gemailde PDF; native print had ze wél) + onclone normaliseert de full-bleed banners (geen versmald/geknipt logo). Download-knop + auto-mail delen nu dezelfde (gefixte) render. // v0.11.0 (2026-09-28) — RAPPORT-OPKUIS (Johan): CREG-verwijzingen weg (cover/P2/factuurvergelijking); voorpagina met klantnaam + afname-adres groot/centraal; Aansluittype (LS/MS) bij Aansluiting; investeringsoverzicht = componenten + technische specs (rechts uitgelijnd), alleen totaalprijs; nieuwe pagina "Extra potentieel: onbalans-sturing" (spotmarkt=dynamisch contract + onbalans-besparing + EMS-waarschuwing (geen voetnoot) + stappenplan implementatie→EMS→onbalans); P5-bis financieel plan MÉT onbalans meegerekend (titel + caveat 100% oogst); bijlage 1 onderhandelingsmarge als getal (richtgetal) + prijs-van-zekerheid framing; kengetal-tabellen even breed (table-layout:fixed) + RAND-kleuring i.p.v. celvulling (_kgRand); laad-kengetallen weg zonder laden. Vereist server v15.189 (factuur.besparing_onbalans_jaar). // v0.10.0 (2026-09-27) — HUISSTIJL: stockfoto-banners vervangen door het Energie-Compas KOMPASSYMBOOL
+<!-- klantrapport.html v0.11.2 (2026-09-28) — PDF-FIX v2 (Johan): elke SVG + bannerafbeelding wordt vóór html2canvas naar PNG omgezet met CORRECTE cover-crop-aspect (kompas blijft rond, geen heatmap valt weg). _rasterizeForPdf/_drawCover. // v0.11.1 (2026-09-28) — PDF-CONSISTENTIE (Johan, batch 4): _genPdf geeft inline-SVG's tijdelijk expliciete px-afmetingen vóór html2canvas (anders vielen de heatmaps weg in de gedownloade/gemailde PDF; native print had ze wél) + onclone normaliseert de full-bleed banners (geen versmald/geknipt logo). Download-knop + auto-mail delen nu dezelfde (gefixte) render. // v0.11.0 (2026-09-28) — RAPPORT-OPKUIS (Johan): CREG-verwijzingen weg (cover/P2/factuurvergelijking); voorpagina met klantnaam + afname-adres groot/centraal; Aansluittype (LS/MS) bij Aansluiting; investeringsoverzicht = componenten + technische specs (rechts uitgelijnd), alleen totaalprijs; nieuwe pagina "Extra potentieel: onbalans-sturing" (spotmarkt=dynamisch contract + onbalans-besparing + EMS-waarschuwing (geen voetnoot) + stappenplan implementatie→EMS→onbalans); P5-bis financieel plan MÉT onbalans meegerekend (titel + caveat 100% oogst); bijlage 1 onderhandelingsmarge als getal (richtgetal) + prijs-van-zekerheid framing; kengetal-tabellen even breed (table-layout:fixed) + RAND-kleuring i.p.v. celvulling (_kgRand); laad-kengetallen weg zonder laden. Vereist server v15.189 (factuur.besparing_onbalans_jaar). // v0.10.0 (2026-09-27) — HUISSTIJL: stockfoto-banners vervangen door het Energie-Compas KOMPASSYMBOOL
      (Johan: klantrapport EK + simulator tonen enkel de kompassymbolen, geen foto's). IMG.cover/desk/office/tech verwijzen nu
      alle vier naar één kompas-banner (navy strip + wit kompas + groene baseline). Geen andere logica gewijzigd.
      ── v0.9.0 (2026-09-26) — EXTRA BIJLAGE "Alle kengetallen per combinatie" (Johan): de PV×batterij-roosters
@@ -763,38 +763,54 @@ financieelPagina();
 // ============================================================================
 //  PDF (client-side) + optioneel: PDF naar de klant mailen via EK
 // ============================================================================
+// v0.11.2 (Johan) — PDF-CONSISTENTIE. html2canvas 1.4.1 is onbetrouwbaar met (a) inline-SVG met enkel CSS-breedte → heatmaps
+//   vielen weg; en (b) object-fit:cover op <img> → banner werd uitgerekt (kompas platgeduwd). Oplossing: ELKE SVG en elke
+//   banner-afbeelding wordt VÓÓR de capture zelf naar een PNG omgezet, met de CORRECTE verhouding (cover-crop met de juiste
+//   aspect ratio), en tijdelijk in de DOM geplaatst. html2canvas rendert daarna enkel nog gewone <img>'s → betrouwbaar.
+function _loadImg(src){ return new Promise(function(res){ var im=new Image(); im.crossOrigin='anonymous'; im.onload=function(){res(im);}; im.onerror=function(){res(null);}; im.src=src; }); }
+function _pngFrom(w,h,draw){ var s=2, cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(w*s)); cv.height=Math.max(1,Math.round(h*s)); var ctx=cv.getContext('2d'); ctx.scale(s,s); draw(ctx,w,h); return cv.toDataURL('image/png'); }
+function _drawCover(ctx,im,w,h){ var ir=im.naturalWidth/im.naturalHeight, tr=w/h, sw,sh,sx,sy; if(ir>tr){ sh=im.naturalHeight; sw=sh*tr; sx=(im.naturalWidth-sw)/2; sy=0; } else { sw=im.naturalWidth; sh=sw/tr; sx=0; sy=(im.naturalHeight-sh)/2; } ctx.drawImage(im,sx,sy,sw,sh,0,0,w,h); }
+async function _rasterizeForPdf(){
+  var restore=[];
+  // 1) inline-SVG → PNG (zelfde px-grootte)
+  var svgs=[].slice.call(document.querySelectorAll('#rapport svg'));
+  for(var i=0;i<svgs.length;i++){
+    var sv=svgs[i], r=sv.getBoundingClientRect(); if(!(r.width>0&&r.height>0)) continue;
+    var clone=sv.cloneNode(true); clone.setAttribute('width',Math.round(r.width)); clone.setAttribute('height',Math.round(r.height));
+    if(!clone.getAttribute('xmlns')) clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    var xml=new XMLSerializer().serializeToString(clone);
+    var im=await _loadImg('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml)); if(!im) continue;
+    var png=_pngFrom(r.width,r.height,function(ctx,w,h){ ctx.drawImage(im,0,0,w,h); });
+    var el=document.createElement('img'); el.src=png; el.style.cssText='display:block;width:'+r.width+'px;height:'+r.height+'px';
+    sv.style.display='none'; sv.parentNode.insertBefore(el,sv); restore.push([sv,el]);
+  }
+  // 2) banner-afbeeldingen (object-fit:cover) → PNG met correcte cover-crop → geen uitgerekt/plat kompas
+  var bands=[].slice.call(document.querySelectorAll('#rapport .band-top, #rapport .band'));
+  for(var j=0;j<bands.length;j++){
+    var bi=bands[j], rb=bi.getBoundingClientRect(); if(!(rb.width>0&&rb.height>0)) continue;
+    var im2=await _loadImg(bi.currentSrc||bi.src); if(!im2) continue;
+    var png2=_pngFrom(rb.width,rb.height,function(ctx,w,h){ _drawCover(ctx,im2,w,h); });
+    var cs=getComputedStyle(bi);
+    var el2=document.createElement('img'); el2.src=png2; el2.style.cssText='display:block;width:'+rb.width+'px;height:'+rb.height+'px;margin:'+cs.margin;
+    bi.style.display='none'; bi.parentNode.insertBefore(el2,bi); restore.push([bi,el2]);
+  }
+  return restore;
+}
 async function _genPdf(){
   if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internetverbinding?)');
   var pages=document.querySelectorAll('.a4');
   var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
-  // v0.11 (Johan) — PDF-CONSISTENTIE: html2canvas 1.4.1 rendert inline-SVG met enkel een CSS-breedte (width:100% + viewBox,
-  //   preserveAspectRatio=none) vaak LEEG → heatmaps vielen weg in de gedownloade/gemailde PDF (native print had ze wél).
-  //   Fix: geef elke SVG tijdelijk EXPLICIETE px-afmetingen (gemeten) vóór de capture, en herstel nadien. + onclone
-  //   normaliseert de full-bleed banners (negatieve marges) zodat het beeld niet versmald/geknipt raakt in de raster-PDF.
-  var svgFix=[];
-  document.querySelectorAll('#rapport svg').forEach(function(sv){
-    var r=sv.getBoundingClientRect();
-    if(r && r.width>0 && r.height>0){
-      svgFix.push([sv, sv.getAttribute('width'), sv.getAttribute('height')]);
-      sv.setAttribute('width', Math.round(r.width)); sv.setAttribute('height', Math.round(r.height));
-    }
-  });
-  var _onclone=function(doc){
-    try{ doc.querySelectorAll('.band-top,.band').forEach(function(im){ im.style.width='100%'; im.style.margin='0 0 8mm'; }); }catch(e){}
-  };
+  var restore=await _rasterizeForPdf();
   try{
     for(var i=0;i<pages.length;i++){
-      var canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,onclone:_onclone});
+      var canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
       var img=canvas.toDataURL('image/jpeg',0.92);
       var hh=canvas.height*210/canvas.width;
       if(i>0) pdf.addPage();
       pdf.addImage(img,'JPEG',0,0,210,hh>297?297:hh);
     }
   } finally {
-    svgFix.forEach(function(x){
-      if(x[1]==null) x[0].removeAttribute('width'); else x[0].setAttribute('width',x[1]);
-      if(x[2]==null) x[0].removeAttribute('height'); else x[0].setAttribute('height',x[2]);
-    });
+    restore.forEach(function(x){ try{ x[0].style.display=''; if(x[1]&&x[1].parentNode) x[1].parentNode.removeChild(x[1]); }catch(e){} });
   }
   return pdf;
 }
