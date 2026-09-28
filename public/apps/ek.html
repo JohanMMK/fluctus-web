@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.23.0 (2026-09-28) — RESULTAAT-OPKUIS + STATE (Johan): (1) CREG-verwijzingen weg (besparing = bestaande+laadplein vs +PV/batt); (2) zonder laden (0 voertuigen) verbergen we km-tegel, aansluiting-tegel, "Uw impact" + laad-paragrafen, en de 2e heatmap schakelt naar rendement%; (3) "Opnieuw" gaat terug naar de invoer mét behoud van alle velden (geen reload); naar resultaat herrekent enkel als de invoer (incl. EAN-keuze + C-factor) wijzigde (_inputSig/LAST_SIG); (4) afname-adres (bewerkbaar veld i-adres) + LS/MS (uit toegangsvermogen) in de titels van invoer/resultaat; live LS/MS-badge bij het toegangsveld. Batterijcycli tonen nu >0 (server v15.188). // v0.22.0 (2026-09-28) — FASE 2 "PAS AAN" + BESTAANDE PV (Johan): (1) custom (kWp, batt-kW) uit 'pas aan' komt als eigen rij+kolom op de heatmap, exact doorgerekend + groen gemarkeerd; (2) batterij-kWh bewerkbaar → C-factor (kWh/kW) geldt via een nieuwe sweep (crate in body) voor ÁLLE batterij-opties; (3) totale prijs bewerkbaar → PRIJS_FACTOR schaalt elke cel pro-rata (investering→TVT→rendement); (4) 'Bestaande zonnepanelen (kWp)' + 'Jaarlijkse injectie (MWh)' in het beginscherm → base case (bestaande_pv{kwp,inj_mwh_jaar} naar sweep/cel/rapport; inj leeg → aanname alles zelf verbruikt). Vereist server v15.186. _invTotMajor=_invTotRaw×PRIJS_FACTOR. // v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
+<!-- ek.html v0.24.0 (2026-09-28) — RAPPORT-PAYLOAD (Johan, batch 3): _klantrapportPayload stuurt nu spanning (LS/MS), heeftLaden, onbalans-besparing (via j.factuur) + onderhandelingsmarge (refMwh−dynMwh × afname, = prijs van zekerheid) mee; kengetal-grids zonder CREG-grid en zonder €/100km-grid als er niet geladen wordt. CTX draagt refMwh/dynMwh/netHef. // v0.23.0 (2026-09-28) — RESULTAAT-OPKUIS + STATE (Johan): (1) CREG-verwijzingen weg (besparing = bestaande+laadplein vs +PV/batt); (2) zonder laden (0 voertuigen) verbergen we km-tegel, aansluiting-tegel, "Uw impact" + laad-paragrafen, en de 2e heatmap schakelt naar rendement%; (3) "Opnieuw" gaat terug naar de invoer mét behoud van alle velden (geen reload); naar resultaat herrekent enkel als de invoer (incl. EAN-keuze + C-factor) wijzigde (_inputSig/LAST_SIG); (4) afname-adres (bewerkbaar veld i-adres) + LS/MS (uit toegangsvermogen) in de titels van invoer/resultaat; live LS/MS-badge bij het toegangsveld. Batterijcycli tonen nu >0 (server v15.188). // v0.22.0 (2026-09-28) — FASE 2 "PAS AAN" + BESTAANDE PV (Johan): (1) custom (kWp, batt-kW) uit 'pas aan' komt als eigen rij+kolom op de heatmap, exact doorgerekend + groen gemarkeerd; (2) batterij-kWh bewerkbaar → C-factor (kWh/kW) geldt via een nieuwe sweep (crate in body) voor ÁLLE batterij-opties; (3) totale prijs bewerkbaar → PRIJS_FACTOR schaalt elke cel pro-rata (investering→TVT→rendement); (4) 'Bestaande zonnepanelen (kWp)' + 'Jaarlijkse injectie (MWh)' in het beginscherm → base case (bestaande_pv{kwp,inj_mwh_jaar} naar sweep/cel/rapport; inj leeg → aanname alles zelf verbruikt). Vereist server v15.186. _invTotMajor=_invTotRaw×PRIJS_FACTOR. // v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
      met de gekozen samenstelling als scope (pv_kwp, batt_kw, batt_kwh, rte, dod, ac, dc, ontkoppelbord). LAST draagt battKw/ac/dc/rte/dod/ontkoppelbord.
      Server routeert: adviseur op dossier → adviseur-mail met 2 knoppen (alleen mijn offerte / + last call), anders alle actieve partner-EPC's.
      Installateurs vullen hun prijs in via offerte-tabel.html. Vereist server v15.177. /api/lead-bevraging blijft bestaan (niet meer gebruikt door de CTA).
@@ -1498,6 +1498,7 @@
       kostNu:kostNu, kostNieuw:kostNieuw, totaalMwh:totaalMwh, deltaFactuur:deltaFactuur,
       km100:km100, laadMwh:laadMwh, kmBehoefte:kmBehoefte, kmPerAuto:kmPerAuto, kmPlafond:kmPlafond,
       loadfactor:loadfactor, isMS:isMS, laadVenster:laadVenster,
+      refMwh:refMwh, dynMwh:dynMwh, netHef:netHef,   // v0.23: energie-rate nu vs dynamisch → onderhandelingsmarge in de bijlage
       bespDiesel:bespDiesel, bespCreg:bespCreg, cregKost:cregKost, dieselKost:dieselKost, cregKm100:cregKm100, dieselKm100:dieselKm100,
       pvKwpFb:(particulier?4.5:Math.min(200,Math.round(afnameMwh*0.9))),
       battKwhFb:(particulier?10:Math.min(400,Math.round(afnameMwh*0.6))),
@@ -2135,8 +2136,10 @@
     try{
       var H=HM; if(!H||!H.real||!H.real.length) return null;
       var rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;});
-      var order=['tvt','rendement','besparing','factuur_na','km100','besp_creg','investering','cycli'];
-      var titel={tvt:'Terugverdientijd totaal (jaar)',rendement:'Rendement totaal (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',besp_creg:'Besparing slim laden t.o.v. CREG (€/jaar)',investering:'Totale investering (€)',cycli:'Batterijcycli per jaar'};
+      // v0.23 (Johan): CREG-grid weg; laad-grid (€/100 km) enkel als er effectief geladen wordt.
+      var order=['tvt','rendement','besparing','factuur_na','investering','cycli'];
+      if(_heeftLaden()) order.splice(4,0,'km100');
+      var titel={tvt:'Terugverdientijd totaal (jaar)',rendement:'Rendement totaal (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Totale investering (€)',cycli:'Batterijcycli per jaar'};
       var best=H.best||{};
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
       var batt_as=rows.map(function(r){return H.rowLabel?H.rowLabel(r):String(r);});
@@ -2192,7 +2195,8 @@
       financieel: Object.assign({ energieprijs_stijging_pct:3, posten:posten }, j.financieel||{}, { investering:_mfull.tot }),
       aansluiting: {
         verbruiksadres: STATE_ADRES||P.verbruiksadres||'',
-        afname: { ean: STATE_EAN_AFNAME||'', piek_kw:(+P.toegangsvermogen_kw||0), verbruik_mwh:(+P.afname_mwh||0) },
+        spanning: _spanningVan((+P.toegangsvermogen_kw||C.toegangKw||0)),   // v0.23: LS/MS in het rapport (uitgangspositie)
+        afname: { ean: STATE_EAN_AFNAME||'', piek_kw:(+P.toegangsvermogen_kw||C.toegangKw||0), verbruik_mwh:(+P.afname_mwh||C.afnameMwh||0) },
         injectie: (STATE_EAN_INJECTIE ? { ean:STATE_EAN_INJECTIE, piek_kw:0, injectie_mwh:0 } : null),
         metertype: STATE_METER||P.metertype||'',
         profiel: P.profielNaam||C.profielNaam||''
@@ -2201,7 +2205,11 @@
         pv_kwp: pvKwp, batt_kw: battKw, batt_kwh: battKwh, batt_cycli:(j.cycli!=null?j.cycli:null),
         laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: dcAantal ? { kva:300, aantal:dcAantal } : null
       },
-      onderhandeling: { afname_marge_jaar:(+ (C.afname_marge_jaar)||0), injectie_marge_jaar:(+(C.injectie_marge_jaar)||0), digitale_meter:true },
+      // v0.23 (Johan): onderhandelingsmarge = ingeschatte jaarwinst van een dynamisch (spot) contract t.o.v. het huidige,
+      //   over dezelfde periode (= wat u vandaag betaalt voor de zekerheid van uw bestaand contract). Richtgetal.
+      onderhandeling: { afname_marge_jaar: Math.max(0, Math.round(((+C.refMwh||0)-(+C.dynMwh||0))*(+C.afnameMwh||0))),
+        energie_nu_mwh:(+C.refMwh||0), energie_dyn_mwh:(+C.dynMwh||0), injectie_marge_jaar:0, digitale_meter:true },
+      heeftLaden: (+C.ev||0)>0,
       heeftLaadplein: !!j.heeftLaadplein,
       kengetallen: (EK_IS_OEKENE?_kengetallenGrids():null),   // v0.14.4/v0.15: PV×batterij-roosters (extra bijlage) — enkel voor oekene@gmail.com
       token: TOKEN||'', mail: (($('i-mail')&&$('i-mail').value)||'').trim(), api: API
