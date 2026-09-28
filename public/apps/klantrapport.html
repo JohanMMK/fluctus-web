@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
-<!-- klantrapport.html v0.11.2 (2026-09-28) — PDF-FIX v2 (Johan): elke SVG + bannerafbeelding wordt vóór html2canvas naar PNG omgezet met CORRECTE cover-crop-aspect (kompas blijft rond, geen heatmap valt weg). _rasterizeForPdf/_drawCover. // v0.11.1 (2026-09-28) — PDF-CONSISTENTIE (Johan, batch 4): _genPdf geeft inline-SVG's tijdelijk expliciete px-afmetingen vóór html2canvas (anders vielen de heatmaps weg in de gedownloade/gemailde PDF; native print had ze wél) + onclone normaliseert de full-bleed banners (geen versmald/geknipt logo). Download-knop + auto-mail delen nu dezelfde (gefixte) render. // v0.11.0 (2026-09-28) — RAPPORT-OPKUIS (Johan): CREG-verwijzingen weg (cover/P2/factuurvergelijking); voorpagina met klantnaam + afname-adres groot/centraal; Aansluittype (LS/MS) bij Aansluiting; investeringsoverzicht = componenten + technische specs (rechts uitgelijnd), alleen totaalprijs; nieuwe pagina "Extra potentieel: onbalans-sturing" (spotmarkt=dynamisch contract + onbalans-besparing + EMS-waarschuwing (geen voetnoot) + stappenplan implementatie→EMS→onbalans); P5-bis financieel plan MÉT onbalans meegerekend (titel + caveat 100% oogst); bijlage 1 onderhandelingsmarge als getal (richtgetal) + prijs-van-zekerheid framing; kengetal-tabellen even breed (table-layout:fixed) + RAND-kleuring i.p.v. celvulling (_kgRand); laad-kengetallen weg zonder laden. Vereist server v15.189 (factuur.besparing_onbalans_jaar). // v0.10.0 (2026-09-27) — HUISSTIJL: stockfoto-banners vervangen door het Energie-Compas KOMPASSYMBOOL
+<!-- klantrapport.html v0.12.0 (2026-09-28) — CONTRACTSWITCH EXPLICIET (Johan, optie B): basis blijft op spot (dynamisch contract), maar de contractwissel wordt apart getoond zodat het rapport aansluit op de échte factuur. CONTRACTSWITCH = onderhandelingsmarge (bijlage 1) → geen dubbeltelling. Cover+P2 hero = 3-staps ketting (huidig contract → dynamisch zonder PV → met PV+batt) via _heroBoxes/_bespRegel; factuurvergelijking krijgt reconciliatie-tabel (huidig vast → +contractswitch → spot-basis → met installatie) + kop "Dynamisch (spot)"; TVT/rendement blijft enkel op PV+batt (besp). // v0.11.2 (2026-09-28) — PDF-FIX v2 (Johan): elke SVG + bannerafbeelding wordt vóór html2canvas naar PNG omgezet met CORRECTE cover-crop-aspect (kompas blijft rond, geen heatmap valt weg). _rasterizeForPdf/_drawCover. // v0.11.1 (2026-09-28) — PDF-CONSISTENTIE (Johan, batch 4): _genPdf geeft inline-SVG's tijdelijk expliciete px-afmetingen vóór html2canvas (anders vielen de heatmaps weg in de gedownloade/gemailde PDF; native print had ze wél) + onclone normaliseert de full-bleed banners (geen versmald/geknipt logo). Download-knop + auto-mail delen nu dezelfde (gefixte) render. // v0.11.0 (2026-09-28) — RAPPORT-OPKUIS (Johan): CREG-verwijzingen weg (cover/P2/factuurvergelijking); voorpagina met klantnaam + afname-adres groot/centraal; Aansluittype (LS/MS) bij Aansluiting; investeringsoverzicht = componenten + technische specs (rechts uitgelijnd), alleen totaalprijs; nieuwe pagina "Extra potentieel: onbalans-sturing" (spotmarkt=dynamisch contract + onbalans-besparing + EMS-waarschuwing (geen voetnoot) + stappenplan implementatie→EMS→onbalans); P5-bis financieel plan MÉT onbalans meegerekend (titel + caveat 100% oogst); bijlage 1 onderhandelingsmarge als getal (richtgetal) + prijs-van-zekerheid framing; kengetal-tabellen even breed (table-layout:fixed) + RAND-kleuring i.p.v. celvulling (_kgRand); laad-kengetallen weg zonder laden. Vereist server v15.189 (factuur.besparing_onbalans_jaar). // v0.10.0 (2026-09-27) — HUISSTIJL: stockfoto-banners vervangen door het Energie-Compas KOMPASSYMBOOL
      (Johan: klantrapport EK + simulator tonen enkel de kompassymbolen, geen foto's). IMG.cover/desk/office/tech verwijzen nu
      alle vier naar één kompas-banner (navy strip + wit kompas + groene baseline). Geen andere logica gewijzigd.
      ── v0.9.0 (2026-09-26) — EXTRA BIJLAGE "Alle kengetallen per combinatie" (Johan): de PV×batterij-roosters
@@ -272,8 +272,36 @@ function band(src){ return src?'<img class="band" src="'+src+'" alt="">':''; }
 //  HOOFDRAPPORT
 // ============================================================================
 var F=D.factuur||{}, NUL=F.nul||{}, OPT=F.opt||{};
-var besp=(+F.besparing_jaar)|| ( (+NUL.saldo||0)-(+OPT.saldo||0) );
+var besp=(+F.besparing_jaar)|| ( (+NUL.saldo||0)-(+OPT.saldo||0) );   // PV+batterij (basis = spot); hier hangt de investering/TVT aan
 var bespPct=(+F.besparing_pct) || ((+NUL.saldo>0)?(besp/(+NUL.saldo)*100):0);
+// v0.12 (Johan) — optie B: basis blijft op spot (dynamisch contract), maar de contractwissel wordt EXPLICIET
+//   getoond zodat het rapport aansluit op de échte factuur. CONTRACTSWITCH = onderhandelingsmarge (bijlage 1),
+//   dus GEEN dubbeltelling. HUIDIG contract = spot-basis + contractswitch (≈ het factuurniveau van de klant).
+var O_=D.onderhandeling||{};
+var CONTRACTSWITCH=Math.max(0,Math.round((+O_.afname_marge_jaar)||0));
+var HAS_SWITCH=CONTRACTSWITCH>0;
+var HUIDIG=(+NUL.saldo||0)+CONTRACTSWITCH;      // wat de klant vandaag ECHT betaalt (huidig/vast contract)
+var BESP_TOTAAL=HUIDIG-(+OPT.saldo||0);          // = contractswitch + besp (PV+batt)
+function _heroBoxes(){
+  if(HAS_SWITCH){
+    return '<div class="box"><span class="l">Uw huidige contract</span><div class="v">'+eur(HUIDIG)+'</div><span class="u">per jaar</span></div>'+
+      '<div class="arr">→</div>'+
+      '<div class="box"><span class="l">Dynamisch contract<br>(zonder '+CS+')</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
+      '<div class="arr">→</div>'+
+      '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>';
+  }
+  return '<div class="box"><span class="l">Jaarfactuur vandaag</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
+    '<div class="arr">→</div>'+
+    '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
+    '<div class="arr">=</div>'+
+    '<div class="box"><span class="l">U bespaart</span><div class="v win">'+eur(besp)+'</div><span class="u">per jaar · '+pct(bespPct,0)+'</span></div>';
+}
+function _bespRegel(){
+  if(!HAS_SWITCH) return '';
+  return '<p class="note" style="text-align:center;margin-top:10px">Totale besparing t.o.v. uw huidige contract: <b>'+eur(BESP_TOTAAL)+' per jaar</b> — '+
+    'waarvan <b>'+eur(CONTRACTSWITCH)+'</b> door de overstap naar een dynamisch (spot) contract en <b>'+eur(besp)+'</b> door '+CN_PROSE+'. '+
+    'De terugverdientijd verderop rekent enkel met de '+eur(besp)+' die tegenover de installatie staat.</p>';
+}
 var combi=D.combi||{};
 var HT=D.heat||{};
 // aantal volledige batterij-cycli per jaar: exact uit payload of afgeleid uit de ontlaad-heatmap / capaciteit
@@ -317,13 +345,7 @@ function _combiTekst(){
   idlines+=(KLANT?'<div><b>Klant</b> '+esc(KLANT)+'</div>':'');
   idlines+=(BTW?'<div><b>BTW</b> '+esc(BTW)+'</div>':'');
   idlines+=(D.datum?'<div><b>Datum</b> '+esc(D.datum)+'</div>':'');
-  var hero='<div class="hero" style="margin:22px 0 0">'+
-       '<div class="box"><span class="l">Jaarfactuur vandaag</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
-       '<div class="arr">→</div>'+
-       '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
-       '<div class="arr">=</div>'+
-       '<div class="box"><span class="l">U bespaart</span><div class="v win">'+eur(besp)+'</div><span class="u">per jaar · '+pct(bespPct,0)+'</span></div>'+
-     '</div>';   // voorblad: géén vermelding van batterij/cycli
+  var hero='<div class="hero" style="margin:22px 0 0">'+_heroBoxes()+'</div>'+_bespRegel();   // voorblad: géén vermelding van batterij/cycli
   // v0.11 (Johan): naam + afname-adres centraal en groot op de voorpagina.
   var ADRES=(D.aansluiting&&D.aansluiting.verbruiksadres)||'';
   var klantBlok=(KLANT||ADRES)?('<div class="cover-klant">'+(KLANT?'<div class="cover-naam">'+esc(KLANT)+'</div>':'')+(ADRES?'<div class="cover-adres">'+esc(ADRES)+'</div>':'')+'</div>'):'';
@@ -346,13 +368,7 @@ function _combiTekst(){
   h+='<p class="lead">Deze analyse vergelijkt uw <b>huidige jaarfactuur</b>'+(HAS_LADEN?' — met het laden aan uw gebouw en de aansluiting die daarvoor nodig is':'')+
      ' met uw <b>jaarfactuur met '+CN_PROSE+'</b> die slim wordt aangestuurd op de energiemarkt. '+
      'Alle cijfers komen uit een simulatie op kwartierbasis over een volledig jaar.</p>';
-  h+='<div class="hero">'+
-       '<div class="box"><span class="l">Jaarfactuur vandaag</span><div class="v">'+eur(NUL.saldo)+'</div><span class="u">per jaar</span></div>'+
-       '<div class="arr">→</div>'+
-       '<div class="box win"><span class="l">Met '+CN_BR+'</span><div class="v win">'+eur(OPT.saldo)+'</div><span class="u">per jaar</span></div>'+
-       '<div class="arr">=</div>'+
-       '<div class="box"><span class="l">U bespaart</span><div class="v win">'+eur(besp)+'</div><span class="u">per jaar · '+pct(bespPct,0)+'</span></div>'+
-     '</div>';
+  h+='<div class="hero">'+_heroBoxes()+'</div>'+_bespRegel();
   // ── Aansluiting (huidige situatie) ──
   var A=D.aansluiting||{};
   var af=A.afname||null, inj=A.injectie||null;
@@ -395,19 +411,33 @@ function _combiTekst(){
 // P2 — factuurvergelijking
 (function(){
   var h=kop('Factuurvergelijking in detail');
+  var _vandaagKop=HAS_SWITCH?'Dynamisch (spot)':'Vandaag';
   h+='<p class="lead">Onderstaande tabel splitst uw jaarfactuur uit per post. Kolom links = uw huidige situatie (zonder '+CS+
-     (HAS_LADEN?', met het laden aan uw gebouw':'')+'). Kolom rechts = met '+CN+'.</p>';
+     (HAS_LADEN?', met het laden aan uw gebouw':'')+')'+
+     (HAS_SWITCH?', geprijsd op een <b>dynamisch (spot) contract</b>':'')+'. Kolom rechts = met '+CN+'.'+
+     (HAS_SWITCH?(' Uw <b>huidige (vaste) contract</b> ligt ± '+eur(CONTRACTSWITCH)+'/jaar hoger — zie de aansluitregel onder de tabel.'):'')+'</p>';
   function rij(label, a, b, win){
     var v=(+a||0)-(+b||0);
     return '<tr><td>'+esc(label)+'</td><td>'+eur(a)+'</td><td'+(win?' class="win"':'')+'>'+eur(b)+'</td>'+
       '<td class="'+(v>=0?'pos':'neg')+'">'+signEur(v)+'</td></tr>';
   }
-  h+='<table class="f"><thead><tr><th>Post</th><th>Vandaag</th><th>Met '+CS+'</th><th>Verschil</th></tr></thead><tbody>';
+  h+='<table class="f"><thead><tr><th>Post</th><th>'+_vandaagKop+'</th><th>Met '+CS+'</th><th>Verschil</th></tr></thead><tbody>';
   h+=rij('Energie (incl. laden, na injectie)', NUL.energie, OPT.energie);
   h+=rij('Netgebruik & capaciteit', NUL.netkosten, OPT.netkosten);
   h+=rij('Heffingen & bijdragen', NUL.heffingen, OPT.heffingen);
   h+='<tr class="tot"><td>Jaarfactuur (saldo)</td><td>'+eur(NUL.saldo)+'</td><td class="win">'+eur(OPT.saldo)+'</td><td class="pos">'+signEur(besp)+'</td></tr>';
   h+='</tbody></table>';
+  if(HAS_SWITCH){
+    // reconciliatie met de échte factuur: huidig (vast) contract → dynamisch (spot, = tabelbasis) → met installatie
+    h+='<table class="f" style="margin-top:10px"><tbody>'+
+       '<tr><td>Uw huidige (vaste) contract — zoals op uw factuur</td><td>'+eur(HUIDIG)+'</td></tr>'+
+       '<tr><td>Overstap naar dynamisch (spot) contract</td><td class="pos">'+signEur(CONTRACTSWITCH)+'</td></tr>'+
+       '<tr><td>Dynamisch (spot) contract, zonder '+CS+' — basis in de tabel hierboven</td><td>'+eur(NUL.saldo)+'</td></tr>'+
+       '<tr class="tot"><td>Met '+CN+' + dynamisch contract</td><td class="win">'+eur(OPT.saldo)+'</td></tr>'+
+       '</tbody></table>';
+    h+='<p class="note">De tabel hierboven vertrekt van een <b>dynamisch (spot) contract</b> als basis. Uw huidige, vaste contract ligt daar ± '+eur(CONTRACTSWITCH)+
+       '/jaar boven; die contractwissel is een aparte winst (zie de onderhandelingsnota in bijlage) en staat <b>los van de installatie</b> — de terugverdientijd rekent enkel met de '+eur(besp)+' uit '+CN_PROSE+'.</p>';
+  }
   if((OPT.injectie_opbrengst||0)>0 || (NUL.injectie_opbrengst||0)>0){
     h+='<p class="muted" style="margin-top:8px">Waarvan injectie-opbrengst (reeds in de energiepost verrekend): '+
        'vandaag '+eur(NUL.injectie_opbrengst||0)+' → met '+CS+' '+eur(OPT.injectie_opbrengst||0)+' per jaar.</p>';
