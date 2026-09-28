@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
+<!-- ek.html v0.22.0 (2026-09-28) — FASE 2 "PAS AAN" + BESTAANDE PV (Johan): (1) custom (kWp, batt-kW) uit 'pas aan' komt als eigen rij+kolom op de heatmap, exact doorgerekend + groen gemarkeerd; (2) batterij-kWh bewerkbaar → C-factor (kWh/kW) geldt via een nieuwe sweep (crate in body) voor ÁLLE batterij-opties; (3) totale prijs bewerkbaar → PRIJS_FACTOR schaalt elke cel pro-rata (investering→TVT→rendement); (4) 'Bestaande zonnepanelen (kWp)' + 'Jaarlijkse injectie (MWh)' in het beginscherm → base case (bestaande_pv{kwp,inj_mwh_jaar} naar sweep/cel/rapport; inj leeg → aanname alles zelf verbruikt). Vereist server v15.186. _invTotMajor=_invTotRaw×PRIJS_FACTOR. // v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
      met de gekozen samenstelling als scope (pv_kwp, batt_kw, batt_kwh, rte, dod, ac, dc, ontkoppelbord). LAST draagt battKw/ac/dc/rte/dod/ontkoppelbord.
      Server routeert: adviseur op dossier → adviseur-mail met 2 knoppen (alleen mijn offerte / + last call), anders alle actieve partner-EPC's.
      Installateurs vullen hun prijs in via offerte-tabel.html. Vereist server v15.177. /api/lead-bevraging blijft bestaan (niet meer gebruikt door de CTA).
@@ -433,6 +433,7 @@
   table.hm td.cell:hover{background:var(--greenbg)}
   table.hm td.cell.sel{background:var(--greenbg)}
   table.hm td.cell.hmopt{outline:2px dashed var(--navy);outline-offset:-4px}
+  table.hm td.cell.hmcustom{outline:2px solid var(--green);outline-offset:-2px;font-weight:700}
   .hmdetail{margin-top:8px}
   /* v0.14.3: heatmaps ONDER ELKAAR (elk volle breedte) → cijfers passen volluit i.p.v. afgekapt naast elkaar. */
   .hmpair{display:flex;flex-direction:column;gap:22px;align-items:stretch}
@@ -536,6 +537,10 @@
     </div>
     <div>
       <label class="fld">Energiekost/jaar (€, van uw factuur)</label><input type="number" id="i-kost" step="10" min="0" inputmode="numeric" value="1150">
+    </div>
+    <div class="row2">
+      <div><label class="fld">Bestaande zonnepanelen (kWp)</label><input type="number" id="i-best-pv" step="0.5" min="0" inputmode="decimal" value="0" placeholder="0 = geen"><div class="sub" style="margin-top:2px">Reeds geplaatst — zit in uw huidige situatie (base case).</div></div>
+      <div><label class="fld">Jaarlijkse injectie (MWh)</label><input type="number" id="i-best-inj" step="0.1" min="0" inputmode="decimal" value="0" placeholder="0 = onbekend"><div class="sub" style="margin-top:2px">Van uw factuur. Leeg/0 → we nemen aan dat alles zelf verbruikt wordt.</div></div>
     </div>
 
     <!-- Zacht kader: wat de klant zelf nog aanvult -->
@@ -785,6 +790,11 @@
   var EK_IS_OEKENE=false, EK_PREPADV=false;  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
   var BATT_RTE=92, BATT_DOD=90;  // v0.18: batterij RTE + DoD (sim) — server-breed via /api/ek-config (oekene tunet), gecachet in localStorage
   var NET_TARIEF=null;   // v0.19: net-tarieven van de sweep-response (toegangsvermogen + maandpiek €/kW/jaar, échte DNB-kaart)
+  // ── Fase 2 (Johan) — "pas aan"-overrides die op het HELE rooster inwerken ──
+  var CRATE_OV=null;     // #2: C-factor (kWh/kW) uit "pas aan" → geldt voor ALLE batterij-opties (nieuwe sweep met crate)
+  var PRIJS_FACTOR=1;    // #3: prijs-prorata — totale-prijs-override / engineprijs → schaalt ELKE cel (investering + TVT/rendement)
+  var _prijsTouched=false; // #3: heeft de gebruiker het totaalprijs-veld zelf getypt? (dan volgt de prijs de componenten niet meer)
+  function _crate(){ return (CRATE_OV>0)?CRATE_OV:(P_TL.BATT_CRATE||2); }   // actieve C-factor (uren)
   var NET_CFG={ verzwaring_eur_kva:150, ms_stap_eur:35000, ms_drempel_kva:250, gelijktijd_ac:0.5, gelijktijd_dc:1.0, ac_paal_kva:22, dc_paal_kva:300, horizon_jaar:15, inflatie_pct:2, net_extra_pct:2, net_dubbel_jaar:2029, net_dubbel_factor:2 };  // v0.20: server-breed via /api/ek-config (alle kosten +2%; netkosten +2% bovenop inflatie + 2029-verdubbeling)
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
@@ -1067,7 +1077,7 @@
     window._RAP_PAYLOAD=payload;   // v0.13.11: sweep-body bewaren voor het klantrapport-endpoint (toon rapport)
     NET_TARIEF=sw.net_tarief||null;   // v0.19: échte DNB-net-tarieven (toegangsvermogen + maandpiek) voor de batterijwaarde
     var best=_besteAnkerKm(A); var rR=(sw.grid&&sw.grid.batt_kw_as)||[], rC=(sw.grid&&sw.grid.pv_kwp_as)||[];
-    HM={ real:A, rows:_subdiv(rR), cols:_subdiv(rC), realRows:rR, realCols:rC, computed:{}, interp:true, crate:2, refKost:sw.referentie_kost, refNetk:(sw.referentie_netk!=null?sw.referentie_netk:null),
+    HM={ real:A, rows:_subdiv(rR), cols:_subdiv(rC), realRows:rR, realCols:rC, computed:{}, interp:true, crate:_crate(), refKost:sw.referentie_kost, refNetk:(sw.referentie_netk!=null?sw.referentie_netk:null),
       rowLabel:function(v){return v>0?(v+' kW'):'geen batt';}, colLabel:function(v){return v+' kWp';},
       realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
     HM.compute=function(ry,cx,done){ var key=ry+'|'+cx; if(HM.computed[key]){ done&&done(HM.computed[key]); return; }
@@ -1119,7 +1129,7 @@
     rows.forEach(function(ry){ html+='<tr><td class="axis">'+(H.rowLabel?H.rowLabel(ry):ry)+'</td>';
       cols.forEach(function(cx){ var a=_cellAt(H,ry,cx), v=(a?M.val(a):null);
         var t=(v==null||!isFinite(v))?null:((max>min)?((v-min)/(max-min)):0.5); if(t!=null && !M.goedHoog) t=1-t;   // laag = beter → donker
-        var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' hmopt':'');
+        var cls='cell'+((a&&sel&&a._ry===sel._ry&&a._cx===sel._cx)?' sel':'')+((a&&best&&a._ry===best._ry&&a._cx===best._cx)?' hmopt':'')+((a&&H.customCell&&a._ry===H.customCell.ry&&a._cx===H.customCell.cx)?' hmcustom':'');
         html+='<td class="'+cls+'" style="border-color:'+_hmRand(t)+'" data-ry="'+ry+'" data-cx="'+cx+'">'+((v==null||!isFinite(v))?'':M.fmt(v))+'</td>'; });
       html+='</tr>'; });
     T.innerHTML=html;
@@ -1140,22 +1150,36 @@
   // v0.18: lichte voertuigen → AC-palen (2/paal); zware (vrachtwagen/bus) → DC-palen 300 kVA (2/paal). Split uit CTX.
   function _acDefault(){ var n=(CTX&&CTX.evLight!=null)?CTX.evLight:(+(CTX&&CTX.ev)||0); return Math.max(0, Math.ceil(n/2)); }
   function _dcDefault(){ var h=(CTX&&CTX.evHeavy)||0; return h>0?Math.max(1,Math.ceil(h/2)):0; }   // genoeg DC 300 kVA voor vrachtwagens/bussen
-  function _invTotMajor(pvKwp, battKwh, ac, dc){
+  // Factor-vrije engineprijs (basis voor de prijs-prorata). Eén bron voor tegel + heatmap + TVT.
+  function _invTotRaw(pvKwp, battKwh, ac, dc){
     var pv=Math.round((+pvKwp||0)*STUB.pv_eur_kwp), bt=Math.round((+battKwh||0)*STUB.batt_eur_kwh);
     var acE=Math.max(0,ac|0)*STUB.ac_paal_eur, dcE=Math.max(0,dc|0)*(STUB.dc_paal_eur||0);
     var kt=kabeltrace((ac|0)+(dc|0), (CTX&&CTX.particulier), (+pvKwp||0)*0.75, (+battKwh||0)/2);
     return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt, invInfra:acE+dcE+kt.totaal, kt:kt };
   }
+  // v Fase 2 #3: prijs-prorata — elke component × PRIJS_FACTOR (uit de totale-prijs-override). f=1 → ongewijzigd gedrag.
+  //   Zo schaalt ELKE heatmap-cel (investering → TVT → rendement) mee als de klant de totaalprijs van één combi aanpast.
+  function _invTotMajor(pvKwp, battKwh, ac, dc){
+    var m=_invTotRaw(pvKwp, battKwh, ac, dc), f=(PRIJS_FACTOR>0?PRIJS_FACTOR:1);
+    if(f===1) return m;
+    var R=Math.round;
+    return { pv:R(m.pv*f), bt:R(m.bt*f), acE:R(m.acE*f), dcE:R(m.dcE*f), overige:R(m.overige*f),
+             tot:R(m.tot*f), invPvBatt:R(m.invPvBatt*f), invInfra:R(m.invInfra*f), kt:m.kt };
+  }
   function _invBtnLabel(){ var b=$('inv-edit-btn'); if(!b) return; b.textContent=INV_EDIT?'💾 Opslaan':'✏️ Pas aan'; b.classList.toggle('saving',INV_EDIT);
-    var hint=$('inv-edit-hint'); if(hint) hint.textContent=INV_EDIT?'Pas de waarden aan; bij Opslaan komt de combi op de heatmap en wordt ze de standaardkeuze.':''; }
+    var hint=$('inv-edit-hint'); if(hint) hint.textContent=INV_EDIT?'Pas kWp, batterij (kW × kWh), palen en de totaalprijs aan. Bij Opslaan komt uw combi op de heatmap; een andere C-factor of prijs geldt voor álle opties.':''; }
   function _invRij(label, spec){ return '<tr><td>'+esc0(label)+'<div class="invspec">'+spec+'</div></td><td class="r"></td></tr>'; }
   function _invRijEdit(label, id, val, unit, step, extra){
     return '<tr><td>'+esc0(label)+'</td><td class="r"><input type="number" id="'+id+'" value="'+val+'" step="'+step+'" min="0" inputmode="decimal" class="invin"> '+unit+(extra||'')+'</td></tr>'; }
   function _invBlok(pvKwp, battKwh, ac, dc){
-    var battKw=Math.round((+battKwh||0)/(P_TL.BATT_CRATE||2)*10)/10, m=_invTotMajor(pvKwp,battKwh,ac,dc), rows='';
+    var battKw=Math.round((+battKwh||0)/_crate()*10)/10, m=_invTotMajor(pvKwp,battKwh,ac,dc), rows='';
     if(INV_EDIT){
       rows+=_invRijEdit('Zonnepanelen','inv-pv',(+pvKwp||0),'kWp',1);
-      rows+=_invRijEdit('Batterij','inv-bkw',battKw,'kW',1,' <span id="inv-bkwh" class="sub"></span>');
+      // #2: kW én kWh bewerkbaar → C-factor (kWh/kW) geldt voor álle batterij-opties in het rooster.
+      rows+='<tr><td>Batterij<div class="invspec">kW × kWh → C-factor geldt voor álle opties</div></td><td class="r">'
+           +'<input type="number" id="inv-bkw" value="'+battKw+'" step="1" min="0" inputmode="decimal" class="invin"> kW · '
+           +'<input type="number" id="inv-bkwh-in" value="'+Math.round(+battKwh||0)+'" step="1" min="0" inputmode="decimal" class="invin"> kWh '
+           +'<span id="inv-crate" class="sub"></span></td></tr>';
       rows+=_invRijEdit('Laadpalen AC','inv-ac',Math.max(0,ac|0),'×',1);
       rows+=_invRijEdit('Laadpalen DC','inv-dc',Math.max(0,dc|0),'×',1);
       rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
@@ -1166,17 +1190,27 @@
       rows+=_invRij('Laadpalen DC', dc>0?(dc+' × 300 kVA DC (fastDC)'):'geen');
       rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
     }
-    rows+='<tr class="tot"><td>Totale investering (indicatief)</td><td class="r" id="inv-tot">'+eur(m.tot)+'</td></tr>';
+    if(INV_EDIT){
+      // #3: totaalprijs bewerkbaar → prijs-prorata over alle cellen.
+      rows+='<tr class="tot"><td>Totale investering (pas gerust aan)</td><td class="r"><input type="number" id="inv-tot-in" value="'+Math.round(m.tot)+'" step="100" min="0" inputmode="numeric" class="invin" style="width:130px"> €</td></tr>';
+    } else {
+      rows+='<tr class="tot"><td>Totale investering (indicatief)</td><td class="r" id="inv-tot">'+eur(m.tot)+'</td></tr>';
+    }
     $('invrows').innerHTML=rows;
-    if(INV_EDIT){ var bk=$('inv-bkwh'); if(bk) bk.textContent='· '+num0(battKw*(P_TL.BATT_CRATE||2))+' kWh';
-      ['inv-pv','inv-bkw','inv-ac','inv-dc'].forEach(function(id){ var el=$(id); if(el) el.oninput=_invRecalc; }); }
+    if(INV_EDIT){ _prijsTouched=false;
+      ['inv-pv','inv-bkw','inv-bkwh-in','inv-ac','inv-dc'].forEach(function(id){ var el=$(id); if(el) el.oninput=_invRecalc; });
+      var pt=$('inv-tot-in'); if(pt) pt.oninput=function(){ _prijsTouched=true; };
+      _invRecalc();
+    }
   }
   function _invRecalc(){
     var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
+    var bkwh=+($('inv-bkwh-in')&&$('inv-bkwh-in').value)||0;
     var ac=Math.max(0,Math.round(+($('inv-ac')&&$('inv-ac').value)||0)), dc=Math.max(0,Math.round(+($('inv-dc')&&$('inv-dc').value)||0));
-    var bkwh=Math.round(bkw*(P_TL.BATT_CRATE||2));
-    if($('inv-bkwh')) $('inv-bkwh').textContent='· '+num0(bkwh)+' kWh';
-    if($('inv-tot')) $('inv-tot').textContent=eur(_invTotMajor(pv,bkwh,ac,dc).tot);
+    var crate=(bkw>0&&bkwh>0)?(Math.round(bkwh/bkw*100)/100):_crate();
+    if($('inv-crate')) $('inv-crate').textContent='C-factor '+String(crate).replace('.',',')+' u'+(Math.abs(crate-_crate())>0.05?' — wijzigt álle batterij-opties':'');
+    // Prijs volgt de componenten zolang de klant het totaalveld niet zelf typte.
+    if(!_prijsTouched && $('inv-tot-in')) $('inv-tot-in').value=Math.round(_invTotMajor(pv,bkwh,ac,dc).tot);
   }
   function _invEditToggle(){
     if(INV_EDIT){ _invSave(); return; }
@@ -1186,14 +1220,35 @@
   }
   function _invSave(){
     var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
+    var bkwh=+($('inv-bkwh-in')&&$('inv-bkwh-in').value)||0;
     var ac=Math.max(0,Math.round(+($('inv-ac')&&$('inv-ac').value)||0)), dc=Math.max(0,Math.round(+($('inv-dc')&&$('inv-dc').value)||0));
-    INV_OV={ pvKwp:pv, battKw:bkw, ac:ac, dc:dc }; INV_EDIT=false; _invBtnLabel();
-    if(HM && HM.real && HM.real.length){
-      var best=null,bd=1e9;
-      HM.real.forEach(function(a){ var apv=Math.round(_anchorKwp(a)*10)/10, abt=(+a.battKw||(a.battKwh?a.battKwh/2:0)||0); var d=Math.abs(apv-pv)+Math.abs(abt-bkw); if(d<bd){bd=d;best=a;} });
-      if(best){ _hmKies(best._ry,best._cx); return; }   // _hmKies → renderRapport(sel) → _invBlok met INV_OV; sel = standaardkeuze
+    // #3 prijs-prorata: factor = (manuele totaalprijs) / (factor-vrije engineprijs van deze combi).
+    var manual=+($('inv-tot-in')&&$('inv-tot-in').value)||0, rawTot=_invTotRaw(pv,bkwh,ac,dc).tot;
+    PRIJS_FACTOR=(manual>0&&rawTot>0)?(manual/rawTot):1;
+    // #2 C-factor uit kW × kWh.
+    var crate=(bkw>0&&bkwh>0)?(bkwh/bkw):_crate();
+    INV_OV={ pvKwp:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc }; INV_EDIT=false; _invBtnLabel();
+    var needReSweep=(bkw>0 && Math.abs(crate-_crate())>0.05);
+    if(needReSweep){
+      CRATE_OV=Math.max(0.5,Math.min(8,crate));
+      var st=$('inv-edit-hint'); if(st) st.textContent='⏳ C-factor gewijzigd — het hele rooster wordt opnieuw doorgerekend…';
+      toonRapport().then(function(){ _voegCustomToe(pv,bkw); }).catch(function(){ _voegCustomToe(pv,bkw); });
+    } else {
+      _voegCustomToe(pv,bkw);
     }
-    renderRapport(HM&&HM.sel);
+  }
+  // #1: de custom (pv, batt-kW) combinatie als eigen rij+kolom aan de heatmap toevoegen, exact doorrekenen + selecteren/markeren.
+  function _voegCustomToe(pv, bkw){
+    var H=HM;
+    if(!H || !H.real || !H.real.length){ renderRapport(H&&H.sel); return; }
+    var ry=Math.round(bkw), cx=Math.round(pv);
+    if(H.rows.indexOf(ry)<0){ H.rows.push(ry); H.rows.sort(function(a,b){return a-b;}); }
+    if(H.cols.indexOf(cx)<0){ H.cols.push(cx); H.cols.sort(function(a,b){return a-b;}); }
+    H.customCell={ ry:ry, cx:cx };
+    var d=$('hm-detail'); if(d) d.innerHTML='± uw combinatie — ⏳ exacte berekening…';
+    var fin=function(cell){ if(cell){ cell._custom=true; H.computed[ry+'|'+cx]=cell; H.sel=cell; renderRapport(cell); _hmDetail(cell); } renderHeatmap(); };
+    if(H.compute){ H.compute(ry,cx,function(ex){ fin(ex||_cellAt(H,ry,cx)); }); }
+    else fin(_cellAt(H,ry,cx));
   }
 
   function renderRapport(a){
@@ -1223,7 +1278,7 @@
     //   factuur gebouw-only). Mag negatief worden → je verdient aan elektrisch rijden. Bij de 0/0-cel = de kale laadkost.
     var _laadNa = factuurNa - C.kostNu;
     var km100Cell = (ev>0 && C.kmBehoefte>0) ? (_laadNa/C.kmBehoefte*100) : 0;
-    LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:Math.round((+battKwh||0)/(P_TL.BATT_CRATE||2)*10)/10, ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
+    LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:Math.round((+battKwh||0)/_crate()*10)/10, ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
     if($('ek-doss')) $('ek-doss').textContent = STATE_CODE || '';
@@ -1319,6 +1374,8 @@
     var afnameMwh=+$('i-afname').value||0;
     var toegangKw=+$('i-toegang').value||0;   // ingevulde waarde = realistische kwartierPIEK (analoog: SLP-piek; digitaal/bedrijf: gemeten)
     var kost=+$('i-kost').value||0;
+    var bestPvKwp=+($('i-best-pv')&&$('i-best-pv').value)||0;   // Fase 2 #4: bestaande PV (kWp) — zit in de base case
+    var bestInjMwh=+($('i-best-inj')&&$('i-best-inj').value)||0;   // jaarlijkse injectie (MWh) van de factuur — 0 = onbekend (aanname: alles zelf verbruikt)
     var particulier=(KLANTTYPE?(KLANTTYPE==='particulier'):(profiel==='residentieel'));   // v0.17: Type klant-conclusie (afgeleid, wijzigbaar)
     // v0.9.2: PIEK ≠ TOEGANGSVERMOGEN. De piek (SLP) is de gladde profielpiek; een individuele woning piekt ~3× hoger →
     //   toegangsvermogen ≈ piek × factor (Johan). Enkel wanneer de piek uit het SLP komt (analoog, geen meting); bij een
@@ -1349,8 +1406,8 @@
              periodeVan:_iso(_van), periodeTot:_iso(_d2), spanningsniveau:(aansluitingKw>63?'MS':'LS') };
     var _sweepPath = particulier?'/api/thuisladen':'/api/energiekompas/bedrijf-sweep';
     var _sweepBody = particulier
-      ? { in:{ profiel:'residentieel', jaarverbruik_mwh:afnameMwh, piek_kw:piekKw, fasen:3, regio:'VL', bestaand_pv_kwp:0, bestaand_inj_mwh:0, wagens:_wagensV2() }, params:P_TL }
-      : { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:toegangKw, spanning:(toegangKw>63?'MS':'LS'), toegangsvermogen_kw:toegangKw, profielNaam:profiel, pleinen:_pleinenV2(), generator:{}, rte_pct:BATT_RTE, dod_pct:BATT_DOD };   // v0.18: RTE/DoD → sweep + (via _RAP_PAYLOAD) cel + rapport
+      ? { in:{ profiel:'residentieel', jaarverbruik_mwh:afnameMwh, piek_kw:piekKw, fasen:3, regio:'VL', bestaand_pv_kwp:bestPvKwp, bestaand_inj_mwh:bestInjMwh, wagens:_wagensV2() }, params:P_TL }
+      : { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:toegangKw, spanning:(toegangKw>63?'MS':'LS'), toegangsvermogen_kw:toegangKw, profielNaam:profiel, pleinen:_pleinenV2(), generator:{}, rte_pct:BATT_RTE, dod_pct:BATT_DOD, crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined) };   // v0.18: RTE/DoD → sweep; Fase 2: crate (#2 C-factor) + bestaande_pv (#4, kWp + injectie) → hele rooster + (via _RAP_PAYLOAD) cel + rapport
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
       _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(aansluitingKw>0?aansluitingKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
@@ -1603,6 +1660,9 @@
     if(afn) $('i-afname').value=afn;
     if(toe) $('i-toegang').value=toe;
     if(kst) $('i-kost').value=kst;
+    // Fase 2: bestaande PV + injectie uit de factuur voorvullen (gemengde factuur of aparte injectie-PDF).
+    if((+bc.pvKwpAanwezig)>0 && $('i-best-pv')) $('i-best-pv').value=Math.round((+bc.pvKwpAanwezig)*10)/10;
+    if(inj>0 && $('i-best-inj')) $('i-best-inj').value=inj;
     var bedr=(opt.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
     $('i-profiel').value = analoog ? 'residentieel' : (opt.profiel || (bedr?'kantoor':'residentieel'));
     if(opt.project_id) STATE_CODE=opt.project_id;
@@ -1686,6 +1746,9 @@
         if(afn) $('i-afname').value=afn;
         if(toe) $('i-toegang').value=toe;
         if(kst) $('i-kost').value=kst;
+        // Fase 2: bestaande PV + injectie uit de factuur voorvullen (gemengde factuur of aparte injectie-PDF).
+        if((+bc.pvKwpAanwezig)>0 && $('i-best-pv')) $('i-best-pv').value=Math.round((+bc.pvKwpAanwezig)*10)/10;
+        if(inj>0 && $('i-best-inj')) $('i-best-inj').value=inj;
         var bedr=(j.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
         // v0.6.1: onthoud het eerder gekozen profiel; bij analoge meter → residentieel (geen andere info); anders default.
         $('i-profiel').value = analoog ? 'residentieel' : (j.profiel || (bedr?'kantoor':'residentieel'));
