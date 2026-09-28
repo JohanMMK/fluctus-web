@@ -795,6 +795,9 @@
   var NET_TARIEF=null;   // v0.19: net-tarieven van de sweep-response (toegangsvermogen + maandpiek €/kW/jaar, échte DNB-kaart)
   var STATE_DATABRON=null;   // v0.24.4 (Johan): databron van de bedrijf-sweep — gemeten kwartierdata (Fluvius) vs standaardprofiel
   var EK_ONB_FORFAIT_MWH=5;   // v0.24.12 (Johan): onbalans-OPSLAG op afname (€/MWh) = staffel consumption_imbalance_markup (was €10 forfait). Dynamisch contract zonder installatie draagt deze opslag → realistische contractswitch. Server past de volledige staffel-onbalans (opslag afname + afslag injectie) per scenario toe (v15.196).
+  var EK_CERTS_EUR_MWH=15;    // v0.24.13 (Johan): GSC (11) + WKK (4,2) certificaten (€/MWh) — identiek in élk contract. De factuur-extractor telt ze in de energiepost; het dynamische onderhandel-tarief (dynMwh) NIET → we strippen ze uit de huidige commodity zodat de vergelijking zuivere energie ↔ zuivere energie is (in sync met server CONTRACT_RAW gsc/wkk).
+  var STATE_FACT_MAAND=null;  // v0.24.13 (Johan): {mwh,label} van de ÉCHTE factuurmaand (als de factuurperiode ~1 maand is) → onderhandelingsnota rekent op die maand i.p.v. jaarafname/12.
+  function _ekMaandLabel(van,tot){ try{ var M=['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']; var a=new Date(van),b=new Date(tot); var d=b&&!isNaN(b)?new Date(b.getTime()-86400000):a; var mi=d.getMonth(); return (mi>=0&&mi<12)?M[mi]:''; }catch(e){ return ''; } }
   // ── Fase 2 (Johan) — "pas aan"-overrides die op het HELE rooster inwerken ──
   var CRATE_OV=null;     // #2: C-factor (kWh/kW) uit "pas aan" → geldt voor ALLE batterij-opties (nieuwe sweep met crate)
   var PRIJS_FACTOR=1;    // #3: prijs-prorata — totale-prijs-override / engineprijs → schaalt ELKE cel (investering + TVT/rendement)
@@ -1735,6 +1738,8 @@
     if(analoog){ var _mwh=afn||((+bc.afnameKwh||0)/1000); toe=Math.max(1,Math.round(_mwh*STUB.res_piek_kw_per_mwh*10)/10); PIEK_IS_SLP=true; }
     var _vol=(+bc.afnameKwh||0)/1000; var _nh=_vol>0?Math.round(((+bc.totaalDistributieExclBtw||0)+(+bc.totaalHeffingenExclBtw||0))/_vol):0;
     if(_nh>0) NETHEF=_nh;
+    // v0.24.13 (Johan): als de factuurperiode ~1 maand is, bewaar de ECHTE factuurmaand (volume + naam) → onderhandelingsnota gebruikt DIE maand (bv. augustus 15 MWh) i.p.v. jaarafname/12 (10 MWh).
+    if(dg>=25 && dg<=40 && _vol>0){ STATE_FACT_MAAND={ mwh:Math.round(_vol*100)/100, label:_ekMaandLabel(bc.periodeVan,bc.periodeTot) }; }
     if(afn) $('i-afname').value=afn;
     if(toe) $('i-toegang').value=toe;
     if(kst) $('i-kost').value=kst;
@@ -2301,13 +2306,22 @@
         pv_kwp: pvKwp, batt_kw: battKw, batt_kwh: battKwh, batt_cycli:(j.cycli!=null?j.cycli:null),
         laadpalen_ac: acAantal ? { kva:22, aantal:acAantal } : null, laadpalen_dc: dcAantal ? { kva:300, aantal:dcAantal } : null
       },
-      // v0.24.13 (Johan): de onderhandelingsnota vergelijkt ENKEL de zuivere energie (piek/dal) + vaste kost tussen bestaand en
-      //   dynamisch (certs/net/heffingen identiek → vallen weg). De server levert dat in C.commodity (nu/dyn €/MWh, vaste kost,
-      //   contract_scherp). Fallback op de oude all-in−netHef-afleiding als de server geen commodity gaf.
+      // v0.24.13 (Johan): de onderhandelingsnota vergelijkt ENKEL de ZUIVERE energie (piek/dal €/MWh) + vaste kost tussen het
+      //   bestaande en een dynamisch contract — certs (GSC/WKK), net en heffingen zijn identiek en vallen weg. Huidig zuivere
+      //   energie = all-in (refMwh) − net/heffingen (netHef) − certs (EK_CERTS). Dynamisch zuivere energie = dynMwh (spot+markup,
+      //   excl certs) + onbalans-opslag (EK_ONB_FORFAIT). Is het dynamische ≤5 €/MWh scherper → contract_scherp (contract al goed).
+      //   Rekent op de ÉCHTE factuurmaand (STATE_FACT_MAAND, bv. augustus 15 MWh) i.p.v. jaarafname/12.
       onderhandeling: (function(){
-        var cm=C.commodity||null;
-        var cN=Math.max(0,(+C.refMwh||0)-(+C.netHef||0)); var dynEff=(+C.dynMwh||0)+EK_ONB_FORFAIT_MWH; var mj=Math.max(0,Math.round((cN-dynEff)*(+C.afnameMwh||0)));
-        return { afname_marge_jaar:mj, energie_nu_mwh:Math.round(cN), energie_dyn_mwh:Math.round(dynEff), injectie_marge_jaar:0, digitale_meter:true, commodity:cm }; })(),
+        var nuE=Math.max(0, Math.round((+C.refMwh||0)-(+C.netHef||0)-EK_CERTS_EUR_MWH));
+        var dynE=Math.round((+C.dynMwh||0)+EK_ONB_FORFAIT_MWH);
+        var marge=nuE-dynE;
+        var maandMwh=(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh>0)?+STATE_FACT_MAAND.mwh:((+C.afnameMwh||0)/12);
+        var maandLabel=(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)?STATE_FACT_MAAND.label:'';
+        var cm={ nu_energie_eur_mwh:nuE, dyn_energie_eur_mwh:dynE, marge_energie_eur_mwh:marge,
+          onbalans_opslag_eur_mwh:EK_ONB_FORFAIT_MWH, contract_scherp:(marge<=5),
+          maand_mwh:Math.round(maandMwh*100)/100, maand_label:maandLabel };
+        var mj=Math.max(0,Math.round(marge*(+C.afnameMwh||0)));
+        return { afname_marge_jaar:mj, energie_nu_mwh:nuE, energie_dyn_mwh:dynE, injectie_marge_jaar:0, digitale_meter:true, commodity:cm }; })(),
       heeftLaden: (+C.ev||0)>0,
       heeftLaadplein: !!j.heeftLaadplein,
       kengetallen: (EK_IS_OEKENE?_kengetallenGrids():null),   // v0.14.4/v0.15: PV×batterij-roosters (extra bijlage) — enkel voor oekene@gmail.com
