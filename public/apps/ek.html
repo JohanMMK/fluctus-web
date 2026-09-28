@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.22.0 (2026-09-28) — FASE 2 "PAS AAN" + BESTAANDE PV (Johan): (1) custom (kWp, batt-kW) uit 'pas aan' komt als eigen rij+kolom op de heatmap, exact doorgerekend + groen gemarkeerd; (2) batterij-kWh bewerkbaar → C-factor (kWh/kW) geldt via een nieuwe sweep (crate in body) voor ÁLLE batterij-opties; (3) totale prijs bewerkbaar → PRIJS_FACTOR schaalt elke cel pro-rata (investering→TVT→rendement); (4) 'Bestaande zonnepanelen (kWp)' + 'Jaarlijkse injectie (MWh)' in het beginscherm → base case (bestaande_pv{kwp,inj_mwh_jaar} naar sweep/cel/rapport; inj leeg → aanname alles zelf verbruikt). Vereist server v15.186. _invTotMajor=_invTotRaw×PRIJS_FACTOR. // v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
+<!-- ek.html v0.23.0 (2026-09-28) — RESULTAAT-OPKUIS + STATE (Johan): (1) CREG-verwijzingen weg (besparing = bestaande+laadplein vs +PV/batt); (2) zonder laden (0 voertuigen) verbergen we km-tegel, aansluiting-tegel, "Uw impact" + laad-paragrafen, en de 2e heatmap schakelt naar rendement%; (3) "Opnieuw" gaat terug naar de invoer mét behoud van alle velden (geen reload); naar resultaat herrekent enkel als de invoer (incl. EAN-keuze + C-factor) wijzigde (_inputSig/LAST_SIG); (4) afname-adres (bewerkbaar veld i-adres) + LS/MS (uit toegangsvermogen) in de titels van invoer/resultaat; live LS/MS-badge bij het toegangsveld. Batterijcycli tonen nu >0 (server v15.188). // v0.22.0 (2026-09-28) — FASE 2 "PAS AAN" + BESTAANDE PV (Johan): (1) custom (kWp, batt-kW) uit 'pas aan' komt als eigen rij+kolom op de heatmap, exact doorgerekend + groen gemarkeerd; (2) batterij-kWh bewerkbaar → C-factor (kWh/kW) geldt via een nieuwe sweep (crate in body) voor ÁLLE batterij-opties; (3) totale prijs bewerkbaar → PRIJS_FACTOR schaalt elke cel pro-rata (investering→TVT→rendement); (4) 'Bestaande zonnepanelen (kWp)' + 'Jaarlijkse injectie (MWh)' in het beginscherm → base case (bestaande_pv{kwp,inj_mwh_jaar} naar sweep/cel/rapport; inj leeg → aanname alles zelf verbruikt). Vereist server v15.186. _invTotMajor=_invTotRaw×PRIJS_FACTOR. // v0.21.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de offerte-CTA vraagt nu een deadline (5/10/15 dagen) en POST /api/offerte/start
      met de gekozen samenstelling als scope (pv_kwp, batt_kw, batt_kwh, rte, dod, ac, dc, ontkoppelbord). LAST draagt battKw/ac/dc/rte/dod/ontkoppelbord.
      Server routeert: adviseur op dossier → adviseur-mail met 2 knoppen (alleen mijn offerte / + last call), anders alle actieve partner-EPC's.
      Installateurs vullen hun prijs in via offerte-tabel.html. Vereist server v15.177. /api/lead-bevraging blijft bestaan (niet meer gebruikt door de CTA).
@@ -525,15 +525,18 @@
     <!-- v0.13.8: dossier-ID + klant (+ BTW) zodra een factuur-case geladen is -->
     <div id="intake-doss" class="hint hidden" style="margin-top:8px;font-weight:600;color:#1F3864"></div>
     <!-- v0.13.9: adviseur/manager kan zelf klant + BTW invullen (enkel getoond in adviseur/prep-modus) → mee in de deel-link -->
-    <div id="adv-klant-blok" class="row2 hidden" style="margin-top:6px">
-      <div><label class="fld">Klantnaam (optioneel)</label><input type="text" id="i-klant" placeholder="Bedrijf of persoon" autocomplete="off"></div>
-      <div><label class="fld">BTW-nummer (optioneel)</label><input type="text" id="i-btw" placeholder="BE0123456789" autocomplete="off"></div>
+    <div id="adv-klant-blok" class="hidden" style="margin-top:6px">
+      <div class="row2">
+        <div><label class="fld">Klantnaam (optioneel)</label><input type="text" id="i-klant" placeholder="Bedrijf of persoon" autocomplete="off"></div>
+        <div><label class="fld">BTW-nummer (optioneel)</label><input type="text" id="i-btw" placeholder="BE0123456789" autocomplete="off"></div>
+      </div>
+      <div style="margin-top:6px"><label class="fld">Afname-adres (optioneel)</label><input type="text" id="i-adres" placeholder="Straat nr, postcode gemeente" autocomplete="off"><div class="sub" style="margin-top:2px">Onderscheidt meerdere aansluitingen van dezelfde klant — komt in de titel van invoer, resultaat en rapport.</div></div>
     </div>
 
     <!-- Uit uw factuur (ingelezen) -->
     <div class="row2" style="margin-top:6px">
       <div><label class="fld">Jaarverbruik afname (MWh)</label><input type="number" id="i-afname" step="0.1" min="0" inputmode="decimal" value="3.5"></div>
-      <div><label class="fld">Piek / toegangsvermogen (kW)</label><input type="number" id="i-toegang" step="0.1" min="0" inputmode="decimal" value="8"></div>
+      <div><label class="fld">Piek / toegangsvermogen (kW)</label><input type="number" id="i-toegang" step="0.1" min="0" inputmode="decimal" value="8"><div class="sub" id="i-spanning-badge" style="margin-top:2px;font-weight:600;color:var(--navy)"></div></div>
     </div>
     <div>
       <label class="fld">Energiekost/jaar (€, van uw factuur)</label><input type="number" id="i-kost" step="10" min="0" inputmode="numeric" value="1150">
@@ -626,14 +629,14 @@
       <div class="ekmeta" id="a4-meta">—</div>
     </div>
     <div class="sig">
-      <div class="b hero"><div class="k">Besparing per jaar</div><div class="n" id="sig-besp">—</div><div class="u">verbruik + laden (t.o.v. laden @ CREG)</div><div class="u" id="sig-besp-tvt"></div></div>
-      <div class="b"><div class="k">Kost per 100 km</div><div class="n green" id="sig-km">—</div><div class="u">slim laden</div></div>
+      <div class="b hero"><div class="k">Besparing per jaar</div><div class="n" id="sig-besp">—</div><div class="u" id="sig-besp-sub">t.o.v. uw situatie vandaag</div><div class="u" id="sig-besp-tvt"></div></div>
+      <div class="b" id="tegel-km"><div class="k">Kost per 100 km</div><div class="n green" id="sig-km">—</div><div class="u">slim laden aan het gebouw</div></div>
       <div class="b"><div class="k">Benutting van uw net</div><div class="n" id="sig-lf">—</div><div class="u">loadfactor</div><div class="u">hoger = minder netkosten per MWh</div></div>
     </div>
     <div class="sig" style="margin-top:-4px">
       <div class="b"><div class="k">Investering</div><div class="n" id="t-inv">—</div><div class="u" id="t-inv-s">PV + batterij</div></div>
-      <div class="b"><div class="k">Nieuwe factuur (gebouw + laden)</div><div class="n" id="t-fact">—</div><div class="u" id="t-fact-s">bestaande kost</div></div>
-      <div class="b"><div class="k">Aansluiting</div><div class="n" id="t-km">—</div><div class="u">km/j nog te laden op uw bestaande aansluiting</div></div>
+      <div class="b"><div class="k" id="t-fact-k">Nieuwe factuur</div><div class="n" id="t-fact">—</div><div class="u" id="t-fact-s">bestaande kost</div></div>
+      <div class="b" id="tegel-aansluiting"><div class="k">Aansluiting</div><div class="n" id="t-km">—</div><div class="u">km/j nog te laden op uw bestaande aansluiting</div></div>
     </div>
 
     <!-- Heatmaps (interactief voor de klant — direct na de kerngetallen) -->
@@ -647,8 +650,7 @@
             <option value="rendement">Rendement (%)</option>
             <option value="besparing">Besparing/jaar (€)</option>
             <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
-            <option value="km100">Energiekost mobiliteit (€/100 km)</option>
-            <option value="besp_creg">Besparing slim laden (€/j)</option>
+            <option value="km100" class="opt-laden">Energiekost mobiliteit (€/100 km)</option>
             <option value="investering" selected>Investering (€)</option>
             <option value="cycli">Batterijcycli (/jaar)</option>
           </select></div>
@@ -661,8 +663,7 @@
             <option value="rendement">Rendement (%)</option>
             <option value="besparing">Besparing/jaar (€)</option>
             <option value="factuur_na">Factuur na PV+batterij (€/j)</option>
-            <option value="km100" selected>Energiekost mobiliteit (€/100 km)</option>
-            <option value="besp_creg">Besparing slim laden (€/j)</option>
+            <option value="km100" class="opt-laden" selected>Energiekost mobiliteit (€/100 km)</option>
             <option value="investering">Investering (€)</option>
             <option value="cycli">Batterijcycli (/jaar)</option>
           </select></div>
@@ -732,7 +733,7 @@
     </details>
 
     <!-- Uw impact (inklapbaar) — waarom u een interessante gesprekspartner bent, met échte cijfers uit uw simulatie -->
-    <details class="gtm">
+    <details class="gtm" id="impact-blok">
       <summary>Uw impact</summary>
       <p class="lead">Uw kost per kilometer en de betere benutting van het net maken van u een interessante gesprekspartner:</p>
       <div class="pcards">
@@ -751,16 +752,16 @@
       <div class="foot" style="margin:0 0 14px;color:var(--navy)">
         <p><b>Verdienmodel.</b> De besparing komt uit slim in- en verkopen op de spotmarkt (day-ahead / intraday). Een passieve onbalans-bonus rekenen we bewust <b>niet</b> mee in de cijfers hierboven — dat is een mogelijke extra bovenop. Voor een woning sturen we niet op onbalans (te complex).</p>
         <p><b>Contract &amp; meter.</b> Deze besparing veronderstelt een <b>dynamisch (spot) contract</b> — nodig om PV + batterij op de spotprijzen te laten spelen. Bij een analoge meter is een overstap naar een <b>digitale meter</b> de randvoorwaarde om dit te kunnen oogsten.</p>
-        <p><b>Uw factuur in drie stappen.</b> vandaag (gebouw) → met laadplein (gebouw + laden) → met PV + batterij. Die laatste = de factuur met laadplein <b>min</b> de besparing van PV + batterij; ze mag onder nul gaan (u wordt dan netto betaald).</p>
-        <p><b>Referentie &amp; besparing.</b> We vergelijken uw situatie <b>vandaag</b> — gebouwverbruik + de wagens die <b>elders aan CREG-tarief</b> (322&nbsp;€/MWh) laden — met de opstelling waarbij u <b>aan het gebouw laadt</b> samen met uw verbruik, gestuurd door PV + batterij op <b>zelfconsumptie, piekafvlakking en de spotmarkt</b>. De besparing/jaar is het verschil tussen die twee.</p>
-        <p><b>Terugverdientijd &amp; rendement.</b> Rekenen op de <b>totale investering</b> (PV + batterij + laadpalen + aansluiting) t.o.v. die totale besparing per jaar; rendement = 100 / terugverdientijd. Eén all-in cijfer — geen aparte terugverdientijden per onderdeel.</p>
-        <p><b>Elektrisch rijden.</b> De <b>€/100&nbsp;km</b> is de energiekost van slim laden aan het gebouw ná PV + batterij — de operationele kost per km.</p>
-        <p><b>Wat verandert met uw keuze.</b> Besparing/jaar, factuur na PV + batterij, terugverdientijd, rendement, investering, €/100&nbsp;km en besparing slim laden bewegen mee met de PV/batterij-combinatie. Elektrische km/jaar, loadfactor en de energiekost met laadplein (zonder PV/batterij) hangen af van uw contract + aansluiting en zijn gelijk voor elke combinatie.</p>
+        <p class="laden-only"><b>Uw factuur in drie stappen.</b> vandaag (gebouw) → met laadplein (gebouw + laden) → met PV + batterij. Die laatste = de factuur met laadplein <b>min</b> de besparing van PV + batterij; ze mag onder nul gaan (u wordt dan netto betaald).</p>
+        <p><b>Referentie &amp; besparing.</b> We vergelijken uw <b>huidige situatie</b> — uw verbruik<span class="laden-only"> + het laden aan het gebouw, met de aansluiting die daarvoor zou moeten stijgen</span> — met dezelfde situatie <b>mét PV + batterij</b>, gestuurd op <b>zelfconsumptie, piekafvlakking en de spotmarkt</b>. De besparing/jaar is het verschil tussen die twee, <b>inclusief het vermeden capaciteitstarief en de vermeden aansluitingsverzwaring</b>.</p>
+        <p><b>Terugverdientijd &amp; rendement.</b> Rekenen op de <b>totale investering</b> (PV + batterij<span class="laden-only"> + laadpalen + aansluiting</span>) t.o.v. die totale besparing per jaar; rendement = 100 / terugverdientijd. Eén all-in cijfer — geen aparte terugverdientijden per onderdeel.</p>
+        <p class="laden-only"><b>Elektrisch rijden.</b> De <b>€/100&nbsp;km</b> is de energiekost van slim laden aan het gebouw ná PV + batterij — de operationele kost per km.</p>
+        <p><b>Wat verandert met uw keuze.</b> Besparing/jaar, factuur na PV + batterij, terugverdientijd, rendement en investering<span class="laden-only"> en €/100&nbsp;km</span> bewegen mee met de PV/batterij-combinatie. Loadfactor<span class="laden-only">, elektrische km/jaar en de energiekost met laadplein</span> hangen af van uw contract + aansluiting en zijn gelijk voor elke combinatie.</p>
         <p style="color:var(--muted)">Indicatief, op een standaardprofiel geschaald op uw verbruik. De exacte cijfers volgen uit de studie op uw echte meetgegevens.</p>
       </div>
     </details>
 
-    <button class="btn ghost block noprint" type="button" onclick="location.reload()">↺ Opnieuw</button>
+    <button class="btn ghost block noprint" type="button" onclick="terugNaarInput()">↺ Opnieuw — pas invoer aan</button>
   </div>
 </div>
 
@@ -967,6 +968,9 @@
     ['ev-p-nacht','ev-p-dag','ev-p-24'].forEach(function(id){ var e=$(id); if(e){ e.oninput=_evSync; e.onchange=_evSync; } });
     var db=$('ev-def-btn'); if(db) db.onclick=_evDefModal;
     var hb=$('bp-herbereken'); if(hb) hb.onclick=_battHerbereken;
+    var tg=$('i-toegang'); if(tg){ tg.addEventListener('input',_updSpanningBadge); tg.addEventListener('change',_updSpanningBadge); }
+    var ad=$('i-adres'); if(ad){ ad.addEventListener('input',function(){ STATE_ADRES=(ad.value||'').trim(); }); }
+    _updSpanningBadge();
     _evAfleiden();
     _ekCfgLoad();   // v0.18: server-brede config (voertuig-defaults + RTE/DoD) ophalen en toepassen
   }catch(e){} })();
@@ -1053,6 +1057,35 @@
   var CTX=null;        // cel-onafhankelijke context (kost, €/100km, km, loadfactor, inputs) — gezet in toonRapport
   var HM=null;         // huidige heatmap-state
   var HMMETRIC_L='investering', HMMETRIC_R='km100';   // twee heatmaps naast elkaar, elk een kengetal (v0.13.10: default links=investering, rechts=€/100km)
+  // v0.23 (Johan): is er iets te laden? Zonder laden verbergen we ALLE laad/CREG/€100km-info + zetten de 2e heatmap op rendement%.
+  function _heeftLaden(){ return !!(CTX && +CTX.ev>0); }
+  function _ekToggleLaden(){
+    var laden=_heeftLaden();
+    var show=function(id,on){ var e=$(id); if(e) e.style.display=on?'':'none'; };
+    show('tegel-km', laden); show('tegel-aansluiting', laden); show('impact-blok', laden);
+    var fk=$('t-fact-k'); if(fk) fk.textContent = laden?'Nieuwe factuur (gebouw + laden)':'Nieuwe factuur';
+    var sb=$('sig-besp-sub'); if(sb) sb.textContent = laden?'verbruik + laden · t.o.v. uw situatie vandaag':'t.o.v. uw situatie vandaag';
+    Array.prototype.forEach.call(document.querySelectorAll('.laden-only'), function(e){ e.style.display=laden?'':'none'; });
+    Array.prototype.forEach.call(document.querySelectorAll('option.opt-laden'), function(o){ o.hidden=!laden; o.disabled=!laden; });
+    if(!laden){
+      if(HMMETRIC_R==='km100'){ HMMETRIC_R='rendement'; var R=$('hm-mx-R'); if(R) R.value='rendement'; }
+      if(HMMETRIC_L==='km100'){ HMMETRIC_L='rendement'; var L=$('hm-mx-L'); if(L) L.value='rendement'; }
+    }
+  }
+  // v0.23 (Johan): input-state → "opnieuw" herstelt de invoer; naar resultaat enkel HERREKENEN als er iets wijzigde.
+  var LAST_SIG=null;   // handtekening van de laatst-doorgerekende invoer (incl. EAN-keuze + C-factor)
+  function _inputSig(){
+    var g=function(id){ var e=$(id); return e?(e.value||''):''; };
+    var rows=''; try{ rows=JSON.stringify(typeof EV_ROWS!=='undefined'?EV_ROWS:[]); }catch(e){}
+    return [g('i-profiel'),g('i-ev'),g('i-afname'),g('i-toegang'),g('i-kost'),g('i-best-pv'),g('i-best-inj'),
+      (typeof KLANTTYPE!=='undefined'?(KLANTTYPE||''):''),STATE_EAN_AFNAME||'',STATE_EAN_INJECTIE||'',STATE_ADRES||'',
+      g('ev-p-nacht'),g('ev-p-dag'),g('ev-p-24'),rows,String(BATT_RTE),String(BATT_DOD),String(CRATE_OV||'')].join('|');
+  }
+  function terugNaarInput(){ var d=$('dash'); if(d) d.classList.add('hidden'); var ik=$('intake'); if(ik) ik.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
+  // v0.23: spanningsniveau (LS/MS) uit het toegangsvermogen — >63 kW ⇒ MS. Live in de invoer + in resultaat/rapport.
+  function _spanningVan(kw){ return ((+kw||0)>63)?'MS':'LS'; }
+  function _spanningTxt(kw){ return _spanningVan(kw)+((+kw||0)>63?' (middenspanning)':' (laagspanning)'); }
+  function _updSpanningBadge(){ var b=$('i-spanning-badge'); if(b){ var kw=+($('i-toegang')&&$('i-toegang').value)||0; b.textContent=kw>0?('→ '+_spanningTxt(kw)):''; } }
   function _hmKleur(v,min,max){ if(v==null||!isFinite(v)) return '#eef2f8'; var t=(max>min)?((v-min)/(max-min)):0.5; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
   function _hmFmt(v,mx){ if(v==null||!isFinite(v)) return ''; return mx==='rendement'?(Math.round(v)+'%'):(v>=1000?(Math.round(v/100)/10+'k'):Math.round(v)); }
@@ -1280,7 +1313,7 @@
     var km100Cell = (ev>0 && C.kmBehoefte>0) ? (_laadNa/C.kmBehoefte*100) : 0;
     LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:Math.round((+battKwh||0)/_crate()*10)/10, ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
-    $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+(ev?(' · '+ev+' EV'):'');
+    $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+' · '+_spanningVan(toegangKw)+(ev?(' · '+ev+' EV'):'');
     if($('ek-doss')) $('ek-doss').textContent = STATE_CODE || '';
     // v0.13.9: klant/BTW ook uit de (adviseur-)invoervelden als er geen factuur-case is die ze al leverde.
     if(!STATE_KLANT && $('i-klant')) STATE_KLANT=($('i-klant').value||'').trim();
@@ -1369,6 +1402,8 @@
   }catch(e){} })();
 
   async function toonRapport(){
+    // v0.23: al doorgerekend met exact deze invoer? → toon meteen het bestaande resultaat (geen herberekening).
+    try{ var _sig0=_inputSig(); if(_sig0===LAST_SIG && HM){ $('intake').classList.add('hidden'); $('dash').classList.remove('hidden'); try{_advOverlay(false);}catch(e){} window.scrollTo({top:0,behavior:'smooth'}); return; } }catch(e){}
     var profiel=$('i-profiel').value;
     var ev=+$('i-ev').value||0;
     var afnameMwh=+$('i-afname').value||0;
@@ -1484,6 +1519,8 @@
     $('dash').classList.remove('hidden');
     try{ _advOverlay(false); }catch(e){}   // v0.13.7: laad-overlay weg zodra het resultaat er staat
     wmActiveer();
+    _ekToggleLaden();   // v0.23: laad/CREG-info tonen/verbergen + 2e heatmap-metric (rendement% zonder laden) — vóór de render
+    try{ LAST_SIG=_inputSig(); }catch(e){}   // v0.23: onthoud de doorgerekende invoer → "opnieuw" + geen nodeloze herberekening
     renderRapport(_sel);
     renderHeatmap();
     _hmDetail(_sel);
@@ -1496,7 +1533,7 @@
   //   ?adv=1 + profiel/ev/afname/toegang/kost (+ optioneel pv/batt) → prefill + auto-simulatie + evt. cel voorselecteren.
   //   ?prep=1 → toont de "adviseur-link"-balk zodat je die link kan bouwen/kopiëren.
   // v0.13.8: "Klantnaam · BTW BE0…" (enkel de delen die we kennen) — getoond naast de dossier-ID op start + resultaat.
-  function _dossierBits(){ var b=[]; if(STATE_KLANT) b.push(STATE_KLANT); if(STATE_BTW) b.push('BTW '+STATE_BTW); return b.join(' · '); }
+  function _dossierBits(){ var b=[]; if(STATE_KLANT) b.push(STATE_KLANT); if(STATE_ADRES) b.push(STATE_ADRES); if(STATE_BTW) b.push('BTW '+STATE_BTW); return b.join(' · '); }
   function _updAdvLink(){ var inp=$('prep-link'); if(!inp) return;
     // v0.13.8: is er een factuur-case (TOKEN, bv. vanuit "Open" in projecten of de mail-link), deel dan de nette,
     //   stabiele case-link — die landt via de case-loader meteen op dit resultaat. Anders de parameter-link (adviseur
@@ -1671,6 +1708,7 @@
     if($('i-klant')&&STATE_KLANT) $('i-klant').value=STATE_KLANT;
     if($('i-btw')&&STATE_BTW) $('i-btw').value=STATE_BTW;
     STATE_ADRES=(bc.leveringsadres||bc.klantAdres||'').trim();
+    if($('i-adres')&&STATE_ADRES) $('i-adres').value=STATE_ADRES;   // v0.23: afname-adres in de invoer (bewerkbaar) → titels
     STATE_METER=analoog?'Analoge meter (standaardprofiel)':'Digitale meter (kwartierregistratie)';
     var _eb=(bc.eanBlokken||[]).map(function(b){ return { ean:String((b&&b.ean)||'').replace(/\s/g,''), rol:String((b&&b.rol)||'') }; }).filter(function(b){ return /^\d{18}$/.test(b.ean)&&b.rol.indexOf('gas')<0; });
     STATE_EAN_AFNAME=((_eb.filter(function(b){return b.rol.indexOf('afn')>=0;})[0]||_eb[0]||{}).ean)||'';
