@@ -7,6 +7,9 @@ import * as odoo from '../lib/odoo.js';
 const router = express.Router();
 const MAAK_LEAD = String(process.env.CONTACT_MAAK_CRM_LEAD || 'false') === 'true';
 const FOCUS = ['injectie', 'aansluiting', 'mobiliteit'];
+// De contactnotificatie loopt via de proxy (Microsoft Graph, vanuit de dossier-mailbox):
+// POST {PROXY}/api/contact-notify → platte mail ZONDER bijlage → geen dossierverwerking.
+const PROXY = process.env.FLUCTUS_PROXY_URL || '';
 
 // POST /api/contact  { naam, email, telefoon?, bedrijf?, focus, bericht? }
 router.post('/', async (req, res) => {
@@ -20,8 +23,16 @@ router.post('/', async (req, res) => {
   };
   try {
     if (sb.supabaseConfigured()) await sb.insertContact(rij).catch(e => console.warn('[contact] sb:', e.message));
-    // Interne notificatie via Brevo (aanvaarding-template hergebruikt als generieke notificatie is niet netjes;
-    // we sturen enkel als er een dedicated template is — anders stil overslaan).
+    // Notificatie naar de dossier-mailbox via de proxy (Microsoft Graph). Platte mail,
+    // GEEN bijlage → de inbound-sweep start er geen dossierverwerking mee. Best-effort.
+    if (PROXY) {
+      try {
+        await fetch(`${PROXY}/api/contact-notify`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ naam: b.naam, email: b.email, telefoon: b.telefoon || '', bedrijf: b.bedrijf || '', focus: focus || '', bericht: b.bericht || '' }),
+        });
+      } catch (e) { console.warn('[contact] notify:', e.message); }
+    }
     if (MAAK_LEAD && odoo.odooConfigured()) {
       await odoo.createLead({
         name: `Website-contact — ${b.naam}${focus ? ' (' + focus + ')' : ''}`,
