@@ -15,6 +15,10 @@ export default defineConfig({
         overons: resolve(__dirname, 'over-ons.html'),
         contact: resolve(__dirname, 'contact.html'),
         portal: resolve(__dirname, 'portal.html'),
+        // Energie-Compas site (los van de bestaande pagina's, geen Fluctus-verwijzing)
+        ec: resolve(__dirname, 'energie-compas.html'),
+        eccontact: resolve(__dirname, 'ec-contact.html'),
+        mijnec: resolve(__dirname, 'mijnec.html'),
       },
     },
   },
