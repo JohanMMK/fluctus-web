@@ -18,7 +18,14 @@ const DIST = path.join(__dirname, '..', 'dist');
 const PORT = process.env.PORT || 8080;
 
 const app = express();
+app.set('trust proxy', true);   // Railway-proxy → req.hostname uit X-Forwarded-Host (host-routing)
 app.use(compression());
+
+// ── Energie-Compas site (energie-compas.eu) ──────────────────────────────────
+// De EC-site staat in dist/ec/ met internationale bestandsnamen (start/contact/login).
+// Voor de EC-hosts serveren we die op de ROOT met clean URLs (/ → start, /contact, /login);
+// alle andere hosts (o.a. fluctus.net, app.energie-compas.eu) houden de bestaande flow.
+const EC_HOSTS = new Set(['energie-compas.eu', 'www.energie-compas.eu']);
 app.use(express.json({ limit: '12mb' }));
 
 // Publieke runtime-config voor de frontend (geen rebuild nodig bij env-wijziging).
@@ -38,10 +45,32 @@ app.use('/api/contact', contactRouter);
 
 // ── Statische frontend (Vite build) ──
 if (fs.existsSync(DIST)) {
+  const DIST_EC = path.join(DIST, 'ec');
+  // Host-routing voor de Energie-Compas-site: clean URLs op de root van energie-compas.eu.
+  app.use((req, res, next) => {
+    const host = String(req.hostname || '').toLowerCase();
+    if (!EC_HOSTS.has(host)) return next();            // andere host → gewone Fluctus-flow
+    if (req.path.startsWith('/api/')) return next();    // API ongemoeid
+    if (!path.extname(req.path)) {                      // extensieloos pad → EC-pagina (clean URL)
+      const name = (req.path === '/' ? 'start' : req.path.replace(/^\/+/, '').replace(/\/+$/, ''));
+      if (!name.includes('..')) {
+        const f = path.join(DIST_EC, name + '.html');
+        if (fs.existsSync(f)) return res.sendFile(f);
+      }
+      return res.sendFile(path.join(DIST_EC, 'start.html'));   // onbekend → start
+    }
+    if (req.path.endsWith('.html')) {                   // expliciete .html → uit de EC-map
+      const f = path.join(DIST_EC, path.basename(req.path));
+      if (fs.existsSync(f)) return res.sendFile(f);
+    }
+    return next();                                      // assets (css/js/img/apps) → static(DIST)
+  });
   app.use(express.static(DIST));
-  // Nette 404 → val terug op de startpagina voor onbekende paden (marketing).
+  // Nette 404 → val terug op de startpagina voor onbekende paden (marketing), host-bewust.
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'not found' });
+    const host = String(req.hostname || '').toLowerCase();
+    if (EC_HOSTS.has(host)) return res.sendFile(path.join(DIST_EC, 'start.html'));
     res.sendFile(path.join(DIST, 'index.html'));
   });
 } else {
