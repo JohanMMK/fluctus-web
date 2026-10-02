@@ -1076,10 +1076,12 @@
     var capRate=(NET_TARIEF&&+NET_TARIEF.cap_eur_kw_jaar)||0;
     var capJ=Math.round(shaved*capRate);                              // vermeden capaciteitstarief/jaar (= netkosten)
     var toegang=(CTX&&+CTX.toegangKw)||0;
-    var domNeed=toegang+pCharge, metBatt=domNeed-shaved;
-    var msDrempel=+NET_CFG.ms_drempel_kva||250;
-    var msStap=(domNeed>msDrempel && metBatt<=msDrempel)?(+NET_CFG.ms_stap_eur||0):0;
-    var verzwaring=Math.round(shaved*(+NET_CFG.verzwaring_eur_kva||0) + msStap);   // vermeden verzwaring (eenmalig)
+    // v0.24.53 (Johan): VERMEDEN eenmalige aansluitingskost = referentie (voor, zonder PV/batt) − deze combi (na).
+    //   De aansluiting stijgt "om aan de km's te komen"; PV+batterij verkleinen die → kleinere LS→MS/verzwaringskost.
+    //   Zonder laadplein → beide 0 → €0 (geen regressie). Vervangt de oude shaved×€/kVA-proxy.
+    var _verzwVoor=(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0;
+    var _verzwNa=(+a.verzwaring_eenmalig||0);
+    var verzwaring=Math.max(0, _verzwVoor - _verzwNa);
     var invTot=_invVan(a), netInv=Math.max(0, invTot - verzwaring);
     // rest → inflatie; netkosten-deel (besp_net) + vermeden capaciteitstarief → sneller netkostenpad + 2029.
     // v0.24.27 (Johan): exploitatiekost PRO-RATA over het rooster — €/jaar naar rato van de investering van elke cel (net als de prijs).
@@ -1230,7 +1232,8 @@
     // v0.24.46 (Johan §6c): km-dekking interpoleren uit de ankers (enkel als er een laadplein is → ankers dragen kmDekking).
     var _hasKm=(c00.kmDekking!=null&&c01.kmDekking!=null&&c10.kmDekking!=null&&c11.kmDekking!=null);
     var _kmd=_hasKm?bil(function(c){return +c.kmDekking||0;}):null;
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null) }; }
+    var _verzw=bil(function(c){return +c.verzwaring_eenmalig||0;});   // v0.24.53 (Johan): eenmalige aansluitingskost (na) interpoleren uit de ankers
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw) }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -1253,6 +1256,8 @@
     var best=_besteAnkerKm(A);
     HM={ real:A, rows:realRows, cols:pvCols, realRows:realRows, realCols:pvAnchors, battMap:battMap, computed:{}, interp:true, crate:_crate(), refKost:sw.referentie_kost, refNetk:(sw.referentie_netk!=null?sw.referentie_netk:null),
       kmVoor:(sw.km_dekking_voor!=null?sw.km_dekking_voor:null),   // v0.24.46 §6c: km-dekking ZONDER installatie (0,0-cel)
+      verzwVoor:(sw.verzwaring_voor_eenmalig!=null?+sw.verzwaring_voor_eenmalig:0),   // v0.24.53 (Johan): eenmalige aansluitingskost VOOR (referentie, zonder PV/batt)
+      aansluitingVoorKw:(sw.aansluiting_voor_kw!=null?+sw.aansluiting_voor_kw:0),
       lpMwh:((sw.dimensionering&&sw.dimensionering.laadplein_mwh)||0),   // v0.24.46: laadplein-jaarverbruik (MWh) → km-dekking enkel relevant met laadplein
       rowLabel:function(v){ var m=battMap[v]; return (m&&m.kw>0)?(m.kw+' kW / '+m.kwh+' kWh'):'geen batt'; }, colLabel:function(v){ return v>0?(v+' kWp'):'geen PV'; },
       realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
@@ -1264,7 +1269,7 @@
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:_m.kw,batt_kwh:_m.kwh})).then(function(j){
         if(j&&j.ok&&j.cel){ var c=j.cel, besp=(HM.refKost!=null)?(HM.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
           var bespNet=(HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;   // v0.20: netkosten-deel van de besparing (exacte cel)
-          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null) };   // v0.24.46 §6c: km-dekking van de exact doorgerekende cel
+          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null),verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0) };   // v0.24.46 §6c: km-dekking; v0.24.53: eenmalige aansluitingskost van de exact doorgerekende cel
           HM.computed[key]=cell; done&&done(cell); } else done&&done(null); }).catch(function(){ done&&done(null); }); }; }
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   // v0.16.2 (Johan): heatmap-investering (+ TVT/rendement) op EXACT dezelfde functie als de tegel/paycard (_invTotMajor)
