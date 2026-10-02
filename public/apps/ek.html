@@ -664,6 +664,7 @@
             <option value="investering" selected>Investering (€)</option>
             <option value="cycli">Batterijcycli (/jaar)</option>
             <option value="kmdekking" class="opt-laden">Km-dekking laadplein (%)</option>
+            <option value="piek">Piekverbruik (kVA)</option>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-L"></table></div>
           <div class="sub" id="hm-note-L" style="margin-top:4px"></div>
@@ -678,6 +679,7 @@
             <option value="investering">Investering (€)</option>
             <option value="cycli">Batterijcycli (/jaar)</option>
             <option value="kmdekking" class="opt-laden">Km-dekking laadplein (%)</option>
+            <option value="piek">Piekverbruik (kVA)</option>
           </select></div>
           <div style="overflow-x:auto"><table class="hm" id="hm-tabel-R"></table></div>
           <div class="sub" id="hm-note-R" style="margin-top:4px"></div>
@@ -823,7 +825,7 @@
   var OPEX_RATIO=0;      // v0.24.27 (Johan): exploitatiekost PRO-RATA — €/jaar per € investering (= OPEX_JAAR / investering van de combi). Toegepast op ELKE cel naar rato van zijn investering, net zoals PRIJS_FACTOR.
   var CUSTOM_COMBOS=[];  // v0.24.26 (Johan): manueel ("Pas aan") ingebrachte combi's {pv,battKw,battKwh,ac,dc,prijsFactor,opex,crate} — OVERLEEFT "opnieuw" + herrekening → worden terug op de heatmap gezet zodat je ze terugvindt
   function _crate(){ return (CRATE_OV>0)?CRATE_OV:(P_TL.BATT_CRATE||2); }   // actieve C-factor (uren)
-  var NET_CFG={ verzwaring_eur_kva:150, ms_stap_eur:35000, ms_drempel_kva:250, gelijktijd_ac:0.5, gelijktijd_dc:1.0, ac_paal_kva:22, dc_paal_kva:300, horizon_jaar:15, inflatie_pct:2, net_extra_pct:2, net_dubbel_jaar:2029, net_dubbel_factor:2 };  // v0.20: server-breed via /api/ek-config (alle kosten +2%; netkosten +2% bovenop inflatie + 2029-verdubbeling)
+  var NET_CFG={ verzwaring_eur_kva:150, ms_stap_eur:50000, ms_drempel_kva:250, gelijktijd_ac:0.5, gelijktijd_dc:1.0, ac_paal_kva:22, dc_paal_kva:300, horizon_jaar:15, inflatie_pct:2, net_extra_pct:2, net_dubbel_jaar:2029, net_dubbel_factor:2 };  // v0.20: server-breed via /api/ek-config (alle kosten +2%; netkosten +2% bovenop inflatie + 2029-verdubbeling)
   var STATE_KLANT='';  // v0.13.8: klantnaam uit de factuur-case → naast de dossier-ID op start + resultaat
   var STATE_BTW='';    // v0.13.8: BTW-nummer uit de factuur-case (indien aanwezig)
   var STATE_EAN_AFNAME='', STATE_EAN_INJECTIE='', STATE_ADRES='', STATE_METER='';  // v0.13.12: aansluiting-gegevens uit de factuur-case (EAN-keuze) → klantrapport
@@ -1233,7 +1235,8 @@
     var _hasKm=(c00.kmDekking!=null&&c01.kmDekking!=null&&c10.kmDekking!=null&&c11.kmDekking!=null);
     var _kmd=_hasKm?bil(function(c){return +c.kmDekking||0;}):null;
     var _verzw=bil(function(c){return +c.verzwaring_eenmalig||0;});   // v0.24.53 (Johan): eenmalige aansluitingskost (na) interpoleren uit de ankers
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw) }; }
+    var _piek=bil(function(c){return +c.jaarpiek||0;});   // v0.24.53 (Johan): piekverbruik (kVA) interpoleren uit de ankers
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw),jaarpiek:Math.round(_piek) }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -1269,7 +1272,7 @@
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:_m.kw,batt_kwh:_m.kwh})).then(function(j){
         if(j&&j.ok&&j.cel){ var c=j.cel, besp=(HM.refKost!=null)?(HM.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
           var bespNet=(HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;   // v0.20: netkosten-deel van de besparing (exacte cel)
-          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null),verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0) };   // v0.24.46 §6c: km-dekking; v0.24.53: eenmalige aansluitingskost van de exact doorgerekende cel
+          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null),verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0),jaarpiek:(c.jaarpiek!=null?+c.jaarpiek:null) };   // v0.24.46 §6c: km-dekking; v0.24.53: eenmalige aansluitingskost + piekverbruik (kVA) van de exact doorgerekende cel
           HM.computed[key]=cell; done&&done(cell); } else done&&done(null); }).catch(function(){ done&&done(null); }); }; }
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   // v0.16.2 (Johan): heatmap-investering (+ TVT/rendement) op EXACT dezelfde functie als de tegel/paycard (_invTotMajor)
@@ -1297,7 +1300,10 @@
     besp_creg:   { val:function(a){ return CTX ? Math.max(0, (CTX.cregKost||0) - (CTX.laadKostReeel||0)) : null; }, fmt:function(v){return _fmtEurK(v);}, goedHoog:true },   // slim laden vs gewoon laden (CREG) op de pure laadkost; eenheid (€/j) staat in de titel
     // v0.24.46 (Johan §6c): km-dekking = % van de gevraagde dag-km's die deze combi EFFECTIEF per dag laadt (100% = elke
     //   dag van het jaar gedekt). Enkel zinvol met een laadplein (anders null → leeg rooster). Server: anchors[].kmDekking.
-    kmdekking:   { val:function(a){ return (a&&a.kmDekking!=null)?+a.kmDekking:null; }, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true }
+    kmdekking:   { val:function(a){ return (a&&a.kmDekking!=null)?+a.kmDekking:null; }, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },
+    // v0.24.53 (Johan): PIEKVERBRUIK (kVA) per combi — de jaarpiek-afname uit de sim (≈ benodigde aansluiting na installatie).
+    //   Lager = beter (kleinere aansluiting). ≥1000 → duizendpunt.
+    piek:        { val:function(a){ return (a&&a.jaarpiek!=null)?+a.jaarpiek:null; }, fmt:function(v){return (Math.abs(v)>=1000?_ekMilDot(v):Math.round(v))+' kVA';}, goedHoog:false }
     // v0.11.3 (Johan): enkel kengetallen die écht met de PV/batterij-grootte veranderen staan in de heatmap. Combi-
     //   onafhankelijke (km/jaar, loadfactor, energiekost-met-laadplein) zijn verwijderd → die staan in de tegels.
   };
