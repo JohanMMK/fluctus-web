@@ -1,4 +1,6 @@
-// mijnec.js v1.0.0 — 2026-09-30 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.1.0 — 2026-10-02 — MijnEC portaal (Energie-Compas).
+// v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
+//   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
 // Deelt het RBAC-toegangscontract met de bestaande portal.js: Supabase-JWT +
 // POST /api/app-access/check op de proxy. Managers zien alle tegels; anderen enkel
 // de toegekende. Bewust EC-branded en ZONDER enige merkverwijzing naar de coöperatie.
@@ -67,9 +69,22 @@ async function sendCode() {
   const email = $('login-email').value.trim();
   if (!email) { $('login-msg').textContent = 'Vul je e-mailadres in.'; return; }
   $('btn-code').disabled = true;
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  // v1.1.0: vraag de 6-cijfercode via de proxy (Graph, Energie-Compas-branded mail van noreply@energie-compas.eu).
+  // Valt terug op de Supabase-eigen OTP als het endpoint onbereikbaar is, zodat inloggen nooit volledig stukgaat.
+  const base = (CFG && CFG.fluctusProxyUrl) || '';
+  let okEndpoint = false;
+  try {
+    const r = await fetch(`${base}/api/auth/otp-request`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    okEndpoint = r.ok;
+  } catch (e) { okEndpoint = false; }
+  if (!okEndpoint) {
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+    if (error) { $('btn-code').disabled = false; $('login-msg').textContent = 'Kon geen code sturen: ' + error.message; return; }
+  }
   $('btn-code').disabled = false;
-  if (error) { $('login-msg').textContent = 'Kon geen code sturen: ' + error.message; return; }
   toonCodeStap(true);
   $('login-msg').textContent = 'We hebben je een code gemaild. Vul ze hierboven in.';
   $('login-code').focus();
