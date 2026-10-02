@@ -20,6 +20,10 @@ export default defineConfig({
         ecstart: resolve(__dirname, 'ec/start.html'),
         eccontact: resolve(__dirname, 'ec/contact.html'),
         eclogin: resolve(__dirname, 'ec/login.html'),
+        // Franstalige versie (ec/fr/*) → via host-routing geserveerd op /fr, /fr/contact, /fr/login.
+        ecfrstart: resolve(__dirname, 'ec/fr/start.html'),
+        ecfrcontact: resolve(__dirname, 'ec/fr/contact.html'),
+        ecfrlogin: resolve(__dirname, 'ec/fr/login.html'),
       },
     },
   },
