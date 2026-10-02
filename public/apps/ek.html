@@ -936,7 +936,7 @@
   }
   function _evRenderRows(){
     var tb=$('ev-rows'); if(!tb) return;
-    if(!EV_ROWS.length) EV_ROWS=[{type:'personenwagen',aantal:1,moment:'nacht',weekend:false}];
+    if(!EV_ROWS.length) EV_ROWS=[{type:'personenwagen',aantal:0,moment:'nacht',weekend:false}];   // v0.24.52 (Johan): nieuw dossier → standaard 0 wagens
     tb.innerHTML=EV_ROWS.map(_evRowHtml).join('');
     Array.prototype.forEach.call(tb.querySelectorAll('[data-f]'),function(el){
       var i=+el.getAttribute('data-i'), f=el.getAttribute('data-f');
@@ -960,6 +960,14 @@
     if(KLANTTYPE==='bedrijf'){ EV_ROWS = [{type:'personenwagen',aantal:n,moment:'nacht',weekend:false}]; _evRenderRows(); }
     else { var a=$('ev-p-nacht'),d=$('ev-p-dag'),h=$('ev-p-24'); if(a)a.value=n; if(d)d.value=0; if(h)h.value=0; }
     _evSync(); }
+  // v0.24.52 (Johan): voertuig-RIJEN bewaren/herstellen → type + aantal + laadmoment + weekend blijven op het dossier staan
+  //   (vroeger ging enkel het totaal-aantal mee → alles viel bij heropenen terug op personenwagen).
+  function _ekEvRowsBewaar(){ try{ return (KLANTTYPE==='bedrijf'&&Array.isArray(EV_ROWS))
+    ? EV_ROWS.map(function(r){ return { type:(r.type||'personenwagen'), aantal:Math.max(0,Math.round(+r.aantal||0)), moment:(r.moment||'nacht'), weekend:!!r.weekend }; }).slice(0,20)
+    : []; }catch(e){ return []; } }
+  function _ekEvRowsHerstel(rows){ if(!Array.isArray(rows)||!rows.length) return false;
+    EV_ROWS = rows.map(function(r){ return { type:(r&&r.type)||'personenwagen', aantal:Math.max(0,Math.round(+(r&&r.aantal)||0)), moment:(r&&r.moment)||'nacht', weekend:!!(r&&r.weekend) }; }).slice(0,20);
+    _evRenderRows(); _evSync(); return true; }
   // thuisladen-wagens[] uit de particulier-buckets (elk voertuig = 1 item met wd/we-venster)
   function _wagensV2(){ var pw=_evType('personenwagen'), out=[];
     function push(cnt,vs,ve){ cnt=Math.max(0,Math.round(cnt)); for(var i=0;i<cnt;i++) out.push({km:pw.kmjaar,kwhkm:pw.kwhkm,wd_start:vs,wd_eind:ve,we_start:vs,we_eind:ve,creg:true}); }
@@ -1488,6 +1496,7 @@
         ean_afname:(STATE_EAN_AFNAME||''), ean_injectie:(STATE_EAN_INJECTIE||''),
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
+        ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''),   // v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         token:TOKEN||undefined, naam:(STATE_KLANT||'').trim(), adres:(STATE_ADRES||''), btw:(STATE_BTW||'').trim(),
@@ -1696,6 +1705,7 @@
         //   (net/heffingen worden dan niet opnieuw uit de factuur gehaald → huidig energietarief viel terug/te hoog).
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
+        ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''),   // v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };   // v0.24.35 (Johan): manuele "Pas aan"-combi's meebewaren → bij heropenen terug op de heatmap
       var _r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         token:TOKEN||undefined, mail:($('i-mail').value||'').trim(), tel:($('i-tel').value||'').trim(),
@@ -2142,7 +2152,7 @@
         var bedr=(j.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
         // v0.6.1: onthoud het eerder gekozen profiel; bij analoge meter → residentieel (geen andere info); anders default.
         $('i-profiel').value = analoog ? 'residentieel' : (j.profiel || (bedr?'kantoor':'residentieel'));
-        try{ _KTYPE_USER=false; _evAfleiden(); _evApplyTotal(j.ev!=null?j.ev:1); }catch(e){}   // v0.17: Type klant afleiden + EV-invoer vullen uit de case
+        try{ _KTYPE_USER=false; _evAfleiden(); _evApplyTotal(j.ev!=null?j.ev:0); }catch(e){}   // v0.17: Type klant afleiden + EV-invoer vullen uit de case; v0.24.52: nieuw/onbekend → 0 wagens
         if(j.project_id) STATE_CODE=j.project_id;
         // v0.13.8: klantnaam + BTW uit de factuur-case onthouden en op het start-scherm tonen naast de dossier-ID.
         STATE_KLANT = (bc.klantNaam || j.naam || '').trim();
@@ -2183,7 +2193,10 @@
           if(B.best_pv_kwp!=null && $('i-best-pv')) $('i-best-pv').value=+B.best_pv_kwp||0;
           if(B.injectie_mwh!=null && $('i-best-inj')) $('i-best-inj').value=+B.injectie_mwh||0;
           if(B.profiel && $('i-profiel')) $('i-profiel').value=B.profiel;
-          if(B.ev!=null){ try{ _KTYPE_USER=false; _evApplyTotal(+B.ev||0); }catch(e){} }
+          if(B.ev!=null||Array.isArray(B.ev_rows)){ try{ _KTYPE_USER=false;
+            if(B.klanttype==='bedrijf'||B.klanttype==='particulier') _evSetKlanttype(B.klanttype);   // v0.24.52: bewaard klanttype terug
+            if(!(Array.isArray(B.ev_rows)&&B.ev_rows.length&&_ekEvRowsHerstel(B.ev_rows))) _evApplyTotal(+B.ev||0);   // v0.24.52: voertuig-rijen exact terug (type+aantal+moment+weekend); anders val terug op het aantal
+          }catch(e){} }
           if(B.klant){ STATE_KLANT=B.klant; if($('i-klant')) $('i-klant').value=B.klant; }
           if(B.btw){ STATE_BTW=B.btw; if($('i-btw')) $('i-btw').value=B.btw; }
           if(B.adres){ STATE_ADRES=B.adres; if($('i-adres')) $('i-adres').value=B.adres; }
