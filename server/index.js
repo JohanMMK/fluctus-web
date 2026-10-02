@@ -52,7 +52,17 @@ if (fs.existsSync(DIST)) {
     if (!EC_HOSTS.has(host)) return next();            // andere host → gewone Fluctus-flow
     if (req.path.startsWith('/api/')) return next();    // API ongemoeid
     if (!path.extname(req.path)) {                      // extensieloos pad → EC-pagina (clean URL)
-      const name = (req.path === '/' ? 'start' : req.path.replace(/^\/+/, '').replace(/\/+$/, ''));
+      const rel = req.path.replace(/^\/+/, '').replace(/\/+$/, '');   // '', 'contact', 'fr', 'fr/contact'
+      // Franstalige tak: /fr → fr/start, /fr/contact, /fr/login (map dist/ec/fr/)
+      if (rel === 'fr' || rel.startsWith('fr/')) {
+        const sub = (rel === 'fr') ? 'start' : rel.slice(3);
+        if (!sub.includes('..')) {
+          const ff = path.join(DIST_EC, 'fr', sub + '.html');
+          if (fs.existsSync(ff)) return res.sendFile(ff);
+        }
+        return res.sendFile(path.join(DIST_EC, 'fr', 'start.html'));   // onbekend FR → FR-start
+      }
+      const name = (rel === '') ? 'start' : rel;
       if (!name.includes('..')) {
         const f = path.join(DIST_EC, name + '.html');
         if (fs.existsSync(f)) return res.sendFile(f);
@@ -70,7 +80,11 @@ if (fs.existsSync(DIST)) {
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'not found' });
     const host = String(req.hostname || '').toLowerCase();
-    if (EC_HOSTS.has(host)) return res.sendFile(path.join(DIST_EC, 'start.html'));
+    if (EC_HOSTS.has(host)) {
+      const relc = req.path.replace(/^\/+/, '');
+      if (relc === 'fr' || relc.startsWith('fr/')) return res.sendFile(path.join(DIST_EC, 'fr', 'start.html'));
+      return res.sendFile(path.join(DIST_EC, 'start.html'));
+    }
     res.sendFile(path.join(DIST, 'index.html'));
   });
 } else {
