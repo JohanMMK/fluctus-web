@@ -1,4 +1,4 @@
-// mijnec.js v1.1.0 — 2026-10-02 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.2.0 — 2026-10-02 — MijnEC portaal (Energie-Compas).
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
 // Deelt het RBAC-toegangscontract met de bestaande portal.js: Supabase-JWT +
@@ -7,6 +7,19 @@
 // Losse module (raakt portal.js niet), zodat het bestaande portaal ongewijzigd blijft.
 
 const $ = (id) => document.getElementById(id);
+
+// v1.2.0: taalbewuste statusmeldingen (NL standaard, FR op /fr/login — <html lang="fr">).
+const _FR = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
+const T = {
+  nietGeconfig: _FR ? 'Connexion pas encore configurée sur le serveur.' : 'Inloggen nog niet geconfigureerd op de server.',
+  vulEmail:     _FR ? 'Saisissez votre adresse e-mail.' : 'Vul je e-mailadres in.',
+  geenCode:     _FR ? "Impossible d'envoyer un code : " : 'Kon geen code sturen: ',
+  codeGemaild:  _FR ? 'Nous vous avons envoyé un code par e-mail. Saisissez-le ci-dessus.' : 'We hebben je een code gemaild. Vul ze hierboven in.',
+  vulCode:      _FR ? 'Saisissez le code reçu par e-mail.' : 'Vul de code uit je e-mail in.',
+  codeFout:     _FR ? 'Code incorrect ou expiré : ' : 'Code klopt niet of is verlopen: ',
+  geenApps:     _FR ? "Vous n'avez encore accès à aucune application. Demandez l'accès à votre gestionnaire." : 'Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.',
+  initFout:     _FR ? "Erreur d'initialisation : " : 'Init-fout: ',
+};
 
 // App-catalogus — zelfde app_id's en gating als het bestaande portaal (managers
 // bepalen de toegang per gebruiker). Enkel de zichtbare namen zijn merk-neutraal.
@@ -47,7 +60,7 @@ function injectSupabase() {
 async function initAuth() {
   await injectSupabase();
   if (!CFG.supabaseUrl || !CFG.supabaseAnonKey) {
-    $('login-msg').textContent = 'Inloggen nog niet geconfigureerd op de server.';
+    $('login-msg').textContent = T.nietGeconfig;
     return;
   }
   sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
@@ -67,7 +80,7 @@ function toonCodeStap(aan) {
 
 async function sendCode() {
   const email = $('login-email').value.trim();
-  if (!email) { $('login-msg').textContent = 'Vul je e-mailadres in.'; return; }
+  if (!email) { $('login-msg').textContent = T.vulEmail; return; }
   $('btn-code').disabled = true;
   // v1.1.0: vraag de 6-cijfercode via de proxy (Graph, Energie-Compas-branded mail van noreply@energie-compas.eu).
   // Valt terug op de Supabase-eigen OTP als het endpoint onbereikbaar is, zodat inloggen nooit volledig stukgaat.
@@ -82,23 +95,23 @@ async function sendCode() {
   } catch (e) { okEndpoint = false; }
   if (!okEndpoint) {
     const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-    if (error) { $('btn-code').disabled = false; $('login-msg').textContent = 'Kon geen code sturen: ' + error.message; return; }
+    if (error) { $('btn-code').disabled = false; $('login-msg').textContent = T.geenCode + error.message; return; }
   }
   $('btn-code').disabled = false;
   toonCodeStap(true);
-  $('login-msg').textContent = 'We hebben je een code gemaild. Vul ze hierboven in.';
+  $('login-msg').textContent = T.codeGemaild;
   $('login-code').focus();
 }
 
 async function verifyCode() {
   const email = $('login-email').value.trim();
   const token = $('login-code').value.trim();
-  if (!token) { $('login-msg').textContent = 'Vul de code uit je e-mail in.'; return; }
+  if (!token) { $('login-msg').textContent = T.vulCode; return; }
   $('btn-verify').disabled = true;
   let res = await sb.auth.verifyOtp({ email, token, type: 'email' });
   if (res.error) res = await sb.auth.verifyOtp({ email, token, type: 'signup' });
   $('btn-verify').disabled = false;
-  if (res.error) { $('login-msg').textContent = 'Code klopt niet of is verlopen: ' + res.error.message; return; }
+  if (res.error) { $('login-msg').textContent = T.codeFout + res.error.message; return; }
   $('login-msg').textContent = '';
 }
 
@@ -136,7 +149,7 @@ async function toegankelijkeApps(token) {
 function renderLauncher(apps) {
   const host = $('apps'); host.innerHTML = '';
   if (!apps.length) {
-    host.innerHTML = '<p class="notice">Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.</p>';
+    host.innerHTML = '<p class="notice">' + T.geenApps + '</p>';
     return;
   }
   apps.forEach((a) => {
@@ -169,5 +182,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('login-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
   $('login-email').addEventListener('keydown', (e) => { if (e.key === 'Enter' && $('stap-code').classList.contains('hidden')) sendCode(); });
   try { await loadConfig(); await initAuth(); }
-  catch (e) { $('login-msg').textContent = 'Init-fout: ' + e.message; }
+  catch (e) { $('login-msg').textContent = T.initFout + e.message; }
 });
