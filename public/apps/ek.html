@@ -1281,10 +1281,9 @@
   function _invVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0);
     // v0.24.26: een custom (manueel ingebrachte) cel rekent met ZIJN eigen prijs + palen; andere cellen met de standaard.
     if(a._custom){ return _invTotMajor(pvKwp, battKwh, (a._ac!=null?a._ac:_acDefault()), (a._dc!=null?a._dc:0), a._prijsFactor).tot; }
-    // v0.24.54 (Johan): BEDRIJF → batt+PV uit de backend prijs-anker (a.capex, €175k-prijszetting incl. 30/60·50/100 +25%);
-    //   palen + kabel komen client-side erbovenop (invInfra). Woning = oude STUB-prijszetting.
-    if(CTX && !CTX.particulier && a.capex!=null){ var _infra=_invTotMajor(pvKwp, battKwh, _acDefault(), 0).invInfra; return Math.round((+a.capex||0) + (+_infra||0)); }
-    return _invTotMajor(pvKwp, battKwh, _acDefault(), 0).tot; }
+    // v0.24.55 (Johan): batt+PV via de anker-prijszetting (in _invTotRaw), palen (AC+DC) + kabel erbovenop.
+    //   DC-paal (vrachtwagens) telt nu óók mee in de rooster-investering (was dc=0). Rooster = rapport = detail.
+    return _invTotMajor(pvKwp, battKwh, _acDefault(), _dcDefault()).tot; }
   function _invPvBattVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invPvBattVoor(pvKwp, battKwh); } // PV+batterij (TVT/ROI)
   function _tvtVan(a){ var v=_battValue(a); return v?v.tvt:null; }   // v0.19: 15-jaar break-even (escalerende netkosten)
   function _ekMilDot(n){ return String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }   // v0.24.50 (Johan): duizendpunt, geen decimalen (1.305)
@@ -1378,9 +1377,15 @@
   // v0.18: lichte voertuigen → AC-palen (2/paal); zware (vrachtwagen/bus) → DC-palen 300 kVA (2/paal). Split uit CTX.
   function _acDefault(){ var n=(CTX&&CTX.evLight!=null)?CTX.evLight:(+(CTX&&CTX.ev)||0); return Math.max(0, Math.ceil(n/2)); }
   function _dcDefault(){ var h=(CTX&&CTX.evHeavy)||0; return h>0?Math.max(1,Math.ceil(h/2)):0; }   // genoeg DC 300 kVA voor vrachtwagens/bussen
+  // v0.24.55 (Johan): BEDRIJF prijs-anker — zelfde als backend (v15.230). 125/261 + 157 kWp = €175.000 (batt+PV).
+  //   PV getrapt: €600/kWp tot 100, €400/kWp daarboven. Batterij ≈ €353,26/kWh; 30/60 & 50/100 batt +25%.
+  function _pvKostBedr(pvKwp){ var p=Math.max(0,+pvKwp||0); return Math.min(p,100)*600 + Math.max(0,p-100)*400; }
+  var EK_BEDR_BATT_EUR_KWH=(175000-_pvKostBedr(157))/261;   // ≈ 353,26 €/kWh
+  function _battKostBedr(battKwh){ var k=Math.round(+battKwh||0); var small=(k===60||k===100); return (+battKwh||0)*EK_BEDR_BATT_EUR_KWH*(small?1.25:1); }
   // Factor-vrije engineprijs (basis voor de prijs-prorata). Eén bron voor tegel + heatmap + TVT.
   function _invTotRaw(pvKwp, battKwh, ac, dc){
-    var pv=Math.round((+pvKwp||0)*STUB.pv_eur_kwp), bt=Math.round((+battKwh||0)*STUB.batt_eur_kwh);
+    var _bedr=!!(CTX && !CTX.particulier);
+    var pv=Math.round(_bedr?_pvKostBedr(pvKwp):((+pvKwp||0)*STUB.pv_eur_kwp)), bt=Math.round(_bedr?_battKostBedr(battKwh):((+battKwh||0)*STUB.batt_eur_kwh));
     var acE=Math.max(0,ac|0)*STUB.ac_paal_eur, dcE=Math.max(0,dc|0)*(STUB.dc_paal_eur||0);
     var kt=kabeltrace((ac|0)+(dc|0), (CTX&&CTX.particulier), (+pvKwp||0)*0.75, (+battKwh||0)/2);
     return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt, invInfra:acE+dcE+kt.totaal, kt:kt };
@@ -1399,8 +1404,9 @@
   function _invRij(label, spec){ return '<tr><td>'+esc0(label)+'<div class="invspec">'+spec+'</div></td><td class="r"></td></tr>'; }
   function _invRijEdit(label, id, val, unit, step, extra){
     return '<tr><td>'+esc0(label)+'</td><td class="r"><input type="number" id="'+id+'" value="'+val+'" step="'+step+'" min="0" inputmode="decimal" class="invin"> '+unit+(extra||'')+'</td></tr>'; }
-  function _invBlok(pvKwp, battKwh, ac, dc){
-    var battKw=Math.round((+battKwh||0)/_crate()*10)/10, m=_invTotMajor(pvKwp,battKwh,ac,dc), rows='';
+  function _invBlok(pvKwp, battKwh, ac, dc, battKwOv){
+    // v0.24.55 (Johan): toon de ECHTE batterij-kW van de staffel/cel (bv. 125), niet kWh/C-factor (261/2 = 130,5).
+    var battKw=(battKwOv!=null && +battKwOv>0)?(Math.round(+battKwOv*10)/10):Math.round((+battKwh||0)/_crate()*10)/10, m=_invTotMajor(pvKwp,battKwh,ac,dc), rows='';
     if(INV_EDIT){
       rows+=_invRijEdit('Zonnepanelen','inv-pv',(+pvKwp||0),'kWp',1);
       // #2: kW én kWh bewerkbaar → C-factor (kWh/kW) geldt voor álle batterij-opties in het rooster.
@@ -1447,7 +1453,7 @@
     if(INV_EDIT){ _invSave(); return; }
     INV_EDIT=true; _invBtnLabel();
     var a=HM&&HM.sel; var pvKwp=a?Math.round(_anchorKwp(a)*10)/10:((CTX&&CTX.pvKwpFb)||0), battKwh=a?(+a.battKwh||0):((CTX&&CTX.battKwhFb)||0);
-    _invBlok(pvKwp, battKwh, (INV_OV?INV_OV.ac:_acDefault()), (INV_OV?INV_OV.dc:0));
+    _invBlok(pvKwp, battKwh, (INV_OV?INV_OV.ac:_acDefault()), (INV_OV?INV_OV.dc:_dcDefault()), (a&&+a.battKw)||0);
   }
   function _invSave(){
     var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
@@ -1578,7 +1584,7 @@
     // v0.24.17 (Johan): €/100km = de pure laadenergie per 100 km (laadvolume × all-in laadtarief / km), niet het factuurverschil.
     //   Het laadtarief is per cel ~gelijk; PV/batterij-besparing zit in de besparings-tegel, niet in de energiekost per km.
     var km100Cell = (ev>0) ? (_km100Van(a)||0) : 0;   // v0.24.37 (Johan): effectief €/kWh uit de nieuwe factuur van déze combi → €/100 km (varieert met PV/batt, gelijk aan de matrix)
-    LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:Math.round((+battKwh||0)/_crate()*10)/10, ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
+    LAST={ pvKwp:pvKwp, battKwh:battKwh, battKw:((a&&+a.battKw>0)?(Math.round(+a.battKw*10)/10):Math.round((+battKwh||0)/_crate()*10)/10), ac:acN, dc:dcN, palen:palen, invTot:invTot, invPvBatt:invPvBatt, rte:BATT_RTE, dod:BATT_DOD, ontkoppelbord:((+battKwh>0)||palen>0) };
     // Kop + kerngetallen + drie tegels (alles onder "Uw Energie-Compas")
     $('a4-meta').textContent=(particulier?'Woning':profiel)+' · '+afnameMwh+' MWh/j · '+_vermTxt+' · '+_spanningEff(toegangKw)+(ev?(' · '+ev+' EV'):'');
     // v0.24.4 (Johan): databron zichtbaar — rekende de analyse op de opgeladen meetgegevens of op een standaardprofiel?
@@ -1618,7 +1624,7 @@
     if($('pk-net'))  $('pk-net').textContent  = (_verbrPct!=null)?('↑ '+_verbrPct+'%'):'—';
     // Investering-blok: enkel hoofdcomponenten (PV, batterij, laadpalen AC/DC, overige) + specs; prijs enkel op het totaal.
     //   Niet herbouwen tijdens "Pas aan" (dan staan er invulvelden die de gebruiker aan het bewerken is).
-    if(!INV_EDIT) _invBlok(pvKwp, battKwh, acN, dcN);
+    if(!INV_EDIT) _invBlok(pvKwp, battKwh, acN, dcN, (a&&+a.battKw)||0);
     $('inv-foot').textContent='Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op uw echte meetgegevens.';
     // v0.19 (Johan): batterijwaarde over 15 jaar (escalerende netkosten). TVT/rendement op de netto-investering (na vermeden verzwaring).
     if($('pay-cap-all')) $('pay-cap-all').textContent = eur(invTot);
