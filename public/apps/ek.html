@@ -1316,15 +1316,15 @@
   //   installatie. nieuwe factuur = CTX.kostNieuw − besparing(a); effectief €/MWh = die factuur / totaal jaarvolume (MWh);
   //   €/100 km = €/MWh × 0,16 kWh/km / 10. Varieert per cel: meer PV/batterij → lagere effectieve €/kWh → lagere €/100 km.
   //   Bij weinig/geen PV valt het terug op ± het dynamische all-in tarief (≈ €3,8). Mag < 0 (netto-inkomst → je verdient aan rijden).
-  // v0.24.57 (Johan): €/100 km = de ZUIVERE laadkost per km, niet de héle factuur ÷ 0,16 kWh/km (die gaf absurde/negatieve
-  //   waarden bij vrachtwagens). Laadkost = laadvolume × all-in laadtarief (dynamisch contract) − het laden-deel van de
-  //   besparing van déze combi (PV/batt verlaagt de effectieve laadkost → lagere €/100 km). Gedeeld door de gevraagde km's.
-  //   Het echte kWh/km zit al in laadMwh (= Σ aantal × km × kWh/km), dus geen 0,16-aanname meer. Mag < 0 (netto-inkomst).
-  function _km100Van(a){ if(!CTX || !(CTX.laadMwh>0) || !(CTX.kmBehoefte>0)) return null;
+  // v0.24.57 (Johan): €/100 km = de NETTO meerkost van de mobiliteit = (nieuwe factuur gebouw+laden ná deze combi) −
+  //   (oude gebouwkost, zónder laden) ÷ de elektrische km's × 100. De nieuwe factuur = de spot-referentie (HM.refKost,
+  //   gebouw+laden) − de besparing van deze combi; de oude gebouwkost = CTX.kostNu (huidige jaarfactuur, enkel gebouw).
+  //   Varieert per cel (meer PV/batterij → lagere nieuwe factuur → lagere €/100 km). Mag < 0 (netto-inkomst).
+  function _km100Van(a){ if(!CTX || !(CTX.kmBehoefte>0)) return null;
     var besp=(a&&+a.besparing)||0;
-    var laadDeelBesp=(CTX.totaalMwh>0)?(besp*(CTX.laadMwh/CTX.totaalMwh)):0;   // proportioneel laden-deel van de combi-besparing
-    var laadKost=(CTX.laadMwh*CTX.laadRateMwh) - laadDeelBesp;                  // pure laadkost na PV/batt
-    return laadKost / CTX.kmBehoefte * 100; }
+    var spotNul=(typeof HM!=='undefined'&&HM&&HM.refKost!=null)?HM.refKost:(CTX.kostNieuw||0);
+    var factuurNa=spotNul - besp;                              // nieuwe factuur gebouw + laden ná deze combi
+    return (factuurNa - (CTX.kostNu||0)) / CTX.kmBehoefte * 100; }   // (nieuwe factuur − oude gebouwkost) / km
   function _hmKleurT(t){ if(t==null||!isFinite(t)) return '#eef2f8'; t=Math.max(0,Math.min(1,t));
     return 'rgb('+Math.round(238-(238-26)*t)+','+Math.round(246-(246-140)*t)+','+Math.round(238-(238-64)*t)+')'; }
   // v0.12.4: gradiënt op de RAND van elke cel (zichtbaar lichtgroen → Energie-Compas-groen). Cel zelf blijft wit.
@@ -1777,9 +1777,14 @@
     var refMwh=(kost>0&&afnameMwh>0)?Math.round(kost/afnameMwh)
       :((ond&&+ond.energiekost_nu_mwh>0)?Math.round(+ond.energiekost_nu_mwh+netHef):Math.round((STUB.kost_nu_eur_mwh||0)+netHef));
     var dynMwh=(ond&&+ond.energiekost_dyn_mwh>0)?+ond.energiekost_dyn_mwh:STUB.kost_dyn_eur_mwh;
-    // Laadvraag (MWh) + elektrische km-behoefte (aantal wagens × jaarkilometrage).
-    var laadMwh=(kpiR&&kpiR.kpi&&+kpiR.kpi.laadvraag_mwh>=0)?+kpiR.kpi.laadvraag_mwh:(ev*STUB.km_per_wagen*STUB.kwh_per_km/1000);
-    var kmBehoefte=ev*STUB.km_per_wagen, kmPerAuto=ev>0?STUB.km_per_wagen:0;
+    // Laadvraag (MWh) + elektrische km-behoefte uit de ECHTE voertuigen (type → km/jaar + kWh/km), niet de personenwagen-default.
+    // v0.24.57 (Johan): vrachtwagen = 150.000 km × 1,1 kWh/km → km-behoefte en laadvolume klopten vroeger niet (ev×15.000×0,16).
+    var _plCTX=(particulier?_pleinenParticulier():_pleinenV2());
+    var kmBehoefte=0, _laadMwhCalc=0;
+    _plCTX.forEach(function(p){ if(String(p.type_plein)==='bezoekers') return; var _a=Math.max(1,+p.aantal||0),_kmj=+p.km_per_jaar||0,_kwhkm=+p.kwh_per_km||STUB.kwh_per_km; kmBehoefte+=_a*_kmj; _laadMwhCalc+=_a*_kmj*_kwhkm/1000; });
+    var laadMwh=(kpiR&&kpiR.kpi&&+kpiR.kpi.laadvraag_mwh>=0)?+kpiR.kpi.laadvraag_mwh:Math.round(_laadMwhCalc*100)/100;
+    var kmPerAuto=(ev>0)?Math.round(kmBehoefte/ev):0;
+    var _avgKwhKm=(kmBehoefte>0)?(laadMwh*1000/kmBehoefte):STUB.kwh_per_km;   // gewogen werkelijk kWh/km (voor de €/100km-referenties)
     var totaalMwh=Math.round((afnameMwh+laadMwh)*100)/100;
     // Twee prijzen (Johan): (1) huidige factuur op het HUIDIGE volume; (2) nieuw slim contract op het TOTALE volume
     //   incl. laden (gebouw + laadplein). Beide all-in (energie + netkosten/heffingen). De stijging = louter het extra volume.
@@ -1794,7 +1799,7 @@
     var km100 = (laadMwh>0 && kmBehoefte>0) ? laadKostReeel/kmBehoefte*100 : 0;
     // Laadplafond op de BESTAANDE aansluiting bij een loadfactor-DOEL van 60% → toont dat er geen verzwaring nodig is.
     var LF_DOEL=0.60;
-    var kmPlafond=Math.max(0, Math.round((aansluitingKw*8760*LF_DOEL - afnameMwh*1000)/STUB.kwh_per_km));
+    var kmPlafond=Math.max(0, Math.round((aansluitingKw*8760*LF_DOEL - afnameMwh*1000)/_avgKwhKm));   // v0.24.57: werkelijk kWh/km (vrachtwagen ≠ 0,16)
     // Laadvenster-aanname (Johan): tot 2 wagens = thuis, 's nachts/daluren; meer dan 2 = wagenpark, overdag (kantooruren).
     var laadVenster = ev>2 ? 'overdag (kantooruren)' : "'s nachts / daluren";
     // Mobiliteitsreferenties (Johan): gewoon laden = CREG-tarief (322 €/MWh); diesel = 2 €/l × ~6 l/100 km = € 12 /100 km.
@@ -1802,7 +1807,7 @@
     //   dieseltarief klopt). Laden zelf is spot-gedispatcht binnen het toegangsvermogen.
     var _inc = (swp && swp.income) || {};
     var CREG_MWH=STUB.creg_eur_mwh;
-    var cregKm100   = Math.round((CREG_MWH + netHef) * STUB.kwh_per_km) / 10;           // €/100 km aan gewoon laden — ALL-IN (energie 322 €/MWh + netkosten), vergelijkbaar met slim laden
+    var cregKm100   = Math.round((CREG_MWH + netHef) * _avgKwhKm) / 10;           // v0.24.57: €/100 km gewoon laden (CREG all-in) op het werkelijke kWh/km
     var dieselKm100 = Math.round(STUB.diesel_l_100km * STUB.diesel_eur_l * 10) / 10;    // €/100 km aan diesel (2 €/l)
     var cregKost   = (+_inc.creg>0) ? Math.round(+_inc.creg) : Math.round(laadMwh*CREG_MWH);
     var dieselKost = Math.round((kmBehoefte/100)*dieselKm100);   // op 2 €/l, consistent met de getoonde referentie
