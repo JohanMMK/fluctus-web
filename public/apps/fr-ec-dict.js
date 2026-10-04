@@ -117,12 +117,55 @@
     'gegevens blijven eigendom van de klant': 'les données restent la propriété du client',
     // Veelgebruikte termen
     'Bedragen exclusief btw, op jaarbasis': 'Montants hors TVA, sur une base annuelle',
-    'Bedragen indicatief, exclusief btw': 'Montants indicatifs, hors TVA'
+    'Bedragen indicatief, exclusief btw': 'Montants indicatifs, hors TVA',
+
+    // Kolomkoppen / hero (segment bevat meer dan enkel het label)
+    'Vandaag + laden': 'Aujourd’hui + recharge',
+    'Vandaag': 'Aujourd’hui',
+
+    // Dynamische component-omschrijvingen (langste eerst door de runtime-sortering)
+    'zonnepanelen én een batterij': 'des panneaux solaires et une batterie',
+    'zonnepanelen + batterij': 'panneaux solaires + batterie',
+    'zonnepanelen': 'panneaux solaires',
+    'een batterij': 'une batterie',
+    'slim laden': 'recharge intelligente',
+    'mét ': 'avec ',
+
+    // P2 — titel + lead (fragmenten tussen de <b>-tags)
+    'Uw energiefactuur: met versus zonder ': 'Votre facture d’énergie : avec contre sans ',
+    'Deze analyse toont wat ': 'Cette analyse montre ce que ',
+    ' u oplevert op een ': ' vous rapporte avec un ',
+    'optimaal dynamisch (spot) contract': 'contrat dynamique (spot) optimal',
+    'uw jaarfactuur ': 'votre facture annuelle ',
+    'zónder installatie': 'sans installation',
+    ' — met het laden aan uw gebouw en de aansluiting die daarvoor nodig is': ' — recharge comprise à votre bâtiment et le raccordement nécessaire',
+    ', slim aangestuurd op de energiemarkt. Alle cijfers komen uit een simulatie op kwartierbasis over een volledig jaar. ':
+      ', pilotés intelligemment sur le marché de l’énergie. Tous les chiffres proviennent d’une simulation au quart d’heure sur une année complète. ',
+    'De overstap van uw huidige contract naar een dynamisch contract behandelen we apart in de onderhandelingsnota (bijlage).':
+      'Le passage de votre contrat actuel à un contrat dynamique est traité séparément dans la note de négociation (annexe).',
+
+    // Hero-bijschrift (cover + p2)
+    'Deze besparing is wat ': 'Cette économie est ce que ',
+    ' oplevert op een ': ' rapporte avec un ',
+    ', becijferd op kwartierbasis over een volledig jaar.': ', calculé au quart d’heure sur une année complète.',
+    'De overstap van uw huidige contract naar zo’n dynamisch contract wordt apart behandeld in de onderhandelingsnota (bijlage).':
+      'Le passage de votre contrat actuel vers un tel contrat dynamique est traité séparément dans la note de négociation (annexe).',
+
+    // Cover-subtitel staart
+    'becijferd op kwartierbasis over een volledig jaar': 'calculé au quart d’heure sur une année complète',
+
+    // Knoppen (segment bevat een icoon → substring i.p.v. exact)
+    'PDF opslaan': 'Enregistrer le PDF',
+    'Mail mij dit rapport': 'Recevoir ce rapport par e-mail',
+    'Toon rapport': 'Afficher le rapport',
+    'Print': 'Imprimer'
   };
 
   // ── RULES: dynamische zinnen met markup/getallen (regex over de volle HTML) ──────────────────
   window.EC_FR_RULES = [
-    // Cover-subtitel "Wat zonnepanelen ... voor u betekent/betekenen — becijferd ..."
+    // Cover-subtitel "Wat <components> voor u betekent/betekenen — ..." → scaffold NL→FR,
+    //   de <components> ($1) worden daarna door de DICT-segmentpass vertaald (zonnepanelen enz.).
+    { re: /Wat (.+?) voor u beteken(?:t|en)/g, fr: 'Ce que $1 représente pour vous' },
     { re: /becijferd op kwartierbasis over\s*<br>\s*een volledig jaar/gi,
       fr: 'calculé au quart d’heure sur<br>une année complète' },
     { re: /Alles op kwartierbasis over een volledig jaar\./g,
