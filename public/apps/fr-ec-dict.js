@@ -148,8 +148,11 @@
     'Deze besparing is wat ': 'Cette économie est ce que ',
     ' oplevert op een ': ' rapporte avec un ',
     ', becijferd op kwartierbasis over een volledig jaar.': ', calculé au quart d’heure sur une année complète.',
-    'De overstap van uw huidige contract naar zo’n dynamisch contract wordt apart behandeld in de onderhandelingsnota (bijlage).':
+    'De overstap van uw huidige contract naar zo\'n dynamisch contract wordt apart behandeld in de onderhandelingsnota (bijlage).':
       'Le passage de votre contrat actuel vers un tel contrat dynamique est traité séparément dans la note de négociation (annexe).',
+    // CN_PROSE-varianten (volledige zinsdelen → juiste FR-grammatica; langste eerst)
+    'zonnepanelen, een batterij en slim laden': 'des panneaux solaires, une batterie et la recharge intelligente',
+    ' en slim laden': ' et la recharge intelligente',
 
     // Cover-subtitel staart
     'becijferd op kwartierbasis over een volledig jaar': 'calculé au quart d’heure sur une année complète',
@@ -165,7 +168,8 @@
   window.EC_FR_RULES = [
     // Cover-subtitel "Wat <components> voor u betekent/betekenen — ..." → scaffold NL→FR,
     //   de <components> ($1) worden daarna door de DICT-segmentpass vertaald (zonnepanelen enz.).
-    { re: /Wat (.+?) voor u beteken(?:t|en)/g, fr: 'Ce que $1 représente pour vous' },
+    { re: /Wat (.+?) voor u betekenen/g, fr: 'Ce que $1 représentent pour vous' },
+    { re: /Wat (.+?) voor u betekent/g, fr: 'Ce que $1 représente pour vous' },
     { re: /becijferd op kwartierbasis over\s*<br>\s*een volledig jaar/gi,
       fr: 'calculé au quart d’heure sur<br>une année complète' },
     { re: /Alles op kwartierbasis over een volledig jaar\./g,
