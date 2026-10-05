@@ -51,7 +51,14 @@
     'Mail mij dit rapport': 'Recevoir ce rapport par e-mail',
     'Toon rapport': 'Afficher le rapport',
     // QC-kop
-    'Kwaliteitscontrole van deze studie.': 'Contrôle qualité de cette étude.'
+    'Kwaliteitscontrole van deze studie.': 'Contrôle qualité de cette étude.',
+    // Toegangsvermogen / piekvermogen (v0.15.9)
+    'Toegangsvermogen / piekvermogen': 'Puissance de raccordement / puissance de pointe',
+    'Bestaande aansluiting': 'Raccordement existant',
+    'Nodig · onbeheerst laden': 'Nécessaire · recharge non pilotée',
+    'Met installatie': 'Avec installation',
+    'Om de dagelijkse km’s te laden moet uw aansluiting de piek aankunnen. Onbeheerst laden — alle voertuigen samen op vol vermogen — zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.':
+      'Pour recharger les km quotidiens, votre raccordement doit encaisser la pointe. Une recharge non pilotée — tous les véhicules à pleine puissance en même temps — ferait fortement grimper le raccordement. L’installation lisse cette pointe.'
   };
 
   // ── DICT: zinnen/fragmenten (substring binnen een tekstsegment) ─────────────────────────────
@@ -161,6 +168,17 @@
     'PDF opslaan': 'Enregistrer le PDF',
     'Mail mij dit rapport': 'Recevoir ce rapport par e-mail',
     'Toon rapport': 'Afficher le rapport',
+    'Print': 'Imprimer',
+    // Toegangsvermogen / piekvermogen — noot-fragmenten (v0.15.9)
+    ' — zo laadt u 100% van de jaar-km’s zonder de aansluiting te verzwaren': ' — vous rechargez ainsi 100 % des km annuels sans renforcer le raccordement',
+    ', wat een eenmalige verzwaring van ± ': ', ce qui évite un renforcement unique de ± ',
+    ' kVA, binnen uw bestaande aansluiting van ': ' kVA, dans les limites de votre raccordement existant de ',
+    ' kVA bij onbeheerst laden': ' kVA en recharge non pilotée',
+    'De netpiek blijft op ± ': 'La pointe réseau reste à ± ',
+    ' kVA, tegenover ': ' kVA, contre ',
+    ' vermijdt.': '.',
+    'geen verzwaring': 'pas de renforcement',
+    'LS→MS': 'BT→MT',
     'Print': 'Imprimer'
   };
 
