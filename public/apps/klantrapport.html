@@ -479,27 +479,28 @@ function _combiSubBr(){
     }
     h+='</div>';
   }
-  // v0.15.7 (Johan): TOEGANGSVERMOGEN / PIEKVERMOGEN (kVA) — moet de aansluiting verzwaard worden om de km's te laden?
-  //   Zelfde kengetal als "Piekverbruik (kVA)" op het resultatenscherm. cos φ ≈ 1 (DC-laden) → kW ≈ kVA. Enkel bij een laadplein.
+  // v0.15.8 (Johan): TOEGANGSVERMOGEN / PIEKVERMOGEN (kVA) — moet de aansluiting verzwaard worden om de km's te laden?
+  //   Zelfde kengetal als "Piekverbruik (kVA)" op het resultatenscherm. Pieken uit de afname-heatmaps (D.heat), cos φ ≈ 1 → kW ≈ kVA. Enkel bij een laadplein.
   if(HAS_LP){
-    var _PKv=D.piek||{}, _BWv=D.battwaarde||{};
-    var _vBest=Math.round(+_PKv.input_kw||(af&&+af.piek_kw)||0);                 // bestaande aansluiting (toegangsvermogen)
-    var _vOnb=Math.round(+_PKv.onbeheerst_kw||+_PKv.sim_voor_kw||0);             // nodig bij onbeheerst laden (dom laden, vol vermogen)
-    var _vNa=Math.round(+_PKv.sim_na_kw||0);                                     // piek met installatie
-    var _vVerm=Math.round(+_BWv.verzwaring||0);                                  // vermeden eenmalige verzwaring (€)
-    var _msG=63;                                                                 // LS→MS-grens (kVA), zelfde grens als de sim
-    if(_vOnb>0){
+    var _HTv=D.heat||{}, _A2=D.aansluiting||{}, _af2=_A2.afname||{}, _BWv=D.battwaarde||{};
+    function _piekVan(hh){ if(!hh) return 0; var m=hh.mat||hh, p=0; (m||[]).forEach(function(r){ (r||[]).forEach(function(v){ if(+v>p) p=+v; }); }); return Math.round(p); }
+    var _vBest=Math.round(+_af2.piek_kw||(D.piek&&+D.piek.input_kw)||0);               // bestaande aansluiting (toegangsvermogen)
+    var _vOnb=_piekVan(_HTv.afname_laden_onbeheerst)||_piekVan(_HTv.afname_laden_zonder); // nodig bij onbeheerst laden (dom laden)
+    var _vNa=_piekVan(_HTv.afname_met_sturing);                                        // piek met installatie (slim laden + batterij)
+    var _vVerm=Math.round(+_BWv.verzwaring||0);                                        // vermeden eenmalige verzwaring (€)
+    var _msG=63;                                                                       // LS→MS-grens (kVA), zelfde grens als de sim
+    if(_vOnb>0 && _vNa>0){
       var _vBinnen=(_vBest<=0)||(_vNa<=_vBest*1.02);
       h+='<h2>Toegangsvermogen / piekvermogen</h2>';
       h+='<p class="lead" style="margin-top:0">Om de dagelijkse km\u2019s te laden moet uw aansluiting de piek aankunnen. '+
          'Onbeheerst laden (alle voertuigen samen op vol vermogen) zou de aansluiting fors moeten optrekken. '+CN_CAP+' vlakt die piek af.</p>';
       h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
-           '<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_vBest,0)+'</div><span class="u">kVA</span></div>'+
+           (_vBest>0?('<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_vBest,0)+'</div><span class="u">kVA</span></div>'):'')+
            '<div class="box"><span class="l">Nodig \u00b7 onbeheerst laden</span><div class="v">'+_num(_vOnb,0)+'</div><span class="u">kVA'+((_vOnb>_msG&&_vBest>0&&_vBest<=_msG)?' \u00b7 LS\u2192MS':'')+'</span></div>'+
            '<div class="box win"><span class="l">Met '+CS+'</span><div class="v win">'+_num(_vNa,0)+'</div><span class="u">kVA'+(_vBinnen?' \u00b7 geen verzwaring':'')+'</span></div>'+
          '</div>';
       h+='<p class="note">'+CN_CAP+' houdt de netpiek op \u00b1 '+_num(_vNa,0)+' kVA'+
-         (_vBinnen?(', binnen uw bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden'))+
+         (_vBest>0?(_vBinnen?(', binnen uw bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden')):'')+
          ' \u2014 zo laadt u 100% van de jaar-km\u2019s zonder de aansluiting te verzwaren'+
          ((_vVerm>0)?(', wat een eenmalige verzwaring van \u00b1 '+eur(_vVerm)+' vermijdt'):'')+'.</p>';
     }
