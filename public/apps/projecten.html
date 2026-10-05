@@ -169,6 +169,7 @@
         var mk = p.mandaat_status==='actief'||p.mandaat_status==='geleverd' ? 'p-ok' : (p.mandaat_status==='adres_mismatch'||p.mandaat_status==='fout'?'p-mis':'p-wacht');
         h+='<span class="pill '+mk+'">mandaat: '+esc(p.mandaat_status)+(p.mandaat_eans>1?(' ('+p.mandaat_eans+')'):'')+'</span>';
       }
+      if((p.mandaat_status==='actief'||p.mandaat_status==='geleverd') && !p.profiel_afname) h+='<span class="pill p-wacht">📥 kwartierdata</span>';
       h+= p.studies_count>0 ? '<span class="pill p-info">'+p.studies_count+' studie'+(p.studies_count>1?'s':'')+'</span>' : '';
       if(p.ek_input) h+='<span class="pill p-ok">✍ input op EK</span>';
       else if(p.ek_bezocht) h+='<span class="pill p-info">👁 bezocht op EK'+(p.ek_bezoek_count>1?(' ('+p.ek_bezoek_count+')'):'')+'</span>';
@@ -261,10 +262,12 @@
       if(eans.length){
         h+='<div class="sub" style="margin:12px 0 4px;font-weight:700;color:var(--navy2)">Mandaat-acties per EAN</div>';
         eans.forEach(function(en,i){
-          h+='<button class="m-act" onclick="eanActie(\''+esc(id)+'\','+i+')"><b>'+esc(en.status)+'</b> · <span class="code">'+esc(en.ean)+'</span>'+(en.richting?(' · '+esc(en.richting)):'')+' — acties…</button>';
+          var _kw=(en.status==='actief' && !en.kwartierdata_aanwezig)?' · <span style="color:#b5600a">📥 kwartierdata op te halen</span>':'';
+          h+='<button class="m-act" onclick="eanActie(\''+esc(id)+'\','+i+')"><b>'+esc(en.status)+'</b> · <span class="code">'+esc(en.ean)+'</span>'+(en.richting?(' · '+esc(en.richting)):'')+_kw+' — acties…</button>';
         });
       } else {
         h+='<div class="sub" style="margin:12px 0 4px">Nog geen mandaat gekoppeld aan dit project.</div>'+
+           '<button class="m-act" onclick="mandaatWachtrij(\''+esc(id)+'\')">➕ Zet mandaat-aanvraag in wachtrij</button>'+
            '<button class="m-act" onclick="_flxOpenFluvius(FLXModal.AANVRAAG,\''+esc(p.naam||'Mijn Fluvius')+'\')">📶 Open Mijn Fluvius — mandaat aanvragen</button>';
       }
       h+=(p.archief
@@ -274,6 +277,20 @@
       m.innerHTML=h; m.style.display='flex';
     };
     window.eanActie=function(id,i){ var arr=EANMAP[id]||[]; if(arr[i]) FLXModal.open(arr[i]); };
+    // v0.6.0 (Johan): mandaat-aanvraag in de server-wachtrij zetten → nadien "werk de Fluvius-wachtrij af" (Claude drijft Mijn Fluvius).
+    window.mandaatWachtrij=async function(id){
+      var ean=(prompt('EAN (18 cijfers) om een mandaat voor aan te vragen:')||'').replace(/\D/g,'');
+      if(!ean) return;
+      if(!/^\d{18}$/.test(ean)){ alert('Een EAN telt 18 cijfers.'); return; }
+      try{
+        var r=await fetch(PROXY+'/api/mandaat/aanvraag',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:id, eans:[ean] }) });
+        var j=await r.json().catch(function(){return {};});
+        if(!r.ok){ alert('Kon niet in wachtrij zetten: '+(j.error||r.status)); return; }
+        alert('✔ In de Fluvius-wachtrij gezet'+(j.nieuw!=null?(' ('+j.nieuw+' nieuw'+(j.gekoppeld?', '+j.gekoppeld+' gekoppeld':'')+')'):'')+'. Vraag Claude: "werk de Fluvius-wachtrij af".');
+        try{ _flxSluit(); }catch(e){}
+        await laad();
+      }catch(e){ alert('Fout: '+e.message); }
+    };
     window.archiveer = async function(id, archived){
       if(archived && !confirm('Project '+id+' archiveren? Het verdwijnt uit het actieve overzicht (herstelbaar via "toon archief").')) return;
       try{
