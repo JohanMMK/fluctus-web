@@ -266,8 +266,11 @@
           h+='<button class="m-act" onclick="eanActie(\''+esc(id)+'\','+i+')"><b>'+esc(en.status)+'</b> · <span class="code">'+esc(en.ean)+'</span>'+(en.richting?(' · '+esc(en.richting)):'')+_kw+' — acties…</button>';
         });
       } else {
-        h+='<div class="sub" style="margin:12px 0 4px">Nog geen mandaat gekoppeld aan dit project.</div>'+
-           '<button class="m-act" onclick="mandaatWachtrij(\''+esc(id)+'\')">➕ Zet mandaat-aanvraag in wachtrij</button>'+
+        var _fe=(p.factuur_eans||[]);
+        h+= (_fe.length
+              ? '<div class="sub" style="margin:12px 0 4px">EAN uit factuur: '+_fe.map(function(x){return '<span class="code">'+esc(x.ean)+'</span>'+(x.richting?(' ('+esc(x.richting)+')'):'');}).join(', ')+'</div>'
+              : '<div class="sub" style="margin:12px 0 4px">Nog geen mandaat gekoppeld · geen EAN uit de factuur.</div>')+
+           '<button class="m-act" onclick="mandaatWachtrij(\''+esc(id)+'\')">➕ Zet mandaat-aanvraag in wachtrij'+(_fe.length?(' ('+_fe.length+' EAN)'):'')+'</button>'+
            '<button class="m-act" onclick="_flxOpenFluvius(FLXModal.AANVRAAG,\''+esc(p.naam||'Mijn Fluvius')+'\')">📶 Open Mijn Fluvius — mandaat aanvragen</button>';
       }
       h+=(p.archief
@@ -277,13 +280,21 @@
       m.innerHTML=h; m.style.display='flex';
     };
     window.eanActie=function(id,i){ var arr=EANMAP[id]||[]; if(arr[i]) FLXModal.open(arr[i]); };
-    // v0.6.0 (Johan): mandaat-aanvraag in de server-wachtrij zetten → nadien "werk de Fluvius-wachtrij af" (Claude drijft Mijn Fluvius).
+    // v0.6.1 (Johan): mandaat-aanvraag in de server-wachtrij → nadien "werk de Fluvius-wachtrij af" (Claude drijft Mijn Fluvius).
+    //   EAN('s) komen uit de factuur (p.factuur_eans, server v15.237); geen factuur-EAN → prompt-fallback.
     window.mandaatWachtrij=async function(id){
-      var ean=(prompt('EAN (18 cijfers) om een mandaat voor aan te vragen:')||'').replace(/\D/g,'');
-      if(!ean) return;
-      if(!/^\d{18}$/.test(ean)){ alert('Een EAN telt 18 cijfers.'); return; }
+      var p=projById(id);
+      var items=((p&&p.factuur_eans)||[]).map(function(x){return {ean:String((x&&x.ean)||'').replace(/\D/g,''), richting:(x&&x.richting)||null};}).filter(function(x){return /^\d{18}$/.test(x.ean);});
+      if(items.length){
+        if(!confirm('Mandaat aanvragen voor '+items.length+' EAN uit de factuur:\n'+items.map(function(x){return x.ean+(x.richting?(' ('+x.richting+')'):'');}).join('\n'))) return;
+      } else {
+        var ean=(prompt('Geen EAN uit de factuur gevonden. Geef de EAN (18 cijfers):')||'').replace(/\D/g,'');
+        if(!ean) return;
+        if(!/^\d{18}$/.test(ean)){ alert('Een EAN telt 18 cijfers.'); return; }
+        items=[{ean:ean, richting:null}];
+      }
       try{
-        var r=await fetch(PROXY+'/api/mandaat/aanvraag',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:id, eans:[ean] }) });
+        var r=await fetch(PROXY+'/api/mandaat/aanvraag',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ project_id:id, eans:items }) });
         var j=await r.json().catch(function(){return {};});
         if(!r.ok){ alert('Kon niet in wachtrij zetten: '+(j.error||r.status)); return; }
         alert('✔ In de Fluvius-wachtrij gezet'+(j.nieuw!=null?(' ('+j.nieuw+' nieuw'+(j.gekoppeld?', '+j.gekoppeld+' gekoppeld':'')+')'):'')+'. Vraag Claude: "werk de Fluvius-wachtrij af".');
