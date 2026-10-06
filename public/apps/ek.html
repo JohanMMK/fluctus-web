@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.32.0 (2026-10-06, Johan) — OPEN OP HET INVOERSCHERM: ?case=<token>&adv=1&invoer=1 (de "Open"-knop in
+<!-- ek.html v0.33.0 (2026-10-06, Johan) — TWEE BESLISSINGEN: rooster-TVT/rendement/investering rekenen nu op PV+batterij ALLEEN (netto vermeden verzwaring), consistent over elke cel via de backend-split (capex_pvbatt) → de €168k-sprong op de aanbevolen cel is weg. Investering-KPI = "Investering PV + batterij"; _interpCel interpoleert capex_pvbatt/capex_laadpalen; _battValue splitst de sturingskost (PV+batt vs laadpalen) en geeft invPvBatt/invLaadpalen/opex_jaar mee; _klantrapportPayload draagt battwaarde (PV+batt, voor het 15-jaar-plan) + een twee_beslissingen-blok (elektrificatie vs PV/batterij) voor het rapport-hoofdstuk. ek.html v0.32.0 (2026-10-06, Johan) — OPEN OP HET INVOERSCHERM: ?case=<token>&adv=1&invoer=1 (de "Open"-knop in
      projecten.html) landt meteen op het voorgevulde invoerscherm — géén "resultaat wordt geladen"-overlay en géén
      automatische doorrekening. Doorrekenen gebeurt pas bij "Start mijn simulatie". Zonder invoer=1 blijft het oude gedrag
      (direct op resultaat) ongewijzigd, bv. de "resultaat"-link in de project-actie-modal.
@@ -1156,17 +1156,23 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _verzwVoor=(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0;
     var _verzwNa=(+a.verzwaring_eenmalig||0);
     var verzwaring=Math.max(0, _verzwVoor - _verzwNa);
-    var invTot=_invVan(a), netInv=Math.max(0, invTot - verzwaring);
+    var invTot=_invVan(a);   // all-in (PV+batt+palen) — voor weergave en opex-basis
+    // v0.33 (Johan): TVT/rendement op PV + batterij alleen (de PV/batterij-beslissing), netto van de vermeden verzwaring.
+    //   De laadpalen horen bij de elektrificatie-beslissing en verwateren de PV/batt-TVT niet. Backend-split (capex_pvbatt);
+    //   een custom cel (geen backend-anchor) valt terug op de frontend-prijszetting _invPvBattVan.
+    var _invPvb=(a && a.capex_pvbatt!=null)?(+a.capex_pvbatt||0):(_invPvBattVan(a)||0);
+    var netInv=Math.max(0, _invPvb - verzwaring);
     // rest → inflatie; netkosten-deel (besp_net) + vermeden capaciteitstarief → sneller netkostenpad + 2029.
     // v0.24.27 (Johan): exploitatiekost PRO-RATA over het rooster — €/jaar naar rato van de investering van elke cel (net als de prijs).
-    var _opexJaar=(OPEX_RATIO>0)?(OPEX_RATIO*(_invVan(a)||0)):((a._custom&&a._opex!=null)?(+a._opex||0):(+OPEX_JAAR||0));
+    var _opexJaar=(OPEX_RATIO>0)?(OPEX_RATIO*(_invPvb||0)):((a._custom&&a._opex!=null)?(+a._opex||0):(+OPEX_JAAR||0));   // v0.33 (Johan): onderhoud pro-rata op de PV+batt-investering (niet op de laadpalen)
     // v0.30.0 (Johan): AUTOMATISCHE jaarlijkse sturingskost bovenop de (manuele) exploitatiekost — consistent met het klantrapport.
     //   4 €/kVA/jaar voor PV + batterij; laadpalen AC 30 / DC 300 €/paal/jaar. Per cel op diens eigen PV/batt/palen.
     var _pvKvaCell=Math.round(_anchorKwp(a)*10)/10;
     var _acN=(a._custom&&a._ac!=null)?(+a._ac||0):(INV_OV?(+INV_OV.ac||0):_acDefault());
     var _dcN=(a._custom&&a._dc!=null)?(+a._dc||0):(INV_OV?(+INV_OV.dc||0):_dcDefault());
-    var _sturKost=Math.round(4*((_pvKvaCell>0?_pvKvaCell:0)+(battKw>0?battKw:0)) + 30*_acN + 300*_dcN);
-    _opexJaar=(+_opexJaar||0)+_sturKost;
+    var _sturPvb=Math.round(4*((_pvKvaCell>0?_pvKvaCell:0)+(battKw>0?battKw:0)));   // v0.33: sturingskost PV + batterij
+    var _sturLp=Math.round(30*_acN + 300*_dcN);   // v0.33: sturingskost laadpalen — elektrificatie-opex, apart (niet in de PV/batt-TVT)
+    _opexJaar=(+_opexJaar||0)+_sturPvb;   // v0.33 (Johan): enkel de PV/batt-opex telt in de PV/batt-cashflow
     // v0.24.48 (Johan 02-10): BESPARING = FACTUURVERGELIJKING. De synthetische capJ-optelling (energie+capJ) week af van de
     //   factuurvergelijking (NUL−OPT = a.besparing) en dook zelfs op bij PV-only/zonder batterij (stale pCharge). We rekenen de
     //   besparing nu UITSLUITEND op de factuur: bespJaar1 = energie (= NUL−OPT), cashflow op bespRest + besp_net (géén +capJ).
@@ -1176,8 +1182,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;   // gemiddeld rendement/jaar over 15 jaar
+    // v0.33 (Johan): capex_laadpalen (elektrificatie) ook meegeven — voor het "twee beslissingen"-hoofdstuk en de gesplitste KPI.
+    var _invLp=(a && a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0;
     return { energie:energie, besp_net:bespNet, besp_rest:bespRest, cap:0, cap_info:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
-             invTot:invTot, netInv:netInv, bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend };
+             invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend };
   }
   function _bespTot(a){ var v=_battValue(a); return v?v.bespJaar1:((a&&+a.besparing)||0); }   // besparing jaar 1 = factuurvergelijking (NUL−OPT)
   function _rendNetto(a){ var v=_battValue(a); return v?v.rend:null; }   // v0.19: gemiddeld rendement/jaar over 15 jaar
@@ -1349,7 +1357,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _verzw=bil(function(c){return +c.verzwaring_eenmalig||0;});   // v0.24.53 (Johan): eenmalige aansluitingskost (na) interpoleren uit de ankers
     var _piek=bil(function(c){return +c.jaarpiek||0;});   // v0.24.53 (Johan): piekverbruik (kVA) interpoleren uit de ankers
     var _aansl=bil(function(c){return +c.aansluiting_totaal_kw||0;});   // v0.31 (Johan): totale contractuele aansluiting (incl. energie-floor) → LS/MS-grens in het rooster
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw),jaarpiek:Math.round(_piek),aansluiting_totaal_kw:Math.round(_aansl) }; }
+    var _capPvb=bil(function(c){return +c.capex_pvbatt||0;});   // v0.33 (Johan): PV+batterij-capex (TVT/rendement-noemer) interpoleren uit de ankers
+    var _capLp=bil(function(c){return +c.capex_laadpalen||0;});   // v0.33 (Johan): laadpalen-capex (elektrificatie) interpoleren uit de ankers
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),capex_pvbatt:Math.round(_capPvb),capex_laadpalen:Math.round(_capLp),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw),jaarpiek:Math.round(_piek),aansluiting_totaal_kw:Math.round(_aansl) }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -1399,6 +1409,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   DC-paal (vrachtwagens) telt nu óók mee in de rooster-investering (was dc=0). Rooster = rapport = detail.
     return _invTotMajor(pvKwp, battKwh, _acDefault(), _dcDefault()).tot; }
   function _invPvBattVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invPvBattVoor(pvKwp, battKwh); } // PV+batterij (TVT/ROI)
+  // v0.33 (Johan): PV+batterij-investering uit de backend-split (consistent, geen afhankelijkheid van EV_ROWS/palentelling → fixt de €168k).
+  function _invPvbCell(a){ if(!a) return null; return (a.capex_pvbatt!=null)?(+a.capex_pvbatt||0):(_invPvBattVan(a)||0); }
+  // v0.33 (Johan): elektrificatie-investering = laadpalen + de aansluiting/verzwaring die het laden sowieso vraagt (referentie, zonder PV/batt).
+  function _invElekCell(a){ if(!a) return null; var lp=(a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0; var vzVoor=(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0; return Math.round(lp+vzVoor); }
   function _tvtVan(a){ var v=_battValue(a); return v?v.tvt:null; }   // v0.19: 15-jaar break-even (escalerende netkosten)
   function _ekMilDot(n){ return String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }   // v0.24.50 (Johan): duizendpunt, geen decimalen (1.305)
   function _ekBattKey(kw,kwh){ return (Math.round(+kw||0))*100000+(Math.round(+kwh||0)); }   // v0.24.50: unieke rooster-rij-sleutel per (kW/kWh)-staffel
@@ -1411,7 +1425,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     rendement:   { val:function(a){return _rendNetto(a);}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },   // v0.16: all-in
     besparing:   { val:function(a){return _bespTot(a);}, fmt:_fmtEurK, goedHoog:true },   // v0.16: totale besparing/jaar (energie + diesel→elektrisch)
     factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?(CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing (mag < 0 → netto-inkomst)
-    investering: { val:function(a){return _invVan(a);}, fmt:_fmtEurK, goedHoog:false },
+    investering: { val:function(a){return _invPvbCell(a);}, fmt:_fmtEurK, goedHoog:false },   // v0.33 (Johan): PV + batterij alleen (de TVT-noemer); elektrificatie staat apart in de noot + het rapport
     cycli:       { val:function(a){ return (a&&a.cycli!=null)?+a.cycli:null; }, fmt:function(v){return Math.round(v)+'/j';}, goedHoog:false },   // v0.13.11: batterijcycli/jaar
     // combi-AFHANKELIJK via de factuur-na-PV+batterij: de PV/batterij-besparing wordt aan het rijden toegerekend (Johan)
     km100:       { val:function(a){ return _km100Van(a); }, fmt:function(v){return '€'+v.toFixed(1).replace('.',',');}, goedHoog:false },   // v0.24.37 (Johan): effectief €/kWh uit de NIEUWE factuur (na PV+batt van deze combi) × 0,16 kWh/km → kost van elke extra 100 km op het plein; varieert nu per combi
@@ -3043,7 +3057,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(_heeftLaden()) order.splice(4,0,'km100');
       if(H.lpMwh>0) order.push('kmdekking');   // v0.24.47 (Johan §6c): km-dekking-rooster in het rapport bij een laadplein
       if(H.lpMwh>0) order.push('piek');       // v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
-      var titel={tvt:'Terugverdientijd totaal (jaar)',rendement:'Rendement totaal (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Totale investering (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)'};
+      var titel={tvt:'Terugverdientijd PV + batterij (jaar)',rendement:'Rendement PV + batterij (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)'};
       var best=H.sel||H.best||{};   // v0.24.15 (Johan): de stippellijn markeert de GEKOZEN oplossing van het rapport (H.sel), niet de eerst-voorgestelde beste (H.best)
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
       var batt_as=rows.map(function(r){return H.rowLabel?H.rowLabel(r):String(r);});
@@ -3094,12 +3108,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(_mfull.overige) posten.push({label:'Overige (kabel, ontkoppelbord, toebehoren)',bedrag:_mfull.overige});
     // v0.24.22 (Johan): exacte rapport-waarden voor de GEKOZEN cel in de kengetallen-bijlage, zodat die cel EXACT gelijk is aan
     //   de cover + het investeringsoverzicht (besparing = NUL−OPT, jaarfactuur = OPT.saldo, cycli = j.cycli, investering = _mfull.tot).
+    // v0.33 (Johan): _bv vooraan → de kengetallen-grid-override voor de gekozen cel gebruikt de PV+batterij-investering
+    //   (consistent met het rooster, laadpalen eruit → geen €168k-sprong meer).
+    var _bv=_battValue(sel)||{energie:Math.round(sel.besparing||0),besp_net:0,cap:0,verzwaring:0,invPvBatt:0,invLaadpalen:0,netInv:0,tvt:null,rend:null,opex_jaar:(+OPEX_JAAR||0)};
     var _kgNul=(j&&j.factuur&&j.factuur.nul)||{}, _kgOpt=(j&&j.factuur&&j.factuur.opt)||{};
     var _kgExact={
       besparing: (+_kgNul.saldo>0 && +_kgOpt.saldo>=0) ? Math.round((+_kgNul.saldo)-(+_kgOpt.saldo)) : null,
       factuur_na: (+_kgOpt.saldo>=0) ? Math.round(+_kgOpt.saldo) : null,
       cycli: (j&&j.cycli!=null && isFinite(+j.cycli)) ? Math.round(+j.cycli) : null,
-      investering: (_mfull&&+_mfull.tot>0) ? Math.round(+_mfull.tot) : null
+      investering: (+_bv.invPvBatt>0) ? Math.round(+_bv.invPvBatt) : null   // v0.33 (Johan): PV+batterij (gelijk aan het rooster)
     };
     // v0.24.49 (Johan 02-10): ÉÉN BRON VOOR DE BESPARING = de factuurvergelijking (j.factuur voor/na, Elia-correct). Het plan
     //   rekende de jaar-1 besparing uit de SWEEP-anker (_bv.energie = sel.besparing), die op een Elia-aansluiting volumetrisch
@@ -3107,23 +3124,47 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   RECHTSTREEKS uit j.factuur: energie = NUL.saldo − OPT.saldo (jaar 1), besp_net = NUL.netkosten − OPT.netkosten (de
     //   net-component, die in latere jaren op het snellere netpad indexeert), besp_rest = de rest (inflatie). Zo is cover = P2 =
     //   plan jaar 1, en het plan projecteert exact dezelfde besparing vooruit (klantrapport besp1 = energie − OPEX).
-    var _bv=_battValue(sel)||{energie:Math.round(sel.besparing||0),besp_net:0,cap:0,verzwaring:0};
     var _fN=(j&&j.factuur&&j.factuur.nul)||{}, _fO=(j&&j.factuur&&j.factuur.opt)||{};
     var _bespF=(_fN.saldo!=null&&_fO.saldo!=null)?Math.round((+_fN.saldo||0)-(+_fO.saldo||0)):Math.round(_bv.energie||0);
     var _bespNetF=(_fN.netkosten!=null&&_fO.netkosten!=null)?Math.round((+_fN.netkosten||0)-(+_fO.netkosten||0)):Math.round(_bv.besp_net||0);
     _bespNetF=Math.max(0,Math.min(_bespNetF,_bespF));
-    var battwaarde={ invTot:_mfull.tot, verzwaring:_bv.verzwaring, netInv:Math.max(0,_mfull.tot-_bv.verzwaring),
+    // v0.33 (Johan): het 15-jaar-plan draait op de PV+batterij-beslissing (netto van vermeden verzwaring, opex = PV/batt-deel).
+    //   De laadpalen/aansluiting zijn een aparte eenmalige elektrificatie-kost (zie twee_beslissingen) en verwateren de TVT niet.
+    var battwaarde={ invTot:Math.round(_bv.invPvBatt), verzwaring:_bv.verzwaring, netInv:Math.round(_bv.netInv),
       energie:_bespF, besp_net:_bespNetF, besp_rest:(_bespF-_bespNetF), cap:0, shaved:_bv.shaved||0, pCharge:_bv.pCharge||0,
       horizon:NET_CFG.horizon_jaar, inflatie_pct:NET_CFG.inflatie_pct, net_extra_pct:NET_CFG.net_extra_pct,
       net_dubbel_jaar:NET_CFG.net_dubbel_jaar, net_dubbel_factor:NET_CFG.net_dubbel_factor, cap_eur_kw_jaar:(NET_TARIEF&&NET_TARIEF.cap_eur_kw_jaar)||0,
-      opex_jaar:(OPEX_RATIO>0?Math.round(OPEX_RATIO*(+_mfull.tot||0)):(+OPEX_JAAR||0)) };   // v0.24.27 (Johan): JAARLIJKSE exploitatiekost (pro-rata op de gekozen combi) → 15j-plan trekt ze jaarlijks af
+      opex_jaar:(OPEX_RATIO>0?Math.round(OPEX_RATIO*(+_bv.invPvBatt||0)):(+OPEX_JAAR||0)) };   // v0.33 (Johan): ONDERHOUD pro-rata op PV+batt; de sturingskost (PV+batt) telt het plan er zelf bij (geen dubbeltelling)
     return {
       project_id: STATE_CODE||'', datum: datum,
       klant: { naam: STATE_KLANT||'', btw: STATE_BTW||'' },
       creg_eur_per_mwh: 322,
       huidig_all_in_jaar: Math.round(+C.kostNu||0),   // v0.24.9 (Johan): de ECHTE all-in jaarfactuur (excl btw) → "uw huidige contract" = dit bedrag
       factuur: j.factuur, heat: j.heat, combi: j.combi, battwaarde: battwaarde,
-      financieel: Object.assign({ energieprijs_stijging_pct:3, posten:posten }, j.financieel||{}, { investering:_mfull.tot }),
+      financieel: Object.assign({ energieprijs_stijging_pct:3, posten:posten }, j.financieel||{}, {
+        investering:_mfull.tot,                                           // all-in (cover "totale investering")
+        investering_pvbatt:Math.round(_bv.invPvBatt),                     // v0.33 (Johan): PV+batterij (de TVT-noemer)
+        investering_laadpalen:Math.round((+_mfull.acE||0)+(+_mfull.dcE||0)),
+        verzwaring_vermeden:Math.round(_bv.verzwaring||0) }),
+      // v0.33 (Johan): "Uw investering in twee beslissingen" — elektrificatie (palen+aansluiting vs diesel) los van PV/batterij.
+      //   De TVT/rendement komen uit het 15-jaar-plan (battwaarde, PV+batt); hier staan de bedragen die het rapport-hoofdstuk toont.
+      twee_beslissingen: {
+        elektrificatie: {
+          laadpalen_eur: Math.round((+_mfull.acE||0)+(+_mfull.dcE||0)),
+          ac_aantal: acAantal, dc_aantal: dcAantal,
+          aansluiting_eur: Math.round((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0),
+          subtotaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0)),
+          diesel_eur_100km: (j&&+j.diesel_eur_100km>0)?+j.diesel_eur_100km:null
+        },
+        pvbatterij: {
+          pv_kwp: pvKwp, batt_kw:(+sel.battKw||0), batt_kwh:battKwh,
+          investering_bruto_eur: Math.round(_bv.invPvBatt),
+          verzwaring_vermeden_eur: Math.round(_bv.verzwaring||0),
+          investering_netto_eur: Math.round(_bv.netInv),
+          besparing_jaar_eur: Math.round(_bespF||0)
+        },
+        totaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0) + _bv.netInv)
+      },
       aansluiting: {
         verbruiksadres: STATE_ADRES||P.verbruiksadres||'',
         spanning: _spanningEff((+P.toegangsvermogen_kw||C.toegangKw||0)),   // v0.23: LS/MS in het rapport (uitgangspositie); v0.24.24: oekene-override
