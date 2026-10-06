@@ -1632,6 +1632,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         token:TOKEN||undefined, naam:(STATE_KLANT||'').trim(), adres:(STATE_ADRES||''), btw:(STATE_BTW||'').trim(),
         profiel:profiel, ev:ev, afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost,
         opt_profieldata:!!($('i-optout')&&$('i-optout').checked), opt_contact:!!($('i-optcontact')&&$('i-optcontact').checked),
+        factuur_bestanden:(Array.isArray(STATE_FACTUUR_BESTANDEN)?STATE_FACTUUR_BESTANDEN:[]),   // v0.30.1 (Johan): factuur-bestand-pointer mee op het dossier → "Bekijk uw factuur" blijft werken na heropenen
         bevestigd:_bev })});
       var j=await r.json().catch(function(){return{};}); if(j&&j.ok){ if(j.token) TOKEN=j.token; if(j.project_id) STATE_CODE=j.project_id; }
     }catch(e){}
@@ -2362,10 +2363,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       .then(function(j){
         if(!j || !j.baseCase){ if(st){ st.style.color='#b23'; st.textContent=(j&&j.error)?('✖ Inlezen mislukte: '+j.error):'✖ Inlezen mislukte — probeer een duidelijkere scan.'; } return; }
         _ekApplyBaseCase(j.baseCase, {});
-        if(st){ var _a=(($('i-afname')||{}).value)||'', _t=(($('i-toegang')||{}).value)||''; st.style.color='var(--green)'; st.textContent='✔ Factuur opnieuw ingelezen'+((_a||_t)?(' — '+[_a?(_a+' MWh'):'',_t?(_t+' kW'):''].filter(Boolean).join(' · ')):'')+' (gegevens hierboven bijgewerkt).'; setTimeout(function(){ try{ if(st && st.textContent.indexOf('✔')===0) st.textContent=''; }catch(e){} }, 12000); }
+        var _opDossier=!!(TOKEN||STATE_CODE);
+        if(st){ var _a=(($('i-afname')||{}).value)||'', _t=(($('i-toegang')||{}).value)||''; st.style.color='var(--green)'; st.textContent='✔ Factuur opnieuw ingelezen'+((_a||_t)?(' — '+[_a?(_a+' MWh'):'',_t?(_t+' kW'):''].filter(Boolean).join(' · ')):'')+' (gegevens hierboven bijgewerkt'+(_opDossier?' — opgeslagen op het dossier':'')+').'; setTimeout(function(){ try{ if(st && st.textContent.indexOf('✔')===0) st.textContent=''; }catch(e){} }, 12000); }
+        // v0.30.1 (Johan): FACTUUR-UPLOAD AUTO-BEWAREN. Vroeger werd een (her)opgeladen factuur enkel in de sessie toegepast →
+        //   bij heropenen via de projectlijst stond de oude lead-data terug (verkeerde kW, geen factuur). Net als de profiel-upload
+        //   bewaren we nu meteen op het dossier: baseCase (afname/kW/kost/EAN…) + de factuur-bestand-pointer (via _ekPersistBevestigd).
+        var _persist=function(){ if(TOKEN||STATE_CODE){ try{ _ekPersistBevestigd(); }catch(e){} } };
         // v0.24.6 (Johan): heeft dit dossier al gekoppelde profielen? Dan zijn de afname/injectie-rollen gekend → NIET opnieuw vragen.
-        if(_eanRolGekend()){ try{ _eanAutoRollen(j.baseCase.eanBlokken||[]); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} }
-        else { try{ _eanKiesModal((j.baseCase.eanBlokken||[]), function(keuze){ if(keuze){ STATE_EAN_AFNAME=keuze.afname||STATE_EAN_AFNAME; STATE_EAN_INJECTIE=keuze.injectie||''; STATE_EAN_GEKEND=true; } try{ _ekFactuurExtra(); }catch(e){} }); }catch(e){} }
+        if(_eanRolGekend()){ try{ _eanAutoRollen(j.baseCase.eanBlokken||[]); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} _persist(); }
+        else { try{ _eanKiesModal((j.baseCase.eanBlokken||[]), function(keuze){ if(keuze){ STATE_EAN_AFNAME=keuze.afname||STATE_EAN_AFNAME; STATE_EAN_INJECTIE=keuze.injectie||''; STATE_EAN_GEKEND=true; } try{ _ekFactuurExtra(); }catch(e){} _persist(); }); }catch(e){} }
       })
       .catch(function(){ if(st){ st.style.color='var(--muted)'; st.textContent='Inlezen mislukte — probeer later opnieuw.'; } });
   }
