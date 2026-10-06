@@ -489,7 +489,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><span class="dot"></span> Energie-Compas <span class="p">cut-the-crap · skelet v0.1</span></div>
+  <div class="brand"><span class="dot"></span> Energie-Compas <button type="button" id="ek-viewtoggle" class="hidden" onclick="_ekToggleKlantview()" style="margin-left:auto;font:inherit;font-size:11.5px;font-weight:700;padding:4px 11px;border:1px solid var(--greenln);border-radius:999px;background:#fff;color:var(--green);cursor:pointer"></button></div>
 
   <!-- ══ INTAKE — één scherm ══ -->
   <div class="card" id="intake">
@@ -512,10 +512,13 @@
       </div>
     </div>
     <!-- Max-CX path: factuur kwam via mail en is al ingelezen -->
-    <div id="factuur-ok" class="chk hidden" style="border-color:var(--greenln)">
+    <div id="factuur-ok" class="chk hidden" style="border-color:var(--greenln);flex-direction:column">
       <span>✔ <b>Uw factuur is ingelezen.</b> <span id="factuur-detail">—</span> Vul enkel nog uw profiel en aantal wagens aan.</span>
       <!-- v0.27.0 (Johan): EAN('s) + "bekijk factuur"-link zodra de factuur is opgeladen/ingelezen (werkt ook voor gewone gebruikers). -->
-      <div id="factuur-extra" class="sub" style="margin-top:6px;line-height:1.55"></div>
+      <!-- v0.30.0 (Johan): EAN ONDER de tekst, licht ingesprongen, met de bekijk-link erachter (factuur-ok stapelt nu verticaal). -->
+      <div id="factuur-extra" class="sub" style="margin-top:6px;line-height:1.55;padding-left:26px"></div>
+      <!-- v0.30.0 (Johan): profieldata (afname/injectie) + link naar de profiel-modal — zichtbaar voor iedereen zodra er een gemeten profiel is. -->
+      <div id="profiel-extra" class="sub" style="margin-top:2px;line-height:1.55;padding-left:26px"></div>
     </div>
     <!-- v0.13.8: dossier-ID + klant (+ BTW) zodra een factuur-case geladen is -->
     <div id="intake-doss" class="hint hidden" style="margin-top:8px;font-weight:600;color:#1F3864"></div>
@@ -834,7 +837,8 @@
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
-  var EK_IS_OEKENE=false, EK_PREPADV=false;  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
+  var EK_IS_OEKENE=false, EK_PREPADV=false;
+var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de adviseur- en de klant-weergave (CX-preview)  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
   var BATT_RTE=92, BATT_DOD=90;  // v0.18: batterij RTE + DoD (sim) — server-breed via /api/ek-config (oekene tunet), gecachet in localStorage
   var NET_TARIEF=null;   // v0.19: net-tarieven van de sweep-response (toegangsvermogen + maandpiek €/kW/jaar, échte DNB-kaart)
   var STATE_DATABRON=null;   // v0.24.4 (Johan): databron van de bedrijf-sweep — gemeten kwartierdata (Fluvius) vs standaardprofiel
@@ -2269,15 +2273,66 @@
   // Rendert in #factuur-extra: de EAN('s) (als gekend) + een "bekijk factuur"-link (als er een factuur beschikbaar is).
   function _ekFactuurExtra(){
     var el=$('factuur-extra'); if(!el) return;
-    var bits=[];
+    // v0.30.0 (Johan): EAN('s) op één regel ONDER de banner-tekst, met de "bekijk factuur"-link erachter.
+    var parts=[];
     var ea=String(STATE_EAN_AFNAME||'').replace(/\s/g,''), ei=String(STATE_EAN_INJECTIE||'').replace(/\s/g,'');
     if(ea||ei){
       var e=[]; if(ea) e.push('afname <b>'+ea+'</b>'); if(ei) e.push('injectie <b>'+ei+'</b>');
-      bits.push('<span style="display:block">🔌 EAN: '+e.join(' · ')+'</span>');
+      parts.push('🔌 EAN: '+e.join(' · '));
     }
     var heeft=(LAST_FACTUUR_FILES&&LAST_FACTUUR_FILES.length) || (STATE_FACTUUR_BESTANDEN||[]).some(function(b){return b&&b.pad;});
-    if(heeft){ bits.push('<a href="#" onclick="_ekBekijkFactuur();return false;" style="display:inline-block;margin-top:2px">📄 Bekijk uw factuur</a>'); }
-    el.innerHTML=bits.join('');
+    if(heeft){ parts.push('<a href="#" onclick="_ekBekijkFactuur();return false;">📄 Bekijk uw factuur</a>'); }
+    el.innerHTML = parts.length ? ('<span style="display:block">'+parts.join(' &nbsp;·&nbsp; ')+'</span>') : '';
+    try{ _ekProfielExtra(); }catch(e){}   // v0.30.0: profieldata-regel + modal-link (zichtbaar voor iedereen)
+  }
+  // v0.30.0 (Johan): profieldata (afname/injectie) in de banner tonen + link naar een modal die hetzelfde toont als bij het
+  //   opladen van de profielen. Bron: de net opgeladen analyse (_LAST_PROFIEL_ANALYSE) of het dossier/mail-link-profiel
+  //   (STATE_PROFIEL_STATUS). Zichtbaar voor iedereen.
+  function _ekProfielExtra(){
+    var el=$('profiel-extra'); if(!el) return;
+    var ps=STATE_PROFIEL_STATUS||null, la=(_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types)||null;
+    function deel(k){
+      var mwh=null, piek=null;
+      if(la && la[k] && la[k].coverage){ mwh=la[k].coverage.jaar_mwh; piek=la[k].coverage.maandpiek_kw; }
+      else if(ps && ps[k] && ps[k].aanwezig){ mwh=ps[k].mwh; piek=ps[k].piek_kw; }
+      if(mwh==null && piek==null) return null;
+      var b=[]; if(mwh!=null) b.push(_ekNf(mwh)+' MWh/j'); if(piek!=null) b.push('piek '+_ekNf(piek)+' kW');
+      return (k==='afname'?'afname':'injectie')+' <b>'+b.join(' · ')+'</b>';
+    }
+    var ds=[deel('afname'),deel('injectie')].filter(Boolean);
+    if(!ds.length){ el.innerHTML=''; return; }
+    el.innerHTML='<span style="display:block">📈 Meetprofiel: '+ds.join(' · ')+' &nbsp;·&nbsp; <a href="#" onclick="_ekBekijkProfiel();return false;">Bekijk uw profiel</a></span>';
+  }
+  // Modal: toont per afname/injectie dezelfde kerncijfers als het scherm bij het opladen van een profiel
+  //   (jaarverbruik MWh · maandpiek kW · gemeten maanden · bron/label). Zichtbaar voor iedereen.
+  function _ekBekijkProfiel(){
+    var ps=STATE_PROFIEL_STATUS||null, la=_LAST_PROFIEL_ANALYSE||null;
+    function rij(k){
+      var c=(la&&la.types&&la.types[k]&&la.types[k].coverage)||null;
+      var mwh = c?c.jaar_mwh:(ps&&ps[k]&&ps[k].aanwezig?ps[k].mwh:null);
+      var piek= c?c.maandpiek_kw:(ps&&ps[k]&&ps[k].aanwezig?ps[k].piek_kw:null);
+      var gm  = c?c.gemeten_maanden:(ps&&ps[k]?ps[k].gemeten_maanden:null);
+      var lbl = c?(c.label||''):'';
+      if(mwh==null && piek==null && gm==null) return '';
+      var ex=[]; if(gm!=null) ex.push(gm+' mnd gemeten'+((gm<12)?', aangevuld tot 12 mnd met standaardprofiel':'')); if(lbl) ex.push(lbl);
+      return '<div style="font-size:13px;color:#1A1F2B;margin:5px 0">• <b>'+(k==='afname'?'Afname':'Injectie')+'</b>: '+
+        (mwh==null?'—':_ekNf(mwh))+' MWh/j · piek '+(piek==null?'—':_ekNf(piek))+' kW'+
+        (ex.length?(' <span style="color:#5A6577">('+_ekEsc(ex.join(' · '))+')</span>'):'')+'</div>';
+    }
+    var body=rij('afname')+rij('injectie');
+    var jv=(la&&la.jaarverbruik)?('<div style="font-size:11.5px;color:#5A6577;margin-top:8px">Jaarverbruik in de simulaties: <b>'+(la.jaarverbruik.bron==='factuur'?'factuurvolume':'jaartotaal van dit profiel')+'</b>'+(la.jaarverbruik.uitleg?(' — '+_ekEsc(la.jaarverbruik.uitleg)):'')+'</div>'):'';
+    if(!body){ body='<div style="color:#5A6577;font-size:13px">Nog geen profieldetails beschikbaar.</div>'; }
+    var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,40,.55);z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.3);font-family:inherit">'+
+      '<div style="font-size:18px;font-weight:800;color:#1F3864;margin-bottom:6px">📈 Uw meetprofiel</div>'+
+      '<div style="font-size:12.5px;color:#5A6577;margin-bottom:8px">De gemeten kwartiergegevens achter uw dossier (afname en injectie).</div>'+
+      body+jv+
+      '<div style="display:flex;justify-content:flex-end;margin-top:16px"><button type="button" id="ekprof_close" style="padding:9px 16px;border:none;background:#05B050;color:#fff;border-radius:8px;font:inherit;font-weight:700;cursor:pointer">Sluiten</button></div>'+
+    '</div>';
+    ov.addEventListener('click',function(e){ if(e.target===ov){ try{document.body.removeChild(ov);}catch(_){} } });
+    document.body.appendChild(ov);
+    var cb=$('ekprof_close'); if(cb) cb.onclick=function(){ try{document.body.removeChild(ov);}catch(_){} };
   }
   // v0.29.0 (Johan): kies een ZICHTBARE status. #upl-status zit in het cold-path-blok (#upl) dat verborgen wordt zodra er
   //   een factuur is ingelezen → een her-upload gaf geen zichtbare feedback. Val dan terug op #ek-herlaad-status (Oekene).
@@ -2619,14 +2674,22 @@
   //   Enkel dan zijn de nieuwe features zichtbaar (Pas aan-investeringsblok, profiel-upload, kengetallen-bijlage).
   function _ekApplyGate(){
     try{
-      var t=document.querySelector('.inv-tools'); if(t) t.style.display=EK_IS_OEKENE?'flex':'none';
-      var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV){ pu.classList.remove('hidden'); try{ _ekOekeneSamenvatting(); }catch(e){} try{ _ekPartnerLaad(); }catch(e){} } else pu.classList.add('hidden'); }
-      var eb=$('ev-def-btn'); if(eb) eb.style.display=EK_IS_OEKENE?'inline-flex':'none';   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
-      var bpc=$('batt-params'); if(bpc){ bpc.classList.toggle('hidden', !EK_IS_OEKENE); if(EK_IS_OEKENE) _battParamsSync(); }   // v0.18: RTE/DoD-control enkel voor oekene
-      var sp=$('ek-spanning-ovr-blok'); if(sp) sp.classList.toggle('hidden', !EK_IS_OEKENE);   // v0.24.24: LS/MS-override enkel voor oekene
-      var ep=$('ek-elia-ovr-blok'); if(ep) ep.classList.toggle('hidden', !EK_IS_OEKENE);   // v0.24.41: Elia/DNB-override enkel voor oekene
+      // v0.30.0 (Johan): in klantweergave verbergt de adviseur ALLE adviseur-/oekene-only elementen → precies wat de klant ziet.
+      var adviseur = EK_IS_OEKENE && !EK_KLANTVIEW;   // oekene-features
+      var prepAdv  = EK_PREPADV  && !EK_KLANTVIEW;    // adviseur/prep-invoervelden
+      var advCtx   = EK_PREPADV  || EK_IS_OEKENE;     // is dit überhaupt een adviseur-sessie?
+      var t=document.querySelector('.inv-tools'); if(t) t.style.display=adviseur?'flex':'none';
+      var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV && !EK_KLANTVIEW){ pu.classList.remove('hidden'); try{ _ekOekeneSamenvatting(); }catch(e){} try{ _ekPartnerLaad(); }catch(e){} } else pu.classList.add('hidden'); }
+      var kb=$('adv-klant-blok'); if(kb){ kb.classList.toggle('hidden', !prepAdv); }   // v0.30.0: klant-/BTW-invoervelden zijn adviseur-only
+      var eb=$('ev-def-btn'); if(eb) eb.style.display=adviseur?'inline-flex':'none';   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
+      var bpc=$('batt-params'); if(bpc){ bpc.classList.toggle('hidden', !adviseur); if(adviseur) _battParamsSync(); }   // v0.18: RTE/DoD-control enkel voor oekene
+      var sp=$('ek-spanning-ovr-blok'); if(sp) sp.classList.toggle('hidden', !adviseur);   // v0.24.24: LS/MS-override enkel voor oekene
+      var ep=$('ek-elia-ovr-blok'); if(ep) ep.classList.toggle('hidden', !adviseur);   // v0.24.41: Elia/DNB-override enkel voor oekene
+      var vt=$('ek-viewtoggle'); if(vt){ if(advCtx){ vt.classList.remove('hidden'); vt.textContent=EK_KLANTVIEW?'🔧 Adviseurweergave':'👁 Klantweergave'; vt.title=EK_KLANTVIEW?'Terug naar wat u als adviseur ziet':'Bekijk wat de klant ziet'; } else vt.classList.add('hidden'); }
     }catch(e){}
   }
+  // v0.30.0 (Johan): wissel tussen adviseur- en klant-weergave zodat de adviseur de klant-CX kan inschatten.
+  function _ekToggleKlantview(){ EK_KLANTVIEW=!EK_KLANTVIEW; try{ _ekApplyGate(); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} }
   async function _ekResolveGate(){
     try{
       if(!_EK_SB_CFG){ var rc=await fetch('/api/config'); _EK_SB_CFG=await rc.json(); }
@@ -2895,6 +2958,7 @@
   var _LAST_PROFIEL_ANALYSE=null;   // v0.24.30: laatste analyse (coverage per type) → samenvatting bijwerken na bewaren
   function _ekProfielResultaat(j){
     _LAST_PROFIEL_ANALYSE=j||null;
+    try{ _ekProfielExtra(); }catch(e){}   // v0.30.0: profiel-regel in de banner meteen bijwerken
     var st=$('prof-status'); if(!st) return;
     var nf1=function(v){ return (v==null||isNaN(v))?'—':Number(v).toLocaleString('nl-BE',{maximumFractionDigits:1}); };
     var lijn=function(t){ var c=j.types&&j.types[t]&&j.types[t].coverage; if(!c) return '';
@@ -2927,7 +2991,7 @@
       if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('bewaren faalde ('+r.status+')'));
       var st=$('prof-status'); if(st){ st.style.color='#1E7A42'; st.innerHTML='<div style="border:1px solid #B7E0C6;background:#F3FBF6;border-radius:8px;padding:10px 12px;font-weight:700;color:#1E7A42">✔ Profiel bewaard op '+_ekEsc(j.project_id)+'. De studie rekent voortaan op deze meetgegevens.'+(j.rapport2?' Het definitieve rapport wordt automatisch bijgewerkt.':'')+'</div>'; }
       // v0.24.30 (Johan): opgeladen-profielen in de blijvende samenvatting bijwerken (uit de laatste analyse-coverage: jaarverbruik + piek).
-      try{ var _t=_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types; if(_t){ STATE_PROFIEL_STATUS=STATE_PROFIEL_STATUS||{}; ['afname','injectie'].forEach(function(k){ var c=_t[k]&&_t[k].coverage; if(c){ STATE_PROFIEL_STATUS[k]={ aanwezig:true, mwh:(c.jaar_mwh!=null?+c.jaar_mwh:null), piek_kw:(c.maandpiek_kw!=null?+c.maandpiek_kw:null), gemeten_maanden:(c.gemeten_maanden!=null?+c.gemeten_maanden:null), aangevuld:(c.gemeten_maanden!=null&&+c.gemeten_maanden<12) }; } }); STATE_HEEFT_PROFIEL=!!(STATE_PROFIEL_STATUS.afname||STATE_PROFIEL_STATUS.injectie); } _ekOekeneSamenvatting(); }catch(e){}
+      try{ var _t=_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types; if(_t){ STATE_PROFIEL_STATUS=STATE_PROFIEL_STATUS||{}; ['afname','injectie'].forEach(function(k){ var c=_t[k]&&_t[k].coverage; if(c){ STATE_PROFIEL_STATUS[k]={ aanwezig:true, mwh:(c.jaar_mwh!=null?+c.jaar_mwh:null), piek_kw:(c.maandpiek_kw!=null?+c.maandpiek_kw:null), gemeten_maanden:(c.gemeten_maanden!=null?+c.gemeten_maanden:null), aangevuld:(c.gemeten_maanden!=null&&+c.gemeten_maanden<12) }; } }); STATE_HEEFT_PROFIEL=!!(STATE_PROFIEL_STATUS.afname||STATE_PROFIEL_STATUS.injectie); } _ekOekeneSamenvatting(); try{ _ekProfielExtra(); }catch(e){} }catch(e){}
     }catch(e){ if(b){ b.disabled=false; b.textContent='💾 Bewaar op dossier'; } var st=$('prof-status'); if(st){ var er=document.createElement('div'); er.style.cssText='font-size:12px;color:#C0392B;margin-top:6px'; er.textContent='Bewaren mislukt: '+e.message; st.appendChild(er); } }
   }
 
