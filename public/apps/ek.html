@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
-<!-- ek.html v0.33.2 (2026-10-07, Johan) — WIRING-FIX: twee_beslissingen stond op payload-top-level maar klantrapport leest D.financieel.twee_beslissingen → hoofdstuk verscheen NOOIT; nu binnen financieel. diesel_eur_100km nu OOK op top-level → de cover-€/100km toont de vlootgewogen diesel i.p.v. de €9-fallback (de v0.21-dieselfix werkte nooit omdat ek het nooit in de payload zette). ek.html v0.33.1 (2026-10-06, Johan) — CACHE-BUST + LABELS: de rapport-URL (window.open + fallback) krijgt ?v=…+Date.now() zodat de browser ALTIJD de verse klantrapport.html laadt (anders bleef een oude gecachte versie hangen → €9-diesel i.p.v. vlootgewogen, en geen "twee beslissingen"-hoofdstuk). Rooster-dropdownlabels + de noot onder de heatmaps zeggen nu expliciet "PV + batterij" (TVT/rendement/investering). ek.html v0.33.0 (2026-10-06, Johan) — TWEE BESLISSINGEN: rooster-TVT/rendement/investering rekenen nu op PV+batterij ALLEEN (netto vermeden verzwaring), consistent over elke cel via de backend-split (capex_pvbatt) → de €168k-sprong op de aanbevolen cel is weg. Investering-KPI = "Investering PV + batterij"; _interpCel interpoleert capex_pvbatt/capex_laadpalen; _battValue splitst de sturingskost (PV+batt vs laadpalen) en geeft invPvBatt/invLaadpalen/opex_jaar mee; _klantrapportPayload draagt battwaarde (PV+batt, voor het 15-jaar-plan) + een twee_beslissingen-blok (elektrificatie vs PV/batterij) voor het rapport-hoofdstuk. ek.html v0.32.0 (2026-10-06, Johan) — OPEN OP HET INVOERSCHERM: ?case=<token>&adv=1&invoer=1 (de "Open"-knop in
+<!-- ek.html v0.33.3 (2026-10-07, Johan) — COHERENTIE + LOADFACTOR: "Investering PV + batterij" is nu overal de ALL-IN GEÏNSTALLEERDE kost (PV + batterij + kabel/ontkoppelbord, zónder laadpalen) = _invTotMajor met 0 palen — rooster, cover-tegel, rapport-hoofdstuk én 15-jaar-plan tonen hetzelfde bedrag (was: rooster 131k bare anker vs rapport 168k install → niet transparant). Loadfactor rekent nu t.o.v. de aansluiting van de GEKOZEN cel (aansluiting_totaal_kw), niet de uitgangspositie. ek.html v0.33.2 (2026-10-07, Johan) — WIRING-FIX: twee_beslissingen stond op payload-top-level maar klantrapport leest D.financieel.twee_beslissingen → hoofdstuk verscheen NOOIT; nu binnen financieel. diesel_eur_100km nu OOK op top-level → de cover-€/100km toont de vlootgewogen diesel i.p.v. de €9-fallback (de v0.21-dieselfix werkte nooit omdat ek het nooit in de payload zette). ek.html v0.33.1 (2026-10-06, Johan) — CACHE-BUST + LABELS: de rapport-URL (window.open + fallback) krijgt ?v=…+Date.now() zodat de browser ALTIJD de verse klantrapport.html laadt (anders bleef een oude gecachte versie hangen → €9-diesel i.p.v. vlootgewogen, en geen "twee beslissingen"-hoofdstuk). Rooster-dropdownlabels + de noot onder de heatmaps zeggen nu expliciet "PV + batterij" (TVT/rendement/investering). ek.html v0.33.0 (2026-10-06, Johan) — TWEE BESLISSINGEN: rooster-TVT/rendement/investering rekenen nu op PV+batterij ALLEEN (netto vermeden verzwaring), consistent over elke cel via de backend-split (capex_pvbatt) → de €168k-sprong op de aanbevolen cel is weg. Investering-KPI = "Investering PV + batterij"; _interpCel interpoleert capex_pvbatt/capex_laadpalen; _battValue splitst de sturingskost (PV+batt vs laadpalen) en geeft invPvBatt/invLaadpalen/opex_jaar mee; _klantrapportPayload draagt battwaarde (PV+batt, voor het 15-jaar-plan) + een twee_beslissingen-blok (elektrificatie vs PV/batterij) voor het rapport-hoofdstuk. ek.html v0.32.0 (2026-10-06, Johan) — OPEN OP HET INVOERSCHERM: ?case=<token>&adv=1&invoer=1 (de "Open"-knop in
      projecten.html) landt meteen op het voorgevulde invoerscherm — géén "resultaat wordt geladen"-overlay en géén
      automatische doorrekening. Doorrekenen gebeurt pas bij "Start mijn simulatie". Zonder invoer=1 blijft het oude gedrag
      (direct op resultaat) ongewijzigd, bv. de "resultaat"-link in de project-actie-modal.
@@ -1160,7 +1160,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.33 (Johan): TVT/rendement op PV + batterij alleen (de PV/batterij-beslissing), netto van de vermeden verzwaring.
     //   De laadpalen horen bij de elektrificatie-beslissing en verwateren de PV/batt-TVT niet. Backend-split (capex_pvbatt);
     //   een custom cel (geen backend-anchor) valt terug op de frontend-prijszetting _invPvBattVan.
-    var _invPvb=(a && a.capex_pvbatt!=null)?(+a.capex_pvbatt||0):(_invPvBattVan(a)||0);
+    var _invPvb=_invPvbCell(a)||0;   // v0.33.3 (Johan): all-in geïnstalleerde PV+batterij-kost (incl. kabel), consistent met rooster/rapport/plan
     var netInv=Math.max(0, _invPvb - verzwaring);
     // rest → inflatie; netkosten-deel (besp_net) + vermeden capaciteitstarief → sneller netkostenpad + 2029.
     // v0.24.27 (Johan): exploitatiekost PRO-RATA over het rooster — €/jaar naar rato van de investering van elke cel (net als de prijs).
@@ -1409,8 +1409,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   DC-paal (vrachtwagens) telt nu óók mee in de rooster-investering (was dc=0). Rooster = rapport = detail.
     return _invTotMajor(pvKwp, battKwh, _acDefault(), _dcDefault()).tot; }
   function _invPvBattVan(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return _invPvBattVoor(pvKwp, battKwh); } // PV+batterij (TVT/ROI)
-  // v0.33 (Johan): PV+batterij-investering uit de backend-split (consistent, geen afhankelijkheid van EV_ROWS/palentelling → fixt de €168k).
-  function _invPvbCell(a){ if(!a) return null; return (a.capex_pvbatt!=null)?(+a.capex_pvbatt||0):(_invPvBattVan(a)||0); }
+  // v0.33.3 (Johan): PV+batterij = de ALL-IN GEÏNSTALLEERDE kost (PV + batterij + kabel/ontkoppelbord/toebehoren), zónder laadpalen.
+  //   "168k = kost van 125/261 + 150 kWp PV alles-in geïnstalleerd." = _invTotMajor met 0 laadpalen. De bare anker (capex_pvbatt, 131k)
+  //   was te laag (kabel/install ontbrak). Zo zijn rooster, cover-tegel, rapport-hoofdstuk én 15-jaar-plan allemaal hetzelfde getal.
+  function _invPvbCell(a){ if(!a) return null; var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return Math.round(_invTotMajor(pvKwp, battKwh, 0, 0, (a._custom?a._prijsFactor:undefined)).tot); }
   // v0.33 (Johan): elektrificatie-investering = laadpalen + de aansluiting/verzwaring die het laden sowieso vraagt (referentie, zonder PV/batt).
   function _invElekCell(a){ if(!a) return null; var lp=(a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0; var vzVoor=(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0; return Math.round(lp+vzVoor); }
   function _tvtVan(a){ var v=_battValue(a); return v?v.tvt:null; }   // v0.19: 15-jaar break-even (escalerende netkosten)
@@ -1757,7 +1759,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       $('sig-besp-cs').textContent = _cs>0 ? ('+ '+eur(_cs)+'/j door overstap naar dynamisch contract (los van de installatie)') : '';
     }
     $('sig-km').textContent=(ev>0?('€ '+eur2(km100Cell)):'—');
-    $('sig-lf').textContent=(C.loadfactor!=null?(C.loadfactor+' %'):'—');
+    // v0.33.3 (Johan): loadfactor t.o.v. de AANSLUITING VAN DEZE CEL (aansluiting_totaal_kw, incl. energie-floor), niet de uitgangspositie.
+    //   = (gebouw + laadvraag) / (cel-aansluiting × 8760). Zonder cel-aansluiting (bv. gebouw-only) → val terug op CTX.loadfactor.
+    var _lfCell=(a && +a.aansluiting_totaal_kw>0) ? Math.round(((+afnameMwh||0)+(+C.laadMwh||0))*1000/((+a.aansluiting_totaal_kw)*8760)*100) : (C.loadfactor!=null?C.loadfactor:null);
+    $('sig-lf').textContent=(_lfCell!=null?(_lfCell+' %'):'—');
     if($('t-inv')){ $('t-inv').textContent=eur(invTot); $('t-inv-s').textContent=String(pvKwp).replace('.',',')+' kWp PV · '+battKwh+' kWh batterij'; }
     if($('t-fact')){ $('t-fact').textContent=eur(factuurNa)+'/j'; $('t-fact-s').textContent=(_spotNul!=null ? 'zonder installatie (spot): '+eur(_spotNul)+'/j' : 'bestaande kost: '+eur(C.kostNu+(C.cregKost||0))+'/j'); }
     if($('t-km')){ $('t-km').textContent=num0(C.kmPlafond)+' km'; }
