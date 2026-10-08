@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.40.0 (2026-10-08, Johan) — (1) LOADFACTOR als volwaardige rooster-KPI: exact doorgerekende/custom cellen dragen nu aansluiting_totaal_kw (zat al in de server-cel maar viel weg → lege loadfactor-cellen); loadfactor ook in de kengetallen-roosters van het rapport, net na Piekverbruik (kVA). (2) OFFERTES SIMULEREN (enkel oekene, ?offertes=1 vanuit offertes-volgen.html): elke ingediende offerte wordt doorgerekend met zijn eigen parameters (PV kWp, batterij kW/kWh, kWh-gewogen RTE/DoD, offerteprijs PV+batterij als investering) via /api/energiekompas/bedrijf-cel, en getoond in een tabel met dezelfde KPI's als het rooster. -->
 <!-- ek.html v0.39.0 (2026-10-08, Johan) — VOERTUIGTABEL: kolomkoppen "kW" en "€/kWh" niet meer in hoofdletters (eenheden behouden hun schrijfwijze), elk met een (i) dat een uitleg-modal opent; de €/kWh-kolom is enkel zichtbaar als minstens één rij "Betalend" aangevinkt is (en enkel ingevuld op betalende rijen). TOESTEMMING: het contact-vinkje is weg; onder "Start mijn simulatie" staat in kleine letters dat starten toestemming tot contact geeft (opt_contact = altijd true). -->
 <!-- ek.html v0.38.0 (2026-10-08, Johan) — (b) resultaattitel "Uw Energie-Compas" vervangen door de KLANTNAAM (zelfde lettertype; terugval op "Uw Energie-Compas" zonder naam), metaregel eronder toont dan enkel adres · BTW; (c) klantnaam + BTW-nummer staan in de invoer nu ook in de klantweergave (zichtbaar + aanpasbaar); het afname-adres blijft adviseur-only. — de adviseur-/dossierlink-balk (#prepbar) verschijnt niet meer op het resultaatscherm; de link (zelfde als vroeger in de balk) gaat als ek_link mee in de rapport-payload en staat nu op pagina 2 van het klantrapport (klantrapport v0.29.0) → ook in elke PDF (PC of cloud). -->
 <!-- ek.html v0.37.0 (2026-10-08, Johan) — RESULTAATSCHERM OFFERTES: (1) één kader "Dimensionering" met naast de titel de batterij & PV-combinatie die in het KPI-rooster geselecteerd is; (2) "Mail mij het rapport" weg; "Toon rapport" opent ineens een NIEUW TABBLAD (synchroon geopend bij de klik → geen pop-upblokker), geen mail; (3) "Wat gebeurt er nu?" + uitleg profieldata/offertes weg; (4) "Offertes opvragen" (server v15.257 /api/offerte/klaarzetten notify=true → mail naar oekene met volledige projectbeschrijving + link offerte-tabel) en "Offerte indienen" (zet de aanvraag klaar en opent offerte-tabel.html in een nieuw tabblad); (5) ENKEL oekene: "Offertes volgen" → offertes-volgen.html; (6) tabtitel volgt fase + klant ("Resultaat · <klant> — Energie-Compas"). -->
@@ -767,6 +768,14 @@
       <div id="offerte-cta" class="hidden"></div>
     </div>
 
+    <!-- v0.40.0 (Johan): offertes gesimuleerd (enkel oekene, ?offertes=1) -->
+    <div class="card hidden" id="offsim-card">
+      <h2 style="color:var(--navy)">Ingediende offertes — gesimuleerd</h2>
+      <div class="sub" id="offsim-status">⏳ Offertes worden opgehaald…</div>
+      <div style="overflow-x:auto;margin-top:8px"><table class="hm" id="offsim-tabel" style="font-size:12.5px"></table></div>
+      <p class="foot" id="offsim-foot" style="margin-top:6px"></p>
+    </div>
+
     <!-- Kwaliteit van een batterij (inklapbaar) — merkvergelijking RTE/DoD + besparing over 10 jaar volgens geselecteerd scenario -->
     <details id="battq-blok">
       <summary>Kwaliteit van een batterij</summary>
@@ -838,6 +847,7 @@
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
   var INVOER_MODE=(function(){ try{ return new URLSearchParams(location.search).get('invoer')==='1'; }catch(e){ return false; } })();   // v0.32.0: open op het invoerscherm (geen auto-doorrekening)
+  var OFF_SIM=false, OFF_SIM_DONE=false;   // v0.40.0: ?offertes=1 → na de doorrekening de ingediende offertes simuleren (enkel oekene)
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
   var EK_IS_OEKENE=false, EK_PREPADV=false;
 var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de adviseur- en de klant-weergave (CX-preview)  // v0.15: login-gate — nieuwe features enkel zichtbaar als oekene@gmail.com op de portal is ingelogd
@@ -1491,7 +1501,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:_m.kw,batt_kwh:_m.kwh})).then(function(j){
         if(j&&j.ok&&j.cel){ var c=j.cel, besp=(HM.refKost!=null)?(HM.refKost-c.kost):null, rend=(besp!=null&&c.capex>0)?(besp/c.capex*100):null;
           var bespNet=(HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;   // v0.20: netkosten-deel van de besparing (exacte cel)
-          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,capex_pvbatt:(c.capex_pvbatt!=null?+c.capex_pvbatt:null),capex_laadpalen:(c.capex_laadpalen!=null?+c.capex_laadpalen:null),ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null),verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0),jaarpiek:(c.jaarpiek!=null?+c.jaarpiek:null) };   // v0.24.46 §6c: km-dekking; v0.24.53: eenmalige aansluitingskost + piekverbruik (kVA) van de exact doorgerekende cel
+          var cell={ _ry:ry,_cx:cx,_interp:true,_exact:true,pvKwp:c.pvKwp,battKw:c.battKw,battKwh:c.battKwh,kost:c.kost,capex:c.capex,capex_pvbatt:(c.capex_pvbatt!=null?+c.capex_pvbatt:null),capex_laadpalen:(c.capex_laadpalen!=null?+c.capex_laadpalen:null),ref_kost:HM.refKost,besparing:(besp!=null?Math.round(besp):null),besp_net:(bespNet!=null?Math.round(bespNet):null),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:(c.cycli!=null?+c.cycli:null),kmDekking:(c.kmDekking!=null?+c.kmDekking:null),verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0),jaarpiek:(c.jaarpiek!=null?+c.jaarpiek:null),aansluiting_totaal_kw:(c.aansluiting_totaal_kw!=null?+c.aansluiting_totaal_kw:null) };   // v0.40.0: + aansluiting → loadfactor. v0.24.46 §6c: km-dekking; v0.24.53: eenmalige aansluitingskost + piekverbruik (kVA) van de exact doorgerekende cel
           HM.computed[key]=cell; done&&done(cell); } else done&&done(null); }).catch(function(){ done&&done(null); }); }; }
   // ── Kengetallen per cel (allemaal combi-afhankelijk) — gedeeld door beide heatmaps + de aanbeveling ──
   // v0.16.2 (Johan): heatmap-investering (+ TVT/rendement) op EXACT dezelfde functie als de tegel/paycard (_invTotMajor)
@@ -2152,6 +2162,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     renderHeatmap();
     _hmDetail(_sel);
     try{ _herstelCustomCombos(); }catch(e){}   // v0.24.26 (Johan): manueel ingebrachte combi's terug op de (net herrekende) heatmap
+    if(OFF_SIM && !OFF_SIM_DONE){ OFF_SIM_DONE=true; setTimeout(function(){ try{ _offSimStart(); }catch(e){} }, 300); }   // v0.40.0
     if(PREP_MODE||ADV_MODE){ _updAdvLink(); }   // v0.38.0 (Johan): balk blijft verborgen — de link staat nu op p. 2 van het klantrapport (ek_link in de payload)
     window.scrollTo({top:0,behavior:'smooth'});
   }
@@ -3177,8 +3188,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var order=['tvt','rendement','besparing','factuur_na','investering','cycli'];
       if(_heeftLaden()) order.splice(4,0,'km100');
       if(H.lpMwh>0) order.push('kmdekking');   // v0.24.47 (Johan §6c): km-dekking-rooster in het rapport bij een laadplein
-      if(H.lpMwh>0) order.push('piek');       // v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
-      var titel={tvt:'Terugverdientijd PV + batterij (jaar)',rendement:'Rendement PV + batterij (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)'};
+      if(H.lpMwh>0) order.push('piek');       order.push('loadfactor');   // v0.40.0 (Johan): loadfactor net na piekverbruik (kVA). v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
+      var titel={tvt:'Terugverdientijd PV + batterij (jaar)',rendement:'Rendement PV + batterij (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)',loadfactor:'Loadfactor (%)'};
       var best=H.sel||H.best||{};   // v0.24.15 (Johan): de stippellijn markeert de GEKOZEN oplossing van het rapport (H.sel), niet de eerst-voorgestelde beste (H.best)
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
       var batt_as=rows.map(function(r){return H.rowLabel?H.rowLabel(r):String(r);});
@@ -3442,6 +3453,81 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!TOKEN){ var st=$('offerte-status'); if(st){ st.style.color='var(--muted)'; st.textContent='Nog geen dossier — er zijn nog geen offertes.'; } return; }
     window.open('/apps/offertes-volgen.html?case='+encodeURIComponent(TOKEN),'_blank');
   }
+  // ══ v0.40.0 (Johan): OFFERTES SIMULEREN — elke offerte met zijn eigen parameters, KPI's zoals in het rooster ══
+  function _offParams(x, sc){
+    var regels=x.regels||[], b=x.batterijen||[];
+    function som(re, veld){ return regels.filter(function(r){ return re.test(String(r.post||'')); }).reduce(function(t,r){ return t+(+r[veld]||0); },0); }
+    var pv=som(/zonnepan|\bpv\b/i,'eenheden'); if(!(pv>0)) pv=(+sc.pv_kwp||0);
+    var ac=Math.round(som(/ac-laad/i,'eenheden')), dc=Math.round(som(/dc-laad/i,'eenheden'));
+    var kw=(+x.batt_kw_totaal||0), kwh=(+x.batt_kwh_totaal||0);
+    var wk=b.reduce(function(t,r){ return t+(+r.kwh||0)*(+r.aantal||1); },0);
+    var rte=wk>0?b.reduce(function(t,r){ return t+(+r.rte||0)*(+r.kwh||0)*(+r.aantal||1); },0)/wk:0;
+    var dod=wk>0?b.reduce(function(t,r){ return t+(+r.dod||0)*(+r.kwh||0)*(+r.aantal||1); },0)/wk:0;
+    var prijsPv=som(/zonnepan|\bpv\b/i,'totaal'), prijsBatt=b.reduce(function(t,r){ return t+(+r.totaal||0); },0), prijsOk=som(/ontkoppel/i,'totaal');
+    var prijsLp=som(/ac-laad|dc-laad/i,'totaal');
+    return { pv:Math.round(pv*10)/10, kw:kw, kwh:kwh, rte:Math.round(rte*10)/10, dod:Math.round(dod*10)/10, ac:ac, dc:dc,
+      prijsPvBatt:Math.round(prijsPv+prijsBatt+prijsOk), prijsLp:Math.round(prijsLp), totaal:Math.round(+x.totaal||0) };
+  }
+  function _offSimCel(pr){
+    var body=Object.assign({}, window._RAP_PAYLOAD||{}, { pv_kwp:pr.pv, batt_kw:pr.kw, batt_kwh:pr.kwh });
+    if(pr.kwh>0){ if(pr.rte>0) body.rte_pct=pr.rte; if(pr.dod>0) body.dod_pct=pr.dod; }
+    return _post('/api/energiekompas/bedrijf-cel', body).then(function(j){
+      if(!(j&&j.ok&&j.cel)) return null;
+      var c=j.cel, besp=(HM&&HM.refKost!=null)?(HM.refKost-c.kost):null, bespNet=(HM&&HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;
+      return { _offerte:true, _exact:true, pvKwp:c.pvKwp, battKw:c.battKw, battKwh:c.battKwh, kost:c.kost, capex:c.capex,
+        capex_pvbatt:(pr.prijsPvBatt>0?pr.prijsPvBatt:(c.capex_pvbatt!=null?+c.capex_pvbatt:null)),   // offerteprijs = investering PV+batterij
+        capex_laadpalen:(pr.prijsLp>0?pr.prijsLp:(c.capex_laadpalen!=null?+c.capex_laadpalen:null)), ref_kost:(HM?HM.refKost:null),
+        besparing:(besp!=null?Math.round(besp):null), besp_net:(bespNet!=null?Math.round(bespNet):null), cycli:(c.cycli!=null?+c.cycli:null),
+        kmDekking:(c.kmDekking!=null?+c.kmDekking:null), verzwaring_eenmalig:(c.verzwaring_eenmalig!=null?+c.verzwaring_eenmalig:0),
+        jaarpiek:(c.jaarpiek!=null?+c.jaarpiek:null), aansluiting_totaal_kw:(c.aansluiting_totaal_kw!=null?+c.aansluiting_totaal_kw:null) };
+    }).catch(function(){ return null; });
+  }
+  function _offSimKpis(){
+    var k=['tvt','rendement','besparing','factuur_na']; if(_heeftLaden()) k.push('km100');
+    k.push('investering','cycli'); if(HM&&HM.lpMwh>0) k.push('kmdekking'); k.push('piek','loadfactor');
+    return k;
+  }
+  var OFF_KPI_LABEL={ tvt:'TVT (j)', rendement:'Rendement', besparing:'Besparing/j', factuur_na:'Factuur na', km100:'€/100 km', investering:'Investering PV+batt', cycli:'Cycli', kmdekking:'Km-dekking', piek:'Piek (kVA)', loadfactor:'Loadfactor' };
+  async function _offSimStart(){
+    var card=$('offsim-card'), st=$('offsim-status'), T=$('offsim-tabel');
+    if(!card) return;
+    if(!_EK_SB){ try{ await _ekResolveGate(); }catch(e){} }
+    if(!EK_IS_OEKENE){ return; }
+    card.classList.remove('hidden');
+    try{ card.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){}
+    if(!TOKEN){ st.textContent='Geen dossier — geen offertes.'; return; }
+    var jwt=null; try{ var d=await _EK_SB.auth.getSession(); jwt=d&&d.data&&d.data.session&&d.data.session.access_token; }catch(e){}
+    if(!jwt){ st.textContent='Log in als oekene om de offertes te simuleren.'; return; }
+    var j; try{ var r=await fetch(API+'/api/offerte/'+encodeURIComponent(TOKEN)+'/inzendingen',{ headers:{ 'Authorization':'Bearer '+jwt } }); j=await r.json(); }catch(e){ j=null; }
+    if(!j||!j.ok){ st.textContent='Offertes ophalen lukte niet.'; return; }
+    var inz=j.inzendingen||[], sc=(j.offerte&&j.offerte.scope)||{};
+    if(!inz.length){ st.textContent='Er zijn nog geen offertes ingediend.'; return; }
+    var kpis=_offSimKpis(), rijen=[];
+    var ref=HM&&(HM.sel||HM.best);
+    if(ref) rijen.push({ naam:'Simulatie (gekozen combinatie)', pr:{ pv:Math.round(_anchorKwp(ref)||0), kw:+ref.battKw||0, kwh:+ref.battKwh||0, rte:BATT_RTE, dod:BATT_DOD, totaal:null }, cel:ref, ref:true });
+    for(var i=0;i<inz.length;i++){
+      st.textContent='⏳ Offerte '+(i+1)+' van '+inz.length+' wordt doorgerekend ('+_ekEsc(inz[i].epc_naam||'')+')…';
+      var pr=_offParams(inz[i], sc);
+      var cel=await _offSimCel(pr);
+      rijen.push({ naam:inz[i].epc_naam||('Offerte '+(i+1)), pr:pr, cel:cel });
+    }
+    function f(v,dec){ return String(Math.round((+v||0)*Math.pow(10,dec||0))/Math.pow(10,dec||0)).replace('.',','); }
+    var h='<thead><tr><th style="text-align:left">Offerte</th><th>Prijs (excl. btw)</th><th>PV</th><th>Batterij</th><th>RTE / DoD</th>'+kpis.map(function(k){ return '<th>'+_ekEsc(OFF_KPI_LABEL[k]||k)+'</th>'; }).join('')+'</tr></thead><tbody>';
+    // beste per KPI markeren (enkel over de offertes)
+    var best={}; kpis.forEach(function(k){ var M=HM_METRICS[k]; if(!M) return; var vs=rijen.filter(function(r){ return !r.ref && r.cel; }).map(function(r){ return M.val(r.cel); }).filter(function(v){ return v!=null&&isFinite(v); }); if(vs.length>1) best[k]=M.goedHoog?Math.max.apply(null,vs):Math.min.apply(null,vs); });
+    rijen.forEach(function(r){
+      var p=r.pr;
+      h+='<tr'+(r.ref?' style="background:#F4F7FB;font-style:italic"':'')+'><td style="text-align:left;white-space:nowrap"><b>'+_ekEsc(r.naam)+'</b></td>'+
+        '<td>'+(p.totaal!=null?eur(p.totaal):'—')+'</td><td>'+(p.pv>0?(f(p.pv,1)+' kWp'):'—')+'</td>'+
+        '<td>'+(p.kwh>0?(f(p.kw)+' kW / '+f(p.kwh)+' kWh'):'—')+'</td><td>'+(p.kwh>0?(f(p.rte,1)+'% / '+f(p.dod,1)+'%'):'—')+'</td>'+
+        kpis.map(function(k){ var M=HM_METRICS[k]; var v=(r.cel&&M)?M.val(r.cel):null; var ok=(v!=null&&isFinite(v)); var b=(ok&&!r.ref&&best[k]!=null&&v===best[k]);
+          return '<td'+(b?' style="background:#EAF3EC;font-weight:700;color:#0a7d3a"':'')+'>'+(ok?M.fmt(v):(r.cel?'—':'⚠'))+'</td>'; }).join('')+'</tr>';
+    });
+    T.innerHTML=h+'</tbody>';
+    var mis=rijen.filter(function(r){ return !r.cel; }).length;
+    st.textContent='✔ '+inz.length+' offerte(s) doorgerekend'+(mis?(' — '+mis+' lukte(n) niet (⚠)'):'')+'.';
+    $('offsim-foot').textContent='Elke offerte is doorgerekend met haar eigen PV-vermogen, batterij (kW/kWh) en kWh-gewogen RTE/DoD; de investering PV+batterij = de offerteprijs voor PV, batterij en ontkoppelbord (kabels/extra posten tellen niet mee). Groen = beste offerte per KPI. De eerste rij is de simulatie ter referentie.';
+  }
   // v0.37.0 (Johan): tabtitel volgt fase + klant, zodat meerdere EK-tabbladen uit elkaar te houden zijn.
   function _ekTitel(){
     try{
@@ -3487,6 +3573,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
 
   // Adviseur-link / prep-modus activeren bij het laden (na alle definities).
+  try{ OFF_SIM = (new URLSearchParams(location.search).get('offertes')==='1'); }catch(e){}
   _advLoad();
   _ekResolveGate();   // v0.15: login-gate resolven (async) → onthult nieuwe features enkel voor oekene@gmail.com
 </script>
