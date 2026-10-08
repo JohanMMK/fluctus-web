@@ -1,4 +1,4 @@
-/* fr-ec-dict.js — Energie-Compas NL→FR woordenboek (v0.1.0, 2026-10-04)
+/* fr-ec-dict.js — Energie-Compas NL→FR woordenboek (v0.2.0, 2026-10-08: + laadplein "kost per MWh verbruik" voor klantrapport v0.26.0; v0.1.0 2026-10-04)
    Geladen VÓÓR i18n-ec.js. EXACT = volledig segment; DICT = substring; RULES = regex (dynamische zinnen). */
 (function () {
   // ── EXACT: korte labels/titels (matchen enkel als het hele segment gelijk is) ───────────────
@@ -59,6 +59,22 @@
     'Met installatie': 'Avec installation',
     'Om de dagelijkse km’s te laden moet uw aansluiting de piek aankunnen. Onbeheerst laden — alle voertuigen samen op vol vermogen — zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.':
       'Pour recharger les km quotidiens, votre raccordement doit encaisser la pointe. Une recharge non pilotée — tous les véhicules à pleine puissance en même temps — ferait fortement grimper le raccordement. L’installation lisse cette pointe.'
+    ,
+    // v0.2.0 (klantrapport v0.26.0) — laadplein: kost per MWh verbruik
+    'Wat kost u een MWh verbruik?': 'Combien vous coûte un MWh consommé\u00a0?',
+    'Verbruik': 'Consommation',
+    'MWh/jaar': 'MWh/an',
+    'Energiefactuur': 'Facture d’énergie',
+    'Kost': 'Coût',
+    'Vandaag — enkel het gebouw': 'Aujourd’hui — bâtiment seul',
+    'Gebouw + laden, zonder extra PV en batterij': 'Bâtiment + recharge, sans PV ni batterie supplémentaires',
+    'Gebouw + laden, met PV + batterij en slim sturen': 'Bâtiment + recharge, avec PV + batterie et pilotage intelligent',
+    'Gebouw + laden, met PV en slim sturen': 'Bâtiment + recharge, avec PV et pilotage intelligent',
+    'Gebouw + laden, met batterij en slim sturen': 'Bâtiment + recharge, avec batterie et pilotage intelligent',
+    'Gebouw + laden, met installatie en slim sturen': 'Bâtiment + recharge, avec installation et pilotage intelligent',
+    'totale verbruik': 'consommation totale',
+    ', telkens op een': ', chaque fois sur un',
+    'optimaal dynamisch contract': 'contrat dynamique optimal'
   };
 
   // ── DICT: zinnen/fragmenten (substring binnen een tekstsegment) ─────────────────────────────
@@ -179,7 +195,11 @@
     ' vermijdt.': '.',
     'geen verzwaring': 'pas de renforcement',
     'LS→MS': 'BT→MT',
-    'Print': 'Imprimer'
+    'Print': 'Imprimer',
+    // v0.2.0 (klantrapport v0.26.0) — laadplein: kost per MWh verbruik (noot)
+    'Kost per MWh = de all-in energiefactuur (energie + net + heffingen, min de injectie-opbrengst, excl. btw) gedeeld door uw': 'Coût par MWh = la facture d’énergie tout compris (énergie + réseau + taxes, moins les revenus d’injection, hors TVA) divisée par votre',
+    '. De investering en afschrijving van de installatie zitten hier niet in.': '. L’investissement et l’amortissement de l’installation n’y sont pas inclus.',
+    'Met uw installatie en slim sturen daalt de kost per MWh van uw verbruik mét laden met': 'Avec votre installation et le pilotage intelligent, le coût par MWh de votre consommation avec recharge baisse de'
   };
 
   // ── RULES: dynamische zinnen met markup/getallen (regex over de volle HTML) ──────────────────
