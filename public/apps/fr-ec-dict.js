@@ -1,4 +1,4 @@
-/* fr-ec-dict.js — Energie-Compas NL→FR woordenboek (v0.2.0, 2026-10-08: + laadplein "kost per MWh verbruik" voor klantrapport v0.26.0; v0.1.0 2026-10-04)
+/* fr-ec-dict.js — Energie-Compas NL→FR woordenboek (v0.3.0, 2026-10-08: + laadmoment-kolom; v0.2.0, 2026-10-08: + laadplein "kost per MWh verbruik" voor klantrapport v0.26.0; v0.1.0 2026-10-04)
    Geladen VÓÓR i18n-ec.js. EXACT = volledig segment; DICT = substring; RULES = regex (dynamische zinnen). */
 (function () {
   // ── EXACT: korte labels/titels (matchen enkel als het hele segment gelijk is) ───────────────
@@ -74,7 +74,15 @@
     'Gebouw + laden, met installatie en slim sturen': 'Bâtiment + recharge, avec installation et pilotage intelligent',
     'totale verbruik': 'consommation totale',
     ', telkens op een': ', chaque fois sur un',
-    'optimaal dynamisch contract': 'contrat dynamique optimal'
+    'optimaal dynamisch contract': 'contrat dynamique optimal',
+    // v0.3.0 (klantrapport v0.27.0) — laadmoment per voertuig + particulier-labels
+    'Laadmoment': 'Moment de recharge',
+    'overdag': 'en journée',
+    '’s nachts': 'la nuit',
+    '24 u': '24 h',
+    'Afrekeningsfactuur ingelezen': 'Facture de régularisation lue',
+    'Voorschotfactuur (geen afrekening)': 'Facture d’acompte (pas de régularisation)',
+    'Geen afrekeningsfactuur': 'Pas de facture de régularisation'
   };
 
   // ── DICT: zinnen/fragmenten (substring binnen een tekstsegment) ─────────────────────────────
