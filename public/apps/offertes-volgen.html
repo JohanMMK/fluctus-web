@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Offertes volgen — Energie-Compas</title>
+<!-- offertes-volgen.html v0.1.0 (2026-10-08, Johan) — ENKEL oekene@gmail.com: stand van de offerte-aanvraag van één dossier
+     (?case=<token>) + elke ingediende offerte openen (batterijlijnen kW/kWh/RTE/DoD, overige posten, datasheets via signed links).
+     Leest GET /api/offerte/:token/inzendingen met de Supabase-sessie (Bearer). Vereist server v15.257. -->
+<style>
+  :root{--navy:#1F3864;--green:#0a7d3a;--greenbg:#EAF3EC;--greenln:#A9CDB4;--bg:#F4F7FB;--card:#fff;--line:#D6E0EC;--ink:#1A1F2B;--muted:#6B7688;--warn:#B26A00}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  .wrap{max-width:900px;margin:0 auto;padding:20px 16px 60px}
+  h1{color:var(--navy);font-size:22px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+  .stand{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px}
+  .k{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .k .l{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-weight:700}
+  .k .v{font-size:16px;font-weight:700;color:var(--navy)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;font-weight:700;padding:6px;border-bottom:2px solid var(--line)}
+  td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  .btn{display:inline-block;background:var(--navy);color:#fff;border:none;border-radius:8px;font:inherit;font-weight:700;padding:6px 12px;cursor:pointer;font-size:13px;text-decoration:none}
+  .btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  .pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px}
+  .pill.open{background:var(--greenbg);color:var(--green);border:1px solid var(--greenln)}
+  .pill.dicht{background:#FBE9E9;color:#B23A3A;border:1px solid #E7B9B9}
+  .detail{background:var(--bg)}
+  .detail td{border-bottom:2px solid var(--line)}
+  .detail h4{color:var(--navy);margin:8px 0 4px;font-size:14px}
+  .detail table{background:#fff;border:1px solid var(--line);border-radius:8px;font-size:13px}
+  .ok{color:var(--green);font-weight:700} .nok{color:var(--warn);font-weight:700}
+  .hidden{display:none}
+  a{color:var(--navy)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Offertes volgen</h1>
+  <div class="sub">Energie-Compas · <span id="doss">dossier</span> <span id="klant"></span></div>
+  <div id="box" class="card">Bezig met laden…</div>
+  <div id="lijst" class="card hidden"></div>
+</div>
+<script>
+  var API='https://lucid-amazement-production.up.railway.app';
+  var $=function(id){return document.getElementById(id);};
+  var TOKEN=(new URLSearchParams(location.search).get('case')||'').trim();
+  var DATA=null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function eur(n){ return '€ '+(Math.round(+n||0)).toLocaleString('nl-BE'); }
+  function nl(v){ return String(Math.round((+v||0)*10)/10).replace('.',','); }
+  function dt(ts){ return ts?new Date(ts).toLocaleString('nl-BE',{dateStyle:'short',timeStyle:'short'}):'—'; }
+  function laadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=nok; document.head.appendChild(s); }); }
+
+  async function jwt(){
+    var cfg=await (await fetch('/api/config')).json();
+    if(!window.supabase) await laadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+    var sb=window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    var d=await sb.auth.getSession(); var s=d&&d.data&&d.data.session;
+    return s ? { token:s.access_token, email:(s.user&&s.user.email||'').toLowerCase() } : null;
+  }
+
+  function pctCmp(a,b){ if(!(b>0)) return ''; var d=Math.round((a/b-1)*100); return ' <span class="'+(Math.abs(d)<=10?'ok':'nok')+'">('+(d>0?'+':'')+d+'%)</span>'; }
+
+  function renderDetail(x, sc){
+    var h='';
+    if((x.batterijen||[]).length){
+      h+='<h4>Batterij</h4><table><thead><tr><th>Merk &amp; type</th><th class="num">kW</th><th class="num">kWh</th><th class="num">RTE</th><th class="num">DoD</th><th class="num">Aantal</th><th class="num">Prijs/stuk</th><th class="num">Totaal</th></tr></thead><tbody>'+
+        x.batterijen.map(function(b){ return '<tr><td>'+esc(b.merk_type)+'</td><td class="num">'+nl(b.kw)+'</td><td class="num">'+nl(b.kwh)+'</td><td class="num">'+nl(b.rte)+'%</td><td class="num">'+nl(b.dod)+'%</td><td class="num">'+b.aantal+'</td><td class="num">'+eur(b.prijs_stuk)+'</td><td class="num">'+eur(b.totaal)+'</td></tr>'; }).join('')+
+        '</tbody></table><div class="sub" style="margin-top:4px">Totaal voorgesteld: <b>'+nl(x.batt_kw_totaal)+' kW</b>'+pctCmp(x.batt_kw_totaal,sc.batt_kw)+' / <b>'+nl(x.batt_kwh_totaal)+' kWh</b>'+pctCmp(x.batt_kwh_totaal,sc.batt_kwh)+' — gevraagd '+nl(sc.batt_kw)+' kW / '+nl(sc.batt_kwh)+' kWh</div>';
+    }
+    if((x.regels||[]).length){
+      h+='<h4>Overige posten</h4><table><thead><tr><th>Post</th><th class="num">Eenheden</th><th class="num">Prijs/eenheid</th><th class="num">Totaal</th></tr></thead><tbody>'+
+        x.regels.map(function(r){ return '<tr><td>'+esc(r.post)+'</td><td class="num">'+nl(r.eenheden)+'</td><td class="num">'+eur(r.prijs_eenheid)+'</td><td class="num">'+eur(r.totaal)+'</td></tr>'; }).join('')+'</tbody></table>';
+    }
+    var ds=x.datasheets||[];
+    h+='<h4>Datasheets</h4>'+(ds.length?('<ul style="margin:0;padding-left:18px">'+ds.map(function(d){ return '<li>'+esc(d.soort)+': '+(d.url?('<a href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.naam)+'</a>'):(esc(d.naam)+' <span class="nok">('+esc(d.fout||'niet beschikbaar')+')</span>'))+'</li>'; }).join('')+'</ul>'):'<div class="sub">Geen datasheets.</div>');
+    if(x.opmerking) h+='<h4>Opmerking</h4><div style="white-space:pre-wrap;font-size:13.5px">'+esc(x.opmerking)+'</div>';
+    return h;
+  }
+
+  function toggle(i){ var r=$('det-'+i); if(r) r.classList.toggle('hidden'); var b=$('btn-'+i); if(b) b.textContent=(r&&!r.classList.contains('hidden'))?'Sluit':'Open'; }
+
+  function render(j){
+    DATA=j;
+    $('doss').textContent=j.dossier||TOKEN; $('klant').textContent=j.klant?('· '+j.klant):'';
+    try{ document.title='Offertes · '+(j.klant||j.dossier||'')+' — Energie-Compas'; }catch(e){}
+    var o=j.offerte;
+    if(!o){ $('box').innerHTML='Voor dit dossier is nog geen offerte-aanvraag gestart.'; return; }
+    var inz=j.inzendingen||[], laagste=inz.length?Math.min.apply(null,inz.map(function(x){return +x.totaal||0;})):null;
+    $('box').innerHTML=
+      '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><b style="color:var(--navy)">Stand van de aanvraag</b>'+
+        '<span>'+(o.gesloten?'<span class="pill dicht">Termijn verstreken</span>':'<span class="pill open">Open</span>')+'</span></div>'+
+      '<div class="sub" style="margin-top:4px">'+esc(o.scope_tekst||'')+'</div>'+
+      '<div class="stand">'+
+        '<div class="k"><div class="l">Ingediende offertes</div><div class="v">'+inz.length+'</div></div>'+
+        '<div class="k"><div class="l">Laagste totaal</div><div class="v">'+(laagste!=null?eur(laagste):'—')+'</div></div>'+
+        '<div class="k"><div class="l">Indienen t.e.m.</div><div class="v">'+(o.deadline_ts?new Date(o.deadline_ts).toLocaleDateString('nl-BE'):'—')+'</div></div>'+
+        '<div class="k"><div class="l">Opgevraagd</div><div class="v">'+(o.opgevraagd_ts?dt(o.opgevraagd_ts):'—')+'</div></div>'+
+      '</div>'+
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><a class="btn ghost" href="'+esc(o.link)+'" target="_blank" rel="noopener">Indienscherm openen</a> <button class="btn ghost" onclick="laad()">↻ Vernieuwen</button></div>';
+    var L=$('lijst'); L.classList.remove('hidden');
+    if(!inz.length){ L.innerHTML='<div class="sub">Nog geen offertes ingediend.</div>'; return; }
+    var rows=inz.slice().sort(function(a,b){ return (+a.totaal||0)-(+b.totaal||0); });
+    L.innerHTML='<table><thead><tr><th>Installateur</th><th>Ingediend</th><th class="num">Batterij</th><th class="num">Datasheets</th><th class="num">Totaal</th><th></th></tr></thead><tbody>'+
+      rows.map(function(x,i){
+        var nDs=(x.datasheets||[]).filter(function(d){return d.url;}).length;
+        return '<tr><td><b style="color:var(--navy)">'+esc(x.epc_naam)+'</b><div class="sub">'+esc(x.indiener_mail||'')+'</div></td><td>'+dt(x.ingediend_ts)+'</td>'+
+          '<td class="num">'+((x.batterijen||[]).length?(nl(x.batt_kw_totaal)+' kW / '+nl(x.batt_kwh_totaal)+' kWh'):'—')+'</td><td class="num">'+nDs+'</td><td class="num"><b>'+eur(x.totaal)+'</b></td>'+
+          '<td class="num"><button class="btn" id="btn-'+i+'" onclick="toggle('+i+')">Open</button></td></tr>'+
+          '<tr class="detail hidden" id="det-'+i+'"><td colspan="6">'+renderDetail(x, (o.scope||{}))+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+
+  async function laad(){
+    if(!TOKEN){ $('box').innerHTML='<b style="color:#B23A3A">Ongeldige link</b> — dossier ontbreekt.'; return; }
+    try{
+      var a=await jwt();
+      if(!a){ $('box').innerHTML='Log eerst in op de portal (oekene@gmail.com) en vernieuw deze pagina.'; return; }
+      if(a.email!=='oekene@gmail.com'){ $('box').innerHTML='Geen toegang.'; return; }
+      var r=await fetch(API+'/api/offerte/'+encodeURIComponent(TOKEN)+'/inzendingen',{ headers:{ 'Authorization':'Bearer '+a.token } });
+      var j=await r.json().catch(function(){return {};});
+      if(r.status===401||r.status===403){ $('box').innerHTML='Geen toegang.'; return; }
+      if(!j||!j.ok){ $('box').innerHTML='Laden lukte niet'+(j&&j.error?(' — '+esc(j.error)):'')+'.'; return; }
+      render(j);
+    }catch(e){ $('box').innerHTML='Laden lukte niet — probeer opnieuw.'; }
+  }
+  laad();
+</script>
+</body>
+</html>
