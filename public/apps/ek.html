@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.41.0 (2026-10-08, Johan) — (1) LOADFACTOR per cel op de JAARPIEK van die cel (verbruik gebouw + laden ÷ (kwartierpiek na installatie × 8760)) i.p.v. de contractuele aansluiting: die bleef bij een dossier zonder verzwaring overal gelijk (140 kW → 27% in elke cel). Nu toont het rooster het effect van PV/batterij op de benutting; ook de "Benutting van uw net"-tegel. (3) payload draagt nu ook D.piek (server piek-blok) mee naar het klantrapport — werd nooit doorgegeven, waardoor o.a. de particulier-piekvloer in het rapport niet werkte. (2) GEEN STILLE NOODCOMBINATIE meer: faalt de rooster-berekening (server druk/time-out), dan blijft u op het invoerscherm met een duidelijke melding + "Opnieuw proberen" i.p.v. een resultaat op de fallback-sizing zonder rooster/KPI's. Sweep-call met eigen time-out (5 min) en herkenning van de server-melding code:"server_druk" (server v15.259). -->
 <!-- ek.html v0.40.0 (2026-10-08, Johan) — (1) LOADFACTOR als volwaardige rooster-KPI: exact doorgerekende/custom cellen dragen nu aansluiting_totaal_kw (zat al in de server-cel maar viel weg → lege loadfactor-cellen); loadfactor ook in de kengetallen-roosters van het rapport, net na Piekverbruik (kVA). (2) OFFERTES SIMULEREN (enkel oekene, ?offertes=1 vanuit offertes-volgen.html): elke ingediende offerte wordt doorgerekend met zijn eigen parameters (PV kWp, batterij kW/kWh, kWh-gewogen RTE/DoD, offerteprijs PV+batterij als investering) via /api/energiekompas/bedrijf-cel, en getoond in een tabel met dezelfde KPI's als het rooster. -->
 <!-- ek.html v0.39.0 (2026-10-08, Johan) — VOERTUIGTABEL: kolomkoppen "kW" en "€/kWh" niet meer in hoofdletters (eenheden behouden hun schrijfwijze), elk met een (i) dat een uitleg-modal opent; de €/kWh-kolom is enkel zichtbaar als minstens één rij "Betalend" aangevinkt is (en enkel ingevuld op betalende rijen). TOESTEMMING: het contact-vinkje is weg; onder "Start mijn simulatie" staat in kleine letters dat starten toestemming tot contact geeft (opt_contact = altijd true). -->
 <!-- ek.html v0.38.0 (2026-10-08, Johan) — (b) resultaattitel "Uw Energie-Compas" vervangen door de KLANTNAAM (zelfde lettertype; terugval op "Uw Energie-Compas" zonder naam), metaregel eronder toont dan enkel adres · BTW; (c) klantnaam + BTW-nummer staan in de invoer nu ook in de klantweergave (zichtbaar + aanpasbaar); het afname-adres blijft adviseur-only. — de adviseur-/dossierlink-balk (#prepbar) verschijnt niet meer op het resultaatscherm; de link (zelfde als vroeger in de balk) gaat als ek_link mee in de rapport-payload en staat nu op pagina 2 van het klantrapport (klantrapport v0.29.0) → ook in elke PDF (PC of cloud). -->
@@ -941,6 +942,18 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       return await r.json();
     }catch(e){ if(poging<2){ await new Promise(function(res){setTimeout(res,1500);}); return _post(path, body, poging+1); } throw e; }
   }
+  // v0.41.0 (Johan): POST met eigen time-out (AbortController) + herkenning van de server-melding code:"server_druk" (503).
+  //   Eén herkansing bij een netwerkfout; GEEN herkansing bij time-out of druk (dat zou de wachtrij net verder verstoppen).
+  async function _postTO(path, body, ms){
+    var ctl=(typeof AbortController!=='undefined')?new AbortController():null, tm=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, ms||300000):null;
+    try{
+      var r=await fetch(API+path,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:ctl?ctl.signal:undefined });
+      var j=await r.json().catch(function(){return null;});
+      if(!r.ok){ var er=new Error((j&&j.error)||('HTTP '+r.status)); er.druk=!!(j&&j.code==='server_druk')||r.status===503; throw er; }
+      return j;
+    }catch(e){ if(e&&e.name==='AbortError'){ var et=new Error('De berekening duurde te lang.'); et.druk=true; throw et; } throw e; }
+    finally{ if(tm) clearTimeout(tm); }
+  }
   function _wagens(ev){ var a=[]; for(var i=0;i<ev;i++) a.push({km:STUB.km_per_wagen,kwhkm:STUB.kwh_per_km,wd_start:19,wd_eind:7,we_start:0,we_eind:24,creg:true}); return a; }
   function _pleinen(ev){ return ev>0 ? [{naam:'Wagenpark',type_plein:'wagenpark',betalend:false,type:'personenwagen',voertuig:'Personenwagen',aantal:ev,km_per_jaar:STUB.km_per_wagen,kwh_per_km:STUB.kwh_per_km,venster_start:19,venster_eind:7,dagen_per_week:5,creg:true}] : []; }
 
@@ -1549,9 +1562,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.35 (Johan): LOADFACTOR per cel = totale afname (gebouw + laden) / (gebruikt toegangsvermogen van DÉZE cel × 8760),
     //   gecapt op 100%. Combi-afhankelijk sinds elke cel haar eigen aansluiting_totaal_kw heeft (energie-floor) → hoe groter
     //   de batterij/energie-buffer, hoe lager de aansluiting, hoe hoger de loadfactor. Hoger = beter (minder netkost per MWh).
-    loadfactor:  { val:function(a){ if(!a||!(+a.aansluiting_totaal_kw>0)||!CTX) return null; var tot=((+CTX.afnameMwh||0)+(+CTX.laadMwh||0))*1000; var lf=tot/((+a.aansluiting_totaal_kw)*8760)*100; return Math.max(0,Math.min(100,Math.round(lf))); }, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true }
+    loadfactor:  { val:function(a){ return _ekLfVan(a); }, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true }
     // v0.11.3 (Johan): enkel kengetallen die écht met de PV/batterij-grootte veranderen staan in de heatmap.
   };
+  // v0.41.0 (Johan): LOADFACTOR van een cel = verbruik (gebouw + laden) ÷ (JAARPIEK van die cel × 8760). De jaarpiek = de
+  //   kwartierpiek-afname na installatie (sim) → PV + batterij vlakken die af → hogere benutting. Valt terug op de
+  //   cel-aansluiting (aansluiting_totaal_kw) als er (nog) geen jaarpiek is. Gecapt op 100%. Hoger = minder netkost per MWh.
+  function _ekLfVan(a){ if(!a||!CTX) return null; var tot=((+CTX.afnameMwh||0)+(+CTX.laadMwh||0))*1000; if(!(tot>0)) return null;
+    var pk=(+a.jaarpiek>0)?(+a.jaarpiek):((+a.aansluiting_totaal_kw>0)?(+a.aansluiting_totaal_kw):0); if(!(pk>0)) return null;
+    return Math.max(0,Math.min(100,Math.round(tot/(pk*8760)*100))); }
   // incrementele laadkost NA PV+batterij voor cel a = (factuur met laadplein − besparing van a) − oude factuur gebouw-only
   function _laadNaVan(a){ if(!CTX) return 0; var b=(a&&+a.besparing)||0; return (CTX.kostNieuw - b) - CTX.kostNu; }   // mag < 0 → €/100km negatief (je verdient aan rijden)
   // v0.24.37 (Johan): €/100 km = de effectieve €/kWh uit de NIEUWE factuur (na PV+batterij van déze combi), doorgerekend
@@ -1878,7 +1897,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     $('sig-km').textContent=(ev>0?('€ '+eur2(km100Cell)):'—');
     // v0.33.3 (Johan): loadfactor t.o.v. de AANSLUITING VAN DEZE CEL (aansluiting_totaal_kw, incl. energie-floor), niet de uitgangspositie.
     //   = (gebouw + laadvraag) / (cel-aansluiting × 8760). Zonder cel-aansluiting (bv. gebouw-only) → val terug op CTX.loadfactor.
-    var _lfCell=(a && +a.aansluiting_totaal_kw>0) ? Math.round(((+afnameMwh||0)+(+C.laadMwh||0))*1000/((+a.aansluiting_totaal_kw)*8760)*100) : (C.loadfactor!=null?C.loadfactor:null);
+    var _lfCell=_ekLfVan(a); if(_lfCell==null) _lfCell=(C.loadfactor!=null?C.loadfactor:null);   // v0.41.0: op de jaarpiek van de cel
     $('sig-lf').textContent=(_lfCell!=null?(_lfCell+' %'):'—');
     if($('t-inv')){ $('t-inv').textContent=eur(invTot); $('t-inv-s').textContent=String(pvKwp).replace('.',',')+' kWp PV · '+battKwh+' kWh batterij'; }
     if($('t-fact')){ $('t-fact').textContent=eur(factuurNa)+'/j'; $('t-fact-s').textContent=(_spotNul!=null ? 'zonder installatie (spot): '+eur(_spotNul)+'/j' : 'bestaande kost: '+eur(C.kostNu+(C.cregKost||0))+'/j'); }
@@ -2064,11 +2083,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
       _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(aansluitingKw>0?aansluitingKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
-      _post(_sweepPath,_sweepBody)
+      _postTO(_sweepPath,_sweepBody,300000)   // v0.41.0: eigen time-out + server_druk-herkenning
     ]);
     var ond=(_res[0].status==='fulfilled')?_res[0].value:null;
     var kpiR=(_res[1].status==='fulfilled'&&_res[1].value&&_res[1].value.kpi)?_res[1].value:null;
     var swp=(_res[2].status==='fulfilled')?_res[2].value:null;
+    var _swpErr=(_res[2].status==='rejected')?_res[2].reason:null;   // v0.41.0
     STATE_DATABRON=(swp&&swp.databron)||null;   // v0.24.4: welke databron rekende de analyse (gemeten kwartierdata vs standaardprofiel)
 
     // Kost oud→nieuw (all-in per jaar): energie-rate uit onderhandel + netkosten/heffingen × jaarvolume.
@@ -2140,6 +2160,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // Volledige simulatie → interactieve heatmap (zelfde engine). Geen anchors → geen heatmap, KPI's op fallback-sizing.
     HM=null;
     try{ if(swp&&swp.anchors&&swp.anchors.length){ _hmBedrijf(swp, _sweepBody); } }catch(e){ HM=null; }   // v0.24.39: één rooster-engine (bedrijf-sweep) voor woning én bedrijf
+    // v0.41.0 (Johan): GEEN stille noodcombinatie meer. Zonder rooster (server druk / time-out / fout) tonen we GEEN resultaat
+    //   op de fallback-sizing (afname×0,9 kWp / ×0,6 kWh, zonder KPI's) maar blijven we op het invoerscherm met een melding.
+    if(!HM){ _ekSimFout(_swpErr, swp); return; }
     var _sel = HM ? HM.best : null;
 
     // "Wat gebeurt er nu?" — enkel het dossiernummer (de mail- en kwartierdata-regels zijn weg; dossier staat ook in de titel)
@@ -2165,6 +2188,21 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(OFF_SIM && !OFF_SIM_DONE){ OFF_SIM_DONE=true; setTimeout(function(){ try{ _offSimStart(); }catch(e){} }, 300); }   // v0.40.0
     if(PREP_MODE||ADV_MODE){ _updAdvLink(); }   // v0.38.0 (Johan): balk blijft verborgen — de link staat nu op p. 2 van het klantrapport (ek_link in de payload)
     window.scrollTo({top:0,behavior:'smooth'});
+  }
+  // v0.41.0 (Johan): melding + "Opnieuw proberen" wanneer de rooster-berekening niet lukt (i.p.v. een nep-resultaat).
+  function _ekSimFout(err, swp){
+    var btn=document.querySelector('#intake .btn.block'); if(btn){ btn.disabled=false; btn.textContent='Start mijn simulatie →'; }
+    try{ _advOverlay(false); }catch(e){}
+    var druk=!!(err&&err.druk) || !!(swp&&swp.code==='server_druk');
+    var box=$('sim-fout');
+    if(!box && btn){ box=document.createElement('div'); box.id='sim-fout'; btn.parentNode.insertBefore(box, btn.nextSibling); }
+    if(!box) return;
+    box.style.cssText='margin:10px 0 0;padding:12px 14px;border:1px solid #F0C36D;background:#FFF8E6;border-radius:10px;color:#6B4E00;font-size:13.5px;line-height:1.5';
+    box.innerHTML='<b>'+(druk?'De rekenserver is momenteel druk.':'De berekening kon niet worden afgerond.')+'</b> '+
+      'We tonen liever geen onvolledig resultaat. Probeer het over een minuut opnieuw — uw invoer blijft bewaard.'+
+      '<div style="margin-top:8px"><button type="button" class="btn ghost sm" onclick="(function(){var b=document.getElementById(\'sim-fout\'); if(b) b.remove(); LAST_SIG=null; toonRapport();})()">↻ Opnieuw proberen</button></div>'+
+      ((err&&err.message&&!druk)?('<div style="margin-top:6px;font-size:11.5px;color:#8a6d1f">Technische melding: '+esc0(err.message)+'</div>'):'');
+    try{ box.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
   }
   function esc0(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
@@ -3315,6 +3353,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       profielanalyse: j.profielanalyse||null,   // v0.24.11 (Johan): profielanalyse-bijlage (afname/injectie) uit de bedrijf-rapport-response → klantrapport toont ze vóór bijlage 1
       energie_mwh: j.energie_mwh||null,          // v0.24.42 (Johan): MWh afname/injectie per situatie (nul/opt) → factuurvergelijking (server v15.212)
       zelfconsumptie: j.zelfconsumptie||null,    // v0.24.42 (Johan): PV-bestemming (direct/via batt/injectie) + verbruik + %-zc/zv + per maand → energiebalans-bijlage (donuts + staafdiagram)
+      piek: j.piek||null,                        // v0.41.0 (Johan): kwartierpieken voor/na (sim_voor_kw/sim_na_kw/onbeheerst_kw) → loadfactor cover + piekblok + particulier-piekvloer (werd tot nu niet doorgegeven)
       laadplein: j.laadplein||null,              // v0.24.47 (Johan §4): laadplein-bijlage (MWh + meerkost boven gebouw + km-dekking vóór/ná) → server v15.217
       betalend: j.betalend||null,                // v0.26 (Johan): betalend-laadplein kost/omzet (gekozen combi) → financieel model 2 extra kolommen (server v15.236)
       per_type: j.per_type||null,                // v0.26 (Johan): geladen km per voertuigtype (gevraagd vs geleverd, betalend/niet-betalend) → nieuwe bijlage
