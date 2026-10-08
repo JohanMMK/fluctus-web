@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Offerte indienen — Energie-Compas</title>
+<!-- offerte-tabel.html v0.2.1 (2026-10-08, Johan) — geen ontkoppelbord onder 30 kVA geïnstalleerd vermogen (PV + batterij kW + 11 kW/AC + 50 kW/DC); datasheets ENKEL voor wat gevraagd wordt: batterij (bij batterij), panelen (bij PV), omvormer(s) (bij PV of batterij), AC-laadpaal (bij AC), DC-laadpaal (bij DC) — andere blokken verborgen. -->
 <!-- offerte-tabel.html v0.2.0 (2026-10-08, Johan) — uitleg selectieprocedure (offerte → selectie installateur → bezoek ter plaatse + bindende offerte met de klant); batterij als aparte lijnen met kW · kWh · RTE · DoD (meerdere types toegestaan, extra lijnitem per type, vergelijking met gevraagde kW/kWh); datasheets batterij / omvormers / panelen (base64 → server v15.257); tabtitel "Offerte · <dossier>". -->
 <!-- offerte-tabel.html v0.1.0 (2026-09-27) — OFFERTE FASE 2 (Johan): de invul-tabel waar een installateur (EPC) zijn prijs indient.
      Leest GET /api/offerte/:token (scope + deadline + status). Adviseur-deeplink ?modus=alleen|lastcall → POST /api/offerte/kies-modus vóór het laden.
@@ -120,10 +121,12 @@
 
     <h3>Datasheets</h3>
     <div class="sub">PDF of afbeelding, max. 6 MB per bestand en 12 MB in totaal.</div>
-    <div class="ds">
-      <label id="ds-batt-l">Datasheet batterij <span id="ds-batt-req"></span><input type="file" id="ds-batterij" accept=".pdf,image/*" multiple><div class="fl" id="ds-batterij-l"></div></label>
-      <label>Datasheet omvormer(s) <span id="ds-omv-req"></span><input type="file" id="ds-omvormer" accept=".pdf,image/*" multiple><div class="fl" id="ds-omvormer-l"></div></label>
-      <label id="ds-pan-l">Datasheet panelen <span id="ds-pan-req"></span><input type="file" id="ds-panelen" accept=".pdf,image/*" multiple><div class="fl" id="ds-panelen-l"></div></label>
+    <div class="ds" id="ds-blok">
+      <label id="ds-wrap-batterij" class="hidden">Datasheet batterij *<input type="file" id="ds-batterij" accept=".pdf,image/*" multiple><div class="fl" id="ds-batterij-l"></div></label>
+      <label id="ds-wrap-omvormer" class="hidden">Datasheet omvormer(s) *<input type="file" id="ds-omvormer" accept=".pdf,image/*" multiple><div class="fl" id="ds-omvormer-l"></div></label>
+      <label id="ds-wrap-panelen" class="hidden">Datasheet panelen *<input type="file" id="ds-panelen" accept=".pdf,image/*" multiple><div class="fl" id="ds-panelen-l"></div></label>
+      <label id="ds-wrap-ac" class="hidden">Datasheet AC-laadpaal *<input type="file" id="ds-ac" accept=".pdf,image/*" multiple><div class="fl" id="ds-ac-l"></div></label>
+      <label id="ds-wrap-dc" class="hidden">Datasheet DC-laadpaal *<input type="file" id="ds-dc" accept=".pdf,image/*" multiple><div class="fl" id="ds-dc-l"></div></label>
     </div>
 
     <h3>Opmerking</h3>
@@ -248,6 +251,17 @@
   }
   function heeftBatt(){ return !!(SCOPE && (SCOPE.batt_kw>0||SCOPE.batt_kwh>0)); }
   function heeftPv(){ return !!(SCOPE && SCOPE.pv_kwp>0); }
+  // v0.2.1: geen ontkoppelbord onder 30 kVA geïnstalleerd vermogen.
+  function kvaGeinstalleerd(sc){ return (+sc.pv_kwp||0)+(+sc.batt_kw||0)+(+sc.ac||0)*11+(+sc.dc||0)*50; }
+  // v0.2.1: welke datasheets gevraagd worden — enkel voor de gevraagde componenten.
+  function dsGevraagd(){ var o=[];
+    if(heeftBatt()) o.push('batterij');
+    if(heeftPv()||heeftBatt()) o.push('omvormer');
+    if(heeftPv()) o.push('panelen');
+    if(SCOPE && SCOPE.ac>0) o.push('ac');
+    if(SCOPE && SCOPE.dc>0) o.push('dc');
+    return o; }
+  var DS_LABEL={ batterij:'de batterij', omvormer:'de omvormer(s)', panelen:'de panelen', ac:'de AC-laadpaal', dc:'de DC-laadpaal' };
 
   function render(j){
     $('laden').classList.add('hidden');
@@ -255,6 +269,7 @@
     try{ document.title='Offerte'+(j.dossier?(' · '+j.dossier):'')+' — Energie-Compas'; }catch(e){}
     if(j.gesloten){ $('dicht').classList.remove('hidden'); return; }
     SCOPE=j.scope||{};
+    if(kvaGeinstalleerd(SCOPE)<30) SCOPE.ontkoppelbord=false;
     $('form').classList.remove('hidden');
     $('scope-txt').textContent = scopeTekst(SCOPE);
     var dl=j.deadline_ts?new Date(j.deadline_ts):null;
@@ -262,15 +277,16 @@
     if(heeftBatt()){
       $('batt-vraag').innerHTML='Gevraagd: <b>'+nl(SCOPE.batt_kw||0)+' kW</b> / <b>'+nl(SCOPE.batt_kwh||0)+' kWh</b>'+((SCOPE.rte||SCOPE.dod)?(' · simulatie gerekend met RTE '+SCOPE.rte+'% en DoD '+SCOPE.dod+'%'):'');
       addBatt();
-      $('ds-batt-req').textContent='*'; $('ds-omv-req').textContent='*';
     } else {
       $('batt-vraag').textContent='Er is geen batterij gevraagd — voeg enkel een lijn toe als u er toch één voorstelt.';
     }
-    if(heeftPv()){ $('ds-pan-req').textContent='*'; $('ds-omv-req').textContent='*'; }
+    var dsg=dsGevraagd();
+    dsg.forEach(function(k){ var w=$('ds-wrap-'+k); if(w) w.classList.remove('hidden'); });
+    if(!dsg.length){ var db=$('ds-blok'); if(db) db.innerHTML='<div class="sub">Voor deze aanvraag zijn geen datasheets nodig.</div>'; }
     var rijen=scopeRijen(SCOPE);
     if(!rijen.length && !heeftBatt()){ addRow('Installatie', 1, true); }
     else rijen.forEach(function(r){ addRow(r.post, r.eenheden, false, r.sub); });
-    ['batterij','omvormer','panelen'].forEach(function(k){ var inp=$('ds-'+k); if(inp) inp.addEventListener('change',function(){ var l=$('ds-'+k+'-l'); if(l) l.textContent=Array.prototype.map.call(inp.files,function(f){ return f.name+' ('+Math.round(f.size/1024)+' kB)'; }).join(', '); }); });
+    ['batterij','omvormer','panelen','ac','dc'].forEach(function(k){ var inp=$('ds-'+k); if(inp) inp.addEventListener('change',function(){ var l=$('ds-'+k+'-l'); if(l) l.textContent=Array.prototype.map.call(inp.files,function(f){ return f.name+' ('+Math.round(f.size/1024)+' kB)'; }).join(', '); }); });
     recalc();
   }
 
@@ -278,7 +294,7 @@
 
   async function verzamelDatasheets(){
     var out=[], tot=0;
-    for(var k of ['batterij','omvormer','panelen']){
+    for(var k of dsGevraagd()){
       var inp=$('ds-'+k); if(!inp||!inp.files) continue;
       for(var i=0;i<inp.files.length;i++){
         var f=inp.files[i];
@@ -301,10 +317,9 @@
     if(heeftBatt()){
       if(!batts.length) return fout('Vul minstens één batterijtype in.');
       for(var i=0;i<batts.length;i++){ var b=batts[i]; if(!b.merk_type||!(b.kw>0)||!(b.kwh>0)||!(b.rte>0)||!(b.dod>0)||!(b.prijs_stuk>0)) return fout('Vul per batterijtype merk & type, kW, kWh, RTE, DoD en prijs in.'); }
-      if(!aantalFiles('batterij')) return fout('Voeg de datasheet van de batterij toe.');
     }
-    if((heeftBatt()||heeftPv()) && !aantalFiles('omvormer')) return fout('Voeg de datasheet van de omvormer(s) toe.');
-    if(heeftPv() && !aantalFiles('panelen')) return fout('Voeg de datasheet van de panelen toe.');
+    var dsMis=dsGevraagd().filter(function(k){ return !aantalFiles(k); });
+    if(dsMis.length) return fout('Voeg de datasheet toe van '+dsMis.map(function(k){ return DS_LABEL[k]; }).join(', ')+'.');
     var prijsOk = batts.some(function(b){ return b.totaal>0; }) || regels.some(function(r){ return r.totaal>0; });
     if(!prijsOk) return fout('Vul minstens één post met een prijs in.');
     var btn=$('send'); btn.disabled=true; btn.textContent='⏳ Indienen…';
