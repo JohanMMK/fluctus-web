@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.31.0 (2026-10-09, Johan) — (0) FIX WEGGEKNIPTE INHOUD p. 2 + factuurvergelijking: bij een laadplein liepen "Toegangsvermogen / piekvermogen" (+ loadfactor) en "Voorgestelde verbetering" + dossierlink onder de printrand en werden weggeknipt (overflow:hidden); idem "Zo is de besparing opgebouwd" onderaan de factuurvergelijking en "Jaar per jaar" + aannames op het financieel plan — nu .split-sectie → verhuist naar een vervolgblad. FRANSE VERSIE: laadt fr-ec-seg.js (FR-sjablonen per tekstsegment) + i18n-ec.js v0.2.0 (segment-sjablonen met getal-/maand-placeholders i.p.v. woordvervanging → geen Franglais meer). FR via ?lang=fr of payload.lang='fr' (ek v0.42 + server-PDF). Fix NL: heatmap-duiding werd ge-escaped → letterlijke "<b>…</b>" en "<span class=muted>" in de bijlage afname (onbeheerst laden). -->
 <!-- klantrapport.html v0.30.1 (2026-10-09, Johan) — FOUT DOSSIER: rapport toonde het vorige dossier (gekloonde sessionStorage van het EK-tabblad). Payload nu gekozen op _rid uit de URL (ek v0.41.1), anders localStorage vóór sessionStorage. -->
 <!-- klantrapport.html v0.30.0 (2026-10-08, Johan) — (1) LOADFACTOR op de voorpagina als tweede kerngetal naast de €/100 km (zonder laadplein: alleen de loadfactor): verbruik (gebouw + laden) ÷ (kwartierpiek na installatie × 8760), met de waarde zonder installatie ernaast — zelfde definitie als het EK-rooster (ek v0.41). (2) Loadfactor HERNOMEN EN GEDUID: bij een laadplein in "Toegangsvermogen / piekvermogen" (vandaag / onbeheerst laden / met installatie, onder de kVA-vakken) + uitleg; zonder laadplein als rij in de tabel "Aansluiting". (3) Bijlage zelfconsumptie & zelfvoorziening ook bij enkel BESTAANDE PV, en "via de batterij → eigen verbruik" per maand begrensd op het resterende verbruik (zelfvoorziening kon tot 200% oplopen; overschot telt als injectie). -->
 <!-- klantrapport.html v0.29.0 (2026-10-08, Johan) — onderaan pagina 2: "Uw dossier online" met de link naar het dossier in Energie-Compas (D.ek_link, uit ek.html v0.38.0) — klikbaar in de browser en in de PDF, URL ook leesbaar uitgeschreven. -->
@@ -62,7 +63,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="i18n-ec.js"></script>
+<script src="fr-ec-seg.js?v=1.1.0"></script>
+<script src="i18n-ec.js?v=0.2.0"></script>
 <style>
   :root{
     --navy:#12233b; --navy-l:#22406e; --blauw:#1F3864; --groen:#05B050; --groen-d:#048443;
@@ -201,6 +203,7 @@
   /* aansluiting-blok */
   .aansl{border:1px solid var(--lijn);border-radius:10px;overflow:hidden;margin-top:8px}
   .aansl .rij{display:grid;grid-template-columns:150px 1fr;gap:0;font-size:12.5px;border-bottom:1px solid var(--lijn)}
+  html[lang=fr] .aansl .rij{grid-template-columns:190px 1fr}   /* v0.31.0: FR-labels zijn langer ("Adresse de consommation") → niet op 2 regels */
   .aansl .rij:last-child{border-bottom:none}
   .aansl .k{background:#f3f6fa;color:var(--navy);font-weight:700;padding:8px 12px}
   .aansl .v{padding:8px 12px;color:var(--zwart)}
@@ -279,7 +282,7 @@ function heatBlok(titel, mat, eenheid, duiding, vanISO){
   var piek=0; if(mat&&mat.length){ mat.forEach(function(r){ r.forEach(function(v){ if(v>piek)piek=v; }); }); }
   var pk=Math.round(piek*10)/10;
   return '<div class="heat-wrap"><div class="heat-titel">'+esc(titel)+'</div>'+
-    (duiding?'<div class="heat-duid">'+esc(duiding)+'</div>':'')+
+    (duiding?'<div class="heat-duid">'+duiding+'</div>':'')+   // v0.31.0: duiding is interne HTML (bv. <b>piek</b>, <span class=muted>) — werd ge-escaped en toonde letterlijke tags
     heatmapSvg(mat, piek, vanISO)+
     '<div class="heat-leg"><span>laag</span><span class="bar"></span><span>hoog — piek '+_num(pk,1)+' '+esc(eenheid||'kW')+'</span></div></div>';
 }
@@ -568,6 +571,7 @@ function _combiSubBr(){
     var _msG=63;
     if(_vOnb>0 && _vNa>0){
       var _vBinnen=(_vBest<=0)||(_vNa<=_vBest*1.02);
+      h+='<div class="split-blok split-sectie">';   // v0.31.0: hele sectie verhuist naar een vervolgblad als ze niet meer past (werd weggeknipt)
       h+='<h2>Toegangsvermogen / piekvermogen</h2>';
       h+='<p class="lead" style="margin-top:0">Om de dagelijkse km\u2019s te laden moet uw aansluiting de piek aankunnen. Onbeheerst laden \u2014 alle voertuigen samen op vol vermogen \u2014 zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.</p>';
       h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
@@ -592,6 +596,7 @@ function _combiSubBr(){
          (_vBest>0?(_vBinnen?(', binnen uw bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden')):'')+
          ' \u2014 zo laadt u 100% van de jaar-km\u2019s zonder de aansluiting te verzwaren'+
          ((_vVerm>0)?(', wat een eenmalige verzwaring van \u00b1 '+eur(_vVerm)+' vermijdt'):'')+'.</p>';
+      h+='</div>';
     }
   }
   // ── Voorgestelde verbetering (hardware in dit scenario) ──
@@ -604,6 +609,7 @@ function _combiSubBr(){
   if(bKwh||bKw) rows.push(['Batterij', [(bKw?_num(bKw,0)+' kW':''),(bKwh?_num(bKwh,0)+' kWh':''),(bCy!=null?'≈ '+_num(bCy,0)+' cycli/jaar':'')].filter(Boolean).join(' · ')]);
   if(ac&&ac.aantal) rows.push(['Laadpalen AC', _num(ac.kva,0)+' kVA × '+_num(ac.aantal,0)]);
   if(dc&&dc.aantal) rows.push(['Laadpalen DC', _num(dc.aantal,0)+' × fastDC']);
+  h+='<div class="split-blok split-sectie">';   // v0.31.0: zie hierboven
   if(rows.length){
     h+='<h2>Voorgestelde verbetering</h2>';
     h+='<p class="lead" style="margin-top:0">In dit scenario komt de volgende hardware bij:</p>';
@@ -619,6 +625,7 @@ function _combiSubBr(){
        '<b style="color:#1F3864">Uw dossier online</b> — bekijk en vergelijk uw resultaten in Energie-Compas:<br>'+
        '<a href="'+esc(D.ek_link)+'" target="_blank" rel="noopener" style="color:#1F3864;word-break:break-all">'+esc(D.ek_link)+'</a></div>';
   }
+  h+='</div>';
   pagina(h);
 })();
 
@@ -685,7 +692,7 @@ function _combiSubBr(){
   if(HAS_BATT) _kaarten.push('<div class="card"><div class="t">Piekafvlakking</div><p>De batterij dekt korte afnamepieken → lagere capaciteitskost.</p></div>');
   if(HAS_BATT) _kaarten.push('<div class="card"><div class="t">Arbitrage spotmarkt</div><p>Laden/ontladen op prijsverschillen binnen de dag — enkel mogelijk met een <b>dynamisch (spot) contract</b> op day-ahead-prijzen.</p></div>');
   if((HAS_BATT||HAS_INJ) && !IS_PART) _kaarten.push('<div class="card"><div class="t">Onbalans (windfall)</div><p>Passieve respons op onbalansmomenten — een extra, opportunistische opbrengst die u ná de installatie met uw leverancier opneemt.</p></div>');
-  if(_kaarten.length){ h+='<h2>Zo is de besparing opgebouwd</h2><div class="grid2">'+_kaarten.join('')+'</div>'; }
+  if(_kaarten.length){ h+='<div class="split-blok split-sectie"><h2>Zo is de besparing opgebouwd</h2><div class="grid2">'+_kaarten.join('')+'</div></div>'; }   // v0.31.0: verhuist naar vervolgblad als de factuurvergelijking te lang is (werd weggeknipt)
   pagina(h);
 })();
 
@@ -928,6 +935,7 @@ function financieelPagina(energieOverride, titelArg, extraNote){
   h+='<div class="heat-wrap"><div class="heat-titel">Cumulatieve cashflow (eigen middelen)</div>'+
      '<div class="heat-duid">Onder de lijn = investering nog niet terugverdiend · boven de lijn = winst.</div>'+
      _cashflowSvg(rows, netInv, extraNote?27:46)+'</div>';
+  h+='<div class="split-blok split-sectie">';   // v0.31.0: tabel + aannames verhuizen naar een vervolgblad als ze niet meer passen (werden weggeknipt)
   h+='<h2>Jaar per jaar</h2>';
   if(HAS_BZ){
     // v0.19 (Johan): betalend → volle-breedte tabel met de twee extra kolommen (omzet plein + kost elektriciteit).
@@ -955,6 +963,7 @@ function financieelPagina(energieOverride, titelArg, extraNote){
      '. Kosten geïndexeerd met '+_num(infl*100,0)+' %/jaar'+(BW&&extra>0?(', het netkosten-deel van de besparing (net­gebruik + capaciteitstarief) met inflatie + '+_num(extra*100,0)+' %/jaar'+(dubJ<9999?' + eenmalige verdubbeling in '+dubJ:'')):'')+
      (HAS_BZ?('. <b>Betalend laadplein:</b> de omzet aan de paal indexeert met '+_num(infl*100,0)+' %/jaar; de elektriciteitskost om te laden volgt hetzelfde (snellere) netkostenpad als de besparing. De netto plaza-marge (omzet − elektriciteit) telt bovenop de PV/batterij-besparing in de cashflow en terugverdientijd.'):'')+
      '. Bedragen exclusief btw. Indicatieve raming, geen persoonlijk financieel advies.</p>';
+  h+='</div>';
   pagina(h);
 }
 // P5 — normaal financieel plan (spot-sturing).
@@ -1801,6 +1810,8 @@ async function _genPdf(){
       for(var k=0;k<kids.length;k++){
         var el=kids[k], h=kidH(el), blk=isBlok(el);
         if(blk && zagBlok && used+h>avail){ split=k; break; }   // dit blok past niet meer
+        // v0.31.0: een .split-sectie (tekstsectie op p. 2) mag ook als EERSTE blok verhuizen, als er inhoud vóór staat en ze op een vers blad past
+        if(blk && !zagBlok && used>0 && el.classList.contains('split-sectie') && used+h>avail && h<avail*0.85){ split=k; break; }
         used+=h; if(blk) zagBlok=true;
       }
       if(split<0){ pi++; continue; }                    // niets te verplaatsen (1 reusachtig blok) → laat staan
