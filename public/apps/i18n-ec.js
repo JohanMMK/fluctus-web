@@ -13,6 +13,7 @@
        deze laag is dan een NO-OP (anti-regressie).
    Woordenboeken (geladen vóór dit script): window.EC_FR_SEG (fr-ec-seg.js, sjablonen) + window.EC_FR_EXACT
    (fr-ec-dict.js, oude exacte labels; enkel als vangnet). EC_FR_DICT/EC_FR_RULES worden NIET meer gebruikt.
+   v0.2.2 (2026-10-09): samengestelde segmenten mogen op een slotpunt eindigen.
    v0.2.1 (2026-10-09): + samengestelde segmenten ("a · b · c" → per deel, enkel als alle delen gekend zijn) + regels
      EC_FR_FN [regex, fn] voor zinnen met vrije tekst (profielnaam, spanning, bron) — gevonden bij de live dekkingsscan van het EK-resultaatscherm.
    v0.1.0 (2026-10-04): eerste versie (substring-woordenboek). */
@@ -100,9 +101,10 @@
       for (var r = 0; r < FN.length; r++) { var mm = core.match(FN[r][0]); if (mm) { var rr = FN[r][1](mm, H); if (rr != null) { DONE.add(norm(rr)); return lead + rr + trail; } } }
       // v0.2.1: samengesteld segment "a · b · c" → elk deel apart (enkel als ALLE delen gekend zijn)
       if (core.indexOf(' · ') > 0) {
-        var dl = core.split(' · '), uit = [], ok = true;
+        var punt = /\.$/.test(core) ? '.' : '', kern = punt ? core.slice(0, -1) : core;   // slotpunt apart
+        var dl = kern.split(' · '), uit = [], ok = true;
         for (var d = 0; d < dl.length; d++) { var t = zoek(dl[d].trim()); if (t == null) { ok = false; break; } uit.push(t); }
-        if (ok) { var res2 = uit.join(' · '); DONE.add(norm(res2)); return lead + res2 + trail; }
+        if (ok) { var res2 = uit.join(' · ') + punt; DONE.add(norm(res2)); return lead + res2 + trail; }
       }
       if (/[a-zà-ÿ]{3,}/i.test(key.replace(/\{[#m]\}/g, ''))) MISSING.add(key); return txt;
     }

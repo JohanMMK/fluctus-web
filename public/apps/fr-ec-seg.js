@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.0, 2026-10-09: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.1, 2026-10-09: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'. */
 window.EC_FR_SEG = {
@@ -1105,7 +1105,14 @@ window.EC_FR_SEG = {
 "{#} kWh": "{#} kWh",
 "Lichtrood = deze opstelling dekt niet {#}% van de dagelijkse km-vraag.": "Rouge clair = cette configuration ne couvre pas {#} % du besoin quotidien en km.",
 "klik": "cliquez",
-"BTW": "TVA"
+"BTW": "TVA",
+"Factuurbasis": "Base de facturation",
+"Piek-coherentie (input vs profiel)": "Cohérence de la pointe (saisie vs profil)",
+"Rendement (gemiddeld/jaar)": "Rendement (moyen/an)",
+"Besparing (% op spot-basis)": "Économie (% sur base spot)",
+"Energiekost per {#} km": "Coût énergétique par {#} km",
+"Dekking dagelijkse km-vraag": "Couverture du besoin quotidien en km",
+"Batterij-cycli per jaar": "Cycles de batterie par an"
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */
