@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.1, 2026-10-09: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.2, 2026-10-10: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'. */
 window.EC_FR_SEG = {
@@ -1112,7 +1112,12 @@ window.EC_FR_SEG = {
 "Besparing (% op spot-basis)": "Économie (% sur base spot)",
 "Energiekost per {#} km": "Coût énergétique par {#} km",
 "Dekking dagelijkse km-vraag": "Couverture du besoin quotidien en km",
-"Batterij-cycli per jaar": "Cycles de batterie par an"
+"Batterij-cycli per jaar": "Cycles de batterie par an",
+"{#} × AC-laadpaal woning (€ {#} + € {#} installatie)": "{#} × borne de recharge AC à domicile (€ {#} + € {#} d'installation)",
+"Laadvermogen per snellaadpaal (kW) — betalend plein": "Puissance de recharge par borne rapide (kW) — parc payant",
+"Verkoopprijs per kWh (betalend)": "Prix de vente par kWh (payant)",
+"{#} van {#} MWh gevraagd": "{#} sur {#} MWh demandés",
+"Omzet/j": "Chiffre d'affaires/an"
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */
