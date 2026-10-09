@@ -2,8 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
+<meta name="ek-build" content="0.41.2">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.41.2 (2026-10-09, Johan) — GEEN CACHE: (1) pagina uit de back/forward-cache → meteen herladen; (2) versiewacht via <meta name="ek-build"> — bij terugkeer naar het tabblad en vóór "Toon rapport" vergelijken met de gepubliceerde versie → balk "Er is een nieuwe versie … Vernieuwen" (geen stille herlaad = geen verlies van invoer); (3) dossier-GETs (inbound-case, project-get) met cache:no-store + cache-buster. Samen met fluctus-web server: HTML Cache-Control no-store. -->
 <!-- ek.html v0.41.1 (2026-10-09, Johan) — FOUT DOSSIER IN RAPPORT: het rapport-tabblad wordt sinds v0.37 synchroon geopend (pop-upblokker) → Chrome kloont op dat moment de sessionStorage van het EK-tabblad, met de payload van het VORIGE rapport. klantrapport las sessionStorage eerst → toonde het vorige dossier (bv. KMO i.p.v. het nieuwe particulier-dossier). Fix: elke payload krijgt een uniek _rid dat ook in de rapport-URL (&rid=) staat; klantrapport v0.30.1 kiest exact die payload. -->
 <!-- ek.html v0.41.0 (2026-10-08, Johan) — (1) LOADFACTOR per cel op de JAARPIEK van die cel (verbruik gebouw + laden ÷ (kwartierpiek na installatie × 8760)) i.p.v. de contractuele aansluiting: die bleef bij een dossier zonder verzwaring overal gelijk (140 kW → 27% in elke cel). Nu toont het rooster het effect van PV/batterij op de benutting; ook de "Benutting van uw net"-tegel. (3) payload draagt nu ook D.piek (server piek-blok) mee naar het klantrapport — werd nooit doorgegeven, waardoor o.a. de particulier-piekvloer in het rapport niet werkte. (2) GEEN STILLE NOODCOMBINATIE meer: faalt de rooster-berekening (server druk/time-out), dan blijft u op het invoerscherm met een duidelijke melding + "Opnieuw proberen" i.p.v. een resultaat op de fallback-sizing zonder rooster/KPI's. Sweep-call met eigen time-out (5 min) en herkenning van de server-melding code:"server_druk" (server v15.259). -->
 <!-- ek.html v0.40.0 (2026-10-08, Johan) — (1) LOADFACTOR als volwaardige rooster-KPI: exact doorgerekende/custom cellen dragen nu aansluiting_totaal_kw (zat al in de server-cel maar viel weg → lege loadfactor-cellen); loadfactor ook in de kengetallen-roosters van het rapport, net na Piekverbruik (kVA). (2) OFFERTES SIMULEREN (enkel oekene, ?offertes=1 vanuit offertes-volgen.html): elke ingediende offerte wordt doorgerekend met zijn eigen parameters (PV kWp, batterij kW/kWh, kWh-gewogen RTE/DoD, offerteprijs PV+batterij als investering) via /api/energiekompas/bedrijf-cel, en getoond in een tabel met dezelfde KPI's als het rooster. -->
@@ -1444,7 +1447,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var H=await _ekAuthHeaders();
       if(!_PARTNERS_CAT){ var rc=await fetch(API+'/api/partners',{headers:H}); var jc=await rc.json().catch(function(){return{};}); _PARTNERS_CAT=(jc&&jc.partners)||[]; }
       _PARTNER_LOADED_FOR=STATE_CODE;
-      try{ var rp=await fetch(API+'/api/kamino/project-get?id='+encodeURIComponent(STATE_CODE),{headers:H}); var jp=await rp.json().catch(function(){return{};}); STATE_PARTNER=(jp&&jp.project&&jp.project.partner)||null; }catch(e){}
+      try{ var rp=await fetch(API+'/api/kamino/project-get?id='+encodeURIComponent(STATE_CODE)+'&_='+Date.now(),{headers:H,cache:'no-store'}); var jp=await rp.json().catch(function(){return{};}); STATE_PARTNER=(jp&&jp.project&&jp.project.partner)||null; }catch(e){}
       _ekPartnerRender();
     }catch(e){ el.innerHTML='<span style="color:#8a94a6">🏢 Partner — meld u aan als manager om te koppelen.</span>'; _PARTNER_LOADED_FOR=null; }
   }
@@ -2585,7 +2588,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{
       var tk=new URLSearchParams(location.search).get('case'); if(!tk) return;
       TOKEN=tk;
-      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src=ek').then(function(r){return r.ok?r.json():null;}).then(function(j){
+      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src=ek&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(!j||!j.ok) return;
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
@@ -3411,6 +3414,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     };
   }
   async function toonKlantrapport(){
+    try{ if(window._ekVersieCheck) window._ekVersieCheck(true); }catch(eV){}   // v0.41.2: versiewacht (balk bij nieuwere versie)
     var st=$('rapport-status');
     if(!window._RAP_PAYLOAD){ if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
     var sel=(HM&&(HM.sel||HM.best))||null;
@@ -3617,6 +3621,41 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   try{ OFF_SIM = (new URLSearchParams(location.search).get('offertes')==='1'); }catch(e){}
   _advLoad();
   _ekResolveGate();   // v0.15: login-gate resolven (async) → onthult nieuwe features enkel voor oekene@gmail.com
+</script>
+<script>
+/* v0.41.2 (Johan): NOOIT EEN VEROUDERDE PAGINA OF DOSSIER.
+   (1) Pagina terug uit de back/forward-cache (bv. terugknop, hersteld tabblad) → meteen herladen, zodat dossier en
+       code altijd vers van de server komen.
+   (2) Versiewacht: bij terugkeren naar het tabblad (max. 1×/2 min) en vóór "Toon rapport" vergelijken we de geladen
+       versie met de gepubliceerde; is er een nieuwere → balk bovenaan met knop "Vernieuwen" (herlaadt met hetzelfde
+       dossier ?case=...). Geen automatische herlaad tijdens het invullen → geen verlies van ingetypte gegevens. */
+(function(){
+  window.addEventListener('pageshow', function(ev){ if(ev && ev.persisted){ try{ location.reload(); }catch(e){} } });
+  var EIGEN=(document.querySelector('meta[name="ek-build"]')||{}).content||'';
+  var laatst=0, nieuw=null;
+  function balk(v){
+    if(document.getElementById('ek-nieuwe-versie')) return;
+    var b=document.createElement('div'); b.id='ek-nieuwe-versie';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#1F3864;color:#fff;font:14px/1.4 -apple-system,Segoe UI,Arial,sans-serif;padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+    b.innerHTML='<span>Er is een nieuwe versie van Energie-Compas beschikbaar.</span>';
+    var k=document.createElement('button'); k.type='button'; k.textContent='Vernieuwen';
+    k.style.cssText='background:#05B050;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer';
+    k.onclick=function(){ try{ location.reload(); }catch(e){} };
+    b.appendChild(k); document.body.appendChild(b);
+  }
+  async function check(force){
+    var nu=Date.now(); if(!force && nu-laatst<120000) return nieuw; laatst=nu;
+    try{
+      var r=await fetch('/apps/ek.html?vchk='+nu,{cache:'no-store'}); if(!r.ok) return nieuw;
+      var t=await r.text(); var m=t.match(/<meta name="ek-build" content="([^"]+)"/);
+      if(m && EIGEN && m[1]!==EIGEN){ nieuw=m[1]; balk(nieuw); }
+    }catch(e){}
+    return nieuw;
+  }
+  window._ekVersieCheck=check;
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(false); });
+  window.addEventListener('focus', function(){ check(false); });
+})();
 </script>
 </body>
 </html>
