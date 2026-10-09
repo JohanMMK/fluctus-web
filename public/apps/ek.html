@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.41.2">
+<meta name="ek-build" content="0.41.3">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.41.3 (2026-10-09, Johan) — ONDERHANDELINGSNOTA ENKEL BIJ EEN OPGELADEN AFREKENING: de onderhandel-baseCase draagt nu factuur_bestanden + is_voorschot (extractor-vlag, STATE_IS_VOORSCHOT; null = geen factuur) en ek-intake bewaart is_voorschot op het dossier. Manueel dossier zonder factuur of voorschotfactuur → server v15.260 afrekening=false → geen nota. -->
 <!-- ek.html v0.41.2 (2026-10-09, Johan) — GEEN CACHE: (1) pagina uit de back/forward-cache → meteen herladen; (2) versiewacht via <meta name="ek-build"> — bij terugkeer naar het tabblad en vóór "Toon rapport" vergelijken met de gepubliceerde versie → balk "Er is een nieuwe versie … Vernieuwen" (geen stille herlaad = geen verlies van invoer); (3) dossier-GETs (inbound-case, project-get) met cache:no-store + cache-buster. Samen met fluctus-web server: HTML Cache-Control no-store. -->
 <!-- ek.html v0.41.1 (2026-10-09, Johan) — FOUT DOSSIER IN RAPPORT: het rapport-tabblad wordt sinds v0.37 synchroon geopend (pop-upblokker) → Chrome kloont op dat moment de sessionStorage van het EK-tabblad, met de payload van het VORIGE rapport. klantrapport las sessionStorage eerst → toonde het vorige dossier (bv. KMO i.p.v. het nieuwe particulier-dossier). Fix: elke payload krijgt een uniek _rid dat ook in de rapport-URL (&rid=) staat; klantrapport v0.30.1 kiest exact die payload. -->
 <!-- ek.html v0.41.0 (2026-10-08, Johan) — (1) LOADFACTOR per cel op de JAARPIEK van die cel (verbruik gebouw + laden ÷ (kwartierpiek na installatie × 8760)) i.p.v. de contractuele aansluiting: die bleef bij een dossier zonder verzwaring overal gelijk (140 kW → 27% in elke cel). Nu toont het rooster het effect van PV/batterij op de benutting; ook de "Benutting van uw net"-tegel. (3) payload draagt nu ook D.piek (server piek-blok) mee naar het klantrapport — werd nooit doorgegeven, waardoor o.a. de particulier-piekvloer in het rapport niet werkte. (2) GEEN STILLE NOODCOMBINATIE meer: faalt de rooster-berekening (server druk/time-out), dan blijft u op het invoerscherm met een duidelijke melding + "Opnieuw proberen" i.p.v. een resultaat op de fallback-sizing zonder rooster/KPI's. Sweep-call met eigen time-out (5 min) en herkenning van de server-melding code:"server_druk" (server v15.259). -->
@@ -886,7 +887,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.27.0 (Johan): factuur terug oproepen. LAST_FACTUUR_FILES = in-sessie opgeladen factuur(en) als dataURL →
   //   "bekijk factuur" voor IEDEREEN (ook anonieme/gewone gebruikers), zonder login. STATE_FACTUUR_BESTANDEN =
   //   {bucket,pad,...} uit baseCase.factuur_bestanden (dossier/mail-link) → kortlevende signed URL via de server.
-  var LAST_FACTUUR_FILES=[], STATE_FACTUUR_BESTANDEN=[];
+  var LAST_FACTUUR_FILES=[], STATE_FACTUUR_BESTANDEN=[], STATE_IS_VOORSCHOT=null;   // v0.41.3: null = geen opgeladen factuur; true/false = extractor-vlag
   var STATE_HEEFT_PROFIEL=false;   // v0.24.6 (Johan): dossier heeft al gekoppelde profielen (afname/injectie) → rol is gekend, EAN-keuze niet opnieuw vragen
   var STATE_EAN_GEKEND=false;      // v0.24.8 (Johan): de EAN-rollen (afname/injectie) zijn bevestigd/bewaard op het dossier → modal niet meer tonen
   function _eanRolGekend(){ return STATE_HEEFT_PROFIEL || STATE_EAN_GEKEND || (!!STATE_EAN_AFNAME && !!STATE_EAN_INJECTIE); }
@@ -1811,6 +1812,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         token:TOKEN||undefined, naam:(STATE_KLANT||'').trim(), adres:(STATE_ADRES||''), btw:(STATE_BTW||'').trim(),
         profiel:profiel, ev:ev, afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost,
         opt_profieldata:!!($('i-optout')&&$('i-optout').checked), opt_contact:!!($('i-optcontact')&&$('i-optcontact').checked),
+        is_voorschot:(typeof STATE_IS_VOORSCHOT==='boolean'?STATE_IS_VOORSCHOT:undefined),   // v0.41.3: voorschot-vlag mee op het dossier
         factuur_bestanden:(Array.isArray(STATE_FACTUUR_BESTANDEN)?STATE_FACTUUR_BESTANDEN:[]),   // v0.30.1 (Johan): factuur-bestand-pointer mee op het dossier → "Bekijk uw factuur" blijft werken na heropenen
         bevestigd:_bev })});
       var j=await r.json().catch(function(){return{};}); if(j&&j.ok){ if(j.token) TOKEN=j.token; if(j.project_id) STATE_CODE=j.project_id; }
@@ -2074,7 +2076,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var profNaam = particulier?'Residentieel':profiel;
     var bc={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.max(1,Math.round(aansluitingKw)),
              totaalEnergieExclBtw: kost>0?kost:Math.round(afnameMwh*STUB.kost_nu_eur_mwh),
-             periodeVan:_iso(_van), periodeTot:_iso(_d2), spanningsniveau:_spanningEff(aansluitingKw) };
+             periodeVan:_iso(_van), periodeTot:_iso(_d2), spanningsniveau:_spanningEff(aansluitingKw),
+             factuur_bestanden:(Array.isArray(STATE_FACTUUR_BESTANDEN)?STATE_FACTUUR_BESTANDEN:[]) };   // v0.41.3: bewijs van een opgeladen factuur → nota enkel op een echte afrekening (server v15.260)
+    if(typeof STATE_IS_VOORSCHOT==='boolean') bc.is_voorschot=STATE_IS_VOORSCHOT;
     // v0.24.39 (Johan: "een woning mag eigenlijk ook een rooster"): ÉÉN engine voor iedereen — ook een woning gaat nu via
     //   de bedrijf-sweep (volwaardig PV×batterij-rooster + per-cel drill-down) i.p.v. het aparte thuisladen-pad dat geen
     //   rooster gaf. De residentiële framing blijft: profiel 'residentieel' → residentieel.json (de sweep schaalt de PV/
@@ -2433,6 +2437,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     STATE_EAN_AFNAME=((_eb.filter(function(b){return b.rol.indexOf('afn')>=0;})[0]||_eb[0]||{}).ean)||'';
     STATE_EAN_INJECTIE=((_eb.filter(function(b){return b.rol.indexOf('inj')>=0;})[0]||{}).ean)||'';
     STATE_FACTUUR_BESTANDEN=(bc.factuur_bestanden||[]);   // v0.27.0: bewaarde factuur → "bekijk factuur"
+    STATE_IS_VOORSCHOT=(typeof bc.is_voorschot==='boolean')?bc.is_voorschot:null;   // v0.41.3: voorschot-vlag van de opgeladen factuur
     var _idz=$('intake-doss');
     if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb); if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
     var u=$('upl'); if(u) u.classList.add('hidden');
@@ -2660,6 +2665,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           STATE_EAN_INJECTIE = ((_eb.filter(function(b){return b.rol.indexOf('inj')>=0;})[0]||{}).ean)||'';
         })();
         STATE_FACTUUR_BESTANDEN=(bc.factuur_bestanden||[]);   // v0.27.0: bewaarde factuur (mail-link) → "bekijk factuur" (token-scoped signed URL)
+        STATE_IS_VOORSCHOT=(typeof bc.is_voorschot==='boolean')?bc.is_voorschot:null;   // v0.41.3
         var _idz=$('intake-doss');
         if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb);
           if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
