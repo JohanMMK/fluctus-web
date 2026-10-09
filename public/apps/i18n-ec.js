@@ -13,6 +13,8 @@
        deze laag is dan een NO-OP (anti-regressie).
    Woordenboeken (geladen vóór dit script): window.EC_FR_SEG (fr-ec-seg.js, sjablonen) + window.EC_FR_EXACT
    (fr-ec-dict.js, oude exacte labels; enkel als vangnet). EC_FR_DICT/EC_FR_RULES worden NIET meer gebruikt.
+   v0.2.1 (2026-10-09): + samengestelde segmenten ("a · b · c" → per deel, enkel als alle delen gekend zijn) + regels
+     EC_FR_FN [regex, fn] voor zinnen met vrije tekst (profielnaam, spanning, bron) — gevonden bij de live dekkingsscan van het EK-resultaatscherm.
    v0.1.0 (2026-10-04): eerste versie (substring-woordenboek). */
 (function () {
   var p; try { p = new URLSearchParams(location.search); } catch (e) { p = null; }
@@ -56,11 +58,29 @@
     'industrie_voeding':'industrie / production', 'industrie / productie':'industrie / production',
     'retail_zonder_koeling':'commerce — sans réfrigération', 'retail_voeding_en_koeling':'commerce alimentaire — avec réfrigération' };
 
+  var H = { zoek: function (x) { return zoek(x); }, num: function (x) { return fmtNum(x); }, prof: function (x) { return PROF[String(x).toLowerCase()] || zoek(x) || x; } };
+  // v0.2.1: opzoeken zonder te loggen (voor delen van samengestelde segmenten).
+  function zoek(core) {
+    var key = norm(core);
+    if (Object.prototype.hasOwnProperty.call(SEG, key)) {
+      var nums = core.match(RE_N) || [], mnds = (core.replace(RE_N, ' ').match(RE_M)) || [];
+      return vul(SEG[key], nums, mnds);
+    }
+    if (Object.prototype.hasOwnProperty.call(EXACT, core)) return EXACT[core];
+    var lc = core.toLowerCase(); if (Object.prototype.hasOwnProperty.call(PROF, lc)) return PROF[lc];
+    if (!/[A-Za-zÀ-ÿ]/.test(core)) return core;
+    return null;
+  }
   // Vertaal één tekstsegment; nxt = (genormaliseerde) tekst die erop volgt, voor context-sleutels.
   function trSeg(txt, nxt) {
     if (!txt) return txt;
     var core = txt.replace(/\s+/g, ' ').trim();
-    if (!core || !/[A-Za-zÀ-ÿ]/.test(core)) return txt;
+    if (!core) return txt;
+    // v0.2.1: puur numerieke segmenten ("€ 10.821", "3.241.263 km", "1.234 kWh") → enkel FR-getalnotatie.
+    if (!/[A-Za-zÀ-ÿ]/.test(core) || /^[€±≈~+\-−\s\d.,%×\/]*\s?(km|kW|kWh|MWh|kWc|kVA|GWh)?(\/(j|jaar|an))?\s*$/.test(core)) {
+      var nn = txt.replace(RE_N, function (t) { return fmtNum(t); }).replace(/\/(j|jaar)\s*$/, '/an');
+      return nn;
+    }
     var lead = txt.match(/^\s*/)[0], trail = txt.match(/\s*$/)[0];
     // "(vervolg)" wordt na de vertaling door de her-paginering achter een (reeds FR) titel geplakt → "(suite)".
     var mv = core.match(/^(.*\S)\s*\(vervolg\)$/);
@@ -74,7 +94,18 @@
       var mp = core.match(/^Standaardprofiel \(SLP\) — (.+)$/);
       if (mp) { var pr = PROF[mp[1].toLowerCase()] || mp[1]; return lead + 'Profil standard (SLP) — ' + pr + trail; }
     }
-    if (tpl == null) { if (/[a-zà-ÿ]{3,}/i.test(key.replace(/\{[#m]\}/g, ''))) MISSING.add(key); return txt; }
+    if (tpl == null) {
+      // v0.2.1: regels (fr-ec-seg.js EC_FR_FN) voor zinnen met vrije tekst (profielnaam, spanning, bron…)
+      var FN = window.EC_FR_FN || [];
+      for (var r = 0; r < FN.length; r++) { var mm = core.match(FN[r][0]); if (mm) { var rr = FN[r][1](mm, H); if (rr != null) { DONE.add(norm(rr)); return lead + rr + trail; } } }
+      // v0.2.1: samengesteld segment "a · b · c" → elk deel apart (enkel als ALLE delen gekend zijn)
+      if (core.indexOf(' · ') > 0) {
+        var dl = core.split(' · '), uit = [], ok = true;
+        for (var d = 0; d < dl.length; d++) { var t = zoek(dl[d].trim()); if (t == null) { ok = false; break; } uit.push(t); }
+        if (ok) { var res2 = uit.join(' · '); DONE.add(norm(res2)); return lead + res2 + trail; }
+      }
+      if (/[a-zà-ÿ]{3,}/i.test(key.replace(/\{[#m]\}/g, ''))) MISSING.add(key); return txt;
+    }
     var nums = core.match(RE_N) || [], mnds = (core.replace(RE_N, ' ').match(RE_M)) || [];
     var res = vul(tpl, nums, mnds); DONE.add(norm(res));
     return lead + res + trail;

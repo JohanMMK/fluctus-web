@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.1.0, 2026-10-09: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.0, 2026-10-09: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'. */
 window.EC_FR_SEG = {
@@ -1078,5 +1078,41 @@ window.EC_FR_SEG = {
 "Uitleg €/kWh": "Explication €/kWh",
 "Totaal: {#} personenwagen · {#} kWh/km · {#} km/j": "Total : {#} voiture particulière · {#} kWh/km · {#} km/an",
 "Laadvermogen per voertuig (kW) — eigen vloot, depotladen": "Puissance de recharge par véhicule (kW) — flotte propre, recharge au dépôt",
-"verwijderen": "supprimer"
+"verwijderen": "supprimer",
+"afname {#} MWh": "prélèvement {#} MWh",
+"injectie {#} MWh": "injection {#} MWh",
+"piek {#} kW": "pointe {#} kW",
+"€ {#}/j": "€ {#}/an",
+"{#} MWh afname": "{#} MWh de prélèvement",
+"{#} MWh injectie": "{#} MWh d'injection",
+"{#} kW toegang": "{#} kW d'accès",
+"€ {#}/j (ingevulde gegevens).": "€ {#}/an (données saisies).",
+"€ {#}/j (uit uw factuur).": "€ {#}/an (de votre facture).",
+"{#} MWh/j": "{#} MWh/an",
+"LS": "BT",
+"MS": "MT",
+"{#} EV": "{#} VE",
+"terugverdiend in ± {#} j": "récupéré en ± {#} ans",
+"zonder installatie (spot): € {#}/j": "sans installation (spot) : € {#}/an",
+"bestaande kost: € {#}/j": "coût existant : € {#}/an",
+"{#} × {#} kVA AC": "{#} × {#} kVA AC",
+"geen": "aucun",
+"Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op uw echte meetgegevens.": "Prix indicatifs — aucun tracé dessiné. Divers = câble vers le raccordement + tableau de découplage + accessoires. Le prix de revient exact découlera de l'étude sur vos véritables données de mesure.",
+"Terugverdientijd en rendement over {#} jaar; alle kosten {#}% inflatie, netkosten {#}% bovenop inflatie en eenmalige verdubbeling in {#}. Base = dom laden (aansluiting moet stijgen); de batterij shaaft de piek tot haar vermogen.": "Temps de retour et rendement sur {#} ans ; tous les coûts {#} % d'inflation, coûts de réseau {#} % au-delà de l'inflation et doublement unique en {#}. Base = recharge brute (le raccordement doit augmenter) ; la batterie écrête la pointe jusqu'à sa puissance.",
+"Batterij {#} kW / {#} kWh": "Batterie {#} kW / {#} kWh",
+"PV {#} kWp": "PV {#} kWc",
+"Besparing over {#} jaar = uw besparing/jaar van de geselecteerde combinatie × {#}, geschaald op de batterijkwaliteit (RTE × DoD). Indicatief. \"(min)\" = niet publiek opgegeven, ingevuld met het laagste cijfer uit de getoonde set (conservatief). RTE-definities verschillen licht per fabrikant (max vs. gemeten systeem); verschillen < {#} procentpunt zijn ruis.": "Économie sur {#} ans = votre économie/an de la combinaison sélectionnée × {#}, ajustée selon la qualité de la batterie (RTE × DoD). Indicatif. « (min) » = non communiqué publiquement, complété avec la valeur la plus basse de l'ensemble affiché (prudent). Les définitions du RTE diffèrent légèrement selon le fabricant (max. vs système mesuré) ; des écarts < {#} point de pourcentage relèvent du bruit.",
+"{#} kWh": "{#} kWh",
+"Lichtrood = deze opstelling dekt niet {#}% van de dagelijkse km-vraag.": "Rouge clair = cette configuration ne couvre pas {#} % du besoin quotidien en km.",
+"klik": "cliquez",
+"BTW": "TVA"
 };
+
+/* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */
+window.EC_FR_FN = [
+  [/^→ (LS|MS) \((laagspanning|middenspanning)\)(?: · (uit factuur|handmatig))?$/, function (m) {
+    return '→ ' + (m[1] === 'LS' ? 'BT (basse tension)' : 'MT (moyenne tension)') + (m[3] ? ' · ' + (m[3] === 'handmatig' ? 'manuel' : 'de la facture') : ''); }],
+  [/^(.+?) · ([\d.,]+) MWh\/j · ([\d.,]+) kW toegang · (LS|MS)(?: · (\d+) EV)?$/, function (m, H) {
+    return H.prof(m[1]) + ' · ' + H.num(m[2]) + ' MWh/an · ' + H.num(m[3]) + " kW d'accès · " + (m[4] === 'LS' ? 'BT' : 'MT') + (m[5] ? ' · ' + m[5] + ' VE' : ''); }],
+  [/^BTW (.+)$/, function (m) { return 'TVA ' + m[1]; }]
+];
