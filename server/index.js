@@ -46,6 +46,17 @@ app.use('/api/contact', contactRouter);
 // ── Statische frontend (Vite build) ──
 if (fs.existsSync(DIST)) {
   const DIST_EC = path.join(DIST, 'ec');
+  // 2026-10-09 (Johan): HTML-pagina's (o.a. /apps/ek.html, /apps/klantrapport.html, EC-site) NOOIT uit de browsercache
+  // of back/forward-cache → altijd de laatst gedeployde versie en een vers dossier. Gehashte assets (/assets/…) blijven cachebaar.
+  // send/express.static overschrijven een reeds gezette Cache-Control niet.
+  app.use((req, res, next) => {
+    if (!req.path.startsWith('/api/') && (req.path.endsWith('.html') || !path.extname(req.path))) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
   // Host-routing voor de Energie-Compas-site: clean URLs op de root van energie-compas.eu.
   app.use((req, res, next) => {
     const host = String(req.hostname || '').toLowerCase();
