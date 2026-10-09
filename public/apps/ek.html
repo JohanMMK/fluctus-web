@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.41.3">
+<meta name="ek-build" content="0.41.4">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.41.4 (2026-10-09, Johan) — MANUEEL DOSSIER ≠ FACTUUR: bij het openen van een dossier (?case=) toonde EK altijd "✔ Uw factuur is ingelezen … (uit uw factuur)", ook als de velden enkel manueel ingevuld waren. Nu: _ekHeeftFactuur(baseCase) (factuur_bestanden / is_voorschot / factuurNummer / eanBlokken — zelfde bewijs als server v15.260) → anders "📁 Uw gegevens: … (ingevulde gegevens)" en in dossierbeheer "Ingevulde gegevens (geen factuur opgeladen)". Voorschot → "Uw voorschotfactuur is ingelezen". -->
 <!-- ek.html v0.41.3 (2026-10-09, Johan) — ONDERHANDELINGSNOTA ENKEL BIJ EEN OPGELADEN AFREKENING: de onderhandel-baseCase draagt nu factuur_bestanden + is_voorschot (extractor-vlag, STATE_IS_VOORSCHOT; null = geen factuur) en ek-intake bewaart is_voorschot op het dossier. Manueel dossier zonder factuur of voorschotfactuur → server v15.260 afrekening=false → geen nota. -->
 <!-- ek.html v0.41.2 (2026-10-09, Johan) — GEEN CACHE: (1) pagina uit de back/forward-cache → meteen herladen; (2) versiewacht via <meta name="ek-build"> — bij terugkeer naar het tabblad en vóór "Toon rapport" vergelijken met de gepubliceerde versie → balk "Er is een nieuwe versie … Vernieuwen" (geen stille herlaad = geen verlies van invoer); (3) dossier-GETs (inbound-case, project-get) met cache:no-store + cache-buster. Samen met fluctus-web server: HTML Cache-Control no-store. -->
 <!-- ek.html v0.41.1 (2026-10-09, Johan) — FOUT DOSSIER IN RAPPORT: het rapport-tabblad wordt sinds v0.37 synchroon geopend (pop-upblokker) → Chrome kloont op dat moment de sessionStorage van het EK-tabblad, met de payload van het VORIGE rapport. klantrapport las sessionStorage eerst → toonde het vorige dossier (bv. KMO i.p.v. het nieuwe particulier-dossier). Fix: elke payload krijgt een uniek _rid dat ook in de rapport-URL (&rid=) staat; klantrapport v0.30.1 kiest exact die payload. -->
@@ -531,7 +532,7 @@
     </div>
     <!-- Max-CX path: factuur kwam via mail en is al ingelezen -->
     <div id="factuur-ok" class="chk hidden" style="border-color:var(--greenln);flex-direction:column">
-      <span>✔ <b>Uw factuur is ingelezen.</b> <span id="factuur-detail">—</span> Vul enkel nog uw profiel en aantal wagens aan.</span>
+      <span><span id="factuur-kop">✔ <b>Uw factuur is ingelezen.</b></span> <span id="factuur-detail">—</span> Vul enkel nog uw profiel en aantal wagens aan.</span>
       <!-- v0.27.0 (Johan): EAN('s) + "bekijk factuur"-link zodra de factuur is opgeladen/ingelezen (werkt ook voor gewone gebruikers). -->
       <!-- v0.30.0 (Johan): EAN ONDER de tekst, licht ingesprongen, met de bekijk-link erachter (factuur-ok stapelt nu verticaal). -->
       <div id="factuur-extra" class="sub" style="margin-top:6px;line-height:1.55;padding-left:26px"></div>
@@ -887,7 +888,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.27.0 (Johan): factuur terug oproepen. LAST_FACTUUR_FILES = in-sessie opgeladen factuur(en) als dataURL →
   //   "bekijk factuur" voor IEDEREEN (ook anonieme/gewone gebruikers), zonder login. STATE_FACTUUR_BESTANDEN =
   //   {bucket,pad,...} uit baseCase.factuur_bestanden (dossier/mail-link) → kortlevende signed URL via de server.
-  var LAST_FACTUUR_FILES=[], STATE_FACTUUR_BESTANDEN=[], STATE_IS_VOORSCHOT=null;   // v0.41.3: null = geen opgeladen factuur; true/false = extractor-vlag
+  var LAST_FACTUUR_FILES=[], STATE_FACTUUR_BESTANDEN=[], STATE_IS_VOORSCHOT=null, STATE_HEEFT_FACTUUR=false;   // v0.41.4: STATE_HEEFT_FACTUUR = er is effectief een factuur opgeladen/ingelezen (geen manueel dossier)
+  function _ekHeeftFactuur(bc){ bc=bc||{}; return (Array.isArray(bc.factuur_bestanden)&&bc.factuur_bestanden.length>0) || (typeof bc.is_voorschot==='boolean') || !!bc.factuurNummer || (Array.isArray(bc.eanBlokken)&&bc.eanBlokken.length>0); }   // v0.41.3: null = geen opgeladen factuur; true/false = extractor-vlag
   var STATE_HEEFT_PROFIEL=false;   // v0.24.6 (Johan): dossier heeft al gekoppelde profielen (afname/injectie) → rol is gekend, EAN-keuze niet opnieuw vragen
   var STATE_EAN_GEKEND=false;      // v0.24.8 (Johan): de EAN-rollen (afname/injectie) zijn bevestigd/bewaard op het dossier → modal niet meer tonen
   function _eanRolGekend(){ return STATE_HEEFT_PROFIEL || STATE_EAN_GEKEND || (!!STATE_EAN_AFNAME && !!STATE_EAN_INJECTIE); }
@@ -1421,7 +1423,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var af=+($('i-afname')&&$('i-afname').value)||0, inj=+($('i-best-inj')&&$('i-best-inj').value)||0, pk=+($('i-toegang')&&$('i-toegang').value)||0, kost=+($('i-kost')&&$('i-kost').value)||0;
       var fP=['afname '+(af>0?_ekNf(af)+' MWh':'—'),'injectie '+(inj>0?_ekNf(inj)+' MWh':'0 MWh'),'piek '+(pk>0?_ekNf(pk)+' kW':'—')];
       if(kost>0) fP.push('€ '+_ekNf(kost,0)+'/j');
-      var html='<b>Laatste factuurdata:</b> '+fP.join(' · ');
+      var html=(STATE_HEEFT_FACTUUR?'<b>Laatste factuurdata:</b> ':'<b>Ingevulde gegevens</b> <span style="color:#8a94a6">(geen factuur opgeladen)</span><b>:</b> ')+fP.join(' · ');   // v0.41.4
       var ps=STATE_PROFIEL_STATUS;
       function deel(nm,o){ if(!o||!o.aanwezig) return null; var b=[]; if(o.mwh!=null) b.push(_ekNf(o.mwh)+' MWh/j'); if(o.piek_kw!=null) b.push('piek '+_ekNf(o.piek_kw)+' kW'); if(o.gemeten_maanden!=null) b.push(o.gemeten_maanden+' mnd gemeten'+(o.aangevuld?', aangevuld':'')); return nm+(b.length?': '+b.join(' · '):''); }
       var pP=[deel('afname',ps&&ps.afname),deel('injectie',ps&&ps.injectie)].filter(Boolean);
@@ -2438,6 +2440,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     STATE_EAN_INJECTIE=((_eb.filter(function(b){return b.rol.indexOf('inj')>=0;})[0]||{}).ean)||'';
     STATE_FACTUUR_BESTANDEN=(bc.factuur_bestanden||[]);   // v0.27.0: bewaarde factuur → "bekijk factuur"
     STATE_IS_VOORSCHOT=(typeof bc.is_voorschot==='boolean')?bc.is_voorschot:null;   // v0.41.3: voorschot-vlag van de opgeladen factuur
+    STATE_HEEFT_FACTUUR=true;   // v0.41.4: net opgeladen + ingelezen
+    if($('factuur-kop')) $('factuur-kop').innerHTML=(STATE_IS_VOORSCHOT===true?'✔ <b>Uw voorschotfactuur is ingelezen.</b>':'✔ <b>Uw factuur is ingelezen.</b>');
+    try{ _ekOekeneSamenvatting(); }catch(e){}
     var _idz=$('intake-doss');
     if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb); if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
     var u=$('upl'); if(u) u.classList.add('hidden');
@@ -2666,6 +2671,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         })();
         STATE_FACTUUR_BESTANDEN=(bc.factuur_bestanden||[]);   // v0.27.0: bewaarde factuur (mail-link) → "bekijk factuur" (token-scoped signed URL)
         STATE_IS_VOORSCHOT=(typeof bc.is_voorschot==='boolean')?bc.is_voorschot:null;   // v0.41.3
+        STATE_HEEFT_FACTUUR=_ekHeeftFactuur(bc);   // v0.41.4: manueel dossier (enkel ingetypte velden) ≠ ingelezen factuur
         var _idz=$('intake-doss');
         if(_idz){ var _bits=[]; if(STATE_CODE) _bits.push('Dossier '+STATE_CODE); var _kb=_dossierBits(); if(_kb) _bits.push(_kb);
           if(_bits.length){ _idz.textContent='📁 '+_bits.join('  ·  '); _idz.classList.remove('hidden'); } }
@@ -2751,8 +2757,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           var _an=$('analoog-note'); if(_an) _an.classList.remove('hidden');
         }
         var _det=[(afn?afn+' MWh afname':''),(inj?inj+' MWh injectie':''),(toe?(analoog?(String(toe).replace('.',',')+' kW piek (uit standaardprofiel)'):(toe+' kW toegang')):''),(kst?'€ '+kst+'/j':'')].filter(Boolean).join(' · ');
-        $('factuur-detail').textContent=_det+(analoog?' — analoge meter, standaardprofiel (residentieel).':' (uit uw factuur).');
-        $('intake-intro').textContent=analoog
+        $('factuur-detail').textContent=_det+(analoog?' — analoge meter, standaardprofiel (residentieel).':(STATE_HEEFT_FACTUUR?' (uit uw factuur).':' (ingevulde gegevens).'));
+        // v0.41.4 (Johan): enkel "Uw factuur is ingelezen" als er effectief een factuur werd opgeladen; een manueel dossier toont "Uw gegevens".
+        if($('factuur-kop')) $('factuur-kop').innerHTML = STATE_HEEFT_FACTUUR
+          ? (STATE_IS_VOORSCHOT===true ? '✔ <b>Uw voorschotfactuur is ingelezen.</b>' : '✔ <b>Uw factuur is ingelezen.</b>')
+          : '📁 <b>Uw gegevens:</b>';
+        if(!STATE_HEEFT_FACTUUR && !analoog){ $('intake-intro').textContent='Bevestig uw gegevens, uw profiel en aantal wagens — en u krijgt meteen uw rapport.'; }
+        else $('intake-intro').textContent=analoog
           ? 'We lazen uw factuur in. Uw meter is analoog (geen kwartierdata), dus we rekenen op een standaardprofiel geschaald op uw verbruik. Bevestig enkel nog uw aantal wagens.'
           : 'We ontvingen uw factuur en lazen ze in. Bevestig uw profiel en aantal wagens — en u krijgt meteen uw rapport.';
         // v0.13.12: staat de factuur op MEERDERE EAN's, dan opent de EAN-keuze-modal hier — op het startscherm, terwijl de
