@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.6.0 (2026-10-10) — ALLE FLUVIUS-INFO: per EAN metertype, label, bron (IMBY / eigen meter /
+<!-- mandaten.html v0.6.1 (2026-10-10) — kolom PROJECT(EN): alle projecten waarin de EAN voorkomt (server ≥ 15.262),
+     klikbaar naar het dossier (EK-invoer of Kamino); gearchiveerd = grijs. Zoekveld zoekt ook op projectnaam/-id.
+     mandaten.html v0.6.0 (2026-10-10) — ALLE FLUVIUS-INFO: per EAN metertype, label, bron (IMBY / eigen meter /
      andere lijst) en toegangen (dag/kwartier · status · vanaf/tot · reden) uit bookmarklet v2 (server ≥ 15.261);
      klik een EAN voor alle Fluvius-velden. "Bijgewerkt" = laatste Fluvius-sync; Ververs toont tijdstip + laatste sync.
      mandaten.html v0.5.0 (2026-09-12) — FILTER op klant/partner (zoekveld) + links naar ⚡ Acties
@@ -70,6 +72,8 @@
   .velden .k{ color:var(--muted); font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-all; }
   .velden .v{ word-break:break-word; }
   #synctijd{ font-size:12px; color:var(--muted); }
+  .proj a{ color:var(--navy2); font-weight:600; text-decoration:none; } .proj a:hover{ text-decoration:underline; }
+  .proj .arch a{ color:#9ca3af; font-weight:400; } .proj div{ margin-bottom:3px; }
 </style>
 </head>
 <body>
@@ -169,7 +173,7 @@
     function matchZoek(it){
       if(!ZOEK) return true;
       var f=it.fluvius||{};
-      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')+' '+(it.fluvius_adres||'')+' '+(it.factuuradres||'')+' '+(f.label||'')+' '+(f.metertype||'')).toLowerCase();
+      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')+' '+(it.fluvius_adres||'')+' '+(it.factuuradres||'')+' '+(f.label||'')+' '+(f.metertype||'')+' '+(it.projecten||[]).map(function(p){ return (p.naam||'')+' '+(p.id||''); }).join(' ')).toLowerCase();
       return hay.indexOf(ZOEK)>=0;
     }
     function gefilterd(){
@@ -212,6 +216,15 @@
         ks.map(function(k){ return '<div class="k">'+esc(k)+'</div><div class="v">'+esc(f.velden[k])+'</div>'; }).join('')+'</div></details>'; }
       return h;
     }
+    function projHtml(it){
+      var l=it.projecten||[];
+      if(!l.length) return '<span class="sub">—</span>';
+      return '<div class="proj">'+l.map(function(p){
+        var href = p.lead_token ? ('/apps/ek.html?case='+encodeURIComponent(p.lead_token)+'&adv=1&invoer=1') : ('/apps/kamino.html?open='+encodeURIComponent(p.id));
+        return '<div'+(p.archief?' class="arch"':'')+'><a href="'+href+'" target="_blank" rel="noopener" title="Open dossier">'+esc(p.naam||p.id)+'</a>'+
+          '<div class="sub code">'+esc(p.id)+(p.archief?' · archief':'')+'</div></div>';
+      }).join('')+'</div>';
+    }
     window.mandDetail=function(ean){ OPEN[ean]=!OPEN[ean]; render(); };
 
     function render(){
@@ -220,7 +233,7 @@
       if(!ITEMS.length){ $('root').innerHTML='<div class="state">Nog geen mandaat-aanvragen. Zodra iemand in de app een mandaat aanvraagt, verschijnt het hier.</div>'; return; }
       if(!rows.length){ $('root').innerHTML='<div class="state">Geen resultaten voor dit filter.</div>'; return; }
       var h='<div class="tbl-wrap"><table><thead><tr>'+
-        '<th>Project</th><th>EAN</th><th>Richting</th><th>Status</th><th>Adres-match</th>'+
+        '<th>Project</th><th>EAN</th><th>Project(en)</th><th>Richting</th><th>Status</th><th>Adres-match</th>'+
         '<th>Factuuradres</th><th>Fluvius-adres</th><th>Bevestigd door</th><th>Referentie / mail</th><th>Bijgewerkt</th>'+
         '</tr></thead><tbody>';
       rows.forEach(function(it){
@@ -244,6 +257,7 @@
         h+='<tr class="'+(isSpecial(it)?'special':'')+'">'+
           '<td>'+projCel+'</td>'+
           '<td>'+eanCel+'</td>'+
+          '<td>'+projHtml(it)+'</td>'+
           '<td>'+esc(it.richting||(f&&f.richting)||'—')+'</td>'+
           '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+toegangenHtml(f)+'</td>'+
           '<td>'+matchCel(it)+'</td>'+
@@ -253,7 +267,7 @@
           '<td>'+(it.referentienummer?('<span class="code">'+esc(it.referentienummer)+'</span>'):'<span class="sub">—</span>')+(it.titularis_mail_masked?('<div class="sub">'+esc(it.titularis_mail_masked)+'</div>'):'')+(it.opmerking?('<div class="sub">“'+esc(it.opmerking)+'”</div>'):'')+'</td>'+
           '<td class="sub">'+kort(laatste)+(it.fluvius_sync_op?'<div style="font-size:10px">Fluvius-sync</div>':'')+'</td>'+
         '</tr>';
-        if(OPEN[it.ean]) h+='<tr class="det"><td colspan="10">'+detailHtml(it)+'</td></tr>';
+        if(OPEN[it.ean]) h+='<tr class="det"><td colspan="11">'+detailHtml(it)+'</td></tr>';
       });
       h+='</tbody></table></div>';
       $('root').innerHTML=h;
