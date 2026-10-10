@@ -2,10 +2,14 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.44.2">
+<meta name="ek-build" content="0.44.3">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.44.3 (2026-10-10, Johan: versnellen stap 3): PREWARM-modus ?prewarm=1 (door de server headless geopend na het inlezen van een factuur):
+     laadt de case zonder 'bezocht'-registratie (src=prewarm), rekent automatisch door met exact de klant-body (sweep met X-EK-Batch: 1),
+     ZONDER /api/ek-intake, zonder projectlog/taal/klik-registratie en zonder EAN-keuzemodal (automatische rollen) → server-cache staat klaar.
+     window.__ekPrewarm = gestart → klaar | fout | overgeslagen. Ook: resultaat uit de server-cache = paneel verdwijnt meteen. -->
 <!-- ek.html v0.44.2 (2026-10-10, Johan: "simulatie blijft hangen in het Engels + klant geduld laten houden + vastlopen detecteren"):
      (1) oorzaak = i18n-ec v0.3.0 (EN-getallen 1.234 ↔ 1,234 in een eindeloze lus → pagina bevroor) → i18n-ec v0.3.1.
      (2) VOORTGANGSPANEEL tijdens de simulatie: verstreken tijd, voortgangsbalk (schatting op basis van het wagenpark), 6 stappen
@@ -899,6 +903,7 @@ function _ecZetTaal(l){ try{ localStorage.setItem('EC_LANG',l); }catch(e){}
   var TOKEN='';        // lead-token (uit ?case= of /api/ek-intake)
   var LAST=null;       // laatste samenstelling (voor de offerte-CTA)
   var PREP_MODE=false; // ?prep=1 → toon de "adviseur-link"-balk zodat je een reeds-uitgerekende link kan delen
+  var PREWARM=(function(){ try{ return new URLSearchParams(location.search).get('prewarm')==='1'; }catch(e){ return false; } })();   // v0.44.3: server-prewarm (headless)
   var INVOER_MODE=(function(){ try{ return new URLSearchParams(location.search).get('invoer')==='1'; }catch(e){ return false; } })();   // v0.32.0: open op het invoerscherm (geen auto-doorrekening)
   var OFF_SIM=false, OFF_SIM_DONE=false;   // v0.40.0: ?offertes=1 → na de doorrekening de ingediende offertes simuleren (enkel oekene)
   var ADV_MODE=false;  // v0.13.8: ?adv=1 → adviseur/manager-context → toon de kopieer-deel-link-balk óók zonder ?prep=1
@@ -1000,7 +1005,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   async function _postTO(path, body, ms){
     var ctl=(typeof AbortController!=='undefined')?new AbortController():null, tm=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, ms||300000):null;
     try{
-      var r=await fetch(API+path,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:ctl?ctl.signal:undefined });
+      var _h={'Content-Type':'application/json'}; if(PREWARM) _h['X-EK-Batch']='1';   // v0.44.3: prewarm = lage voorrang
+      var r=await fetch(API+path,{ method:'POST', headers:_h, body:JSON.stringify(body), signal:ctl?ctl.signal:undefined });
       var j=await r.json().catch(function(){return null;});
       if(!r.ok){ var er=new Error((j&&j.error)||('HTTP '+r.status)); er.druk=!!(j&&j.code==='server_druk')||r.status===503; throw er; }
       return j;
@@ -2068,6 +2074,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     }
   }catch(e){} })();
 
+  // v0.44.3: automatisch doorrekenen (adviseur-deeplink of server-prewarm); prewarm meldt het resultaat via window.__ekPrewarm.
+  function _ekAutoRun(){
+    if(PREWARM) window.__ekPrewarm='gestart';
+    var p; try{ p=toonRapport(); }catch(e){ if(PREWARM) window.__ekPrewarm='fout'; return; }
+    if(PREWARM) Promise.resolve(p).then(function(){ window.__ekPrewarm=(HM?'klaar':'fout'); }, function(){ window.__ekPrewarm='fout'; });
+  }
   async function toonRapport(){
     // v0.23: al doorgerekend met exact deze invoer? → toon meteen het bestaande resultaat (geen herberekening).
     try{ var _sig0=_inputSig(); if(_sig0===LAST_SIG && HM){ $('intake').classList.add('hidden'); $('dash').classList.remove('hidden'); try{_advOverlay(false);}catch(e){} window.scrollTo({top:0,behavior:'smooth'}); return; } }catch(e){}
@@ -2090,7 +2102,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
 
     // ── Backbone: lead + FLX-project (dossiercode) + baseCase + consents + (opt-in) mandaat op één project_id.
     //    /api/ek-intake is idempotent op TOKEN; faalt hij, dan tonen we toch het rapport (met een lokale stubcode).
-    try{
+    if(!PREWARM) try{   // v0.44.3: prewarm registreert GEEN intake (geen consent/engagement namens de klant)
       // v0.24.33 (Johan: "klantnaam-wijziging werkt niet"): neem klant/BTW/adres LIVE uit de (adviseur-)velden over vóór het
       //   bewaren. Voorheen bleef STATE_KLANT op de oude case-waarde staan (sync gebeurde enkel als STATE_KLANT leeg was) →
       //   een gewijzigde klantnaam werd genegeerd en de oude naam ging naar het dossier.
@@ -2648,7 +2660,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{
       var tk=new URLSearchParams(location.search).get('case'); if(!tk) return;
       TOKEN=tk;
-      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src=ek&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
+      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(!j||!j.ok) return;
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
@@ -2823,15 +2835,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         try{
           var _adv=(new URLSearchParams(location.search).get('adv'))==='1';
           // v0.24.8 (Johan): rol al gekend (gekoppeld profiel of eerder bevestigd/bewaard) → NIET opnieuw vragen.
-          if(_eanRolGekend()){ try{ _eanAutoRollen(bc.eanBlokken||[]); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} if(_adv && !INVOER_MODE) toonRapport(); }
+          if(_eanRolGekend() || PREWARM){ try{ _eanAutoRollen(bc.eanBlokken||[]); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} if((_adv||PREWARM) && !INVOER_MODE) _ekAutoRun(); }   // v0.44.3: prewarm → geen keuzemodal
           else {
             _eanKiesModal((bc.eanBlokken||[]), function(keuze){
               if(keuze){ STATE_EAN_AFNAME=keuze.afname||STATE_EAN_AFNAME; STATE_EAN_INJECTIE=keuze.injectie||''; STATE_EAN_GEKEND=true; }
               try{ _ekFactuurExtra(); }catch(e){}
-              if(_adv && !INVOER_MODE) toonRapport();
+              if(_adv && !INVOER_MODE) _ekAutoRun();
             });
           }
-        }catch(e){ try{ if((new URLSearchParams(location.search).get('adv'))==='1' && !INVOER_MODE) toonRapport(); }catch(_){} }
+        }catch(e){ try{ if(((new URLSearchParams(location.search).get('adv'))==='1' || PREWARM) && !INVOER_MODE) _ekAutoRun(); }catch(_){} }
       }).catch(function(){});
     }catch(e){}
   })();
@@ -3778,7 +3790,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var t=tok(); if(!t||!Q.length) return; var items=Q.splice(0,40);
     try{ fetch(API_L+'/api/ek/log',{ method:'POST', keepalive:!!keep, headers:hdr(), body:JSON.stringify({ token:t, items:items, rol:(window.ADV_MODE?'adviseur':'') }) }).catch(function(){}); }catch(e){}
   }
-  window._ekLog=function(ev,data){ try{ Q.push({ ev:ev, data:data||null, ts:Date.now() }); if(Q.length>=20) flush(false); clearTimeout(T); T=setTimeout(function(){ flush(false); },3000); }catch(e){} };
+  window._ekLog=function(ev,data){ if(window.PREWARM) return; try{ Q.push({ ev:ev, data:data||null, ts:Date.now() }); if(Q.length>=20) flush(false); clearTimeout(T); T=setTimeout(function(){ flush(false); },3000); }catch(e){} };
   document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden') flush(true); });
   window.addEventListener('pagehide',function(){ flush(true); });
   document.addEventListener('click',function(e){
@@ -3791,6 +3803,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     }catch(x){}
   },true);
   function start(){
+    if(window.PREWARM) return;   // v0.44.3: server-prewarm registreert niets
     if(START) return; var t=tok(); if(!t) return; START=true;
     var q=new URLSearchParams(location.search), viaLink=!!q.get('lang')&&!q.get('lk');
     // v0.44.1: een adviseur-/manager-sessie (?adv=1 of oekene ingelogd) legt NIET de taal van de klant vast
