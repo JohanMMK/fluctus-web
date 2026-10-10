@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projectlog · Energie-Compas</title>
+<!-- projectlog.html v0.1.0 (2026-10-10, Johan) — PROJECTLOG per dossier (manager/oekene). Leest GET /api/ek/log?token=… (server ≥ 15.265):
+     wie mailde wanneer om te starten, ontvangstmail, mail met projectlink, link gebruikt, elke klik in EK, taalkeuze,
+     "Toon rapport" met de gekozen combinatie PV/batterij, offertes (EPC), mandaat-mails … — met wie (rol · naam · mail) indien gekend.
+     Geopend vanuit EK (oekene-dossierbeheer → "📜 Projectlog") of Projecten ("📜 Log"). -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--navy:#1F3864;--green:#05B050;--line:#D6E0EC;--muted:#6B7689;--bg:#F4F7FB}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#1A1F2B}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header b{color:var(--navy);font-size:16px} .who{margin-left:auto;color:var(--muted);font-size:12px}
+  main{max-width:1180px;margin:0 auto;padding:16px}
+  .kaart{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 18px}
+  .kv div span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .bar input[type=search]{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit}
+  .bar label{font-size:13px;color:#33404f;display:flex;gap:6px;align-items:center}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:8px 10px;border-bottom:1px solid #EEF2F7;text-align:left;vertical-align:top;font-size:13px}
+  th{background:#F7F9FC;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0}
+  td.t{white-space:nowrap;color:#33404f;font-variant-numeric:tabular-nums}
+  .ev{font-weight:600;color:var(--navy)} .sub{color:var(--muted);font-size:12px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#EEF2F7;color:#33404f}
+  .p-klant{background:#E6F6EC;color:#0a7d3c} .p-manager{background:#FFF3D6;color:#8a5a00} .p-epc{background:#E8EEFF;color:#2a44a8} .p-systeem{background:#F1F1F1;color:#666} .p-adviseur{background:#F3E8FF;color:#6b2fa8}
+  tr.klik td{background:#FCFDFE} tr.klik .ev{font-weight:500;color:#33404f}
+  .fout{background:#FEF2F2;border:1px solid #F2C7C7;color:#8a1f1f;padding:12px;border-radius:10px}
+  .state{color:var(--muted);padding:20px}
+  @media(max-width:700px){ td.t{white-space:normal} th:nth-child(3),td:nth-child(3){display:none} }
+</style>
+</head>
+<body>
+<header><b>📜 Projectlog</b><span class="sub" id="kop"></span><span class="who" id="who"></span></header>
+<main><div id="root"><div class="state">Laden…</div></div></main>
+<script>
+  var $=function(id){return document.getElementById(id);};
+  var CFG=null, sb=null, SESSION=null, PROXY='', DATA=null, ZOEK='', VERBERG_KLIK=false;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function tijd(ts){ var d=new Date(ts); if(isNaN(d.getTime())) return '—'; return p2(d.getDate())+'-'+p2(d.getMonth()+1)+'-'+d.getFullYear()+' '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds()); }
+  var TAAL={nl:'Nederlands',fr:'Frans',en:'Engels'};
+  // Leesbare omschrijving per gebeurtenis (onbekend → technische naam)
+  function omschrijf(e){
+    var d=e.data||{}, ev=e.ev||'';
+    var M={
+      'factuurmail_ontvangen': function(){ return ['Factuurmail ontvangen', (d.van?'van '+d.van:'')+(d.onderwerp?' · “'+d.onderwerp+'”':'')+(d.ontvangen?' · ontvangen '+tijd(Date.parse(d.ontvangen)):'')]; },
+      'ontvangstmail': function(){ return ['Ontvangstbevestiging gemaild', (d.verstuurd?'naar ':'NIET verstuurd naar ')+(d.naar||'?')+(d.reden?' ('+d.reden+')':'')]; },
+      'projectlink_mail': function(){ return ['Mail met link naar het project', (d.verstuurd?'naar ':'NIET verstuurd naar ')+(d.naar||'?')+' · '+(d.talen||'')]; },
+      'factuurmail_intake': function(){ return ['Factuur ingelezen → project aangemaakt', (d.ean?'EAN '+d.ean:'')+(d.marge!=null?' · marge ± € '+Math.round(d.marge):'')]; },
+      'abonnement_factuur': function(){ return ['Nieuwe factuur op bestaand project', d.ean?'EAN '+d.ean:'']; },
+      'adviseur_factuur_ontvangen': function(){ return ['Factuur ontvangen (klant van adviseur)', d.adviseur||'']; },
+      'ek:project_geopend': function(){ return ['Project geopend in EK', 'via '+(d.via||'?')+' · taal '+(TAAL[d.taal]||d.taal||'?')+(d.adviseur?' · adviseursweergave':'')]; },
+      'ek:klik': function(){ return ['Klik: '+(d.label||d.id||'?'), (d.id?'#'+d.id:'')+(d.tag?' · '+d.tag:'')]; },
+      'taal_gekozen': function(){ return ['Taal gekozen: '+(TAAL[d.taal]||d.taal), (d.vorige?'was '+(TAAL[d.vorige]||d.vorige)+' · ':'')+'via '+(d.via||'?')]; },
+      'rapport_getoond': function(){ return ['Toon rapport', 'PV '+(d.pv_kwp!=null?d.pv_kwp:'?')+' kWp · batterij '+(d.batt_kw!=null?d.batt_kw:'?')+' kW / '+(d.batt_kwh!=null?d.batt_kwh:'?')+' kWh'+(d.taal?' · '+(TAAL[d.taal]||d.taal):'')+(d.n?' · '+d.n+'e keer':'')]; },
+      'rapport_bekeken': function(){ return ['Rapport voor het eerst bekeken','']; },
+      'profieldata_gevraagd': function(){ return ['Profieldata gevraagd (knop)', d.eans?(Array.isArray(d.eans)?d.eans.join(', '):d.eans):'']; },
+      'mandaat_mail_klant': function(){ return ['Fluvius-mail naar klant (toegang bevestigen)', 'naar '+(d.naar||'?')+' · '+(TAAL[d.taal]||d.taal||'')+(d.review?' · (review → oekene)':'')+(d.eans?' · '+d.eans.join(', '):'')]; },
+      'offerte_opgevraagd_oekene': function(){ return ['Offertes opgevraagd', '']; },
+      'offerte_gestart': function(){ return ['Offerte-aanvraag gestart', (d.modus||'')+(d.dagen?' · '+d.dagen+' d':'')]; },
+      'offerte_inzending': function(){ return ['Offerte opgeladen', (d.epc||'?')+(d.totaal!=null?' · € '+Math.round(d.totaal).toLocaleString('nl-BE'):'')+(d.datasheets?' · '+d.datasheets+' datasheet(s)':'')]; },
+      'offerte_geupload': function(){ return ['Offerte opgeladen (oude flow)', d.concurrent?'concurrent':'']; },
+      'factuur_meerdere_aansluitingen': function(){ return ['Factuur met meerdere aansluitingen', (d.afname||0)+' afname · '+(d.injectie||0)+' injectie']; },
+      'rapport2_klaar_gemaild': function(){ return ['Definitief rapport klaar', d.kanaal?('mail: '+d.kanaal):'']; }
+    };
+    if(M[ev]) return M[ev]();
+    var rest=Object.keys(d).length?JSON.stringify(d):'';
+    return [ev.replace(/^ek:/,'EK: ').replace(/_/g,' '), rest.length>240?rest.slice(0,240)+'…':rest];
+  }
+  function wieHtml(w){
+    if(!w) return '<span class="sub">—</span>';
+    var r=String(w.rol||''), cls=/klant/.test(r)?'p-klant':(/manager/.test(r)?'p-manager':(/epc/.test(r)?'p-epc':(/adviseur/.test(r)?'p-adviseur':'p-systeem')));
+    return '<span class="pill '+cls+'">'+esc(r||'?')+'</span>'+(w.naam?' '+esc(w.naam):'')+(w.mail?'<div class="sub">'+esc(w.mail)+'</div>':'');
+  }
+  function render(){
+    var j=DATA; if(!j) return;
+    var log=(j.log||[]).filter(function(e){
+      if(VERBERG_KLIK && e.ev==='ek:klik') return false;
+      if(!ZOEK) return true;
+      var o=omschrijf(e); var w=e.wie||{};
+      return (o[0]+' '+o[1]+' '+(w.rol||'')+' '+(w.naam||'')+' '+(w.mail||'')).toLowerCase().indexOf(ZOEK)>=0;
+    });
+    var nKlik=(j.log||[]).filter(function(e){return e.ev==='ek:klik';}).length;
+    var h='<div class="kaart"><div class="kv">'+
+      '<div><span>Klant</span>'+esc(j.naam||'—')+'</div>'+
+      '<div><span>E-mail</span>'+esc(j.mail||'—')+'</div>'+
+      '<div><span>Taal</span>'+esc(TAAL[j.lang]||j.lang||'nog niet gekozen')+'</div>'+
+      '<div><span>Project</span>'+esc(j.project||'—')+'</div>'+
+      '<div><span>Bron</span>'+esc(j.bron||'—')+'</div>'+
+      '<div><span>Adviseur / partner</span>'+esc((j.adviseur&&(j.adviseur.naam||j.adviseur.email))||'—')+(j.partner?' · '+esc(typeof j.partner==='string'?j.partner:(j.partner.naam||j.partner.id||'')):'')+'</div>'+
+      '<div><span>Aangemaakt</span>'+(j.aangemaakt?tijd(j.aangemaakt):'—')+'</div>'+
+      '<div><span>Registraties</span>'+(j.log||[]).length+' ('+nKlik+' klikken)</div>'+
+      '</div><div style="margin-top:10px"><a href="/apps/ek.html?case='+encodeURIComponent(j.token)+'&adv=1&invoer=1" target="_blank" rel="noopener">Open dossier in EK ↗</a></div></div>';
+    h+='<div class="bar"><input type="search" id="zoek" placeholder="Zoek in de log (gebeurtenis, naam, mail…)" value="'+esc(ZOEK)+'"><label><input type="checkbox" id="vk"'+(VERBERG_KLIK?' checked':'')+'> verberg klikken</label><button onclick="laad()" style="padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">↻ Ververs</button></div>';
+    if(!log.length) h+='<div class="state">Geen registraties'+(ZOEK||VERBERG_KLIK?' voor deze filter':'')+'.</div>';
+    else h+='<table><thead><tr><th>Tijdstip</th><th>Gebeurtenis</th><th>Details</th><th>Wie</th></tr></thead><tbody>'+log.map(function(e){
+      var o=omschrijf(e);
+      return '<tr'+(e.ev==='ek:klik'?' class="klik"':'')+'><td class="t">'+tijd(e.ts)+'</td><td class="ev">'+esc(o[0])+'</td><td class="sub">'+esc(o[1])+'</td><td>'+wieHtml(e.wie)+'</td></tr>';
+    }).join('')+'</tbody></table>';
+    $('root').innerHTML=h;
+    $('zoek').oninput=function(){ ZOEK=this.value.trim().toLowerCase(); var pos=this.selectionStart; render(); var z=$('zoek'); z.focus(); try{ z.setSelectionRange(pos,pos); }catch(e){} };
+    $('vk').onchange=function(){ VERBERG_KLIK=this.checked; render(); };
+  }
+  async function authHeaders(){
+    var tok=SESSION&&SESSION.access_token;
+    try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+    return { 'Authorization':'Bearer '+tok };
+  }
+  async function laad(){
+    var q=new URLSearchParams(location.search), token=q.get('token')||q.get('case')||'', proj=q.get('project')||'';
+    if(!token && !proj){ $('root').innerHTML='<div class="fout">Geen dossier opgegeven (?token=…).</div>'; return; }
+    var r;
+    try{ r=await fetch(PROXY+'/api/ek/log?token='+encodeURIComponent(token)+(proj?'&project='+encodeURIComponent(proj):'')+'&cb='+Date.now(),{ headers: await authHeaders(), cache:'no-store' }); }
+    catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+    if(r.status===401||r.status===403){ $('root').innerHTML='<div class="fout">De projectlog is enkel voor managers. Meld u aan via de portal en open deze pagina opnieuw.</div>'; return; }
+    if(r.status===404){ $('root').innerHTML='<div class="fout">Dossier niet gevonden.</div>'; return; }
+    if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+    DATA=await r.json(); $('kop').textContent=(DATA.naam||'')+(DATA.project?' · '+DATA.project:''); document.title='Projectlog · '+(DATA.naam||DATA.project||DATA.token);
+    render();
+  }
+  (async function(){
+    try{
+      var rc=await fetch('/api/config'); CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'https://lucid-amazement-production.up.railway.app').replace(/\/+$/,'');
+      if(CFG.supabaseUrl&&CFG.supabaseAnonKey&&window.supabase){ sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey); var d=await sb.auth.getSession(); SESSION=d.data.session; }
+      if(!SESSION){ $('root').innerHTML='<div class="fout">Niet aangemeld. Meld u aan via de portal en open deze pagina opnieuw.</div>'; return; }
+      $('who').textContent=(SESSION.user&&SESSION.user.email)||'';
+      await laad();
+    }catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+  })();
+</script>
+</body>
+</html>

@@ -1,4 +1,8 @@
-/* i18n-ec.js — Energie-Compas runtime vertaallaag (NL → FR)
+/* i18n-ec.js — Energie-Compas runtime vertaallaag (NL → FR / EN)
+   v0.3.0 (2026-10-10, Johan: "ook Engels") — derde taal EN met dezelfde segment-sjablonen: window.EC_EN_SEG (en-ec-seg.js,
+     zelfde NL-sleutels als EC_FR_SEG) + EC_EN_FN-regels. EN-getalnotatie: duizendtal komma, decimaal punt (1.234,5 → 1,234.5).
+     Maanden/profielnamen/(vervolg) per taal. Taal: ?lang=fr|en · window.EC_LANG · KLANTRAPPORT_DATA.lang. NL = NO-OP.
+     Ontbrekende segmenten → window.EC_FR_MISSING (naam behouden voor compat; geldt voor de actieve taal) = window.EC_MISSING.
    v0.2.0 (2026-10-09, Johan: "volledig FR") — SEGMENT-SJABLONEN i.p.v. woordvervanging.
      v0.1 vertaalde met losse woord-/substringvervangingen (EC_FR_DICT) → Franglais ("pointevermogen",
      "afnamepointeen", "Met des panneaux solaires … neemt u minder van het net af"). v0.2:
@@ -23,19 +27,25 @@
   var q = (p && (p.get('lang') || '')) || '';
   var dl = ''; try { dl = (window.KLANTRAPPORT_DATA && window.KLANTRAPPORT_DATA.lang) || ''; } catch (e) {}
   var LANG = (q || window.EC_LANG || dl || 'nl').toString().toLowerCase();
-  if (LANG !== 'fr') LANG = 'nl';
+  if (LANG !== 'fr' && LANG !== 'en') LANG = 'nl';
+  var EN = (LANG === 'en');
   window.EC_LANG = LANG;
-  window.EC_LOCALE = (LANG === 'fr') ? 'fr-BE' : 'nl-BE';
+  window.EC_LOCALE = (LANG === 'fr') ? 'fr-BE' : (EN ? 'en-GB' : 'nl-BE');
 
-  var SEG = window.EC_FR_SEG || {};
-  var EXACT = window.EC_FR_EXACT || {};
+  var SEG = (EN ? window.EC_EN_SEG : window.EC_FR_SEG) || {};
+  var EXACT = EN ? {} : (window.EC_FR_EXACT || {});
   var MISSING = window.EC_FR_MISSING = window.EC_FR_MISSING || new Set();
+  window.EC_MISSING = MISSING;
   var DONE = new Set();   // genormaliseerde FR-uitkomsten → niet opnieuw vertalen/loggen (observer ziet onze eigen wijzigingen)
 
+  var MND_EN = { januari:'January', februari:'February', maart:'March', april:'April', mei:'May', juni:'June', juli:'July',
+    augustus:'August', september:'September', oktober:'October', november:'November', december:'December',
+    jan:'Jan', feb:'Feb', mrt:'Mar', apr:'Apr', jun:'Jun', jul:'Jul', aug:'Aug', sep:'Sep', sept:'Sep', okt:'Oct', nov:'Nov', dec:'Dec' };
   var MND = { januari:'janvier', februari:'février', maart:'mars', april:'avril', mei:'mai', juni:'juin', juli:'juillet',
     augustus:'août', september:'septembre', oktober:'octobre', november:'novembre', december:'décembre',
     jan:'janv.', feb:'févr.', mrt:'mars', apr:'avr.', jun:'juin', jul:'juil.', aug:'août', sep:'sept.', sept:'sept.',
     okt:'oct.', nov:'nov.', dec:'déc.' };
+  if (EN) MND = MND_EN;
   var RE_M = new RegExp('\\b(' + Object.keys(MND).sort(function (a, b) { return b.length - a.length; }).join('|') + ')\\b', 'gi');
   var RE_N = /[-−+]?\d+(?:[.,]\d+)*/g;
   var NB = ' ';
@@ -43,10 +53,15 @@
   function norm(s) { return s.replace(/\s+/g, ' ').trim().replace(RE_N, '{#}').replace(RE_M, '{m}'); }
   // NL-getal → FR-notatie: duizendtalpunt → harde spatie (enkel als het echt duizendtallen zijn); decimaalkomma blijft.
   function fmtNum(t) {
+    if (EN) {   // v0.3.0: NL-notatie → EN (1.234,5 → 1,234.5 · 5,98 → 5.98)
+      if (/^[-−+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return t.replace(/\./g, '\u0001').replace(/,/g, '.').replace(/\u0001/g, ',');
+      if (/^[-−+]?\d+,\d+$/.test(t)) return t.replace(',', '.');
+      return t;
+    }
     if (/^[-−+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return t.replace(/\./g, NB);
     return t;
   }
-  function maand(m) { var f = MND[m.toLowerCase()]; if (!f) return m; return (m.charAt(0) === m.charAt(0).toUpperCase()) ? f.charAt(0).toUpperCase() + f.slice(1) : f; }
+  function maand(m) { var f = MND[m.toLowerCase()]; if (!f) return m; if (EN) return f; return (m.charAt(0) === m.charAt(0).toUpperCase()) ? f.charAt(0).toUpperCase() + f.slice(1) : f; }
   function vul(tpl, nums, mnds) {
     var i = 0, j = 0;
     return tpl.replace(/\{#\}|\{m\}/g, function (ph) {
@@ -59,6 +74,11 @@
     'opslag / magazijn':'stockage / entrepôt', 'opslag___magazijn':'stockage / entrepôt', 'landbouw':'agriculture', 'boer_melkvee':'agriculture (élevage laitier)',
     'industrie_voeding':'industrie / production', 'industrie / productie':'industrie / production',
     'retail_zonder_koeling':'commerce — sans réfrigération', 'retail_voeding_en_koeling':'commerce alimentaire — avec réfrigération' };
+  if (EN) PROF = { 'kantoor':'office', 'kantoor / diensten':'office / services', 'residentieel':'residential', 'woning':'home',
+    'horeca':'hospitality', 'school':'school', 'garage':'workshop / garage', 'werkplaats / garage':'workshop / garage',
+    'opslag / magazijn':'storage / warehouse', 'opslag___magazijn':'storage / warehouse', 'landbouw':'agriculture', 'boer_melkvee':'agriculture (dairy farming)',
+    'industrie_voeding':'industry / production', 'industrie / productie':'industry / production',
+    'retail_zonder_koeling':'retail — without refrigeration', 'retail_voeding_en_koeling':'food retail — with refrigeration' };
 
   var H = { zoek: function (x) { return zoek(x); }, num: function (x) { return fmtNum(x); }, prof: function (x) { return PROF[String(x).toLowerCase()] || zoek(x) || x; } };
   // v0.2.1: opzoeken zonder te loggen (voor delen van samengestelde segmenten).
@@ -80,13 +100,13 @@
     if (!core) return txt;
     // v0.2.1: puur numerieke segmenten ("€ 10.821", "3.241.263 km", "1.234 kWh") → enkel FR-getalnotatie.
     if (!/[A-Za-zÀ-ÿ]/.test(core) || /^[€±≈~+\-−\s\d.,%×\/]*\s?(km|kW|kWh|MWh|kWc|kVA|GWh)?(\/(j|jaar|an))?\s*$/.test(core)) {
-      var nn = txt.replace(RE_N, function (t) { return fmtNum(t); }).replace(/\/(j|jaar)\s*$/, '/an');
+      var nn = txt.replace(RE_N, function (t) { return fmtNum(t); }).replace(/\/(j|jaar)\s*$/, EN ? '/yr' : '/an');
       return nn;
     }
     var lead = txt.match(/^\s*/)[0], trail = txt.match(/\s*$/)[0];
     // "(vervolg)" wordt na de vertaling door de her-paginering achter een (reeds FR) titel geplakt → "(suite)".
     var mv = core.match(/^(.*\S)\s*\(vervolg\)$/);
-    if (mv) { var basis = trSeg(mv[1], null); var rv = (/\(suite\)$/.test(basis) ? basis : basis + ' (suite)'); DONE.add(norm(rv)); return lead + rv + trail; }
+    if (mv) { var VV = EN ? '(continued)' : '(suite)'; var basis = trSeg(mv[1], null); var rv = (basis.slice(-VV.length) === VV ? basis : basis + ' ' + VV); DONE.add(norm(rv)); return lead + rv + trail; }
     var key = norm(core), tpl = null;
     if (DONE.has(key)) return txt;
     if (nxt != null) { var ck = key + '|' + nxt; if (Object.prototype.hasOwnProperty.call(SEG, ck)) tpl = SEG[ck]; }
@@ -94,11 +114,11 @@
     if (tpl == null && Object.prototype.hasOwnProperty.call(EXACT, core)) { DONE.add(norm(EXACT[core])); return lead + EXACT[core] + trail; }
     if (tpl == null) {
       var mp = core.match(/^Standaardprofiel \(SLP\) — (.+)$/);
-      if (mp) { var pr = PROF[mp[1].toLowerCase()] || mp[1]; return lead + 'Profil standard (SLP) — ' + pr + trail; }
+      if (mp) { var pr = PROF[mp[1].toLowerCase()] || mp[1]; return lead + (EN ? 'Standard load profile (SLP) — ' : 'Profil standard (SLP) — ') + pr + trail; }
     }
     if (tpl == null) {
       // v0.2.1: regels (fr-ec-seg.js EC_FR_FN) voor zinnen met vrije tekst (profielnaam, spanning, bron…)
-      var FN = window.EC_FR_FN || [];
+      var FN = (EN ? window.EC_EN_FN : window.EC_FR_FN) || [];
       for (var r = 0; r < FN.length; r++) { var mm = core.match(FN[r][0]); if (mm) { var rr = FN[r][1](mm, H); if (rr != null) { DONE.add(norm(rr)); return lead + rr + trail; } } }
       // v0.2.1: samengesteld segment "a · b · c" → elk deel apart (enkel als ALLE delen gekend zijn)
       if (core.indexOf(' · ') > 0) {
@@ -127,7 +147,7 @@
   }
 
   function EC_translate(root) {
-    if (LANG !== 'fr' || !root) return;
+    if (LANG === 'nl' || !root) return;
     try {
       if (root.nodeType === 3) { var v0 = root.nodeValue; var t0 = trSeg(v0, volgendeTekst(root)); if (t0 !== v0) root.nodeValue = t0; return; }
       var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), n, jobs = [];
@@ -151,11 +171,11 @@
 
   // HTML-string → vertaalde HTML-string (via een losse DOM-boom, zodat attributen/markup ongemoeid blijven).
   function EC_T_HTML(html) {
-    if (LANG !== 'fr' || html == null) return html;
+    if (LANG === 'nl' || html == null) return html;
     try { var tp = document.createElement('template'); tp.innerHTML = String(html); EC_translate(tp.content); return tp.innerHTML; }
     catch (e) { return html; }
   }
-  function EC_T(txt) { if (LANG !== 'fr' || txt == null) return txt; return trSeg(String(txt), null); }
+  function EC_T(txt) { if (LANG === 'nl' || txt == null) return txt; return trSeg(String(txt), null); }
 
   window.EC_T_HTML = EC_T_HTML;
   window.EC_T = EC_T;
@@ -164,21 +184,21 @@
 
   // lang doorgeven aan interne links (zodat de hele flow FR blijft).
   function EC_propagateLang() {
-    if (LANG !== 'fr') return;
+    if (LANG === 'nl') return;
     try {
       document.querySelectorAll('a[href]').forEach(function (a) {
         var h = a.getAttribute('href'); if (!h) return;
         if (/^(mailto:|tel:|#|https?:\/\/(?!app\.energie-compas\.eu))/i.test(h)) return;
         if (/[?&]lang=/.test(h)) return;
         var hi = h.indexOf('#'), base = hi >= 0 ? h.slice(0, hi) : h, frag = hi >= 0 ? h.slice(hi) : '';
-        a.setAttribute('href', base + (base.indexOf('?') === -1 ? '?' : '&') + 'lang=fr' + frag);
+        a.setAttribute('href', base + (base.indexOf('?') === -1 ? '?' : '&') + 'lang=' + LANG + frag);
       });
     } catch (e) {}
   }
   window.EC_propagateLang = EC_propagateLang;
 
-  if (LANG === 'fr') {
-    try { document.documentElement.setAttribute('lang', 'fr'); } catch (e) {}
+  if (LANG !== 'nl') {
+    try { document.documentElement.setAttribute('lang', LANG); } catch (e) {}
     var start = function () {
       EC_translate(document.body);
       EC_propagateLang();
