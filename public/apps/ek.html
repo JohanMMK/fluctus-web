@@ -2,10 +2,17 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.44.1">
+<meta name="ek-build" content="0.44.2">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.44.2 (2026-10-10, Johan: "simulatie blijft hangen in het Engels + klant geduld laten houden + vastlopen detecteren"):
+     (1) oorzaak = i18n-ec v0.3.0 (EN-getallen 1.234 ↔ 1,234 in een eindeloze lus → pagina bevroor) → i18n-ec v0.3.1.
+     (2) VOORTGANGSPANEEL tijdens de simulatie: verstreken tijd, voortgangsbalk (schatting op basis van het wagenpark), 6 stappen
+         die afvinken, plaats in de wachtrij van de rekenserver (GET / sim_parallel), "Wist u dat?"-tips, en meldingen bij traag (>75 s),
+         erg traag (>180 s) en bij een onbereikbare server. (3) DETECTIE: hartslag elke seconde — bevriest de pagina >8 s (zichtbaar
+         tabblad) → 'ui_bevroren' in de projectlog; ook 'sim_gestart', 'sim_klaar' (duur), 'sim_traag' (>150 s) en 'sim_fout' →
+         server ≥ 15.265.1 mailt de back-office bij fout/bevriezing/traag (max. 1 per dossier per 30 min). -->
 <!-- ek.html v0.44.1 (2026-10-10): projectlog noteert een ingelogde manager/oekene als "manager" (Bearer); een adviseur-/manager-sessie wijzigt de klanttaal niet. -->
 <!-- ek.html v0.44.0 (2026-10-10, Johan) — (1) ENGELS: taalschakelaar NL | FR | EN (i18n-ec v0.3.0 + en-ec-seg.js); klantrapport + server-PDF volgen de EK-taal (&lang=en).
      (2) TAAL = KLANTTAAL: elke taalkeuze (knop of mail-link ?lang=) → POST /api/ek/taal (server rec.lang → alle klantmails in die taal); bij de eerste keer openen zonder keuze wordt de taal van die sessie de klanttaal.
@@ -519,9 +526,9 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.2.3"></script>
-<script src="en-ec-seg.js?v=1.0.0"></script>
-<script src="i18n-ec.js?v=0.3.0"></script>
+<script src="fr-ec-seg.js?v=1.2.4"></script>
+<script src="en-ec-seg.js?v=1.0.1"></script>
+<script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 </head>
 <body>
@@ -2113,6 +2120,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
 
     // ── Echte cijfers uit de endpoints (Promise.allSettled → stub-fallback per call) ──
     var _btn=document.querySelector('#intake .btn.block'); if(_btn){ _btn.disabled=true; _btn.textContent='⏳ Uw simulatie draait… (kan tot ±1 min)'; }
+    try{ _simVoortgang.start({ ev:ev, rijen:((typeof _pleinenV2==='function')?(function(){ try{ return _pleinenV2().length; }catch(e){ return 1; } })():1), particulier:particulier }); }catch(eSV){}   // v0.44.2
     var _d2=new Date(), _iso=function(x){return x.toISOString().slice(0,10);}, _van=new Date(_d2.getTime()-365*864e5);
     var profNaam = particulier?'Residentieel':profiel;
     var bc={ klantNaam:'', afnameKwh:Math.round(afnameMwh*1000), aansluitVermogenKva:Math.max(1,Math.round(aansluitingKw)),
@@ -2192,6 +2200,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var noemer=aansluitingKw*8760, loadfactor = noemer>0 ? Math.round((afnameMwh+laadMwh)*1000/noemer*100) : null;
 
     if(_btn){ _btn.disabled=false; _btn.textContent='Start mijn simulatie →'; }
+    try{ _simVoortgang.stop(true); }catch(eSV){}   // v0.44.2
 
     // Cel-onafhankelijke context (verandert niet met de PV/batterij-keuze in de heatmap).
     var _evHeavy=_evHeavyCount(), _evLight=Math.max(0, ev-_evHeavy);   // v0.18: zware voertuigen (vrachtwagen/bus) → DC 300 kVA; rest → AC
@@ -2241,6 +2250,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   // v0.41.0 (Johan): melding + "Opnieuw proberen" wanneer de rooster-berekening niet lukt (i.p.v. een nep-resultaat).
   function _ekSimFout(err, swp){
+    try{ _simVoortgang.stop(false, err); }catch(eSV){}   // v0.44.2
     var btn=document.querySelector('#intake .btn.block'); if(btn){ btn.disabled=false; btn.textContent='Start mijn simulatie →'; }
     try{ _advOverlay(false); }catch(e){}
     var druk=!!(err&&err.druk) || !!(swp&&swp.code==='server_druk');
@@ -3790,6 +3800,95 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // TOKEN kan pas later gekend zijn (intake) → even blijven proberen
   var n=0, iv=setInterval(function(){ start(); if(START||++n>120) clearInterval(iv); },1000); setTimeout(start, 2500);   // v0.44.1: even wachten zodat ADV_MODE/oekene-sessie gekend zijn
   window._ekOpenLog=function(){ var t=tok(); if(!t){ alert('Nog geen dossier-token.'); return; } window.open('/apps/projectlog.html?token='+encodeURIComponent(t),'_blank','noopener'); };
+})();
+</script>
+<script>
+// ══ v0.44.2 (Johan): VOORTGANGSPANEEL + VASTLOOP-DETECTIE tijdens de simulatie ══
+var _simVoortgang=(function(){
+  var API_V='https://lucid-amazement-production.up.railway.app';
+  var STAPPEN=['Uw gegevens en verbruiksprofiel klaarzetten','Een volledig jaar doorrekenen — 35.040 kwartieren','Combinaties zonnepanelen × batterij vergelijken','Laadmomenten van uw voertuigen slim plannen','Terugverdientijd, rendement en loadfactor berekenen','Resultaat opbouwen'];
+  var TIPS=['Wist u dat? Wij rekenen niet met gemiddelden, maar met elk kwartier van een volledig jaar — zo ziet u uw echte piek.',
+    'Wist u dat? Slim laden spreidt het laden van uw voertuigen over de goedkoopste uren en houdt uw aansluiting binnen de grenzen.',
+    'Wist u dat? Het rooster toont meteen welke combinatie van zonnepanelen en batterij het snelst terugverdiend is.',
+    'Wist u dat? Uw factuur is het vertrekpunt: we vergelijken uw huidige contract met een dynamisch (spot) contract.',
+    'Wist u dat? Met uw echte kwartierdata van Fluvius maken wij het rapport achteraf nog exacter.'];
+  var t0=0, iv=null, srvIv=null, est=45, box=null, wacht=null, srvFout=0, gelogdTraag=false, actief=false;
+  function el(id){ return document.getElementById(id); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function log(ev,d){ try{ if(window._ekLog) window._ekLog(ev,d); }catch(e){} }
+  function bouw(){
+    var btn=document.querySelector('#intake .btn.block'); if(!btn) return null;
+    var b=el('sim-voortgang'); if(!b){ b=document.createElement('div'); b.id='sim-voortgang'; btn.parentNode.insertBefore(b, btn.nextSibling); }
+    b.style.cssText='margin:12px 0 0;padding:14px 16px;border:1px solid var(--greenln,#BFE6CC);background:#F7FBF8;border-radius:12px;font-size:13.5px;line-height:1.5;color:#1A1F2B';
+    b.innerHTML='<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="color:var(--navy,#1F3864);font-size:14.5px">Uw simulatie draait</b><span id="sv-tijd" style="font-variant-numeric:tabular-nums;color:#5A6577">Verstreken: 0:00</span></div>'+
+      '<div style="height:8px;background:#E3EEE7;border-radius:99px;margin:10px 0 12px;overflow:hidden"><div id="sv-balk" style="height:100%;width:2%;background:var(--green,#05B050);border-radius:99px;transition:width .8s ease"></div></div>'+
+      '<div id="sv-stappen">'+STAPPEN.map(function(s,i){ return '<div data-i="'+i+'" style="display:flex;gap:8px;align-items:flex-start;margin:3px 0;color:#8A93A3"><span class="sv-ic" style="width:16px;flex:none">○</span><span>'+s+'</span></div>'; }).join('')+'</div>'+
+      '<div id="sv-wacht" style="margin-top:10px;color:#5A6577;font-size:12.5px"></div>'+
+      '<div id="sv-melding" style="margin-top:8px;font-size:12.5px"></div>'+
+      '<div id="sv-tip" style="margin-top:10px;padding:9px 11px;background:#fff;border:1px solid #E1E8F0;border-radius:9px;color:#33404f;font-size:12.5px"></div>'+
+      '<div style="margin-top:8px;color:#8A93A3;font-size:12px">Laat deze pagina open — het resultaat verschijnt vanzelf.</div>';
+    return b;
+  }
+  function zetStap(k){
+    var rows=document.querySelectorAll('#sv-stappen [data-i]');
+    for(var i=0;i<rows.length;i++){ var r=rows[i], ic=r.querySelector('.sv-ic');
+      if(i<k){ r.style.color='#1E7A42'; ic.textContent='✔'; } else if(i===k){ r.style.color='#1F3864'; r.style.fontWeight='600'; ic.textContent='⏳'; } else { r.style.color='#8A93A3'; r.style.fontWeight='400'; ic.textContent='○'; } }
+  }
+  function tik(){
+    if(!actief) return;
+    var btn=document.querySelector('#intake .btn.block');
+    if(btn && !btn.disabled){ stop(true); return; }   // vangnet: de simulatie is (langs een andere weg) afgerond
+    var s=Math.round((Date.now()-t0)/1000);
+    var t=el('sv-tijd'); if(t) t.textContent='Verstreken: '+Math.floor(s/60)+':'+p2(s%60);
+    var p=Math.min(0.95, 1-Math.exp(-s/est));                 // nadert 95 % maar haalt het nooit vóór het echte einde
+    var ba=el('sv-balk'); if(ba) ba.style.width=Math.max(2,Math.round(p*100))+'%';
+    zetStap(Math.min(STAPPEN.length-1, Math.floor(p/0.95*STAPPEN.length)));
+    var tp=el('sv-tip'); if(tp){ var nt=TIPS[Math.floor(s/9)%TIPS.length]; if(tp.getAttribute('data-t')!==nt){ tp.setAttribute('data-t',nt); tp.textContent=nt; } }
+    var m=el('sv-melding');
+    if(m){ var txt='', kl='#6B4E00';
+      if(srvFout>=3){ txt='De verbinding met de rekenserver lijkt even weg — we blijven het proberen.'; kl='#8a1f1f'; }
+      else if(s>180){ txt='De berekening loopt nog. Lukt het niet binnen 5 minuten, dan tonen we een melding met de knop Opnieuw proberen.'; }
+      else if(s>75){ txt='Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. U hoeft niets te doen.'; }
+      if(m.getAttribute('data-t')!==txt){ m.setAttribute('data-t',txt); m.textContent=txt; m.style.color=kl; } }
+    if(s>=150 && !gelogdTraag){ gelogdTraag=true; log('sim_traag',{ sec:s, est:est, wachtrij:wacht }); }
+  }
+  async function server(){
+    if(!actief) return;
+    try{
+      var ctl=(typeof AbortController!=='undefined')?new AbortController():null, to=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} },8000):null;
+      var r=await fetch(API_V+'/?sv='+Date.now(),{ cache:'no-store', signal:ctl?ctl.signal:undefined }); if(to) clearTimeout(to);
+      var j=await r.json(); srvFout=0;
+      var sp=(j&&j.sim_parallel)||{}; wacht=(+sp.wachtrij||0);
+      var w=el('sv-wacht'); if(w){ var tx=wacht>1?('Er staan '+wacht+' berekeningen vóór u in de wachtrij.'):(wacht===1?'Er staat 1 berekening vóór u in de wachtrij.':''); if(w.getAttribute('data-t')!==tx){ w.setAttribute('data-t',tx); w.textContent=tx; } }
+    }catch(e){ srvFout++; }
+  }
+  function start(o){
+    o=o||{}; stop(null);
+    est=Math.max(30, Math.min(150, 30 + 1.2*(+o.ev||0) + 6*Math.max(0,(+o.rijen||1)-1)));
+    t0=Date.now(); actief=true; srvFout=0; wacht=null; gelogdTraag=false;
+    box=bouw(); tik(); server();
+    iv=setInterval(tik,1000); srvIv=setInterval(server,10000);
+    log('sim_gestart',{ ev:+o.ev||0, rijen:+o.rijen||0, schatting_s:Math.round(est), taal:window.EC_LANG||'nl' });
+  }
+  function stop(ok, err){
+    var was=actief; actief=false;
+    if(iv){ clearInterval(iv); iv=null; } if(srvIv){ clearInterval(srvIv); srvIv=null; }
+    var b=el('sim-voortgang'); if(b) b.remove();
+    if(was && ok!==null){ var s=Math.round((Date.now()-t0)/1000);
+      if(ok) log('sim_klaar',{ sec:s }); else log('sim_fout',{ sec:s, druk:!!(err&&err.druk), melding:(err&&err.message)?String(err.message).slice(0,160):null }); }
+  }
+  return { start:start, stop:stop };
+})();
+// Hartslag: bevriest de pagina (lange blokkering van de hoofdthread) terwijl het tabblad zichtbaar is → registreren.
+(function(){
+  var last=Date.now(), zicht=(document.visibilityState==='visible'), gemeld=0;
+  document.addEventListener('visibilitychange',function(){ zicht=(document.visibilityState==='visible'); last=Date.now(); });
+  setInterval(function(){
+    var nu=Date.now(), gat=nu-last; last=nu;
+    if(zicht && document.visibilityState==='visible' && gat>8000 && gemeld<3){
+      gemeld++; try{ if(window._ekLog) window._ekLog('ui_bevroren',{ sec:Math.round(gat/1000), taal:window.EC_LANG||'nl', scherm:(document.getElementById('dash')&&!document.getElementById('dash').classList.contains('hidden'))?'resultaat':'invoer' }); }catch(e){}
+    }
+  },1000);
 })();
 </script>
 </body>

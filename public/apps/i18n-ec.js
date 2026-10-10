@@ -1,4 +1,5 @@
 /* i18n-ec.js — Energie-Compas runtime vertaallaag (NL → FR / EN)
+   v0.3.1 (2026-10-10): FIX oneindige lus in EN (1.234 ↔ 1,234 flip-flop via de MutationObserver → EK bevroor tijdens de simulatie). EN-getalomzetting is nu idempotent + vangnet: max. 3 herschrijvingen per tekstknoop.
    v0.3.0 (2026-10-10, Johan: "ook Engels") — derde taal EN met dezelfde segment-sjablonen: window.EC_EN_SEG (en-ec-seg.js,
      zelfde NL-sleutels als EC_FR_SEG) + EC_EN_FN-regels. EN-getalnotatie: duizendtal komma, decimaal punt (1.234,5 → 1,234.5).
      Maanden/profielnamen/(vervolg) per taal. Taal: ?lang=fr|en · window.EC_LANG · KLANTRAPPORT_DATA.lang. NL = NO-OP.
@@ -54,6 +55,10 @@
   // NL-getal → FR-notatie: duizendtalpunt → harde spatie (enkel als het echt duizendtallen zijn); decimaalkomma blijft.
   function fmtNum(t) {
     if (EN) {   // v0.3.0: NL-notatie → EN (1.234,5 → 1,234.5 · 5,98 → 5.98)
+      // v0.3.1 FIX (Johan: "simulatie blijft hangen in het Engels"): de omzetting moet IDEMPOTENT zijn. "1.234" → "1,234" werd
+      //   bij de volgende observer-ronde als NL-decimaal gelezen → "1.234" → "1,234" … oneindige lus (pagina bevroor).
+      //   Een getal dat al in EN-duizendtalnotatie staat (1,234 / 12,345.6 — begint niet met 0) blijft ongemoeid.
+      if (/^[-−+]?[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/.test(t)) return t;
       if (/^[-−+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return t.replace(/\./g, '\u0001').replace(/,/g, '.').replace(/\u0001/g, ',');
       if (/^[-−+]?\d+,\d+$/.test(t)) return t.replace(',', '.');
       return t;
@@ -137,6 +142,15 @@
     return lead + res + trail;
   }
 
+  // v0.3.1: vangnet tegen herschrijf-lussen — een tekstknoop wordt hooguit 3× door ons herschreven (zolang zijn tekst niet van buitenaf verandert).
+  var HERS = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+  function magSchrijven(n, nieuw) {
+    if (!HERS) return true;
+    var r = HERS.get(n);
+    if (!r || (r.laatst !== n.nodeValue)) r = { k: 0, laatst: null };   // tekst kwam van de app → teller opnieuw
+    r.k++; r.laatst = nieuw; HERS.set(n, r);
+    return r.k <= 3;
+  }
   function volgendeTekst(n) {
     var s = n.nextSibling;
     while (s && s.nodeType === 3 && !s.nodeValue.trim()) s = s.nextSibling;
@@ -149,7 +163,7 @@
   function EC_translate(root) {
     if (LANG === 'nl' || !root) return;
     try {
-      if (root.nodeType === 3) { var v0 = root.nodeValue; var t0 = trSeg(v0, volgendeTekst(root)); if (t0 !== v0) root.nodeValue = t0; return; }
+      if (root.nodeType === 3) { var v0 = root.nodeValue; var t0 = trSeg(v0, volgendeTekst(root)); if (t0 !== v0 && magSchrijven(root, t0)) root.nodeValue = t0; return; }
       var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), n, jobs = [];
       while ((n = w.nextNode())) {
         var pa = n.parentNode; if (pa && (pa.nodeName === 'SCRIPT' || pa.nodeName === 'STYLE')) continue;
@@ -157,7 +171,7 @@
         var v = n.nodeValue;
         if (v && v.trim()) { var nv = trSeg(v, volgendeTekst(n)); if (nv !== v) jobs.push([n, nv]); }
       }
-      jobs.forEach(function (j) { j[0].nodeValue = j[1]; });
+      jobs.forEach(function (j) { if (magSchrijven(j[0], j[1])) j[0].nodeValue = j[1]; });
       ['placeholder', 'title', 'aria-label'].forEach(function (a) {
         var els = root.querySelectorAll ? root.querySelectorAll('[' + a + ']') : [];
         Array.prototype.forEach.call(els, function (el) {
@@ -206,7 +220,7 @@
         var mo = new MutationObserver(function (muts) {
           for (var i = 0; i < muts.length; i++) {
             var mu = muts[i];
-            if (mu.type === 'characterData') { var tn = mu.target; var nv0 = trSeg(tn.nodeValue || '', volgendeTekst(tn)); if (nv0 !== tn.nodeValue) tn.nodeValue = nv0; continue; }
+            if (mu.type === 'characterData') { var tn = mu.target; var nv0 = trSeg(tn.nodeValue || '', volgendeTekst(tn)); if (nv0 !== tn.nodeValue && magSchrijven(tn, nv0)) tn.nodeValue = nv0; continue; }
             var a = mu.addedNodes; if (!a) continue;
             for (var j = 0; j < a.length; j++) {
               var nd = a[j];

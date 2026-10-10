@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.3, 2026-10-10: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'. */
 window.EC_FR_SEG = {
@@ -1122,7 +1122,26 @@ window.EC_FR_SEG = {
 "Haal mijn profieldata op": "Récupérer mes données de profil",
 "Uw rapport is nu gebaseerd op uw factuur en een standaardprofiel. Met uw echte kwartierdata van Fluvius wordt het exact. Wij vragen ze voor u aan; de contracthouder krijgt van Fluvius een mail om de toegang te bevestigen.": "Votre rapport repose actuellement sur votre facture et un profil standard. Avec vos données quart-horaires réelles de Fluvius, il devient exact. Nous les demandons pour vous ; le titulaire du contrat reçoit de Fluvius un e-mail pour confirmer l'accès.",
 "✔ Aangevraagd — wij vragen uw kwartierdata op bij Fluvius. De contracthouder ontvangt een mail van Fluvius om de toegang te bevestigen. Zodra de data binnen is, maken wij uw exacte rapport.": "✔ Demandé — nous demandons vos données quart-horaires à Fluvius. Le titulaire du contrat reçoit un e-mail de Fluvius pour confirmer l'accès. Dès que les données sont disponibles, nous établissons votre rapport exact.",
-"ℹ️ Uw profieldata is aangevraagd bij Fluvius. Zodra de contracthouder de toegang bevestigt, maken wij uw exacte rapport.": "ℹ️ Vos données de profil ont été demandées à Fluvius. Dès que le titulaire du contrat confirme l'accès, nous établissons votre rapport exact."
+"ℹ️ Uw profieldata is aangevraagd bij Fluvius. Zodra de contracthouder de toegang bevestigt, maken wij uw exacte rapport.": "ℹ️ Vos données de profil ont été demandées à Fluvius. Dès que le titulaire du contrat confirme l'accès, nous établissons votre rapport exact.",
+"Uw simulatie draait": "Votre simulation est en cours",
+"Verstreken: {#}:{#}": "Écoulé : {#}:{#}",
+"Uw gegevens en verbruiksprofiel klaarzetten": "Préparation de vos données et de votre profil de consommation",
+"Een volledig jaar doorrekenen — {#} kwartieren": "Calcul d'une année complète — {#} quarts d'heure",
+"Combinaties zonnepanelen × batterij vergelijken": "Comparaison des combinaisons panneaux solaires × batterie",
+"Laadmomenten van uw voertuigen slim plannen": "Planification intelligente de la recharge de vos véhicules",
+"Terugverdientijd, rendement en loadfactor berekenen": "Calcul du temps de retour, du rendement et du facteur de charge",
+"Resultaat opbouwen": "Construction du résultat",
+"Wist u dat? Wij rekenen niet met gemiddelden, maar met elk kwartier van een volledig jaar — zo ziet u uw echte piek.": "Le saviez-vous ? Nous ne calculons pas avec des moyennes, mais avec chaque quart d'heure d'une année complète — vous voyez ainsi votre pointe réelle.",
+"Wist u dat? Slim laden spreidt het laden van uw voertuigen over de goedkoopste uren en houdt uw aansluiting binnen de grenzen.": "Le saviez-vous ? La recharge intelligente répartit la recharge de vos véhicules sur les heures les moins chères et maintient votre raccordement dans ses limites.",
+"Wist u dat? Het rooster toont meteen welke combinatie van zonnepanelen en batterij het snelst terugverdiend is.": "Le saviez-vous ? La grille montre immédiatement quelle combinaison de panneaux solaires et de batterie est rentabilisée le plus vite.",
+"Wist u dat? Uw factuur is het vertrekpunt: we vergelijken uw huidige contract met een dynamisch (spot) contract.": "Le saviez-vous ? Votre facture est le point de départ : nous comparons votre contrat actuel à un contrat dynamique (spot).",
+"Wist u dat? Met uw echte kwartierdata van Fluvius maken wij het rapport achteraf nog exacter.": "Le saviez-vous ? Avec vos données quart-horaires réelles de Fluvius, nous rendons ensuite le rapport encore plus exact.",
+"Er staan {#} berekeningen vóór u in de wachtrij.": "{#} calculs vous précèdent dans la file d'attente.",
+"Er staat {#} berekening vóór u in de wachtrij.": "{#} calcul vous précède dans la file d'attente.",
+"De verbinding met de rekenserver lijkt even weg — we blijven het proberen.": "La connexion avec le serveur de calcul semble interrompue — nous continuons d'essayer.",
+"De berekening loopt nog. Lukt het niet binnen 5 minuten, dan tonen we een melding met de knop Opnieuw proberen.": "Le calcul est toujours en cours. S'il n'aboutit pas dans les 5 minutes, nous affichons un message avec le bouton Réessayer.",
+"Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. U hoeft niets te doen.": "Cela prend plus de temps que d'habitude — un parc de véhicules plus important demande plus de calculs. Vous n'avez rien à faire.",
+"Laat deze pagina open — het resultaat verschijnt vanzelf.": "Laissez cette page ouverte — le résultat s'affichera automatiquement."
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */

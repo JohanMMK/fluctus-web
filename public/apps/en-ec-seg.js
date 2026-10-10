@@ -1,4 +1,4 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.0, 2026-10-10, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
@@ -1133,7 +1133,26 @@ window.EC_EN_SEG = {
 "Gebouw + laden, met installatie en slim sturen": "Building + charging, with installation and smart control",
 "Afrekeningsfactuur ingelezen": "Settlement invoice read",
 "Voorschotfactuur (geen afrekening)": "Advance invoice (no settlement)",
-"Geen afrekeningsfactuur": "No settlement invoice"
+"Geen afrekeningsfactuur": "No settlement invoice",
+"Uw simulatie draait": "Your simulation is running",
+"Verstreken: {#}:{#}": "Elapsed: {#}:{#}",
+"Uw gegevens en verbruiksprofiel klaarzetten": "Preparing your data and consumption profile",
+"Een volledig jaar doorrekenen — {#} kwartieren": "Calculating a full year — {#} quarter-hours",
+"Combinaties zonnepanelen × batterij vergelijken": "Comparing solar panel × battery combinations",
+"Laadmomenten van uw voertuigen slim plannen": "Smart scheduling of your vehicles' charging",
+"Terugverdientijd, rendement en loadfactor berekenen": "Calculating payback period, return and load factor",
+"Resultaat opbouwen": "Building the result",
+"Wist u dat? Wij rekenen niet met gemiddelden, maar met elk kwartier van een volledig jaar — zo ziet u uw echte piek.": "Did you know? We don't calculate with averages but with every quarter-hour of a full year — so you see your real peak.",
+"Wist u dat? Slim laden spreidt het laden van uw voertuigen over de goedkoopste uren en houdt uw aansluiting binnen de grenzen.": "Did you know? Smart charging spreads your vehicles' charging over the cheapest hours and keeps your grid connection within its limits.",
+"Wist u dat? Het rooster toont meteen welke combinatie van zonnepanelen en batterij het snelst terugverdiend is.": "Did you know? The matrix immediately shows which combination of solar panels and battery pays back fastest.",
+"Wist u dat? Uw factuur is het vertrekpunt: we vergelijken uw huidige contract met een dynamisch (spot) contract.": "Did you know? Your invoice is the starting point: we compare your current contract with a dynamic (spot) contract.",
+"Wist u dat? Met uw echte kwartierdata van Fluvius maken wij het rapport achteraf nog exacter.": "Did you know? With your actual quarter-hourly data from Fluvius, we make the report even more exact afterwards.",
+"Er staan {#} berekeningen vóór u in de wachtrij.": "There are {#} calculations ahead of you in the queue.",
+"Er staat {#} berekening vóór u in de wachtrij.": "There is {#} calculation ahead of you in the queue.",
+"De verbinding met de rekenserver lijkt even weg — we blijven het proberen.": "The connection to the calculation server seems lost for a moment — we keep trying.",
+"De berekening loopt nog. Lukt het niet binnen 5 minuten, dan tonen we een melding met de knop Opnieuw proberen.": "The calculation is still running. If it doesn't finish within 5 minutes, we will show a message with a Try again button.",
+"Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. U hoeft niets te doen.": "This is taking longer than usual — a larger fleet needs more computation. You don't need to do anything.",
+"Laat deze pagina open — het resultaat verschijnt vanzelf.": "Keep this page open — the result will appear automatically."
 };
 
 /* Regels voor zinnen met vrije tekst (zelfde als EC_FR_FN, in het Engels). fn(match, H) → EN of null. */
