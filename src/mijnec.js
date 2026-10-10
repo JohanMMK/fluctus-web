@@ -1,4 +1,5 @@
-// mijnec.js v1.2.0 — 2026-10-02 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
+// v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
 // Deelt het RBAC-toegangscontract met de bestaande portal.js: Supabase-JWT +
@@ -9,16 +10,18 @@
 const $ = (id) => document.getElementById(id);
 
 // v1.2.0: taalbewuste statusmeldingen (NL standaard, FR op /fr/login — <html lang="fr">).
-const _FR = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
+const _LANG = (document.documentElement.lang || 'nl').toLowerCase().slice(0, 2);
+const _FR = _LANG === 'fr', _EN = _LANG === 'en';
+const _t = (nl, fr, en) => (_FR ? fr : (_EN ? en : nl));
 const T = {
-  nietGeconfig: _FR ? 'Connexion pas encore configurée sur le serveur.' : 'Inloggen nog niet geconfigureerd op de server.',
-  vulEmail:     _FR ? 'Saisissez votre adresse e-mail.' : 'Vul je e-mailadres in.',
-  geenCode:     _FR ? "Impossible d'envoyer un code : " : 'Kon geen code sturen: ',
-  codeGemaild:  _FR ? 'Nous vous avons envoyé un code par e-mail. Saisissez-le ci-dessus.' : 'We hebben je een code gemaild. Vul ze hierboven in.',
-  vulCode:      _FR ? 'Saisissez le code reçu par e-mail.' : 'Vul de code uit je e-mail in.',
-  codeFout:     _FR ? 'Code incorrect ou expiré : ' : 'Code klopt niet of is verlopen: ',
-  geenApps:     _FR ? "Vous n'avez encore accès à aucune application. Demandez l'accès à votre gestionnaire." : 'Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.',
-  initFout:     _FR ? "Erreur d'initialisation : " : 'Init-fout: ',
+  nietGeconfig: _t('Inloggen nog niet geconfigureerd op de server.', 'Connexion pas encore configurée sur le serveur.', 'Login is not yet configured on the server.'),
+  vulEmail:     _t('Vul je e-mailadres in.', 'Saisissez votre adresse e-mail.', 'Please enter your e-mail address.'),
+  geenCode:     _t('Kon geen code sturen: ', "Impossible d'envoyer un code : ", 'Could not send a code: '),
+  codeGemaild:  _t('We hebben je een code gemaild. Vul ze hierboven in.', 'Nous vous avons envoyé un code par e-mail. Saisissez-le ci-dessus.', 'We have e-mailed you a code. Enter it above.'),
+  vulCode:      _t('Vul de code uit je e-mail in.', 'Saisissez le code reçu par e-mail.', 'Enter the code from your e-mail.'),
+  codeFout:     _t('Code klopt niet of is verlopen: ', 'Code incorrect ou expiré : ', 'The code is incorrect or has expired: '),
+  geenApps:     _t('Je hebt nog geen toegang tot apps. Vraag toegang aan je manager.', "Vous n'avez encore accès à aucune application. Demandez l'accès à votre gestionnaire.", 'You do not have access to any apps yet. Ask your manager for access.'),
+  initFout:     _t('Init-fout: ', "Erreur d'initialisation : ", 'Initialisation error: '),
 };
 
 // App-catalogus — zelfde app_id's en gating als het bestaande portaal (managers
@@ -89,7 +92,7 @@ async function sendCode() {
   try {
     const r = await fetch(`${base}/api/auth/otp-request`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, lang: _LANG }),   // v1.3.0: aanmeldcode-mail in de taal van de pagina
     });
     okEndpoint = r.ok;
   } catch (e) { okEndpoint = false; }
