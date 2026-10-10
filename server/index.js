@@ -65,13 +65,15 @@ if (fs.existsSync(DIST)) {
     if (!path.extname(req.path)) {                      // extensieloos pad → EC-pagina (clean URL)
       const rel = req.path.replace(/^\/+/, '').replace(/\/+$/, '');   // '', 'contact', 'fr', 'fr/contact'
       // Franstalige tak: /fr → fr/start, /fr/contact, /fr/login (map dist/ec/fr/)
-      if (rel === 'fr' || rel.startsWith('fr/')) {
-        const sub = (rel === 'fr') ? 'start' : rel.slice(3);
+      // 2026-10-10 (Johan): + Engelstalige tak /en (map dist/ec/en/), zelfde patroon als /fr.
+      const taal = (rel === 'fr' || rel.startsWith('fr/')) ? 'fr' : ((rel === 'en' || rel.startsWith('en/')) ? 'en' : null);
+      if (taal) {
+        const sub = (rel === taal) ? 'start' : rel.slice(3);
         if (!sub.includes('..')) {
-          const ff = path.join(DIST_EC, 'fr', sub + '.html');
+          const ff = path.join(DIST_EC, taal, sub + '.html');
           if (fs.existsSync(ff)) return res.sendFile(ff);
         }
-        return res.sendFile(path.join(DIST_EC, 'fr', 'start.html'));   // onbekend FR → FR-start
+        return res.sendFile(path.join(DIST_EC, taal, 'start.html'));   // onbekend → start in die taal
       }
       const name = (rel === '') ? 'start' : rel;
       if (!name.includes('..')) {
@@ -94,6 +96,7 @@ if (fs.existsSync(DIST)) {
     if (EC_HOSTS.has(host)) {
       const relc = req.path.replace(/^\/+/, '');
       if (relc === 'fr' || relc.startsWith('fr/')) return res.sendFile(path.join(DIST_EC, 'fr', 'start.html'));
+      if (relc === 'en' || relc.startsWith('en/')) return res.sendFile(path.join(DIST_EC, 'en', 'start.html'));
       return res.sendFile(path.join(DIST_EC, 'start.html'));
     }
     res.sendFile(path.join(DIST, 'index.html'));
