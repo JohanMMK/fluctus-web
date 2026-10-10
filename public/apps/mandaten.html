@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.6.1 (2026-10-10) — kolom PROJECT(EN): alle projecten waarin de EAN voorkomt (server ≥ 15.262),
+<!-- mandaten.html v0.6.2 (2026-10-10) — Fluvius-codes leesbaar (meterType 3/4, discipline 23) en Fluvius-adres
+     uit de vlakke velden (street/houseNumber/postalCode/place) als fluvius_adres nog leeg is.
+     mandaten.html v0.6.1 (2026-10-10) — kolom PROJECT(EN): alle projecten waarin de EAN voorkomt (server ≥ 15.262),
      klikbaar naar het dossier (EK-invoer of Kamino); gearchiveerd = grijs. Zoekveld zoekt ook op projectnaam/-id.
      mandaten.html v0.6.0 (2026-10-10) — ALLE FLUVIUS-INFO: per EAN metertype, label, bron (IMBY / eigen meter /
      andere lijst) en toegangen (dag/kwartier · status · vanaf/tot · reden) uit bookmarklet v2 (server ≥ 15.261);
@@ -160,7 +162,7 @@
       if(r.status===403){ $('root').innerHTML='<div class="fout">Dit overzicht is enkel voor managers.<br><a href="/portal.html">← naar Mijn Fluctus</a></div>'; return; }
       if(r.status===401){ window.location.href='/portal.html'; return; }
       if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
-      var j = await r.json(); ITEMS = (j.items||[]);
+      var j = await r.json(); ITEMS = (j.items||[]); ITEMS.forEach(function(x){ fvNorm(x.fluvius); });
       LAATSTE_SYNC = j.laatste_sync || ITEMS.map(function(x){ return x.fluvius_sync_op||''; }).filter(Boolean).sort().pop() || null;
       $('bar').style.display='flex'; $('legend').style.display='block';
       var nu=new Date(), p2=function(n){return(n<10?'0':'')+n;};
@@ -173,7 +175,7 @@
     function matchZoek(it){
       if(!ZOEK) return true;
       var f=it.fluvius||{};
-      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')+' '+(it.fluvius_adres||'')+' '+(it.factuuradres||'')+' '+(f.label||'')+' '+(f.metertype||'')+' '+(it.projecten||[]).map(function(p){ return (p.naam||'')+' '+(p.id||''); }).join(' ')).toLowerCase();
+      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')+' '+fvAdres(it)+' '+(it.factuuradres||'')+' '+(f.label||'')+' '+(f.metertype||'')+' '+(it.projecten||[]).map(function(p){ return (p.naam||'')+' '+(p.id||''); }).join(' ')).toLowerCase();
       return hay.indexOf(ZOEK)>=0;
     }
     function gefilterd(){
@@ -194,6 +196,20 @@
       return '<span class="match-na">— niet gecheckt</span>';
     }
 
+    var _MT={'1':'Analoge meter','3':'Digitale meter','4':'AMR-meter'}, _DI={'23':'Elektriciteit'};
+    function fvNorm(f){
+      if(!f) return f;
+      if(f.metertype && _MT[f.metertype]) f.metertype=_MT[f.metertype];
+      if(f.energie && _DI[f.energie]) f.energie=_DI[f.energie];
+      return f;
+    }
+    function fvAdres(it){
+      if(it.fluvius_adres) return it.fluvius_adres;
+      var v=(it.fluvius&&it.fluvius.velden)||{}; if(!v.street && !v.postalCode) return '';
+      var cap=function(t){ return String(t||'').toLowerCase().replace(/(^|[\s\-'])\S/g,function(c){return c.toUpperCase();}); };
+      var nr=[String(v.houseNumber||'')+String(v.houseNumberAddition||''), v.box?('bus '+v.box):''].filter(Boolean).join(' ');
+      return [[cap(v.street),nr].filter(Boolean).join(' '),[v.postalCode,cap(v.place)].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    }
     function toegangenHtml(f){
       if(!f || !f.toegangen || !f.toegangen.length) return '';
       return f.toegangen.map(function(t){
@@ -262,7 +278,7 @@
           '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+toegangenHtml(f)+'</td>'+
           '<td>'+matchCel(it)+'</td>'+
           '<td class="adr">'+esc(it.factuuradres||'—')+'</td>'+
-          '<td class="adr">'+esc(it.fluvius_adres||'—')+'</td>'+
+          '<td class="adr">'+esc(fvAdres(it)||'—')+'</td>'+
           '<td>'+bev+'</td>'+
           '<td>'+(it.referentienummer?('<span class="code">'+esc(it.referentienummer)+'</span>'):'<span class="sub">—</span>')+(it.titularis_mail_masked?('<div class="sub">'+esc(it.titularis_mail_masked)+'</div>'):'')+(it.opmerking?('<div class="sub">“'+esc(it.opmerking)+'”</div>'):'')+'</td>'+
           '<td class="sub">'+kort(laatste)+(it.fluvius_sync_op?'<div style="font-size:10px">Fluvius-sync</div>':'')+'</td>'+
