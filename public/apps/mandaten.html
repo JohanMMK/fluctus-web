@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.7.0 (2026-10-10) — WACHTRIJ → FLUVIUS IN 1 KEER: chip "In wachtrij (N)" + standaard op de wachtrij
+<!-- mandaten.html v0.8.0 (2026-10-10) — FLUVIUS-TERUGKOPPELING: knop "📥 Fluvius-Excel" leest het Excel uit de Fluvius-Meldingen
+     in de browser (SheetJS 0.18.5, lazy) → per EAN het gemaskeerde titularis-adres + Fluvius-tekst (⚠ bij probleem) → preview →
+     "Toon mails" (dry-run) en "Verwerk" (POST /api/mandaat/fluvius-terugkoppeling, server ≥ 15.264): wachtrij → aangevraagd en
+     ÉÉN mail per klant-mail (template mandaat-aangevraagd-groep, review-gated → voorlopig naar oekene).
+     mandaten.html v0.7.0 (2026-10-10) — WACHTRIJ → FLUVIUS IN 1 KEER: chip "In wachtrij (N)" + standaard op de wachtrij
      als die niet leeg is; knop "📤 CSV voor Fluvius" downloadt de wachtrij-EAN's in het Fluvius-bulkformaat (EAN-code; / 'EAN;)
      en opent een paneel met de stappen in de IMBY-wizard + "✔ Markeer als aangevraagd" (POST /api/mandaat/markeer-aangevraagd,
      server ≥ 15.263). De wachtrij ontstaat enkel via de EK-knop "Haal mijn profieldata op".
@@ -109,6 +113,8 @@
       <button class="btn ghost" id="ververs" style="margin-left:8px">↻ Ververs</button>
       <button class="btn" id="syncknop">📋 Plak → Sync</button>
       <button class="btn" id="csvknop" style="background:#05B050">📤 CSV voor Fluvius</button>
+      <button class="btn ghost" id="fbknop" title="Excel-terugkoppeling uit je Fluvius-Meldingen inlezen">📥 Fluvius-Excel</button>
+      <input type="file" id="fbfile" accept=".xlsx,.xls,.csv" style="display:none">
       <input id="zoek" placeholder="Filter klant/partner…" style="border:1.5px solid var(--line);border-radius:8px;padding:6px 11px;font-size:12.5px;min-width:180px">
       <span class="cnt" id="cnt"></span>
       <span id="synctijd" style="flex-basis:100%"></span>
@@ -130,7 +136,7 @@
         <li>Open <a href="https://mijn.fluvius.be/verbruik/dienstverlener?kbo=0848039623" target="_blank" rel="noopener">Mijn Fluvius → Meetgegevens delen met IMBY</a> (ingelogd) en klik <b>Toegang verlenen</b>.</li>
         <li>Kies <b>Via een CSV-bestand</b> → <b>Bestand opladen</b> → het gedownloade bestand → <b>Ga verder</b>.</li>
         <li>Laat "alle beschikbare meetgegevens" staan en vink <b>"Ik ga akkoord dat, als ik niet de houder van het energiecontract ben, mijn naam aan deze persoon wordt doorgegeven"</b> aan — zo wordt de titularis verwittigd.</li>
-        <li>Klik <b>Aanvraag bevestigen</b>. De terugkoppeling (Excel met gemaskeerde titularis-mail per EAN) komt in je Fluvius-<b>Meldingen</b>.</li>
+        <li>Klik <b>Aanvraag bevestigen</b>. De terugkoppeling (Excel met gemaskeerde titularis-mail per EAN) komt in je Fluvius-<b>Meldingen</b> → download en laad ze hier in met <b>📥 Fluvius-Excel</b> (zet de status én mailt de klanten, gegroepeerd).</li>
         <li>Klik hieronder <b>Markeer als aangevraagd</b>. De opvolging (actief/geweigerd) komt nadien binnen via de bookmarklet-sync.</li>
       </ol>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -139,6 +145,19 @@
         <button class="btn ghost" id="csvsluit">Sluiten</button>
         <span class="cnt" id="csvmeld" style="margin-left:0"></span>
       </div>
+    </div>
+    <div id="fbpaneel" style="display:none;background:#fff;border:2px solid var(--navy);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Fluvius-terugkoppeling (Excel uit de Meldingen)</div>
+      <div class="sub" id="fbinfo" style="margin-bottom:8px"></div>
+      <div id="fbtabel" style="max-height:340px;overflow:auto;margin-bottom:10px"></div>
+      <label style="font-size:12.5px;display:flex;gap:6px;align-items:center;margin-bottom:8px"><input type="checkbox" id="fbmail" checked> Mail de klanten — <b>één mail per klant-mailadres</b> met al zijn EAN's (template <span class="code">mandaat-aangevraagd-groep</span>; zolang die niet goedgekeurd is gaat hij naar oekene als test)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn ghost" id="fbtoon">👁 Toon mails</button>
+        <button class="btn" id="fbverwerk">✔ Verwerk</button>
+        <button class="btn ghost" id="fbsluit">Sluiten</button>
+        <span class="cnt" id="fbmeld" style="margin-left:0"></span>
+      </div>
+      <div id="fbmails" style="margin-top:10px"></div>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
     <div class="legend" id="legend" style="display:none">
@@ -231,6 +250,68 @@
         FILT_GEKOZEN=true; FILT='aangevraagd'; Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.toggle('on', x.getAttribute('data-f')==='aangevraagd'); });
         await laad();
       }catch(e){ b.disabled=false; csvMeld('Kan de server niet bereiken: '+e.message,'#b23'); }
+    };
+
+    // v0.8.0: Fluvius-Excel (Meldingen) inlezen — generiek: EAN (5414 + 14 cijfers), gemaskeerd mailadres (met *), rest = Fluvius-tekst
+    var FB_RIJEN=[];
+    function _laadXlsx(){ return new Promise(function(ok,nok){ if(window.XLSX) return ok(); var sc=document.createElement('script'); sc.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload=function(){ ok(); }; sc.onerror=function(){ nok(new Error('Excel-lezer kon niet laden')); }; document.head.appendChild(sc); }); }
+    var FB_PROBLEEM=/geen\s+e-?mail|niet\s+(gevonden|mogelijk|gekend|geldig)|fout|error|mislukt|geweigerd|ongeldig|onbekend|bestaat niet|reeds|al een/i;
+    function fbParse(rows){
+      var uit=[], kop=null, seen={};
+      rows.forEach(function(row){
+        var cel=(row||[]).map(function(c){ return String(c==null?'':c).trim(); });
+        var eanI=-1, ean=null;
+        cel.forEach(function(c,i){ if(ean) return; var m=c.replace(/[\s']/g,'').match(/(^|\D)(5414\d{14})(\D|$)/); if(m){ ean=m[2]; eanI=i; } });
+        if(!ean){ if(!kop && cel.filter(Boolean).length>=2) kop=cel; return; }
+        var mailI=-1, mail=null;
+        cel.forEach(function(c,i){ if(i===eanI) return; var m=c.match(/[^\s@;,]+@[^\s@;,]+\.[^\s@;,]+/); if(m && (!mail || (/\*/.test(m[0]) && !/\*/.test(mail)))){ mail=m[0]; mailI=i; } });
+        var stukken=[]; cel.forEach(function(c,i){ if(i===eanI||i===mailI||!c) return; stukken.push((kop&&kop[i])?(kop[i]+': '+c):c); });
+        var tekst=stukken.join(' · ').slice(0,300);
+        if(seen[ean]) return; seen[ean]=1;
+        uit.push({ ean:ean, titularis_mail_masked:mail, tekst:tekst, probleem:FB_PROBLEEM.test(tekst) });
+      });
+      return uit;
+    }
+    function fbMeld(t,k){ var e=$('fbmeld'); if(e){ e.textContent=t||''; e.style.color=k||''; } }
+    function fbRender(){
+      var byEan={}; ITEMS.forEach(function(x){ byEan[x.ean]=x; });
+      var nIn=FB_RIJEN.filter(function(r){ return byEan[r.ean]; }).length, nP=FB_RIJEN.filter(function(r){ return r.probleem; }).length, nM=FB_RIJEN.filter(function(r){ return r.titularis_mail_masked; }).length;
+      $('fbinfo').innerHTML='<b>'+FB_RIJEN.length+'</b> EAN'+(FB_RIJEN.length===1?'':'’s')+' gelezen · '+nIn+' in de lijst · '+nM+' met titularis-mail · '+(nP?('<span style="color:#b23">⚠ '+nP+' met een probleem (geen mail, niet verwerkt als aangevraagd)</span>'):'0 problemen');
+      $('fbtabel').innerHTML='<table style="min-width:0"><thead><tr><th>EAN</th><th>In lijst</th><th>Titularis-mail</th><th>Fluvius</th></tr></thead><tbody>'+FB_RIJEN.map(function(r){
+        var it=byEan[r.ean], pr=(it&&it.projecten&&it.projecten[0])?it.projecten[0].naam:'';
+        return '<tr'+(r.probleem?' style="background:#FEF2F2"':'')+'><td class="code">'+esc(r.ean)+'</td><td>'+(it?(statusBadge(it.status)+'<div class="sub">'+esc(pr||it.klant||((it.aanvrager||{}).naam)||'')+'</div>'):'<span class="sub">niet in de lijst</span>')+'</td><td class="code">'+esc(r.titularis_mail_masked||'—')+'</td><td class="sub">'+(r.probleem?'⚠ ':'')+esc(r.tekst||'')+'</td></tr>';
+      }).join('')+'</tbody></table>';
+      $('fbmails').innerHTML=''; fbMeld(''); $('fbverwerk').disabled=!FB_RIJEN.length; $('fbpaneel').style.display='block';
+    }
+    async function fbBestand(f){
+      if(!f) return;
+      $('fbpaneel').style.display='block'; $('fbinfo').textContent='⏳ '+f.name+' lezen…'; $('fbtabel').innerHTML=''; $('fbmails').innerHTML='';
+      try{
+        var rows=[];
+        if(/\.csv$/i.test(f.name)){ var t=await f.text(); rows=t.split(/\r?\n/).map(function(l){ return l.split(/[;,\t]/); }); }
+        else { await _laadXlsx(); var wb=XLSX.read(await f.arrayBuffer(),{type:'array'}); wb.SheetNames.forEach(function(n){ rows=rows.concat(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:''})); }); }
+        FB_RIJEN=fbParse(rows);
+        if(!FB_RIJEN.length){ $('fbinfo').innerHTML='Geen EAN’s gevonden in <b>'+esc(f.name)+'</b>. Staan de EAN’s er als tekst in (18 cijfers, 5414…)?'; $('fbverwerk').disabled=true; return; }
+        fbRender();
+      }catch(e){ $('fbinfo').textContent='Kon het bestand niet lezen: '+e.message; }
+    }
+    async function fbPost(dry){
+      var r=await fetch(PROXY+'/api/mandaat/fluvius-terugkoppeling',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ rijen:FB_RIJEN, mail:$('fbmail').checked, dry:!!dry }) });
+      var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('HTTP '+r.status)); return j;
+    }
+    function fbMailsHtml(j){
+      if(!j.mails||!j.mails.length) return '<div class="sub">Geen klantmails (geen klant-mailadres gekend of enkel problemen).</div>';
+      return '<div class="sub" style="margin-bottom:6px">'+j.mails.length+' mail(s), één per klant'+(j.review_naar?(' — gaan naar <b>'+esc(j.review_naar)+'</b> (review/test)'):' — naar de klant (template goedgekeurd)')+'.</div>'+
+        j.mails.map(function(m){ return '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px"><div><b>'+esc(m.naar)+'</b>'+(m.naam?(' · '+esc(m.naam)):'')+' · '+m.eans.length+' EAN</div><div class="sub">'+esc(m.onderwerp)+'</div>'+(m.tekst?('<pre style="white-space:pre-wrap;font:12px/1.5 inherit;margin:6px 0 0">'+esc(m.tekst)+'</pre>'):'')+'</div>'; }).join('')+
+        ((j.zonder_klantmail&&j.zonder_klantmail.length)?('<div class="sub" style="color:#b23">Zonder klant-mailadres (geen mail): '+j.zonder_klantmail.map(esc).join(', ')+'</div>'):'')+
+        ((j.niet_gevonden&&j.niet_gevonden.length)?('<div class="sub" style="color:#b23">Niet in de lijst (genegeerd): '+j.niet_gevonden.map(esc).join(', ')+'</div>'):'');
+    }
+    window.fbToon=async function(){ fbMeld('⏳','var(--muted)'); try{ var j=await fbPost(true); $('fbmails').innerHTML=fbMailsHtml(j); fbMeld(''); }catch(e){ fbMeld('Fout: '+e.message,'#b23'); } };
+    window.fbVerwerk=async function(){
+      if(!confirm('Terugkoppeling verwerken'+($('fbmail').checked?' en de klantmails versturen (zolang niet goedgekeurd: naar oekene als test)':'')+'?')) return;
+      $('fbverwerk').disabled=true; fbMeld('⏳ Verwerken…','var(--muted)');
+      try{ var j=await fbPost(false); $('fbmails').innerHTML=fbMailsHtml(j); fbMeld('✓ '+j.bijgewerkt+' EAN’s bijgewerkt · '+(j.mails||[]).length+' mail(s)'+(j.review_naar?(' → '+j.review_naar+' (test)'):''),'#059669'); await laad(); }
+      catch(e){ $('fbverwerk').disabled=false; fbMeld('Fout: '+e.message,'#b23'); }
     };
 
     function isSpecial(it){ return it.status==='adres_mismatch' || it.adres_bevestigd===true; }
@@ -412,6 +493,9 @@
       $('syncdoen').onclick=syncDoen;
       $('syncsluit').onclick=function(){ syncToggle(false); };
       $('csvknop').onclick=csvStart;
+      $('fbknop').onclick=function(){ var i=$('fbfile'); i.value=''; i.click(); };
+      $('fbfile').addEventListener('change', function(){ fbBestand(this.files&&this.files[0]); });
+      $('fbtoon').onclick=fbToon; $('fbverwerk').onclick=fbVerwerk; $('fbsluit').onclick=function(){ $('fbpaneel').style.display='none'; };
       $('csvmarkeer').onclick=csvMarkeer;
       $('csvopnieuw').onclick=function(){ if(CSV_EANS.length) csvDownload(CSV_EANS); };
       $('csvsluit').onclick=function(){ $('csvpaneel').style.display='none'; };
