@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.5.0 (2026-09-12) — FILTER op klant/partner (zoekveld) + links naar ⚡ Acties
+<!-- mandaten.html v0.6.0 (2026-10-10) — ALLE FLUVIUS-INFO: per EAN metertype, label, bron (IMBY / eigen meter /
+     andere lijst) en toegangen (dag/kwartier · status · vanaf/tot · reden) uit bookmarklet v2 (server ≥ 15.261);
+     klik een EAN voor alle Fluvius-velden. "Bijgewerkt" = laatste Fluvius-sync; Ververs toont tijdstip + laatste sync.
+     mandaten.html v0.5.0 (2026-09-12) — FILTER op klant/partner (zoekveld) + links naar ⚡ Acties
      (fluvius-acties.html) en 🤝 Partners (partners.html). v0.4.0 — HANDMATIGE FLUVIUS-SYNC: knop "Plak → Sync" plakt de JSON die de
      Fluvius-bookmarklet (bookmarklet.src.js) op het klembord zette en POST't ze naar /api/mandaat/sync
      (Supabase-manager-token). Geen agent → geen classifier. Additief; Ververs/filters ongewijzigd.
@@ -57,6 +60,16 @@
   .state{ padding:40px; text-align:center; color:var(--muted); }
   .fout{ padding:40px; text-align:center; color:#b23; }
   .legend{ font-size:11.5px; color:var(--muted); margin-top:10px; line-height:1.7; }
+  .tg{ font-size:11px; color:var(--muted); margin-top:4px; line-height:1.45; white-space:nowrap; }
+  .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle; background:#9ca3af; }
+  .dot.s3{ background:#059669; } .dot.s1{ background:#F59E0B; } .dot.s2{ background:#dc2626; }
+  .bron{ display:inline-block; border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:10px; font-weight:700; color:var(--navy2); margin-right:3px; }
+  .eanlink{ cursor:pointer; color:var(--navy2); text-decoration:underline dotted; }
+  tr.det td{ background:#f9fbfe; }
+  .velden{ display:grid; grid-template-columns:minmax(160px,260px) 1fr; gap:2px 14px; font-size:11.5px; }
+  .velden .k{ color:var(--muted); font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-all; }
+  .velden .v{ word-break:break-word; }
+  #synctijd{ font-size:12px; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -85,6 +98,7 @@
       <button class="btn" id="syncknop">📋 Plak → Sync</button>
       <input id="zoek" placeholder="Filter klant/partner…" style="border:1.5px solid var(--line);border-radius:8px;padding:6px 11px;font-size:12.5px;min-width:180px">
       <span class="cnt" id="cnt"></span>
+      <span id="synctijd" style="flex-basis:100%"></span>
     </div>
     <div id="syncpaneel" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px">
       <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Fluvius-status syncen</div>
@@ -98,9 +112,11 @@
     </div>
     <div id="root"><div class="state">Laden…</div></div>
     <div class="legend" id="legend" style="display:none">
-      <b>↻ Ververs</b> herleest wat er op de server staat. De <b>live Fluvius-status</b> (mandaten die er al staan of
-      in aanvraag zijn) wordt binnengetrokken door de <b>watchdog / een skill-run op je PC</b> (die schrijft ze via
-      sync terug); daarna toont een ververs ze hier. EAN’s die bij Fluvius bestaan maar (nog) geen project hebben,
+      <b>↻ Ververs</b> herleest wat er op de server staat. De <b>live Fluvius-info</b> komt binnen via de
+      <b>Fluvius-bookmarklet v2</b> op mijn.fluvius.be (ingelogd) → <b>Kopieer</b> → hier <b>📋 Plak → Sync</b>
+      (<a href="/apps/fluvius-sync-install.html">installeren</a>). <b>Klik een EAN</b> voor alle Fluvius-velden.
+      Bronnen: <span class="bron">IMBY</span> = mandaat via IMBY · <span class="bron">eigen</span> = staat in Eigen meters ·
+      <span class="bron">anderen</span> = Meters van anderen. Bolletjes: groen = gedeeld/actief, oranje = wacht op goedkeuring, rood = geweigerd. EAN’s die bij Fluvius bestaan maar (nog) geen project hebben,
       staan als <b>“Fluvius — los (geen project)”</b> in de lijst.<br>
       <b>⚠ Te verifiëren</b> = adres-mismatch die door de klant/adviseur werd <b>bevestigd</b> (badge “bevestigd”)
       of nog op <b>adres te bevestigen</b> staat — hier doe je het manuele nazicht. Kolom <b>Adres-match</b>: ✓ = factuur en
@@ -110,7 +126,7 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], FILT='alle', ZOEK='';
+    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], FILT='alle', ZOEK='', OPEN={}, LAATSTE_SYNC=null;
     var ALLE_STATUS = 'wachtrij,aangevraagd,actief,geleverd,adres_mismatch,geannuleerd,fout';
 
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -141,14 +157,19 @@
       if(r.status===401){ window.location.href='/portal.html'; return; }
       if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
       var j = await r.json(); ITEMS = (j.items||[]);
+      LAATSTE_SYNC = j.laatste_sync || ITEMS.map(function(x){ return x.fluvius_sync_op||''; }).filter(Boolean).sort().pop() || null;
       $('bar').style.display='flex'; $('legend').style.display='block';
+      var nu=new Date(), p2=function(n){return(n<10?'0':'')+n;};
+      $('synctijd').innerHTML = '✓ Ververst om '+p2(nu.getHours())+':'+p2(nu.getMinutes())+':'+p2(nu.getSeconds())+
+        ' · laatste Fluvius-sync: '+(LAATSTE_SYNC?('<b>'+kort(LAATSTE_SYNC)+'</b>'):'<b>nog geen (bookmarklet v2)</b>')+' · '+ITEMS.length+' EAN’s';
       render();
     }
 
     function isSpecial(it){ return it.status==='adres_mismatch' || it.adres_bevestigd===true; }
     function matchZoek(it){
       if(!ZOEK) return true;
-      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')).toLowerCase();
+      var f=it.fluvius||{};
+      var hay=((it.klant||'')+' '+(it.project_naam||'')+' '+(it.partner||'')+' '+((it.aanvrager&&it.aanvrager.naam)||'')+' '+(it.ean||'')+' '+(it.fluvius_adres||'')+' '+(it.factuuradres||'')+' '+(f.label||'')+' '+(f.metertype||'')).toLowerCase();
       return hay.indexOf(ZOEK)>=0;
     }
     function gefilterd(){
@@ -169,6 +190,30 @@
       return '<span class="match-na">— niet gecheckt</span>';
     }
 
+    function toegangenHtml(f){
+      if(!f || !f.toegangen || !f.toegangen.length) return '';
+      return f.toegangen.map(function(t){
+        var cls = t.status_code===3?'s3':(t.status_code===1?'s1':(t.status_code===2?'s2':''));
+        return '<div class="tg"><span class="dot '+cls+'"></span>'+esc(t.granulariteit||'?')+(t.dienstverlener?(' · '+esc(t.dienstverlener)):'')+
+          (t.vanaf?(' · vanaf '+esc(t.vanaf)):'')+(t.tot?(' · tot '+esc(t.tot)):'')+(t.status?(' · '+esc(t.status)):'')+(t.reden?(' <span title="reden">('+esc(t.reden)+')</span>'):'')+'</div>';
+      }).join('');
+    }
+    function detailHtml(it){
+      var f=it.fluvius;
+      if(!f){ return '<div class="sub">Nog geen Fluvius-detail voor deze EAN. Doe een sync met bookmarklet v2 (mijn.fluvius.be → bookmarklet → Kopieer → Plak → Sync).</div>'; }
+      var h='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
+        '<div><b>Bron</b>: '+((f.bron||[]).map(function(b){return '<span class="bron">'+esc(b)+'</span>';}).join('')||'—')+'</div>'+
+        '<div><b>Metertype</b>: '+esc(f.metertype||'—')+'</div><div><b>Label</b>: '+esc(f.label||'—')+'</div>'+
+        '<div><b>Energie</b>: '+esc(f.energie||'—')+'</div><div><b>Richting</b>: '+esc(f.richting||it.richting||'—')+'</div>'+
+        '<div><b>Gezien</b>: '+esc(kort(f.gezien_op||it.fluvius_sync_op))+'</div></div>';
+      if(f.toegangen && f.toegangen.length) h+='<div style="margin-bottom:8px"><b style="font-size:12px">Toegangen</b>'+toegangenHtml(f)+'</div>';
+      var ks=Object.keys(f.velden||{});
+      if(ks.length){ h+='<details><summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--navy2)">Alle Fluvius-velden ('+ks.length+')</summary><div class="velden" style="margin-top:6px">'+
+        ks.map(function(k){ return '<div class="k">'+esc(k)+'</div><div class="v">'+esc(f.velden[k])+'</div>'; }).join('')+'</div></details>'; }
+      return h;
+    }
+    window.mandDetail=function(ean){ OPEN[ean]=!OPEN[ean]; render(); };
+
     function render(){
       var rows = gefilterd();
       $('cnt').textContent = rows.length+' / '+ITEMS.length+' EAN'+(ITEMS.length===1?'':'’s');
@@ -180,7 +225,10 @@
         '</tr></thead><tbody>';
       rows.forEach(function(it){
         var bev = it.bevestigd_door ? (esc(it.bevestigd_door.naam||it.bevestigd_door.email||'?')+(it.bevestigd_door.rol?(' <span class="sub">('+esc(it.bevestigd_door.rol)+')</span>'):'')+'<div class="sub">'+kort(it.bevestigd_op)+'</div>') : '<span class="sub">—</span>';
-        var laatste = it.actief_op || it.aangevraagd_op || it.in_wachtrij_sinds;
+        var laatste = it.fluvius_sync_op || it.actief_op || it.aangevraagd_op || it.in_wachtrij_sinds;
+        var f = it.fluvius || null;
+        var eanCel = '<span class="code eanlink" onclick="mandDetail(\''+esc(it.ean)+'\')" title="Alle Fluvius-info">'+esc(it.ean)+'</span>'+
+          (f?('<div class="sub" style="margin-top:3px">'+((f.bron||[]).map(function(b){return '<span class="bron">'+esc(b)+'</span>';}).join(''))+esc([f.metertype,f.label].filter(Boolean).join(' · '))+'</div>'):'');
         var projCel = '<b>'+esc(it.project_naam||it.project_id)+'</b><div class="sub code">'+esc(it.project_id)+(it.klant?(' · '+esc(it.klant)):'')+(it.meter_type?(' · '+esc(it.meter_type)):'')+'</div>';
         if(it.los){
           var av = it.aanvrager||{}; var rol = (av.rol||it.rol||'klant'); var partner = it.partner||'';
@@ -195,16 +243,17 @@
         }
         h+='<tr class="'+(isSpecial(it)?'special':'')+'">'+
           '<td>'+projCel+'</td>'+
-          '<td class="code">'+esc(it.ean)+'</td>'+
-          '<td>'+esc(it.richting||'—')+'</td>'+
-          '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+'</td>'+
+          '<td>'+eanCel+'</td>'+
+          '<td>'+esc(it.richting||(f&&f.richting)||'—')+'</td>'+
+          '<td>'+statusBadge(it.status)+((it.status==='adres_mismatch' && !it.los)?('<div style="margin-top:6px;display:flex;gap:5px"><button class="mini ok" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',true)">✓ bevestig</button><button class="mini no" onclick="mandBevestig(\''+esc(it.project_id)+'\',\''+esc(it.ean)+'\',false)">✕ weiger</button></div>'):'')+toegangenHtml(f)+'</td>'+
           '<td>'+matchCel(it)+'</td>'+
           '<td class="adr">'+esc(it.factuuradres||'—')+'</td>'+
           '<td class="adr">'+esc(it.fluvius_adres||'—')+'</td>'+
           '<td>'+bev+'</td>'+
           '<td>'+(it.referentienummer?('<span class="code">'+esc(it.referentienummer)+'</span>'):'<span class="sub">—</span>')+(it.titularis_mail_masked?('<div class="sub">'+esc(it.titularis_mail_masked)+'</div>'):'')+(it.opmerking?('<div class="sub">“'+esc(it.opmerking)+'”</div>'):'')+'</td>'+
-          '<td class="sub">'+kort(laatste)+'</td>'+
+          '<td class="sub">'+kort(laatste)+(it.fluvius_sync_op?'<div style="font-size:10px">Fluvius-sync</div>':'')+'</td>'+
         '</tr>';
+        if(OPEN[it.ean]) h+='<tr class="det"><td colspan="10">'+detailHtml(it)+'</td></tr>';
       });
       h+='</tbody></table></div>';
       $('root').innerHTML=h;
@@ -250,7 +299,8 @@
         var j = await r.json().catch(function(){ return {}; });
         if(r.status===403){ syncMeld('Enkel voor managers.', '#b23'); return; }
         if(!r.ok){ syncMeld('Fout ('+r.status+'): '+(j.error||'onbekend'), '#b23'); return; }
-        syncMeld('✓ '+ (j.ontvangen!=null?j.ontvangen:geldig.length) +' verwerkt · '+(j.projecten_bijgewerkt||0)+' project(en) bijgewerkt · '+(j.los_toegevoegd||0)+' los toegevoegd', '#059669');
+        var metInfo = geldig.filter(function(x){ return x.fluvius; }).length;
+        syncMeld('✓ '+ (j.ontvangen!=null?j.ontvangen:geldig.length) +' verwerkt'+(metInfo?(' (met Fluvius-detail: '+metInfo+')'):' (oude bookmarklet: enkel status — installeer v2 voor alle info)')+' · '+(j.projecten_bijgewerkt||0)+' project(en) bijgewerkt · '+(j.los_toegevoegd||0)+' los toegevoegd', '#059669');
         if(ta) ta.value='';
         await laad();
       }catch(e){ syncMeld('Kan de server niet bereiken: '+e.message, '#b23'); }
