@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.8.0 (2026-10-10) — FLUVIUS-TERUGKOPPELING: knop "📥 Fluvius-Excel" leest het Excel uit de Fluvius-Meldingen
+<!-- mandaten.html v0.8.1 (2026-10-10) — Fluvius-terugkoppeling op het ECHTE formaat (CSV ';' met kolommen EAN-code;Product;
+     Metertype;Richting;Toegang;Status;Extra info — 1 rij per EAN per toegang dag/kwartier, mail in 'Extra info': "Toestemmingsvraag
+     verzonden via E-MAIL: a***@acom.be"): rijen per EAN samengevoegd (Toegang: Status), richting meegestuurd, scheidingsteken
+     uit de kopregel; probleem als een toegang niet 'in aanvraag'/'verzonden'/'actief' is of de tekst op een fout wijst.
+     mandaten.html v0.8.0 (2026-10-10) — FLUVIUS-TERUGKOPPELING: knop "📥 Fluvius-Excel" leest het Excel uit de Fluvius-Meldingen
      in de browser (SheetJS 0.18.5, lazy) → per EAN het gemaskeerde titularis-adres + Fluvius-tekst (⚠ bij probleem) → preview →
      "Toon mails" (dry-run) en "Verwerk" (POST /api/mandaat/fluvius-terugkoppeling, server ≥ 15.264): wachtrij → aangevraagd en
      ÉÉN mail per klant-mail (template mandaat-aangevraagd-groep, review-gated → voorlopig naar oekene).
@@ -257,20 +261,32 @@
     function _laadXlsx(){ return new Promise(function(ok,nok){ if(window.XLSX) return ok(); var sc=document.createElement('script'); sc.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload=function(){ ok(); }; sc.onerror=function(){ nok(new Error('Excel-lezer kon niet laden')); }; document.head.appendChild(sc); }); }
     var FB_PROBLEEM=/geen\s+e-?mail|niet\s+(gevonden|mogelijk|gekend|geldig)|fout|error|mislukt|geweigerd|ongeldig|onbekend|bestaat niet|reeds|al een/i;
     function fbParse(rows){
-      var uit=[], kop=null, seen={};
+      var per={}, volg=[], kop=null;
+      function kolom(re){ if(!kop) return -1; for(var i=0;i<kop.length;i++){ if(re.test(kop[i])) return i; } return -1; }
       rows.forEach(function(row){
         var cel=(row||[]).map(function(c){ return String(c==null?'':c).trim(); });
         var eanI=-1, ean=null;
         cel.forEach(function(c,i){ if(ean) return; var m=c.replace(/[\s']/g,'').match(/(^|\D)(5414\d{14})(\D|$)/); if(m){ ean=m[2]; eanI=i; } });
         if(!ean){ if(!kop && cel.filter(Boolean).length>=2) kop=cel; return; }
-        var mailI=-1, mail=null;
-        cel.forEach(function(c,i){ if(i===eanI) return; var m=c.match(/[^\s@;,]+@[^\s@;,]+\.[^\s@;,]+/); if(m && (!mail || (/\*/.test(m[0]) && !/\*/.test(mail)))){ mail=m[0]; mailI=i; } });
-        var stukken=[]; cel.forEach(function(c,i){ if(i===eanI||i===mailI||!c) return; stukken.push((kop&&kop[i])?(kop[i]+': '+c):c); });
-        var tekst=stukken.join(' · ').slice(0,300);
-        if(seen[ean]) return; seen[ean]=1;
-        uit.push({ ean:ean, titularis_mail_masked:mail, tekst:tekst, probleem:FB_PROBLEEM.test(tekst) });
+        var r=per[ean]; if(!r){ r=per[ean]={ ean:ean, titularis_mail_masked:null, richting:null, delen:[], probleem:false }; volg.push(ean); }
+        var mailI=-1;
+        cel.forEach(function(c,i){ if(i===eanI) return; var m=c.match(/[^\s@;,:]+@[^\s@;,]+\.[^\s@;,]+/); if(m && (!r.titularis_mail_masked || (/\*/.test(m[0]) && !/\*/.test(r.titularis_mail_masked)))){ r.titularis_mail_masked=m[0]; mailI=i; } });
+        var iR=kolom(/richting/i), iT=kolom(/toegang/i), iS=kolom(/^status/i), iX=kolom(/extra|info|opmerking/i);
+        if(iR>=0 && cel[iR] && !r.richting) r.richting=cel[iR].toLowerCase();
+        var deel;
+        if(iT>=0 || iS>=0){
+          deel=[(iT>=0?cel[iT]:''),(iS>=0?cel[iS]:'')].filter(Boolean).join(': ');
+          var x=(iX>=0?cel[iX]:'').replace(/[^\s@;,:]+@[^\s@;,]+\.[^\s@;,]+/,'').replace(/\s*:\s*$/,'').trim();
+          if(x) deel+=' ('+x+')';
+          var st=(iS>=0?cel[iS]:'');
+          if(st && !/aanvraag|verzonden|actief|goedgekeurd|gedeeld|toegekend/i.test(st)) r.probleem=true;
+        } else {
+          deel=cel.filter(function(c,i){ return c && i!==eanI && i!==mailI; }).join(' · ');
+        }
+        if(deel && r.delen.indexOf(deel)<0) r.delen.push(deel);
+        if(FB_PROBLEEM.test(deel)) r.probleem=true;
       });
-      return uit;
+      return volg.map(function(e){ var r=per[e]; return { ean:r.ean, titularis_mail_masked:r.titularis_mail_masked, richting:r.richting, tekst:r.delen.join(' · ').slice(0,300), probleem:r.probleem }; });
     }
     function fbMeld(t,k){ var e=$('fbmeld'); if(e){ e.textContent=t||''; e.style.color=k||''; } }
     function fbRender(){
@@ -288,7 +304,7 @@
       $('fbpaneel').style.display='block'; $('fbinfo').textContent='⏳ '+f.name+' lezen…'; $('fbtabel').innerHTML=''; $('fbmails').innerHTML='';
       try{
         var rows=[];
-        if(/\.csv$/i.test(f.name)){ var t=await f.text(); rows=t.split(/\r?\n/).map(function(l){ return l.split(/[;,\t]/); }); }
+        if(/\.csv$/i.test(f.name)){ var t=await f.text(); var l1=(t.split(/\r?\n/)[0]||''); var sep=(l1.indexOf(';')>=0)?';':((l1.indexOf('\t')>=0)?'\t':','); rows=t.split(/\r?\n/).map(function(l){ return l.split(sep).map(function(c){ return c.replace(/^"|"$/g,''); }); }); }
         else { await _laadXlsx(); var wb=XLSX.read(await f.arrayBuffer(),{type:'array'}); wb.SheetNames.forEach(function(n){ rows=rows.concat(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:''})); }); }
         FB_RIJEN=fbParse(rows);
         if(!FB_RIJEN.length){ $('fbinfo').innerHTML='Geen EAN’s gevonden in <b>'+esc(f.name)+'</b>. Staan de EAN’s er als tekst in (18 cijfers, 5414…)?'; $('fbverwerk').disabled=true; return; }
