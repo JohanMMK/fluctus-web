@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.2, 2026-10-10: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.3, 2026-10-10: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'. */
 window.EC_FR_SEG = {
@@ -1117,7 +1117,12 @@ window.EC_FR_SEG = {
 "Laadvermogen per snellaadpaal (kW) — betalend plein": "Puissance de recharge par borne rapide (kW) — parc payant",
 "Verkoopprijs per kWh (betalend)": "Prix de vente par kWh (payant)",
 "{#} van {#} MWh gevraagd": "{#} sur {#} MWh demandés",
-"Omzet/j": "Chiffre d'affaires/an"
+"Omzet/j": "Chiffre d'affaires/an",
+"📶 Haal mijn profieldata op": "📶 Récupérer mes données de profil",
+"Haal mijn profieldata op": "Récupérer mes données de profil",
+"Uw rapport is nu gebaseerd op uw factuur en een standaardprofiel. Met uw echte kwartierdata van Fluvius wordt het exact. Wij vragen ze voor u aan; de contracthouder krijgt van Fluvius een mail om de toegang te bevestigen.": "Votre rapport repose actuellement sur votre facture et un profil standard. Avec vos données quart-horaires réelles de Fluvius, il devient exact. Nous les demandons pour vous ; le titulaire du contrat reçoit de Fluvius un e-mail pour confirmer l'accès.",
+"✔ Aangevraagd — wij vragen uw kwartierdata op bij Fluvius. De contracthouder ontvangt een mail van Fluvius om de toegang te bevestigen. Zodra de data binnen is, maken wij uw exacte rapport.": "✔ Demandé — nous demandons vos données quart-horaires à Fluvius. Le titulaire du contrat reçoit un e-mail de Fluvius pour confirmer l'accès. Dès que les données sont disponibles, nous établissons votre rapport exact.",
+"ℹ️ Uw profieldata is aangevraagd bij Fluvius. Zodra de contracthouder de toegang bevestigt, maken wij uw exacte rapport.": "ℹ️ Vos données de profil ont été demandées à Fluvius. Dès que le titulaire du contrat confirme l'accès, nous établissons votre rapport exact."
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */

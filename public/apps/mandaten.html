@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandaten · Fluctus</title>
-<!-- mandaten.html v0.6.3 (2026-10-10) — toegang-reden neutraal: "geen antwoord binnen de maand" (+ "→ toch toegekend" enkel bij
+<!-- mandaten.html v0.7.0 (2026-10-10) — WACHTRIJ → FLUVIUS IN 1 KEER: chip "In wachtrij (N)" + standaard op de wachtrij
+     als die niet leeg is; knop "📤 CSV voor Fluvius" downloadt de wachtrij-EAN's in het Fluvius-bulkformaat (EAN-code; / 'EAN;)
+     en opent een paneel met de stappen in de IMBY-wizard + "✔ Markeer als aangevraagd" (POST /api/mandaat/markeer-aangevraagd,
+     server ≥ 15.263). De wachtrij ontstaat enkel via de EK-knop "Haal mijn profieldata op".
+     mandaten.html v0.6.3 (2026-10-10) — toegang-reden neutraal: "geen antwoord binnen de maand" (+ "→ toch toegekend" enkel bij
      status actief, "→ vervallen" bij geweigerd), andere codes "reden N"; legende vermeldt Ardosolar/andere dienstverleners.
      mandaten.html v0.6.2 (2026-10-10) — Fluvius-codes leesbaar (meterType 3/4, discipline 23) en Fluvius-adres
      uit de vlakke velden (street/houseNumber/postalCode/place) als fluvius_adres nog leeg is.
@@ -96,7 +100,7 @@
     <div class="bar" id="bar" style="display:none">
       <span style="font-size:12.5px;color:var(--navy);font-weight:700">Filter:</span>
       <span class="chip on" data-f="alle">Alle</span>
-      <span class="chip" data-f="wachtrij">In wachtrij</span>
+      <span class="chip" data-f="wachtrij" id="chip-wachtrij">In wachtrij</span>
       <span class="chip" data-f="adres_mismatch">Adres te bevestigen</span>
       <span class="chip" data-f="aangevraagd">Aangevraagd</span>
       <span class="chip" data-f="actief">Actief</span>
@@ -104,6 +108,7 @@
       <span class="chip" data-f="special">⚠ Te verifiëren</span>
       <button class="btn ghost" id="ververs" style="margin-left:8px">↻ Ververs</button>
       <button class="btn" id="syncknop">📋 Plak → Sync</button>
+      <button class="btn" id="csvknop" style="background:#05B050">📤 CSV voor Fluvius</button>
       <input id="zoek" placeholder="Filter klant/partner…" style="border:1.5px solid var(--line);border-radius:8px;padding:6px 11px;font-size:12.5px;min-width:180px">
       <span class="cnt" id="cnt"></span>
       <span id="synctijd" style="flex-basis:100%"></span>
@@ -116,6 +121,23 @@
         <button class="btn" id="syncdoen">Sync nu</button>
         <button class="btn ghost" id="syncsluit">Sluiten</button>
         <span class="cnt" id="syncmeld" style="margin-left:0"></span>
+      </div>
+    </div>
+    <div id="csvpaneel" style="display:none;background:#fff;border:2px solid #05B050;border-radius:12px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:6px">Wachtrij aanvragen bij Fluvius</div>
+      <div class="sub" id="csvinfo" style="margin-bottom:8px"></div>
+      <ol style="font-size:12.5px;line-height:1.7;margin:0 0 10px;padding-left:20px">
+        <li>Open <a href="https://mijn.fluvius.be/verbruik/dienstverlener?kbo=0848039623" target="_blank" rel="noopener">Mijn Fluvius → Meetgegevens delen met IMBY</a> (ingelogd) en klik <b>Toegang verlenen</b>.</li>
+        <li>Kies <b>Via een CSV-bestand</b> → <b>Bestand opladen</b> → het gedownloade bestand → <b>Ga verder</b>.</li>
+        <li>Laat "alle beschikbare meetgegevens" staan en vink <b>"Ik ga akkoord dat, als ik niet de houder van het energiecontract ben, mijn naam aan deze persoon wordt doorgegeven"</b> aan — zo wordt de titularis verwittigd.</li>
+        <li>Klik <b>Aanvraag bevestigen</b>. De terugkoppeling (Excel met gemaskeerde titularis-mail per EAN) komt in je Fluvius-<b>Meldingen</b>.</li>
+        <li>Klik hieronder <b>Markeer als aangevraagd</b>. De opvolging (actief/geweigerd) komt nadien binnen via de bookmarklet-sync.</li>
+      </ol>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="csvmarkeer">✔ Markeer als aangevraagd</button>
+        <button class="btn ghost" id="csvopnieuw">⬇ Download opnieuw</button>
+        <button class="btn ghost" id="csvsluit">Sluiten</button>
+        <span class="cnt" id="csvmeld" style="margin-left:0"></span>
       </div>
     </div>
     <div id="root"><div class="state">Laden…</div></div>
@@ -134,7 +156,7 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], FILT='alle', ZOEK='', OPEN={}, LAATSTE_SYNC=null;
+    var CFG=null, sb=null, SESSION=null, PROXY='', ITEMS=[], FILT='alle', ZOEK='', OPEN={}, LAATSTE_SYNC=null, FILT_GEKOZEN=false, CSV_EANS=[];
     var ALLE_STATUS = 'wachtrij,aangevraagd,actief,geleverd,adres_mismatch,geannuleerd,fout';
 
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -170,8 +192,46 @@
       var nu=new Date(), p2=function(n){return(n<10?'0':'')+n;};
       $('synctijd').innerHTML = '✓ Ververst om '+p2(nu.getHours())+':'+p2(nu.getMinutes())+':'+p2(nu.getSeconds())+
         ' · laatste Fluvius-sync: '+(LAATSTE_SYNC?('<b>'+kort(LAATSTE_SYNC)+'</b>'):'<b>nog geen (bookmarklet v2)</b>')+' · '+ITEMS.length+' EAN’s';
+      var nW=ITEMS.filter(function(x){ return x.status==='wachtrij'; }).length;
+      var cw=$('chip-wachtrij'); if(cw) cw.textContent='In wachtrij'+(nW?(' ('+nW+')'):'');
+      var ck=$('csvknop'); if(ck) ck.textContent='📤 CSV voor Fluvius'+(nW?(' ('+nW+')'):'');
+      if(nW && !FILT_GEKOZEN){ FILT='wachtrij'; Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.toggle('on', x.getAttribute('data-f')==='wachtrij'); }); }
       render();
     }
+
+    // v0.7.0: wachtrij → Fluvius-bulk-CSV (formaat van het Fluvius-voorbeeldbestand: "EAN-code;" + per regel "'<EAN>;")
+    function csvDownload(eans){
+      var txt='EAN-code;\r\n'+eans.map(function(e){ return "'"+e+';'; }).join('\r\n')+'\r\n';
+      var d=new Date(), p=function(n){return(n<10?'0':'')+n;};
+      var naam='fluvius-aanvraag-'+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes())+'.csv';
+      var blob=new Blob([txt],{type:'text/csv'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=naam;
+      document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      return naam;
+    }
+    function csvMeld(t,k){ var e=$('csvmeld'); if(e){ e.textContent=t||''; e.style.color=k||''; } }
+    window.csvStart=function(){
+      CSV_EANS=ITEMS.filter(function(x){ return x.status==='wachtrij'; }).map(function(x){ return x.ean; }).filter(function(e,i,a){ return a.indexOf(e)===i; });
+      var p=$('csvpaneel');
+      if(!CSV_EANS.length){ p.style.display='block'; $('csvinfo').innerHTML='De wachtrij is leeg — er is niets aan te vragen. EAN\'s komen in de wachtrij wanneer een klant in Energie-Compas op <b>Haal mijn profieldata op</b> klikt.'; $('csvmarkeer').style.display='none'; $('csvopnieuw').style.display='none'; return; }
+      var naam=csvDownload(CSV_EANS);
+      $('csvmarkeer').style.display=''; $('csvopnieuw').style.display=''; $('csvmarkeer').disabled=false;
+      $('csvmarkeer').textContent='✔ Markeer '+CSV_EANS.length+' als aangevraagd';
+      $('csvinfo').innerHTML='Gedownload: <b>'+esc(naam)+'</b> met <b>'+CSV_EANS.length+'</b> EAN'+(CSV_EANS.length===1?'':'’s')+': <span class="code">'+CSV_EANS.map(esc).join(', ')+'</span>';
+      csvMeld(''); p.style.display='block';
+    };
+    window.csvMarkeer=async function(){
+      if(!CSV_EANS.length) return;
+      if(!confirm('Heb je de '+CSV_EANS.length+' EAN\'s in Fluvius aangevraagd (Aanvraag bevestigen geklikt)? Dan zetten we ze op "aangevraagd".')) return;
+      var b=$('csvmarkeer'); b.disabled=true; csvMeld('Bezig…','var(--muted)');
+      try{
+        var r=await fetch(PROXY+'/api/mandaat/markeer-aangevraagd',{ method:'POST', headers: await authHeaders(), body: JSON.stringify({ eans: CSV_EANS }) });
+        var j=await r.json().catch(function(){return{};});
+        if(!r.ok||!j.ok){ b.disabled=false; csvMeld('Fout: '+(j.error||r.status),'#b23'); return; }
+        csvMeld('✓ '+j.bijgewerkt+' EAN’s op aangevraagd gezet.','#059669'); CSV_EANS=[];
+        FILT_GEKOZEN=true; FILT='aangevraagd'; Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.toggle('on', x.getAttribute('data-f')==='aangevraagd'); });
+        await laad();
+      }catch(e){ b.disabled=false; csvMeld('Kan de server niet bereiken: '+e.message,'#b23'); }
+    };
 
     function isSpecial(it){ return it.status==='adres_mismatch' || it.adres_bevestigd===true; }
     function matchZoek(it){
@@ -344,13 +404,17 @@
     };
     window.addEventListener('DOMContentLoaded', async function(){
       Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(c){
-        c.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); }); c.classList.add('on'); FILT=c.getAttribute('data-f'); render(); };
+        c.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); }); c.classList.add('on'); FILT=c.getAttribute('data-f'); FILT_GEKOZEN=true; render(); };
       });
       $('ververs').onclick=laad;
       $('zoek').addEventListener('input', function(){ ZOEK=this.value.trim().toLowerCase(); render(); });
       $('syncknop').onclick=function(){ syncToggle(); };
       $('syncdoen').onclick=syncDoen;
       $('syncsluit').onclick=function(){ syncToggle(false); };
+      $('csvknop').onclick=csvStart;
+      $('csvmarkeer').onclick=csvMarkeer;
+      $('csvopnieuw').onclick=function(){ if(CSV_EANS.length) csvDownload(CSV_EANS); };
+      $('csvsluit').onclick=function(){ $('csvpaneel').style.display='none'; };
       try{ await loadConfig(); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
     });
