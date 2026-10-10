@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.44.0">
+<meta name="ek-build" content="0.44.1">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.44.1 (2026-10-10): projectlog noteert een ingelogde manager/oekene als "manager" (Bearer); een adviseur-/manager-sessie wijzigt de klanttaal niet. -->
 <!-- ek.html v0.44.0 (2026-10-10, Johan) — (1) ENGELS: taalschakelaar NL | FR | EN (i18n-ec v0.3.0 + en-ec-seg.js); klantrapport + server-PDF volgen de EK-taal (&lang=en).
      (2) TAAL = KLANTTAAL: elke taalkeuze (knop of mail-link ?lang=) → POST /api/ek/taal (server rec.lang → alle klantmails in die taal); bij de eerste keer openen zonder keuze wordt de taal van die sessie de klanttaal.
      (3) PROJECTLOG: project geopend (via mail-link of direct), elke klik op een knop/link (label + id), taalwissel, Toon rapport mét de gekozen combinatie PV/batterij → /api/ek/log (gebundeld, keepalive). oekene: knop "📜 Projectlog" in dossierbeheer → apps/projectlog.html. -->
@@ -873,7 +874,7 @@ function _ecZetTaal(l){ try{ localStorage.setItem('EC_LANG',l); }catch(e){}
   var _ga=function(){ try{ var u=new URL(location.href); u.searchParams.set('lang',l); u.searchParams.set('lk','1'); location.href=u.toString(); }catch(e){ location.reload(); } };
   try{
     var tk=(window.TOKEN)||new URLSearchParams(location.search).get('case')||'';
-    if(tk && l!==window.EC_LANG){
+    if(tk && l!==window.EC_LANG && !window.ADV_MODE && !window.EK_IS_OEKENE){   // v0.44.1: enkel de klant zelf legt zijn taal vast
       fetch('https://lucid-amazement-production.up.railway.app/api/ek/taal',{ method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:tk, lang:l, bron:'knop', rol:(window.ADV_MODE?'adviseur':'') }) })
         .catch(function(){}).then(function(){ _ga(); });
       setTimeout(_ga, 1500); return false;
@@ -3757,10 +3758,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
 (function(){
   var API_L='https://lucid-amazement-production.up.railway.app', Q=[], T=null, START=false;
   function tok(){ try{ return window.TOKEN||new URLSearchParams(location.search).get('case')||''; }catch(e){ return ''; } }
-  window._ekLogHdr=function(){ return {'Content-Type':'application/json'}; };
+  // v0.44.1: ingelogde manager/oekene → Bearer meesturen, zodat de log 'manager' (naam + mail) noteert i.p.v. 'klant (link)'.
+  var BEARER=null;
+  function bearer(){ try{ if(window._EK_SB && window._EK_SB.auth){ window._EK_SB.auth.getSession().then(function(d){ BEARER=(d&&d.data&&d.data.session&&d.data.session.access_token)||null; }).catch(function(){}); } }catch(e){} }
+  setInterval(bearer, 20000); setTimeout(bearer, 1500); setTimeout(bearer, 4000);
+  function hdr(){ var h={'Content-Type':'application/json'}; if(BEARER) h['Authorization']='Bearer '+BEARER; return h; }
+  window._ekLogHdr=hdr;
   function flush(keep){
     var t=tok(); if(!t||!Q.length) return; var items=Q.splice(0,40);
-    try{ fetch(API_L+'/api/ek/log',{ method:'POST', keepalive:!!keep, headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:t, items:items, rol:(window.ADV_MODE?'adviseur':'') }) }).catch(function(){}); }catch(e){}
+    try{ fetch(API_L+'/api/ek/log',{ method:'POST', keepalive:!!keep, headers:hdr(), body:JSON.stringify({ token:t, items:items, rol:(window.ADV_MODE?'adviseur':'') }) }).catch(function(){}); }catch(e){}
   }
   window._ekLog=function(ev,data){ try{ Q.push({ ev:ev, data:data||null, ts:Date.now() }); if(Q.length>=20) flush(false); clearTimeout(T); T=setTimeout(function(){ flush(false); },3000); }catch(e){} };
   document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden') flush(true); });
@@ -3777,11 +3783,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function start(){
     if(START) return; var t=tok(); if(!t) return; START=true;
     var q=new URLSearchParams(location.search), viaLink=!!q.get('lang')&&!q.get('lk');
-    try{ fetch(API_L+'/api/ek/taal',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:t, lang:window.EC_LANG||'nl', bron:(viaLink?'link':'eerste'), rol:(window.ADV_MODE?'adviseur':'') }) }).catch(function(){}); }catch(e){}
+    // v0.44.1: een adviseur-/manager-sessie (?adv=1 of oekene ingelogd) legt NIET de taal van de klant vast
+    if(!window.ADV_MODE && !window.EK_IS_OEKENE){ try{ fetch(API_L+'/api/ek/taal',{ method:'POST', headers:hdr(), body:JSON.stringify({ token:t, lang:window.EC_LANG||'nl', bron:(viaLink?'link':'eerste') }) }).catch(function(){}); }catch(e){} }
     window._ekLog('project_geopend',{ via:(viaLink?'mail-link':(q.get('lk')?'taalknop':'direct')), taal:window.EC_LANG||'nl', adviseur:!!window.ADV_MODE, scherm:(window.innerWidth||0)+'px' });
   }
   // TOKEN kan pas later gekend zijn (intake) → even blijven proberen
-  var n=0, iv=setInterval(function(){ start(); if(START||++n>120) clearInterval(iv); },1000); start();
+  var n=0, iv=setInterval(function(){ start(); if(START||++n>120) clearInterval(iv); },1000); setTimeout(start, 2500);   // v0.44.1: even wachten zodat ADV_MODE/oekene-sessie gekend zijn
   window._ekOpenLog=function(){ var t=tok(); if(!t){ alert('Nog geen dossier-token.'); return; } window.open('/apps/projectlog.html?token='+encodeURIComponent(t),'_blank','noopener'); };
 })();
 </script>
