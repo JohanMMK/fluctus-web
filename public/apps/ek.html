@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.44.3">
+<meta name="ek-build" content="0.44.4">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
 <!-- ek.html v0.44.3 (2026-10-10, Johan: versnellen stap 3): PREWARM-modus ?prewarm=1 (door de server headless geopend na het inlezen van een factuur):
      laadt de case zonder 'bezocht'-registratie (src=prewarm), rekent automatisch door met exact de klant-body (sweep met X-EK-Batch: 1),
      ZONDER /api/ek-intake, zonder projectlog/taal/klik-registratie en zonder EAN-keuzemodal (automatische rollen) → server-cache staat klaar.
@@ -1273,7 +1274,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var ad=$('i-adres'); if(ad){ ad.addEventListener('input',function(){ STATE_ADRES=(ad.value||'').trim(); }); }
     _updSpanningBadge();
     _evAfleiden();
-    _ekCfgLoad();   // v0.18: server-brede config (voertuig-defaults + RTE/DoD) ophalen en toepassen
+    window._EK_CFG_P=_ekCfgLoad();   // v0.44.4: promise bewaard → automatisch doorrekenen wacht op de server-config (zelfde body als de klant) · v0.18: server-brede config (voertuig-defaults + RTE/DoD) ophalen en toepassen
   }catch(e){} })();
   function _anchorKwp(a){ return (a.pvKwp!=null)?a.pvKwp:((+a.pvPan||0)*P_TL.PANEEL_WP/1000); }
   // Totale KLANT-investering (PV + batterij + palen + kabeltracé) voor een cel, uit CTX (ev/particulier).
@@ -2077,8 +2078,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.44.3: automatisch doorrekenen (adviseur-deeplink of server-prewarm); prewarm meldt het resultaat via window.__ekPrewarm.
   function _ekAutoRun(){
     if(PREWARM) window.__ekPrewarm='gestart';
-    var p; try{ p=toonRapport(); }catch(e){ if(PREWARM) window.__ekPrewarm='fout'; return; }
-    if(PREWARM) Promise.resolve(p).then(function(){ window.__ekPrewarm=(HM?'klaar':'fout'); }, function(){ window.__ekPrewarm='fout'; });
+    // v0.44.4: eerst de server-config (RTE/DoD/voertuig-defaults) binnen — anders rekent een verse browser (of de prewarm) met
+    //   ingebakken defaults en wijkt de body af van wat de klant later stuurt (geen cache-treffer).
+    Promise.resolve(window._EK_CFG_P).catch(function(){}).then(function(){
+      var p; try{ p=toonRapport(); }catch(e){ if(PREWARM) window.__ekPrewarm='fout'; return; }
+      if(PREWARM) Promise.resolve(p).then(function(){ window.__ekPrewarm=(HM?'klaar':'fout'); }, function(){ window.__ekPrewarm='fout'; });
+    });
   }
   async function toonRapport(){
     // v0.23: al doorgerekend met exact deze invoer? → toon meteen het bestaande resultaat (geen herberekening).
