@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demo · Energie-Compas</title>
-<!-- demo.html v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
+<!-- demo.html v0.3.0 (2026-10-11, Johan): + knop "↺ Demo resetten" per bezoeker (POST /api/ek/demo-reset, server ≥ 15.268.1). v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
      één rij per bezoeker-mail, één kolom per demo-stap (tijdstip), interesse-score 1–5 per bezoeker (hoe ver + hoe snel) en
      bovenaan een vlot-score 1–5 per stap (5 = vlotte doorgang, 1 = hier blijven bezoekers hangen). -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -107,6 +107,7 @@
         h+='<tr class="det"><td class="s0" colspan="'+(ks.length+1)+'"><div style="max-width:900px">'+
           (r.project_id?'<div><b>Project:</b> '+esc(r.project_id)+(r.token?' · <a target="_blank" rel="noopener" href="/apps/projectlog.html?token='+encodeURIComponent(r.token)+'">📜 Projectlog</a> · <a target="_blank" rel="noopener" href="/apps/ek.html?case='+encodeURIComponent(r.token)+'&lang='+esc(r.taal||'nl')+'">Open in EK</a>':'')+'</div>':'<div class="sub">Nog geen demo-project (factuur nog niet doorgestuurd).</div>')+
           '<div><b>Aanvragen:</b> '+r.n_aanvragen+' · <b>projecten:</b> '+r.n_projecten+'</div>'+
+          '<div style="margin-top:8px"><button type="button" data-reset="'+esc(r.mail)+'" style="border:1px solid #F2C7C7;background:#fff;color:#8a1f1f;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer">↺ Demo resetten</button> <span class="sub">archiveert het demo-project en zet dit mailadres terug op nul → de demo kan opnieuw.</span></div>'+
           ((r.herhalingen&&r.herhalingen.length)?'<div><b>Opnieuw gevraagd (geen nieuw project, link naar het bestaande gemaild):</b> '+r.herhalingen.map(function(h){ return esc(datum(h.ts))+' via '+esc(h.via==='aanvraag'?'contactformulier':(h.via==='antwoord'?'antwoord op demo-mail':'doorgestuurde factuur'))+(h.sent?'':' (mail NIET verstuurd)'); }).join(' · ')+'</div>':'')+
           (fb?('<div style="margin-top:6px"><b>Feedback</b> ('+esc(fb.ts?datum(Date.parse(fb.ts)):'')+')'+(fb.contact?' · <b style="color:#05B050">wil contact</b> · '+esc(fb.mail||'')+(fb.gsm?' · '+esc(fb.gsm):''):'')+'<div style="white-space:pre-wrap;background:#fff;border:1px solid #EEF2F7;border-radius:8px;padding:8px 10px;margin-top:4px">'+esc(fb.commentaar||'—')+'</div></div>'):'<div class="sub">Geen feedback.</div>')+
           '</div></td></tr>';
@@ -119,6 +120,13 @@
     $('root').innerHTML=h;
     $('zoek').oninput=function(){ ZOEK=this.value.trim().toLowerCase(); var pos=this.selectionStart; render(); var z=$('zoek'); z.focus(); try{ z.setSelectionRange(pos,pos); }catch(e){} };
     $('ververs').onclick=laad;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'),function(b){ b.onclick=async function(){
+      var m=b.getAttribute('data-reset'); if(!confirm('Demo van '+m+' resetten?\n\nHet demo-project wordt gearchiveerd en dit mailadres kan de demo opnieuw doen.')) return;
+      b.disabled=true; b.textContent='⏳ Resetten…';
+      try{ var h=await authHeaders(); h['Content-Type']='application/json'; var r=await fetch(PROXY+'/api/ek/demo-reset',{ method:'POST', headers:h, body:JSON.stringify({ mail:m }) }); var j=await r.json().catch(function(){return{};});
+        if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status)); delete OPEN[m]; await laad(); }
+      catch(e){ b.disabled=false; b.textContent='↺ Demo resetten'; alert('Resetten lukte niet: '+e.message); }
+    }; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-open]'),function(a){ a.onclick=function(e){ e.preventDefault(); var m=a.getAttribute('data-open'); OPEN[m]=!OPEN[m]; render(); }; });
   }
   async function authHeaders(){
