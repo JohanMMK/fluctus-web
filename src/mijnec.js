@@ -1,4 +1,4 @@
-// mijnec.js v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
 // v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
@@ -124,6 +124,24 @@ function resetLogin() { toonCodeStap(false); $('login-code').value = ''; $('logi
 async function logout() { await sb.auth.signOut(); }
 
 // RBAC — zelfde contract als het bestaande portaal (POST /api/app-access/check).
+// v1.15.0 / v1.6.0 (Johan 11-10): teller op de tegel «🙋 Hulpvragen» — aantal hulpvragen dat nog beantwoord moet worden
+async function hulpTeller(token) {
+  try {
+    const tile = document.querySelector('.app-tile[data-app="hulp"]'); if (!tile) return;
+    const base = (CFG && CFG.fluctusProxyUrl) || '';
+    const r = await fetch(`${base}/api/ek/hulp-overzicht?cb=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` }, cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json(); const V = (j && j.vragen) || [];
+    const open = V.filter((v) => v.status === 'open').length, bel = V.filter((v) => v.status === 'open' && v.terugbellen).length;
+    let b = tile.querySelector('.tile-teller');
+    if (!b) { b = document.createElement('span'); b.className = 'tile-teller'; tile.style.position = 'relative'; tile.appendChild(b); }
+    b.style.cssText = 'position:absolute;top:10px;right:10px;border-radius:999px;padding:3px 10px;font-weight:800;font-size:12.5px;line-height:1.4;'
+      + (open ? 'background:#C0392B;color:#fff;box-shadow:0 2px 8px rgba(192,57,43,.35)' : 'background:#E6F6EC;color:#0a7d3c');
+    b.textContent = open ? `${open} te beantwoorden` : '✔ niets open';
+    b.title = open ? `${open} open hulpvra${open === 1 ? 'ag' : 'gen'}${bel ? ` — waarvan ${bel} terugbellen` : ''}` : 'Alle hulpvragen beantwoord';
+  } catch (e) { /* stil */ }
+}
+
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
   const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.gatedBy);
@@ -159,7 +177,7 @@ function renderLauncher(apps) {
   }
   apps.forEach((a) => {
     const t = document.createElement('a');
-    t.className = 'app-tile';
+    t.className = 'app-tile'; t.dataset.app = a.id;   // v1.6.0: data-app voor tellers
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p>${a.beschrijving}</p>`;
@@ -177,6 +195,7 @@ async function render() {
   $('portal-user').textContent = user.email || '';
   $('hi-naam').textContent = user.email ? (', ' + user.email.split('@')[0]) : '';
   renderLauncher(await toegankelijkeApps(SESSION.access_token));
+  hulpTeller(SESSION.access_token);   // v1.6.0
 }
 
 window.addEventListener('DOMContentLoaded', async () => {

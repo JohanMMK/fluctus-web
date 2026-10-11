@@ -1,4 +1,4 @@
-// portal.js v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
+// portal.js v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
 // v1.11.0 — 2026-09-23 — nieuwe tegel 'ek' (📊 Energie-Compas) → /apps/ek.html?prep=1: de snelle energie-analyse
@@ -185,6 +185,24 @@ async function logout() { await sb.auth.signOut(); }
 // RBAC: per app checken via de bestaande fluctus-proxy (9a). Managers → alle apps.
 // 'altijd'-tegels (Academy) tonen we altijd; 'managerOnly'-tegels (Gebruikers)
 // enkel voor managers. De rol lezen we uit het antwoord van app-access/check.
+// v1.15.0 / v1.6.0 (Johan 11-10): teller op de tegel «🙋 Hulpvragen» — aantal hulpvragen dat nog beantwoord moet worden
+async function hulpTeller(token) {
+  try {
+    const tile = document.querySelector('.app-tile[data-app="hulp"]'); if (!tile) return;
+    const base = (CFG && CFG.fluctusProxyUrl) || '';
+    const r = await fetch(`${base}/api/ek/hulp-overzicht?cb=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` }, cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json(); const V = (j && j.vragen) || [];
+    const open = V.filter((v) => v.status === 'open').length, bel = V.filter((v) => v.status === 'open' && v.terugbellen).length;
+    let b = tile.querySelector('.tile-teller');
+    if (!b) { b = document.createElement('span'); b.className = 'tile-teller'; tile.style.position = 'relative'; tile.appendChild(b); }
+    b.style.cssText = 'position:absolute;top:10px;right:10px;border-radius:999px;padding:3px 10px;font-weight:800;font-size:12.5px;line-height:1.4;'
+      + (open ? 'background:#C0392B;color:#fff;box-shadow:0 2px 8px rgba(192,57,43,.35)' : 'background:#E6F6EC;color:#0a7d3c');
+    b.textContent = open ? `${open} te beantwoorden` : '✔ niets open';
+    b.title = open ? `${open} open hulpvra${open === 1 ? 'ag' : 'gen'}${bel ? ` — waarvan ${bel} terugbellen` : ''}` : 'Alle hulpvragen beantwoord';
+  } catch (e) { /* stil */ }
+}
+
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
   const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.gatedBy);
@@ -226,7 +244,7 @@ function renderLauncher(apps) {
   ensureVideoUI();
   apps.forEach(a => {
     const t = document.createElement('a');
-    t.className = 'app-tile';
+    t.className = 'app-tile'; t.dataset.app = a.id;   // v1.15.0: data-app voor tellers
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p class="notice">${a.beschrijving}</p>`;
@@ -323,6 +341,7 @@ async function render() {
   $('hi-naam').textContent = user.email ? (', ' + user.email.split('@')[0]) : '';
 
   renderLauncher(await toegankelijkeApps(SESSION.access_token));
+  hulpTeller(SESSION.access_token);   // v1.15.0
   initOfferteUit();  // toon offerte-paneel indien ?aanbod=...
 }
 
