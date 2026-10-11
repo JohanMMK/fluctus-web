@@ -1,4 +1,4 @@
-// portal.js v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
+// portal.js v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
 // v1.11.0 — 2026-09-23 — nieuwe tegel 'ek' (📊 Energie-Compas) → /apps/ek.html?prep=1: de snelle energie-analyse
@@ -97,6 +97,7 @@ const APP_CATALOG = [
   { id: 'projecten',   naam: 'Projecten',        ico: '📁', beschrijving: 'Alle projecten: status, volgende actie en archief — voor managers.', url: '/apps/projecten.html', managerOnly: true },
   // v1.10.0 (22-09): profiel-import — upload afname (+ injectie) in elk formaat → gemeten profiel bij het project (manager-only).
   { id: 'profiel-import', naam: 'Profiel-import', ico: '📈', beschrijving: 'Verbruiksprofiel (CSV/Excel, elk formaat) omzetten naar een gemeten profiel bij een project.', url: '/apps/profiel-import.html', managerOnly: true },
+  { id: 'demo', naam: 'Demo', ico: '🎬', beschrijving: 'Demo klantbeleving: per bezoeker elke stap met tijdstip, interesse- en vlot-score.', url: '/apps/demo.html', managerOnly: true },   // 2026-10-11 (Johan): demo-overzicht
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
 ];
