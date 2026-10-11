@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demo · Energie-Compas</title>
+<!-- demo.html v0.6.0 (2026-10-11, Johan): + kolom 'Offertes gevraagd' (server ≥ 15.268.5; in de demo wordt niets verstuurd) + KPI 'vragen offertes'; telt niet mee in 'hoe ver' maar +1 interesse. 'Hoe ver' rekent nu tot en met de samenvatting via indexOf. -->
 <!-- demo.html v0.5.0 (2026-10-11, Johan): + kolommen 'PDF standaard' / 'PDF echt profiel' (bezoeker bewaarde het rapport via 🖨️ Print → PDF; server ≥ 15.268.4, klantrapport ≥ v0.33.0) + KPI 'rapport als PDF bewaard'; de PDF-stappen tellen niet mee in 'hoe ver' maar geven +0,5 interesse. -->
 <!-- demo.html v0.4.0 (2026-10-11, Johan): + kolom 'Type' (energiegebruiker / energieleverancier / installatiebedrijf / verkoper van EV's, uit het contactformulier; server ≥ 15.268.3) + teller per type bovenaan. v0.3.0 (2026-10-11, Johan): + knop "↺ Demo resetten" per bezoeker (POST /api/ek/demo-reset, server ≥ 15.268.1). v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
      één rij per bezoeker-mail, één kolom per demo-stap (tijdstip), interesse-score 1–5 per bezoeker (hoe ver + hoe snel) en
@@ -48,10 +49,10 @@
   var LABEL={ aangevraagd:'Aangevraagd', demo_mail:'Demo-mail verstuurd', factuur_doorgestuurd:'Factuur doorgestuurd', projectlink:'Projectlink gemaild',
     project_geopend:'Project geopend', sim_std_start:'Sim. standaard gestart', sim_std_klaar:'Resultaat standaard', rapport_std_open:'Rapport standaard', rapport_std_print:'PDF standaard',
     profiel_gekoppeld:'Profiel opgehaald', sim_echt_start:'Sim. echt gestart', sim_echt_klaar:'Resultaat echt profiel', rapport_echt_open:'Rapport echt profiel', rapport_echt_print:'PDF echt profiel',
-    samenvatting:'Samenvatting', feedback:'Feedback', contact:'Contact' };
+    samenvatting:'Samenvatting', feedback:'Feedback', contact:'Contact', offertes:'Offertes gevraagd' };
   // Vorige stap voor de doorstroom (feedback/contact volgen allebei op de samenvatting) + max. vlotte wachttijd (min)
-  var VORIGE={ feedback:'samenvatting', contact:'samenvatting', profiel_gekoppeld:'rapport_std_open', samenvatting:'rapport_echt_open' };   // v0.5.0: PDF-stappen zijn optioneel → niet de 'vorige' van de hoofdlijn
-  var VLOT_MIN={ rapport_std_print:30, rapport_echt_print:30, factuur_doorgestuurd:30, project_geopend:30, projectlink:15, rapport_std_open:15, profiel_gekoppeld:15, rapport_echt_open:15, feedback:30, contact:30 };
+  var VORIGE={ offertes:'sim_std_klaar', feedback:'samenvatting', contact:'samenvatting', profiel_gekoppeld:'rapport_std_open', samenvatting:'rapport_echt_open' };   // v0.5.0: PDF-stappen zijn optioneel → niet de 'vorige' van de hoofdlijn
+  var VLOT_MIN={ offertes:60, rapport_std_print:30, rapport_echt_print:30, factuur_doorgestuurd:30, project_geopend:30, projectlink:15, rapport_std_open:15, profiel_gekoppeld:15, rapport_echt_open:15, feedback:30, contact:30 };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function p2(n){ return (n<10?'0':'')+n; }
   function tijd(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return '—'; return p2(d.getHours())+':'+p2(d.getMinutes()); }
@@ -63,12 +64,14 @@
   // ── Interesse-score per bezoeker: hoe ver (aandeel bereikte stappen) + hoe snel ──
   function interesse(r){
     var S=r.stappen||{}, ks=DATA.stappen.filter(function(k){ return !/_print$/.test(k); }), ver=-1;   // v0.5.0: PDF-stappen tellen niet mee voor 'hoe ver'
-    for(var i=0;i<ks.length;i++) if(S[ks[i]] && ks[i]!=='feedback' && ks[i]!=='contact') ver=i;
-    var basis=ks.length-3, p=Math.max(0,ver)/basis;   // tot en met 'samenvatting'
+    var basis=Math.max(1,ks.indexOf('samenvatting'));   // v0.6.0: tot en met 'samenvatting' (feedback/contact/offertes zijn extra's)
+    for(var i=0;i<=basis;i++) if(S[ks[i]]) ver=i;
+    var p=Math.max(0,ver)/basis;
     var sc=1+4*Math.min(1,p), uitleg=['ver: '+(ver+1)+'/'+(basis+1)+' stappen'];
     var t0=(S.factuur_doorgestuurd||S.aangevraagd||{}).ts, tEind=null; for(var j=0;j<ks.length;j++) if(S[ks[j]]) tEind=Math.max(tEind||0, +S[ks[j]].ts||0);
     if(t0 && tEind && S.rapport_std_open){ var mins=(tEind-t0)/60000; if(mins<30){ sc+=0.5; uitleg.push('snel (< 30 min): +0,5'); } else if(mins>1440){ sc-=0.5; uitleg.push('traag (> 1 dag): −0,5'); } }
     if(S.rapport_std_print||S.rapport_echt_print){ sc+=0.5; uitleg.push('rapport als PDF bewaard: +0,5'); }
+    if(S.offertes){ sc+=1; uitleg.push('vraagt offertes: +1'); }
     if(S.feedback){ sc+=0.5; uitleg.push('feedback: +0,5'); }
     if(S.contact){ sc=5; uitleg.push('vraagt contact → 5'); }
     sc=Math.max(1,Math.min(5,Math.round(sc)));
@@ -97,7 +100,7 @@
   function render(){
     var ks=DATA.stappen, rijen=DATA.rijen.filter(function(r){ if(!ZOEK) return true; return ((r.mail||'')+' '+(r.naam||'')+' '+(r.bedrijf||'')).toLowerCase().indexOf(ZOEK)>=0; });
     var n=DATA.rijen.length, nOpen=DATA.rijen.filter(function(r){return r.stappen.project_geopend;}).length, nEcht=DATA.rijen.filter(function(r){return r.stappen.rapport_echt_open;}).length, nC=DATA.rijen.filter(function(r){return r.stappen.contact;}).length;
-    var h='<div class="kpis"><div><b>'+n+'</b><span>bezoekers</span></div><div><b>'+nOpen+'</b><span>project geopend</span></div><div><b>'+nEcht+'</b><span>rapport echt profiel</span></div><div><b>'+DATA.rijen.filter(function(r){return r.stappen.rapport_std_print||r.stappen.rapport_echt_print;}).length+'</b><span>rapport als PDF bewaard</span></div><div><b>'+nC+'</b><span>vragen contact</span></div>'+(function(){ var c={}; DATA.rijen.forEach(function(r){ var k=r.rol_label||'onbekend'; c[k]=(c[k]||0)+1; }); return Object.keys(c).sort().map(function(k){ return '<div><b>'+c[k]+'</b><span>'+esc(k)+'</span></div>'; }).join(''); })()+'</div>';
+    var h='<div class="kpis"><div><b>'+n+'</b><span>bezoekers</span></div><div><b>'+nOpen+'</b><span>project geopend</span></div><div><b>'+nEcht+'</b><span>rapport echt profiel</span></div><div><b>'+DATA.rijen.filter(function(r){return r.stappen.rapport_std_print||r.stappen.rapport_echt_print;}).length+'</b><span>rapport als PDF bewaard</span></div><div><b>'+nC+'</b><span>vragen contact</span></div><div><b>'+DATA.rijen.filter(function(r){return r.stappen.offertes;}).length+'</b><span>vragen offertes</span></div>'+(function(){ var c={}; DATA.rijen.forEach(function(r){ var k=r.rol_label||'onbekend'; c[k]=(c[k]||0)+1; }); return Object.keys(c).sort().map(function(k){ return '<div><b>'+c[k]+'</b><span>'+esc(k)+'</span></div>'; }).join(''); })()+'</div>';
     h+='<div class="bar"><input type="search" id="zoek" placeholder="Zoek op mail, naam of bedrijf…" value="'+esc(ZOEK)+'"><button type="button" id="ververs">↻ Vernieuwen</button></div>';
     h+='<div class="wrap"><table><thead><tr><th class="s0">Bezoeker · interesse</th><th>Type</th>'+ks.map(function(k){ return '<th>'+esc(LABEL[k]||k)+'</th>'; }).join('')+'</tr>';
     h+='<tr class="vlot"><th class="s0" title="5 = vlotte doorgang · 1 = hier blijven bezoekers hangen">Vlot-score per stap</th><th></th>'+ks.map(function(k,i){ var v=vlot(k,i); if(!v) return '<th class="x">—</th>'; return '<th title="'+esc(v.txt)+'"><span class="sc sc'+v.sc+'">'+(v.sc||'–')+'</span></th>'; }).join('')+'</tr></thead><tbody>';
