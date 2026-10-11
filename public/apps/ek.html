@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.51.0">
+<meta name="ek-build" content="0.52.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.52.0 (2026-10-11, Johan): HULPVRAGEN BEANTWOORDEN (server ≥ 15.272.0). (1) OEKENE/adviseur: blok «🙋 Hulpvragen» in het rapportblok — per vraag commentaar, contact, terugbellen, beste TVT; open vragen: antwoordveld + «✉️ Verstuur antwoord» (mail naar de klant met knop naar het project) of «📞 Terugbellen gedaan» (afsluiten met notitie); beantwoorde vragen tonen antwoord, wie en wanneer. (2) KLANT/demo: in het invoerscherm (onder de factuur) en onder «🙋 Hulp vragen» de link «💬 Antwoord van onze adviseur» (of "in behandeling") → modal met vraag + antwoord (NL/FR/EN). -->
 <!-- ek.html v0.51.0 (2026-10-11, Johan): HULP VRAGEN — vindt een klant of demo-bezoeker geen rendabele combinatie (geen enkele doorgerekende cel met PV en/of batterij verdient zich terug binnen 15 jaar), dan verschijnt na de simulatie een modal "Geen rendabele combinatie gevonden?" met commentaarveld, e-mail, GSM en «Bel mij terug» → POST /api/ek/hulp (server ≥ 15.271.0: mail naar de back-office, projectlog, demo-stap). Eén keer automatisch per dossier en toestel; daarnaast altijd de knop «🙋 Hulp vragen» naast de offerte-knoppen (klant + demo, NL/FR/EN). -->
 <!-- ek.html v0.50.4 (2026-10-11, Johan): DEMO — kolommen Betalend / kW / €/kWh ook verborgen in een demo-project wanneer het via ?adv=1 of als oekene geopend wordt (demo = altijd klantbeeld). -->
 <!-- ek.html v0.50.3 (2026-10-11, Johan): VOERTUIGTABEL — de kolommen «Betalend», «kW» en «€/kWh» (en de hint "/dag bij betalend") zijn enkel zichtbaar in de adviseursweergave (_ekAdvView: adv/prep/oekene, niet in klantweergave). Klanten zien: voertuig, aantal, laadmoment, weekend. Door een adviseur ingestelde waarden (betalend, kW, €/kWh) blijven behouden en tellen mee. -->
@@ -818,6 +819,8 @@
         <button class="btn ghost sm" type="button" id="btn-verwittig" onclick="_ekVerwittigModal()" data-nolog="1">📣 Klant verwittigen: project bijgewerkt</button>
         <div class="sub" id="verwittig-status" style="margin-top:6px"></div>
       </div>
+      <!-- v0.52.0 (Johan): oekene — hulpvragen van deze klant beantwoorden -->
+      <div id="ek-hulpadv-blok" class="hidden" data-i18n-skip="1" style="margin-top:12px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
         <button class="btn sm" type="button" id="btn-off-opvragen" onclick="offertesOpvragen()">📨 Offertes opvragen</button>
         <button class="btn ghost sm" type="button" onclick="offerteIndienen()">📝 Offerte indienen</button>
@@ -2689,7 +2692,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(!j||!j.ok) return;
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
         try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
-        try{ window._EK_DNB=j.netbeheerder||(j.baseCase&&j.baseCase.dnb)||''; }catch(eDnb){}   // v0.50.0: netbeheerder → uitleg profieldata   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
+        try{ window._EK_DNB=j.netbeheerder||(j.baseCase&&j.baseCase.dnb)||''; }catch(eDnb){}   // v0.50.0: netbeheerder → uitleg profieldata
+        try{ window._EK_HULP=Array.isArray(j.hulp)?j.hulp:[]; if(window._ekHulpAdvRender) window._ekHulpAdvRender(); if(window._ekDemo && window._ekDemo.hulpAntw) window._ekDemo.hulpAntw(); }catch(eH){}   // v0.52.0: hulpvragen + antwoorden   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
         if(j.ev!=null && $('i-ev')) $('i-ev').value=j.ev;      // v0.6.1: onthoud aantal wagens uit de vorige input
@@ -3006,7 +3010,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV && !EK_KLANTVIEW){ pu.classList.remove('hidden'); try{ _ekOekeneSamenvatting(); }catch(e){} try{ _ekPartnerLaad(); }catch(e){} } else pu.classList.add('hidden'); }
       var kb=$('adv-klant-blok'); if(kb){ kb.classList.toggle('hidden', !prepAdv); }   // v0.30.0: klant-/BTW-invoervelden zijn adviseur-only
       var eb=$('ev-def-btn'); if(eb) eb.style.display=adviseur?'inline-flex':'none';
-      var vw=$('ek-verwittig-blok'); if(vw) vw.classList.toggle('hidden', !(adviseur && TOKEN));   // v0.50.0: klant verwittigen — enkel oekene
+      var vw=$('ek-verwittig-blok'); if(vw) vw.classList.toggle('hidden', !(adviseur && TOKEN));
+      var hb=$('ek-hulpadv-blok'); if(hb) hb.classList.toggle('hidden', !(adviseur && TOKEN && (window._EK_HULP||[]).length));   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
       var evt=$('ev-tab'); if(evt) evt.classList.toggle('ev-klant', !_ekAdvView());   // v0.50.3: betalend/kW/€/kWh enkel in de adviseursweergave
       var ov=$('btn-off-volgen'); if(ov) ov.style.display=adviseur?'inline-block':'none';   // v0.37.0 (Johan): offertes volgen enkel voor oekene   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
       var cab=$('ek-cabine-blok'); if(cab){ cab.classList.toggle('hidden', !adviseur); if(adviseur && $('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:''); }   // v0.34 (Johan): kVA bestaande cabine enkel voor oekene
@@ -3947,6 +3952,55 @@ var _simVoortgang=(function(){
 })();
 </script>
 <script>
+// ══ v0.52.0 (Johan 11-10): OEKENE — hulpvragen beantwoorden (server ≥ 15.272.0) ══
+(function(){
+  var API_H='https://lucid-amazement-production.up.railway.app';
+  function esc(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function dt(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return '—'; return p2(d.getDate())+'/'+p2(d.getMonth()+1)+' '+p2(d.getHours())+':'+p2(d.getMinutes()); }
+  function duur(ms){ var m=Math.round(ms/60000); if(m<60) return m+' min'; var h=Math.round(m/60); if(h<48) return h+' u'; return Math.round(h/24)+' d'; }
+  window._ekHulpAdvRender=function(){
+    var b=document.getElementById('ek-hulpadv-blok'); if(!b) return;
+    var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
+    try{ var adv=(window.EK_IS_OEKENE && !window.EK_KLANTVIEW); b.classList.toggle('hidden', !(adv && window.TOKEN && L.length)); }catch(e){}
+    if(!L.length){ b.innerHTML=''; return; }
+    var nOpen=L.filter(function(h){ return h.status==='open'; }).length;
+    var h='<div style="border:1px solid #F0DDA8;background:#FFFBF0;border-radius:12px;padding:12px 14px">'+
+      '<div style="font-weight:800;color:#1F3864;margin-bottom:6px">🙋 Hulpvragen van deze klant'+(nOpen?' — <span style="color:#B45309">'+nOpen+' open</span>':' — alles beantwoord')+'</div>';
+    L.forEach(function(x){
+      var c=x.context||{}, open=(x.status==='open');
+      h+='<div style="border-top:1px solid #F0E6C8;padding:8px 0">'+
+        '<div style="font-size:12.5px;color:#6B7689">'+esc(dt(x.ts))+' · '+(x.reden==='niet_rendabel'?'geen rendabele combinatie':'via de knop')+(x.terugbellen?' · <b style="color:#B45309">📞 wil teruggebeld worden</b>':'')+
+          ' · '+(open?'<b style="color:#B45309">open</b>':'<b style="color:#1E7A42">'+(x.status==='gebeld'?'gebeld':'beantwoord')+'</b>')+'</div>'+
+        (x.commentaar?'<div style="white-space:pre-wrap;margin:4px 0;background:#fff;border:1px solid #EEF2F7;border-radius:8px;padding:6px 10px">'+esc(x.commentaar)+'</div>':'')+
+        '<div style="font-size:12.5px;color:#4A5568">'+[x.mail?'✉ '+esc(x.mail):'', x.gsm?'📞 '+esc(x.gsm):'', (c.beste_tvt!=null?'beste TVT '+String(c.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j'), (c.pv||c.batt_kw)?('combi '+c.pv+' kWp / '+c.batt_kw+' kW / '+c.batt_kwh+' kWh'):'' ].filter(Boolean).join(' · ')+'</div>';
+      if(open){
+        h+='<textarea data-hid="'+esc(x.id)+'" rows="4" style="width:100%;box-sizing:border-box;margin-top:6px;padding:8px 10px;border:1px solid #D6E0EC;border-radius:8px;font:inherit" placeholder="Uw antwoord aan de klant (wordt gemaild in zijn taal — schrijf in die taal), of een notitie bij terugbellen"></textarea>'+
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" data-hact="mail" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Verstuur antwoord</button><button type="button" class="btn ghost sm" data-hact="gebeld" data-hid="'+esc(x.id)+'" data-nolog="1">📞 Terugbellen gedaan (afsluiten)</button></div>'+
+          '<div class="sub" data-hst="'+esc(x.id)+'" style="margin-top:4px"></div>';
+      } else {
+        h+='<div style="margin-top:6px;font-size:13px"><b>'+(x.status==='gebeld'?'📞 Gebeld':'✉️ Antwoord')+'</b> — '+esc(x.door||'')+', '+esc(dt(x.beantwoord_ts))+' (na '+esc(duur((+x.beantwoord_ts||0)-(+x.ts||0)))+')'+
+          ((x.antwoord||x.notitie)?'<div style="white-space:pre-wrap;margin-top:3px;border-left:3px solid #05B050;padding-left:8px">'+esc(x.antwoord||x.notitie)+'</div>':'')+'</div>';
+      }
+      h+='</div>';
+    });
+    b.innerHTML=h+'</div>';
+    Array.prototype.forEach.call(b.querySelectorAll('[data-hact]'),function(bt){ bt.onclick=async function(){
+      var id=bt.getAttribute('data-hid'), act=bt.getAttribute('data-hact'), ta=b.querySelector('textarea[data-hid="'+id+'"]'), st=b.querySelector('[data-hst="'+id+'"]');
+      var tx=(ta&&ta.value||'').trim();
+      if(act==='mail' && tx.length<3){ st.style.color='#8a5a00'; st.textContent='Schrijf eerst een antwoord.'; return; }
+      if(act==='mail' && !confirm('Dit antwoord nu naar de klant mailen?')) return;
+      bt.disabled=true; st.style.color='var(--muted)'; st.textContent='⏳ Bezig…';
+      try{ var hd=(window._ekLogHdr?window._ekLogHdr():{}); hd['Content-Type']='application/json';
+        var r=await fetch(API_H+'/api/ek/hulp-antwoord',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, actie:act, antwoord:tx }) });
+        var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+        window._EK_HULP=j.hulp||window._EK_HULP; window._ekHulpAdvRender();
+      }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; }
+    }; });
+  };
+})();
+</script>
+<script>
 // ══ v0.50.0 (Johan 11-10): OEKENE — klant verwittigen dat zijn project werd bijgewerkt (server ≥ 15.270.0) ══
 (function(){
   var API_V='https://lucid-amazement-production.up.railway.app';
@@ -4166,6 +4220,14 @@ var _simVoortgang=(function(){
       hk_ok:'Thank you! An adviser reviews your file and will contact you.', hk_nok:'Sending failed — please try again.', hk_leeg:'Write a question or tick «Call me back».' }
   };
   ['nl','fr','en'].forEach(function(l){ for(var k in TK4[l]) T[l][k]=TK4[l][k]; });
+
+  // v0.52.0: antwoorden op hulpvragen tonen aan de klant
+  var TK5={
+    nl:{ ha_knop:'💬 Antwoord van onze adviseur', ha_kort:'Er is een antwoord op uw vraag.', ha_wacht:'⏳ Uw vraag is in behandeling — een adviseur neemt contact met u op.', ha_t:'Uw vragen en onze antwoorden', ha_v:'Uw vraag', ha_a:'Antwoord van onze adviseur', ha_g:'We namen telefonisch contact met u op.', ha_o:'In behandeling.' },
+    fr:{ ha_knop:'💬 Réponse de notre conseiller', ha_kort:'Votre question a reçu une réponse.', ha_wacht:'⏳ Votre question est en cours de traitement — un conseiller vous contacte.', ha_t:'Vos questions et nos réponses', ha_v:'Votre question', ha_a:'Réponse de notre conseiller', ha_g:'Nous vous avons contacté par téléphone.', ha_o:'En cours de traitement.' },
+    en:{ ha_knop:'💬 Answer from our adviser', ha_kort:'Your question has been answered.', ha_wacht:'⏳ Your question is being handled — an adviser will contact you.', ha_t:'Your questions and our answers', ha_v:'Your question', ha_a:'Answer from our adviser', ha_g:'We contacted you by phone.', ha_o:'Being handled.' }
+  };
+  ['nl','fr','en'].forEach(function(l){ for(var k in TK5[l]) T[l][k]=TK5[l][k]; });
   function adv(){ try{ return !!(window.ADV_MODE||window.PREP_MODE||window.EK_PREPADV||window.EK_IS_OEKENE||window.EK_KLANTVIEW||new URLSearchParams(location.search).get('prep')); }catch(e){ return false; } }
   function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
   function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -4281,10 +4343,37 @@ var _simVoortgang=(function(){
     lijst.forEach(function(a){ try{ if(!a) return; var pv=+(_anchorKwp(a)||a.pvKwp||0), bk=+(a.battKwh||0); if(!(pv>0||bk>0)) return; var v=_battValue(a)||{}; if(v.tvt!=null && isFinite(v.tvt) && v.tvt>0 && (m==null||v.tvt<m)) m=v.tvt; }catch(e){} });
     return m; }
   function rendabel(){ var m=besteTvt(); return m!=null && m<=HULP_TVT_MAX; }
+  // v0.52.0: antwoorden op hulpvragen (klant/demo) — link in het invoerscherm én onder «Hulp vragen» → modal
+  function dtK(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return ''; return p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear(); }
+  function mAntw(){
+    var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
+    var h='<h3>'+esc(t('ha_t'))+'</h3>'+L.map(function(x,i){
+      return '<div style="'+(i?'border-top:1px solid #EEF2F7;margin-top:10px;padding-top:10px':'')+'"><div style="font-size:12.5px;color:#6B7689">'+esc(dtK(x.ts))+'</div>'+
+        (x.commentaar?'<div style="margin:4px 0"><b>'+esc(t('ha_v'))+':</b> <span style="white-space:pre-wrap">'+esc(x.commentaar)+'</span></div>':'')+
+        (x.antwoord?'<div style="margin-top:6px"><b style="color:#1F3864">'+esc(t('ha_a'))+'</b><div style="white-space:pre-wrap;border-left:4px solid #05B050;background:#F4F7FB;border-radius:8px;padding:8px 12px;margin-top:4px">'+esc(x.antwoord)+'</div></div>'
+          :(x.status==='gebeld'?'<div style="margin-top:6px;color:#1E7A42">✔ '+esc(t('ha_g'))+'</div>':'<div style="margin-top:6px;color:#B45309">⏳ '+esc(t('ha_o'))+'</div>'))+'</div>';
+    }).join('');
+    modal('hulp_antwoord',(D.modus==='klant')?3:(D.fase==='echt'?5:3),h,{ force:true });
+  }
+  function hulpAntw(){
+    try{
+      var L=window._EK_HULP||[]; if(!D.aan || adv()) return;
+      var heeftA=L.some(function(x){ return x.antwoord; }), open=L.some(function(x){ return x.status==='open'; });
+      var html=!L.length?'':(heeftA?('<button type="button" class="btn ghost sm" data-ha="1">'+esc(t('ha_knop'))+'</button> <span style="color:#6B7689">'+esc(t('ha_kort'))+'</span>'):(open?'<span style="color:#B45309">'+esc(t('ha_wacht'))+'</span>':''));
+      // 1) invoerscherm (onder de factuur)
+      var fo=document.getElementById('factuur-ok'), a1=document.getElementById('ek-hulp-antw1');
+      if(fo && !a1){ a1=document.createElement('div'); a1.id='ek-hulp-antw1'; a1.className='sub'; a1.setAttribute('data-i18n-skip','1'); a1.style.cssText='margin-top:6px;line-height:1.55;padding-left:26px'; fo.appendChild(a1); }
+      // 2) resultaatscherm (onder de knoppen)
+      var ob=document.getElementById('btn-off-opvragen'), a2=document.getElementById('ek-hulp-antw2');
+      if(ob && ob.parentNode && !a2){ a2=document.createElement('div'); a2.id='ek-hulp-antw2'; a2.className='sub'; a2.setAttribute('data-i18n-skip','1'); a2.style.cssText='margin-top:8px'; ob.parentNode.parentNode.insertBefore(a2, ob.parentNode.nextSibling); }
+      [a1,a2].forEach(function(el){ if(!el) return; el.innerHTML=html; el.style.display=html?'':'none'; var k=el.querySelector('[data-ha]'); if(k) k.onclick=mAntw; });
+    }catch(e){}
+  }
   function hulpKnop(){
     try{ if(document.getElementById('ek-hulp-knop')) return; var ob=document.getElementById('btn-off-opvragen'); if(!ob||!ob.parentNode) return;
       var b=document.createElement('button'); b.type='button'; b.id='ek-hulp-knop'; b.className='btn ghost sm'; b.setAttribute('data-i18n-skip','1'); b.textContent=t('hk_knop');
       b.onclick=function(){ mHulp('knop'); }; ob.parentNode.appendChild(b); }catch(e){}
+    hulpAntw();   // v0.52.0
   }
   function mHulp(reden){
     var nr=(reden==='niet_rendabel'), n=(D.modus==='klant')?3:(D.fase==='echt'?5:3);
@@ -4307,6 +4396,7 @@ var _simVoortgang=(function(){
             mail:(document.getElementById('ekh-m').value||'').trim(), gsm:(document.getElementById('ekh-g').value||'').trim(),
             context:{ beste_tvt:besteTvt(), pv:w.pv, batt_kw:w.batt_kw, batt_kwh:w.batt_kwh, rend:w.rend, tvt:w.tvt, taal:L() } }) });
           var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error('x');
+          if(Array.isArray(j.hulp)){ window._EK_HULP=j.hulp; hulpAntw(); }   // v0.52.0: 'in behandeling' tonen
           st.style.color='#1E7A42'; st.textContent=t('hk_ok'); bt.style.display='none'; lsSet('EK_HULP_'+(window.TOKEN||''),'1');
         }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent=t('hk_nok'); }
       };
@@ -4487,7 +4577,7 @@ var _simVoortgang=(function(){
   window._ekDemo={
     init:function(j){
       if(window.PREWARM || D.aan || !j || !j.demo) return;
-      D.aan=true; D.modus='demo'; D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
+      D.aan=true; D.modus='demo'; setTimeout(hulpAntw, 50); D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
       D.auto=!((j.demo.stappen||{}).samenvatting);   // v0.47.0: wie de demo al doorliep (samenvatting gezien) → geen automatische modals, enkel de knop
       try{ document.body.classList.add('ek-demo'); }catch(e){}
       css(); installeer();
@@ -4510,13 +4600,14 @@ var _simVoortgang=(function(){
         if(D.aan || adv()) return;
         var ps=null; try{ var r=await fetch(API_D+'/api/ek/profieldata-status?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{cache:'no-store'}); ps=await r.json(); }catch(e){}
         if(!ps || !ps.ok || adv()) return;
-        D.aan=true; D.modus='klant'; D.autoBasis=!ps.rapport_bekeken;
+        D.aan=true; D.modus='klant'; D.autoBasis=!ps.rapport_bekeken; setTimeout(hulpAntw, 50);   // v0.52.0
         css(); installeer();
         klog('gids_start',{ auto:isAuto(), eerste:D.autoBasis });
         var dash=$('dash'); if(!dash || dash.classList.contains('hidden')) mWelkomK();
         else if(window.HM && !D.toond.res){ D.toond.res=true; mResK(waarden()); }
       }, 2500);
     },
+    hulpAntw:function(){ hulpAntw(); },   // v0.52.0
     status:function(){ return D; }
   };
 })();

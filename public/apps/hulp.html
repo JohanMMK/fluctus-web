@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hulpvragen · Energie-Compas</title>
+<!-- hulp.html v0.1.0 (2026-10-11, Johan): overzicht van ALLE hulpvragen (klanten + demo-bezoekers) uit het centrale register (GET /api/ek/hulp-overzicht, server ≥ 15.272.0). Per vraag: datum, klant + contact, project, reden, vraag, terugbellen, beste TVT, status (open / beantwoord / gebeld) met wacht- of antwoordtijd; links naar het project in EK (adviseursweergave, daar beantwoorden) en de projectlog. Filter open / alle + zoeken. Enkel managers. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--navy:#1F3864;--green:#05B050;--line:#D6E0EC;--muted:#6B7689;--bg:#F4F7FB;--amber:#B45309}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#1A1F2B}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header b{color:var(--navy);font-size:16px} .who{margin-left:auto;color:var(--muted);font-size:12px}
+  main{max-width:1500px;margin:0 auto;padding:16px}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px} .kpis div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:150px}
+  .kpis b{display:block;font-size:22px;color:var(--navy)} .kpis span{font-size:12px;color:var(--muted)}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .bar input[type=search]{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit}
+  .bar button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer} .bar button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .wrap{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%}
+  th,td{padding:8px 10px;border-bottom:1px solid #EEF2F7;text-align:left;vertical-align:top;font-size:13px}
+  thead th{background:#F7F9FC;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0}
+  .sub{color:var(--muted);font-size:12px} .vraag{white-space:pre-wrap;max-width:420px}
+  .st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+  .st-open{background:#FFF3D6;color:var(--amber)} .st-beantwoord{background:#E6F6EC;color:#0a7d3c} .st-gebeld{background:#E8EEFF;color:#2a44a8}
+  .demo{display:inline-block;padding:1px 6px;border-radius:6px;background:#F3E8FF;color:#6b2fa8;font-size:11px;font-weight:700;margin-left:4px}
+  a{color:#2a44a8} .fout{background:#FEF2F2;border:1px solid #F2C7C7;color:#8a1f1f;padding:12px;border-radius:10px} .state{color:var(--muted);padding:20px}
+</style>
+</head>
+<body>
+<header><b>🙋 Hulpvragen</b><span class="sub">klanten en demo-bezoekers die hulp vroegen — beantwoorden doe je in het project (EK, adviseursweergave)</span><span class="who" id="who"></span></header>
+<main><div id="root"><div class="state">Laden…</div></div></main>
+<script>
+  var $=function(id){return document.getElementById(id);};
+  var CFG=null, sb=null, SESSION=null, PROXY='', DATA=null, ZOEK='', FILTER='open', WEB='';
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function datum(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return '—'; return p2(d.getDate())+'-'+p2(d.getMonth()+1)+'-'+d.getFullYear()+' '+p2(d.getHours())+':'+p2(d.getMinutes()); }
+  function duur(ms){ if(ms==null||!isFinite(ms)||ms<0) return ''; var m=Math.round(ms/60000); if(m<60) return m+' min'; var h=Math.round(m/60); if(h<48) return h+' u'; return Math.round(h/24)+' d'; }
+  function render(){
+    var V=DATA.vragen||[], nu=Date.now();
+    var nOpen=V.filter(function(v){return v.status==='open';}).length, nBel=V.filter(function(v){return v.status==='open'&&v.terugbellen;}).length;
+    var bt=V.filter(function(v){return v.beantwoord_ts&&v.ts;}).map(function(v){return v.beantwoord_ts-v.ts;}).sort(function(a,b){return a-b;});
+    var med=bt.length?bt[Math.floor(bt.length/2)]:null;
+    var rij=V.filter(function(v){ if(FILTER==='open'&&v.status!=='open') return false; if(!ZOEK) return true; return ((v.naam||'')+' '+(v.mail||'')+' '+(v.project_id||'')+' '+(v.commentaar||'')).toLowerCase().indexOf(ZOEK)>=0; });
+    var h='<div class="kpis"><div><b>'+nOpen+'</b><span>open</span></div><div><b>'+nBel+'</b><span>open + wil teruggebeld worden</span></div><div><b>'+V.length+'</b><span>hulpvragen totaal</span></div><div><b>'+(med!=null?duur(med):'—')+'</b><span>mediane antwoordtijd</span></div></div>';
+    h+='<div class="bar"><button type="button" data-f="open" class="'+(FILTER==='open'?'on':'')+'">Open</button><button type="button" data-f="alle" class="'+(FILTER==='alle'?'on':'')+'">Alle</button><input type="search" id="zoek" placeholder="Zoek op naam, mail, project of vraag…" value="'+esc(ZOEK)+'"><button type="button" id="ververs">↻ Vernieuwen</button></div>';
+    h+='<div class="wrap"><table><thead><tr><th>Datum</th><th>Klant</th><th>Project</th><th>Reden</th><th>Vraag</th><th>Status</th><th></th></tr></thead><tbody>';
+    if(!rij.length) h+='<tr><td colspan="7"><div class="state">'+(FILTER==='open'?'Geen open hulpvragen 🎉':'Nog geen hulpvragen.')+'</div></td></tr>';
+    rij.forEach(function(v){
+      var ek=WEB+'/apps/ek.html?case='+encodeURIComponent(v.token)+'&adv=1', pl=WEB+'/apps/projectlog.html?token='+encodeURIComponent(v.token);
+      h+='<tr><td>'+esc(datum(v.ts))+'</td>'+
+        '<td><b>'+esc(v.naam||'—')+'</b><div class="sub">'+[v.mail?esc(v.mail):'', v.gsm?'📞 '+esc(v.gsm):''].filter(Boolean).join('<br>')+'</div>'+(v.terugbellen?'<div style="color:var(--amber);font-weight:700;font-size:12px">📞 wil teruggebeld worden</div>':'')+'</td>'+
+        '<td>'+esc(v.project_id||'—')+(v.demo?'<span class="demo">DEMO</span>':'')+'</td>'+
+        '<td>'+(v.reden==='niet_rendabel'?'geen rendabele combinatie':'knop «Hulp vragen»')+'<div class="sub">'+(v.beste_tvt!=null?'beste TVT '+String(v.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j')+'</div></td>'+
+        '<td class="vraag">'+esc(v.commentaar||'—')+'</td>'+
+        '<td><span class="st st-'+esc(v.status||'open')+'">'+esc(v.status||'open')+'</span><div class="sub">'+(v.status==='open'?'wacht '+duur(nu-(+v.ts||nu)):(esc(v.door||'')+' · na '+duur((+v.beantwoord_ts||0)-(+v.ts||0))))+'</div></td>'+
+        '<td style="white-space:nowrap"><a href="'+esc(ek)+'" target="_blank" rel="noopener">'+(v.status==='open'?'✉️ Beantwoorden in EK':'🔧 Open in EK')+'</a><br><a href="'+esc(pl)+'" target="_blank" rel="noopener">📜 Projectlog</a></td></tr>';
+    });
+    h+='</tbody></table></div>';
+    $('root').innerHTML=h;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-f]'),function(b){ b.onclick=function(){ FILTER=b.getAttribute('data-f'); render(); }; });
+    $('zoek').oninput=function(){ ZOEK=this.value.trim().toLowerCase(); var pos=this.selectionStart; render(); var z=$('zoek'); z.focus(); try{ z.setSelectionRange(pos,pos); }catch(e){} };
+    $('ververs').onclick=laad;
+  }
+  async function authHeaders(){
+    var tok=SESSION&&SESSION.access_token;
+    try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
+    return { 'Authorization':'Bearer '+tok };
+  }
+  async function laad(){
+    var r;
+    try{ r=await fetch(PROXY+'/api/ek/hulp-overzicht?cb='+Date.now(),{ headers: await authHeaders(), cache:'no-store' }); }
+    catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
+    if(r.status===401||r.status===403){ $('root').innerHTML='<div class="fout">Dit overzicht is enkel voor managers. Meld u aan via de portal en open deze pagina opnieuw.</div>'; return; }
+    if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
+    DATA=await r.json(); DATA.vragen=DATA.vragen||[]; WEB=(DATA.web||location.origin).replace(/\/+$/,'');
+    render();
+  }
+  (async function(){
+    try{
+      var rc=await fetch('/api/config'); CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'https://lucid-amazement-production.up.railway.app').replace(/\/+$/,'');
+      if(CFG.supabaseUrl&&CFG.supabaseAnonKey&&window.supabase){ sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey); var d=await sb.auth.getSession(); SESSION=d.data.session; }
+      if(!SESSION){ $('root').innerHTML='<div class="fout">Niet aangemeld. Meld u aan via de portal en open deze pagina opnieuw.</div>'; return; }
+      $('who').textContent=(SESSION.user&&SESSION.user.email)||'';
+      await laad();
+    }catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+  })();
+</script>
+</body>
+</html>
