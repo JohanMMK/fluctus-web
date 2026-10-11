@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.46.0">
+<meta name="ek-build" content="0.47.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.47.0 (2026-10-11, Johan): RAPPORT-GIDS. (1) Na «📄 Toon rapport» verschijnt in het EK-tabblad een modal "Uw rapport staat in een nieuw tabblad" (demo én klant). De vervolg-uitleg (profiel ophalen / samenvatting) komt pas als de bezoeker het tabblad écht verliet en terugkomt (geen 5 s-timer meer). (2) KLANT-GIDS: een klant/prospect die voor het eerst door het echte proces gaat (rapport nog nooit bekeken, /api/ek/profieldata-status) krijgt dezelfde soort uitleg automatisch: welkom → resultaat → rapport in nieuw tabblad → profieldata ophalen; bij de eerste keer met het echte profiel opnieuw (per toestel onthouden). Wie eerder passeerde krijgt GEEN automatische modals maar wel de knop «ℹ️ Uitleg». Nooit in adviseur/prep/oekene-sessies. Demo: automatisch tot de samenvatting één keer getoond werd, daarna enkel de knop. (3) De rapport-payload draagt _gids {modus, fase, auto, token, lang} → klantrapport ≥ v0.33.0 toont de rapport-uitleg (standaard- vs. echt profiel, terug naar de resultaten, 🖨️ Print → PDF) en registreert het printen (demo: rapport_std_print / rapport_echt_print, server ≥ 15.268.4). -->
 <!-- ek.html v0.46.0 (2026-10-11, Johan): (1) ROOSTER-KPI's standaard in ALLE projecten: links Rendement PV+batterij (%), rechts Piekverbruik (kVA) (was investering / €/100 km). (2) DEMO: altijd focus op de combinatie 150 kWp + 1 C&I-batterij 125/261 — zowel op het standaardprofiel als op het echte profiel (zelfde cel → appels met appels in de vergelijking). -->
 <!-- ek.html v0.45.0 (2026-10-11, Johan): DEMO KLANTBELEVING — meldt /api/inbound-case een demo-dossier (j.demo, server ≥ 15.267), dan legt bij elke stap en elke wachttijd een eenvoudige modal (NL/FR/EN) uit wat er gebeurt: welkom (alles ingevuld, standaardprofiel) → simulatie → eerste resultaat (rendement/TVT) → rapport → "Haal mijn profieldata op" koppelt meteen het anonieme echte profiel (geen netbeheerder-aanvraag) → herberekening op het resultaatscherm → advies 150 kWp + 1 C&I-batterij (125 kW / 261 kWh) met vergelijking → rapport → samenvatting (tijdstippen, rendement/TVT, conclusie, platformvoordelen, commentaar + contact). Geen adviseurweergave-knop in een demo. Alle stappen → /api/ek/demo-stap. -->
 <!-- ek.html v0.44.3 (2026-10-10, Johan: versnellen stap 3): PREWARM-modus ?prewarm=1 (door de server headless geopend na het inlezen van een factuur):
@@ -2669,7 +2670,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       TOKEN=tk;
       fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(!j||!j.ok) return;
-        try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); }catch(eDm){}   // v0.45.0: demo klantbeleving
+        try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
         if(j.ev!=null && $('i-ev')) $('i-ev').value=j.ev;      // v0.6.1: onthoud aantal wagens uit de vorige input
@@ -3920,7 +3921,7 @@ var _simVoortgang=(function(){
 //   (server) → herberekening op het resultaatscherm → advies 150 kWp + 1 C&I-batterij (125 kW / 261 kWh) → samenvatting.
 (function(){
   var API_D='https://lucid-amazement-production.up.railway.app';
-  var D={ aan:false, fase:'std', info:null, toond:{}, wachtTerug:null, std:null, echt:null, laatste:null, bezig:false, combo:{ pv:150, kw:125, kwh:261 } };
+  var D={ aan:false, modus:'demo', auto:true, autoBasis:false, weg:false, fase:'std', info:null, toond:{}, wachtTerug:null, std:null, echt:null, laatste:null, bezig:false, combo:{ pv:150, kw:125, kwh:261 } };
   function L(){ var l=window.EC_LANG; return (l==='fr'||l==='en')?l:'nl'; }
   var T={
     nl:{ stap:'Stap', van:'van', ok:'Begrepen', sluit:'Sluiten', doe:'Wat doet u nu?', uitleg:'ℹ️ Demo-uitleg', tijd:'Verstreken', jaar:'jaar',
@@ -3966,6 +3967,39 @@ var _simVoortgang=(function(){
       sam_plat:'What the platform does next for you', sam_v:['Quality quotes for solar panels, batteries and charging points','Recalculation of the quotes you receive, with a check of the savings','An EMS to actually harvest the savings','A file for financing and the increased investment deduction (up to 40 %)'],
       fb_t:'What did you think of this demo?', fb_ph:'Your comment (optional)', fb_c:'Please contact me', fb_m:'E-mail address', fb_g:'Mobile (optional)', fb_s:'Send', fb_ok:'Thank you! We have received your feedback.', fb_nok:'Sending failed — please try again.', fb_leeg:'Write a comment or tick contact.' }
   };
+
+  // v0.47.0: KLANT-GIDS (echte klant/prospect, eerste keer) + rapport-in-nieuw-tabblad (demo én klant)
+  var TK={
+    nl:{ uitlegK:'ℹ️ Uitleg', fasenK:['Factuur','Gegevens','Simulatie','Rapport','Echt profiel'],
+      welkomK_t:'Welkom in uw Energie-Compas-project', welkomK_b:'Uw factuur werd automatisch ingelezen: verbruik, aansluiting en kosten staan al ingevuld. Kijk de gegevens even na en vul aan waar nodig (bijvoorbeeld het aantal voertuigen). Een korte uitleg op het scherm begeleidt u bij elke stap.', welkomK_h:'Klik daarna op «Start mijn simulatie».',
+      resK_t:'Uw resultaat staat klaar', resK_b:'Het rooster toont alle doorgerekende combinaties van zonnepanelen (kolommen) en batterij (rijen). Standaard ziet u links het rendement en rechts het benodigde aansluitvermogen (kVA). Klik op een cel om die combinatie te kiezen.', resK_std:'Op basis van een standaardprofiel geeft de gekozen combinatie:', resK_echt:'Op basis van uw gemeten profiel geeft de gekozen combinatie:',
+      rtab_t:'Uw rapport staat in een nieuw tabblad', rtab_b:'Het rapport werd geopend in een nieuw tabblad van uw browser. U kijkt nu nog naar uw project — het rapport ziet u pas als u naar dat tabblad gaat.', rtab_h:'Klik bovenaan in uw browser op het nieuwe tabblad met het rapport. Daarna komt u hier terug voor de volgende stap.',
+      terugK_t:'Volgende stap: uw échte verbruiksprofiel', terugK_b:'Dit eerste rapport rekent met een standaardprofiel. Met de échte kwartierdata van uw meter wordt het advies op maat. Wij vragen die data voor u op bij Fluvius; de contracthouder krijgt van Fluvius een mail om de toegang te bevestigen. Zodra de data binnen is, rekenen we opnieuw en kunt u hier het rapport met uw eigen profiel opnieuw laten tonen.' },
+    fr:{ uitlegK:'ℹ️ Explication', fasenK:['Facture','Données','Simulation','Rapport','Profil réel'],
+      welkomK_t:'Bienvenue dans votre projet Energie-Compas', welkomK_b:'Votre facture a été lue automatiquement : consommation, raccordement et coûts sont déjà remplis. Vérifiez les données et complétez si nécessaire (par exemple le nombre de véhicules). Une courte explication à l’écran vous accompagne à chaque étape.', welkomK_h:'Cliquez ensuite sur « Lancer ma simulation ».',
+      resK_t:'Votre résultat est prêt', resK_b:'La grille montre toutes les combinaisons calculées de panneaux solaires (colonnes) et de batterie (lignes). Par défaut, vous voyez à gauche le rendement et à droite la puissance de raccordement nécessaire (kVA). Cliquez sur une cellule pour choisir cette combinaison.', resK_std:'Sur la base d’un profil standard, la combinaison choisie donne :', resK_echt:'Sur la base de votre profil mesuré, la combinaison choisie donne :',
+      rtab_t:'Votre rapport s’ouvre dans un nouvel onglet', rtab_b:'Le rapport a été ouvert dans un nouvel onglet de votre navigateur. Vous regardez encore votre projet — vous ne verrez le rapport qu’en allant dans cet onglet.', rtab_h:'Cliquez en haut de votre navigateur sur le nouvel onglet avec le rapport. Revenez ensuite ici pour l’étape suivante.',
+      terugK_t:'Étape suivante : votre vrai profil de consommation', terugK_b:'Ce premier rapport calcule avec un profil standard. Avec les vraies données quart-horaires de votre compteur, le conseil devient sur mesure. Nous demandons ces données pour vous à Fluvius ; le titulaire du contrat reçoit un e-mail de Fluvius pour confirmer l’accès. Dès que les données sont disponibles, nous recalculons et vous pouvez réafficher ici le rapport avec votre propre profil.' },
+    en:{ uitlegK:'ℹ️ Guide', fasenK:['Invoice','Data','Simulation','Report','Real profile'],
+      welkomK_t:'Welcome to your Energie-Compas project', welkomK_b:'Your invoice was read automatically: consumption, connection and costs are already filled in. Please check the data and complete where needed (for example the number of vehicles). A short on-screen explanation guides you at every step.', welkomK_h:'Then click «Start my simulation».',
+      resK_t:'Your result is ready', resK_b:'The grid shows all calculated combinations of solar panels (columns) and battery (rows). By default you see the return on the left and the required connection capacity (kVA) on the right. Click a cell to choose that combination.', resK_std:'Based on a standard profile, the chosen combination gives:', resK_echt:'Based on your measured profile, the chosen combination gives:',
+      rtab_t:'Your report opens in a new tab', rtab_b:'The report was opened in a new tab of your browser. You are still looking at your project — you will only see the report when you go to that tab.', rtab_h:'Click the new tab with the report at the top of your browser. Then come back here for the next step.',
+      terugK_t:'Next step: your real consumption profile', terugK_b:'This first report calculates with a standard profile. With the real quarter-hour data of your meter the advice becomes tailored. We request this data for you from Fluvius; the contract holder receives an e-mail from Fluvius to confirm access. As soon as the data is in, we recalculate and you can show the report with your own profile here again.' }
+  };
+  ['nl','fr','en'].forEach(function(l){ for(var k in TK[l]) T[l][k]=TK[l][k]; });
+  function adv(){ try{ return !!(window.ADV_MODE||window.PREP_MODE||window.EK_PREPADV||window.EK_IS_OEKENE||window.EK_KLANTVIEW||new URLSearchParams(location.search).get('prep')); }catch(e){ return false; } }
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  function faseNu(){ return D.modus==='demo' ? D.fase : (window.STATE_HEEFT_PROFIEL ? 'echt' : 'std'); }
+  // Automatisch tonen? Demo: tot de samenvatting één keer getoond werd. Klant: eerste doorgang (rapport nog nooit bekeken), of de eerste keer
+  //   met het echte profiel (per toestel onthouden). Anders enkel de knop «ℹ️ Uitleg».
+  function isAuto(){
+    if(D.modus==='demo') return !!D.auto;
+    if(adv()) return false;
+    if(D.autoBasis) return true;
+    return faseNu()==='echt' && !lsGet('EK_GIDS_'+(window.TOKEN||'')+'_echt');
+  }
+  function klog(ev,data){ try{ if(window._ekLog) window._ekLog(ev,data||{}); }catch(e){} }
   function t(k){ var d=T[L()]||T.nl; return (d[k]!=null)?d[k]:T.nl[k]; }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function nf(x,d){ if(x==null||!isFinite(+x)) return '—'; var s=(+x).toFixed(d==null?1:d); return (L()==='en')?s:s.replace('.',','); }
@@ -4001,21 +4035,26 @@ var _simVoortgang=(function(){
   }
   var _timer=null, _laatsteModal=null;
   function sluit(){ var o=document.getElementById('ekd-ov'); if(o) o.remove(); if(_timer){ clearInterval(_timer); _timer=null; } }
-  function fase(n){ var f=t('fasen'), h='<div class="ekd-f">'; for(var i=0;i<5;i++) h+='<span class="'+(i<n?'on':'')+'"></span>'; return h+'</div><div class="ekd-fl">'+esc(t('stap'))+' '+n+' '+esc(t('van'))+' 5 · '+esc(f[n-1])+'</div>'; }
+  function fase(n){ var f=t(D.modus==='klant'?'fasenK':'fasen'), h='<div class="ekd-f">'; for(var i=0;i<5;i++) h+='<span class="'+(i<n?'on':'')+'"></span>'; return h+'</div><div class="ekd-fl">'+esc(t('stap'))+' '+n+' '+esc(t('van'))+' 5 · '+esc(f[n-1])+'</div>'; }
+  // v0.47.0: opt.tijdelijk = wacht-modal (niet via de knop terug op te roepen) · opt.force = via de knop «Uitleg» · opt.na(o) = bedrading na tonen.
+  //   Niet automatisch (bezoeker passeerde eerder) → enkel onthouden voor de knop «ℹ️ Uitleg», niets tonen.
   function modal(id, n, inner, opt){
-    opt=opt||{}; css(); sluit();
+    opt=opt||{}; css();
+    if(!opt.tijdelijk) _laatsteModal={ id:id, n:n, inner:inner, opt:opt };
+    if(!opt.force && !isAuto()){ pill(); return; }
+    sluit();
     var o=document.createElement('div'); o.id='ekd-ov'; o.setAttribute('data-i18n-skip','1');
     o.innerHTML='<div class="ekd-k" role="dialog" aria-modal="true">'+fase(n)+inner+(opt.geenKnop?'':'<div class="ekd-acties"><button type="button" class="ekd-btn" id="ekd-ok">'+esc(opt.knop||t('ok'))+'</button></div>')+'</div>';
     document.body.appendChild(o);
     var b=document.getElementById('ekd-ok'); if(b) b.onclick=function(){ sluit(); if(opt.puls) puls(opt.puls); if(opt.naSluit) opt.naSluit(); };
-    if(!opt.geenLog){ stap('modal',{ id:id }); }
-    _laatsteModal={ id:id, n:n, inner:inner, opt:opt };
+    if(opt.na){ try{ opt.na(o); }catch(e){} }
+    if(!opt.geenLog && !opt.tijdelijk){ if(D.modus==='demo') stap('modal',{ id:id }); else klog('gids_modal',{ id:id }); }
     pill();
   }
   function pill(){
     if(document.getElementById('ekd-pill')) return;
-    var p=document.createElement('button'); p.id='ekd-pill'; p.type='button'; p.setAttribute('data-i18n-skip','1'); p.setAttribute('data-nolog','1'); p.textContent=t('uitleg');
-    p.onclick=function(){ if(_laatsteModal){ var m=_laatsteModal; modal(m.id, m.n, m.inner, Object.assign({}, m.opt, { geenLog:true })); } };
+    var p=document.createElement('button'); p.id='ekd-pill'; p.type='button'; p.setAttribute('data-i18n-skip','1'); p.setAttribute('data-nolog','1'); p.textContent=t(D.modus==='klant'?'uitlegK':'uitleg');
+    p.onclick=function(){ if(_laatsteModal){ var m=_laatsteModal; modal(m.id, m.n, m.inner, Object.assign({}, m.opt, { geenLog:true, force:true })); } };
     document.body.appendChild(p);
   }
   function puls(sel){ try{ var el=(typeof sel==='function')?sel():document.querySelector(sel); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.remove('ekd-puls'); void el.offsetWidth; el.classList.add('ekd-puls'); setTimeout(function(){ el.classList.remove('ekd-puls'); }, 6000); }catch(e){} }
@@ -4024,7 +4063,7 @@ var _simVoortgang=(function(){
   function wachtModal(id, n, titel, tekst, lijst, lijstStap){
     var h='<h3>'+esc(titel)+'</h3><p>'+esc(tekst)+'</p><div style="display:flex;align-items:center;gap:12px"><div class="ekd-sp"></div><div id="ekd-tijd" style="font-variant-numeric:tabular-nums;color:#6B7689">'+esc(t('tijd'))+': 0:00</div></div>';
     if(lijst){ h+='<div class="ekd-l">'+lijst.map(function(x,i){ var c=i<lijstStap?'ok':(i===lijstStap?'nu':''); return '<div class="'+c+'">'+(i<lijstStap?'✔ ':(i===lijstStap?'⏳ ':'○ '))+esc(x)+'</div>'; }).join('')+'</div>'; }
-    modal(id, n, h, { geenKnop:true });
+    modal(id, n, h, { geenKnop:true, tijdelijk:true });
     var t0=Date.now(); _timer=setInterval(function(){ var e=document.getElementById('ekd-tijd'); if(!e){ clearInterval(_timer); _timer=null; return; } var s=Math.round((Date.now()-t0)/1000); e.textContent=t('tijd')+': '+Math.floor(s/60)+':'+p2(s%60); },1000);
   }
   function waarden(sel){
@@ -4046,6 +4085,15 @@ var _simVoortgang=(function(){
       '<tr><td>'+esc(rij[2])+'</td><td class="n">'+(s&&s.tvt!=null?nf(s.tvt,1)+' '+esc(t('jaar')):'—')+'</td><td class="n"><b>'+(w&&w.tvt!=null?nf(w.tvt,1)+' '+esc(t('jaar')):'—')+'</b></td></tr></tbody></table>';
     modal('resultaat_echt',5,'<h3>'+esc(t('res_t'))+'</h3><p>'+esc(t('res_b'))+'</p><div class="ekd-combo">'+esc(t('combo_echt'))+'</div>'+kpi(w)+(s?tab:'')+'<div class="ekd-h">👉 '+esc(t('res_h'))+'</div>',{ puls:knopRapport });
   }
+  // v0.47.0: rapport staat in een NIEUW tabblad (de bezoeker blijft in het projecttabblad)
+  function mRtab(){
+    var n=(D.modus==='klant')?4:(D.fase==='echt'?5:3);
+    modal('rapport_tab',n,'<h3>'+esc(t('rtab_t'))+'</h3><p>'+esc(t('rtab_b'))+'</p><div class="ekd-h">👉 '+esc(t('rtab_h'))+'</div>');
+    if(D.modus==='klant' && faseNu()==='echt') lsSet('EK_GIDS_'+(window.TOKEN||'')+'_echt','1');
+  }
+  function mWelkomK(){ modal('welkom',2,'<h3>'+esc(t('welkomK_t'))+'</h3><p>'+esc(t('welkomK_b'))+'</p><div class="ekd-h">👉 '+esc(t('welkomK_h'))+'</div>',{ puls:knopStart }); }
+  function mResK(w){ modal('resultaat',3,'<h3>'+esc(t('resK_t'))+'</h3><p>'+esc(t('resK_b'))+'</p>'+((w && (w.pv>0 || w.batt_kw>0))?('<p style="margin-bottom:0">'+esc(t(faseNu()==='echt'?'resK_echt':'resK_std'))+'</p><div class="ekd-combo">'+esc(comboTxt(w))+'</div>'+kpi(w)):'')+'<div class="ekd-h">👉 '+esc(t('std_h'))+'</div>',{ puls:knopRapport }); }
+  function mTerugK(){ modal('profiel_uitleg',5,'<h3>'+esc(t('terugK_t'))+'</h3><p>'+esc(t('terugK_b'))+'</p><div class="ekd-h">👉 '+esc(t('terug_h'))+'</div>',{ puls:'#btn-pd' }); }
   async function mSamenvatting(){
     var j=null; try{ var r=await fetch(API_D+'/api/ek/demo-status?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{cache:'no-store'}); j=await r.json(); }catch(e){}
     var S=(j&&j.stappen)||{}, R=t('sam_rij');
@@ -4070,8 +4118,8 @@ var _simVoortgang=(function(){
       '<div id="ekd-cv" style="display:none"><input type="email" id="ekd-m" placeholder="'+esc(t('fb_m'))+'" value="'+esc(mail)+'"><input type="tel" id="ekd-g" placeholder="'+esc(t('fb_g'))+'"></div>'+
       '<div id="ekd-fbst" style="font-size:13px;min-height:1.2em;margin-top:4px"></div></div>'+
       '<div class="ekd-acties"><button type="button" class="ekd-btn g" id="ekd-x">'+esc(t('sluit'))+'</button><button type="button" class="ekd-btn" id="ekd-s">'+esc(t('fb_s'))+'</button></div>';
-    modal('samenvatting',5,h,{ geenKnop:true });
-    stap('samenvatting',{ duur_min:duur });
+    modal('samenvatting',5,h,{ geenKnop:true, na:function(){ if(!D.samLog){ D.samLog=true; stap('samenvatting',{ duur_min:duur }); } bedraad(); } });
+    function bedraad(){
     var c=document.getElementById('ekd-c'); if(c) c.onchange=function(){ document.getElementById('ekd-cv').style.display=c.checked?'block':'none'; };
     document.getElementById('ekd-x').onclick=sluit;
     document.getElementById('ekd-s').onclick=async function(){
@@ -4083,6 +4131,7 @@ var _simVoortgang=(function(){
         st.style.color='#1E7A42'; st.textContent=t('fb_ok'); this.style.display='none';
       }catch(e){ this.disabled=false; st.style.color='#8a1f1f'; st.textContent=t('fb_nok'); }
     };
+    }
   }
 
   // ── Wrappers rond de bestaande EK-functies ──
@@ -4110,9 +4159,20 @@ var _simVoortgang=(function(){
   }
   function installeer(){
     if(installeer.ok) return; installeer.ok=true;
-    var _tr=window.toonRapport, _kr=window.toonKlantrapport, _pd=window.haalProfieldata;
+    var _tr=window.toonRapport, _kr=window.toonKlantrapport, _pd=window.haalProfieldata, _kp=window._klantrapportPayload;
+    // v0.47.0: gids-info mee in de rapport-payload → klantrapport toont de juiste uitleg en registreert het printen
+    if(typeof _kp==='function') window._klantrapportPayload=function(){
+      var o=_kp.apply(this, arguments);
+      try{ if(o && D.aan && !(D.modus==='klant' && adv())) o._gids={ modus:D.modus, fase:faseNu(), auto:isAuto(), token:window.TOKEN||'', lang:L(), api:API_D }; }catch(e){}
+      return o;
+    };
     window.toonRapport=async function(){
       if(!D.aan || window.PREWARM || D.bezigTR) return _tr.apply(this, arguments);
+      if(D.modus==='klant'){   // v0.47.0: klant-gids — enkel de uitleg bij het eerste resultaat
+        var rk=await _tr.apply(this, arguments);
+        try{ if(window.HM && !D.toond.res && !adv()){ D.toond.res=true; setTimeout(function(){ mResK(waarden()); }, 700); } }catch(e){}
+        return rk;
+      }
       D.bezigTR=true; var f=D.fase, r;
       stap(f==='echt'?'sim_echt_start':'sim_std_start', { taal:L() });
       var tm=null; if(f!=='echt') tm=setTimeout(function(){ wachtModal('sim_bezig',3,t('bezig_t'),t('bezig_b')); }, 1200);
@@ -4130,12 +4190,17 @@ var _simVoortgang=(function(){
     };
     window.toonKlantrapport=async function(){
       var r=await _kr.apply(this, arguments);
-      try{ if(D.aan){ var st=$('rapport-status'); var ok=!!(st && (st.style.color.indexOf('green')>=0 || st.querySelector('a')));
-        if(ok){ var k=(D.fase==='echt' && D.echt)?'rapport_echt_open':'rapport_std_open'; stap(k, k==='rapport_echt_open'?(D.echt||waarden()):(D.std||waarden())); D.wachtTerug=k; setTimeout(terugCheck, 5000); } } }catch(e){}
+      try{ if(D.aan && !(D.modus==='klant' && adv())){ var st=$('rapport-status'); var geopend=!!(st && st.style.color.indexOf('green')>=0), link=!!(st && st.querySelector('a'));
+        if(geopend || link){
+          if(D.modus==='demo'){ var k=(D.fase==='echt' && D.echt)?'rapport_echt_open':'rapport_std_open'; stap(k, k==='rapport_echt_open'?(D.echt||waarden()):(D.std||waarden())); D.wachtTerug=k; }
+          else D.wachtTerug=(faseNu()==='echt')?'k_echt':'k_std';
+          D.weg=(document.visibilityState==='hidden');
+          if(geopend) mRtab();   // v0.47.0: het rapport staat in een nieuw tabblad — de bezoeker zit nog hier
+        } } }catch(e){}
       return r;
     };
     window.haalProfieldata=async function(){
-      if(!D.aan) return _pd.apply(this, arguments);
+      if(!D.aan || D.modus!=='demo') return _pd.apply(this, arguments);
       var b=$('btn-pd'); if(b) b.disabled=true;
       wachtModal('echt_bezig',4,t('echt_t'),t('echt_b'),t('echt_l'),0);
       try{
@@ -4147,19 +4212,23 @@ var _simVoortgang=(function(){
         LAST_SIG=null; await window.toonRapport();
       }catch(e){ sluit(); if(b) b.disabled=false; modal('fout',4,'<h3>'+esc(t('fout_t'))+'</h3><p>'+esc(t('fout_b'))+'</p>'); }
     };
-    document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') setTimeout(terugCheck, 700); });
+    // v0.47.0: de vervolg-uitleg pas tonen als de bezoeker het projecttabblad écht verliet (naar het rapport) en terugkomt
+    document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden') D.weg=true; else setTimeout(terugCheck, 700); });
+    window.addEventListener('blur', function(){ D.weg=true; });
     window.addEventListener('focus', function(){ setTimeout(terugCheck, 700); });
   }
   function terugCheck(){
-    if(!D.aan || !D.wachtTerug || document.visibilityState!=='visible') return;
-    var k=D.wachtTerug; D.wachtTerug=null;
+    if(!D.aan || !D.wachtTerug || !D.weg || document.visibilityState!=='visible') return;
+    var k=D.wachtTerug; D.wachtTerug=null; D.weg=false;
     if(k==='rapport_std_open' && D.fase==='std' && !D.toond.terug){ D.toond.terug=true; wacht(function(){ var b=$('pd-blok'); return b && !b.classList.contains('hidden'); }, 8000).then(function(){ mTerug(); }); }
     else if(k==='rapport_echt_open' && !D.toond.sam){ D.toond.sam=true; mSamenvatting(); }
+    else if(k==='k_std' && !D.toond.terugK){ wacht(function(){ var b=$('pd-blok'); return b && !b.classList.contains('hidden'); }, 8000).then(function(v){ if(v && !D.toond.terugK){ D.toond.terugK=true; mTerugK(); } }); }
   }
   window._ekDemo={
     init:function(j){
       if(window.PREWARM || D.aan || !j || !j.demo) return;
-      D.aan=true; D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
+      D.aan=true; D.modus='demo'; D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
+      D.auto=!((j.demo.stappen||{}).samenvatting);   // v0.47.0: wie de demo al doorliep (samenvatting gezien) → geen automatische modals, enkel de knop
       try{ document.body.classList.add('ek-demo'); }catch(e){}
       css(); installeer();
       var S=j.demo.stappen||{};
@@ -4168,10 +4237,25 @@ var _simVoortgang=(function(){
       if(S.rapport_std_open) D.toond.terug=true;
       stap('project_geopend', { taal:L() });
       setTimeout(function(){
-        if(S.rapport_echt_open){ D.toond.std=D.toond.echt=true; D.wachtTerug='rapport_echt_open'; terugCheck(); return; }
+        if(S.rapport_echt_open){ D.toond.std=D.toond.echt=true; D.wachtTerug='rapport_echt_open'; D.weg=true; terugCheck(); return; }
         if(D.fase==='echt'){ D.toond.std=true; modal('echt_herstart',4,'<h3>'+esc(t('res_t'))+'</h3><p>'+esc(t('echt_b'))+'</p><div class="ekd-h">👉 '+esc(t('welkom_h'))+'</div>',{ puls:knopStart }); return; }
         mWelkom();
       }, 900);
+    },
+    // v0.47.0: KLANT-GIDS — echte klant/prospect via de projectlink (?case=). Nooit in adviseur/prep/oekene-sessies.
+    initKlant:function(j){
+      if(window.PREWARM || D.aan || D.klantInit || !j || j.demo || !window.TOKEN) return;
+      D.klantInit=true;
+      setTimeout(async function(){   // even wachten: adviseur/oekene-sessie wordt asynchroon herkend
+        if(D.aan || adv()) return;
+        var ps=null; try{ var r=await fetch(API_D+'/api/ek/profieldata-status?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{cache:'no-store'}); ps=await r.json(); }catch(e){}
+        if(!ps || !ps.ok || adv()) return;
+        D.aan=true; D.modus='klant'; D.autoBasis=!ps.rapport_bekeken;
+        css(); installeer();
+        klog('gids_start',{ auto:isAuto(), eerste:D.autoBasis });
+        var dash=$('dash'); if(!dash || dash.classList.contains('hidden')) mWelkomK();
+        else if(window.HM && !D.toond.res){ D.toond.res=true; mResK(waarden()); }
+      }, 2500);
     },
     status:function(){ return D; }
   };
