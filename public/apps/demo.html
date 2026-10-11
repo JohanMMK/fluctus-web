@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demo · Energie-Compas</title>
+<!-- demo.html v0.7.0 (2026-10-11, Johan): UITLEG-MODAL — verschijnt automatisch de eerste keer (per browser, localStorage EC_DEMO_UITLEG_V1) en daarna via de knop «ℹ️ Uitleg» in de kop: wat de demo is, hoe de tabel leest (rij = bezoeker, kolom = stap, cel = tijdstip + tijd sinds vorige stap), de extra kolommen, interesse- en vlot-score, detail + reset. Legende bijgewerkt (PDF +0,5, offertes +1). -->
 <!-- demo.html v0.6.0 (2026-10-11, Johan): + kolom 'Offertes gevraagd' (server ≥ 15.268.5; in de demo wordt niets verstuurd) + KPI 'vragen offertes'; telt niet mee in 'hoe ver' maar +1 interesse. 'Hoe ver' rekent nu tot en met de samenvatting via indexOf. -->
 <!-- demo.html v0.5.0 (2026-10-11, Johan): + kolommen 'PDF standaard' / 'PDF echt profiel' (bezoeker bewaarde het rapport via 🖨️ Print → PDF; server ≥ 15.268.4, klantrapport ≥ v0.33.0) + KPI 'rapport als PDF bewaard'; de PDF-stappen tellen niet mee in 'hoe ver' maar geven +0,5 interesse. -->
 <!-- demo.html v0.4.0 (2026-10-11, Johan): + kolom 'Type' (energiegebruiker / energieleverancier / installatiebedrijf / verkoper van EV's, uit het contactformulier; server ≥ 15.268.3) + teller per type bovenaan. v0.3.0 (2026-10-11, Johan): + knop "↺ Demo resetten" per bezoeker (POST /api/ek/demo-reset, server ≥ 15.268.1). v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
@@ -38,10 +39,17 @@
   a{color:#2a44a8}
   .fout{background:#FEF2F2;border:1px solid #F2C7C7;color:#8a1f1f;padding:12px;border-radius:10px} .state{color:var(--muted);padding:20px}
   .legende{color:var(--muted);font-size:12px;margin-top:10px;line-height:1.6}
+  #uitleg-knop{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font:600 12.5px inherit;font-family:inherit;color:var(--navy);cursor:pointer}
+  #dm-ov{position:fixed;inset:0;z-index:1000;background:rgba(15,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+  #dm-ov .k{background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.25);padding:20px 22px;font-size:14px;line-height:1.55}
+  #dm-ov h3{margin:0 0 6px;color:var(--navy);font-size:19px} #dm-ov h4{margin:14px 0 4px;color:var(--navy);font-size:14px}
+  #dm-ov ul,#dm-ov ol{margin:4px 0;padding-left:20px} #dm-ov li{margin:3px 0} #dm-ov p{margin:4px 0}
+  #dm-ov .tip{margin-top:12px;padding:10px 12px;background:#E6F6EC;border-radius:10px;color:#0B6B35;font-weight:600}
+  #dm-ov .a{display:flex;justify-content:flex-end;margin-top:14px} #dm-ov .a button{border:0;background:var(--green);color:#fff;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:14px}
 </style>
 </head>
 <body>
-<header><b>🎬 Demo — klantbeleving</b><span class="sub">bezoekers die de demo aanvroegen via het contactformulier</span><span class="who" id="who"></span></header>
+<header><b>🎬 Demo — klantbeleving</b><span class="sub">bezoekers die de demo aanvroegen via het contactformulier</span><button type="button" id="uitleg-knop">ℹ️ Uitleg</button><span class="who" id="who"></span></header>
 <main><div id="root"><div class="state">Laden…</div></div></main>
 <script>
   var $=function(id){return document.getElementById(id);};
@@ -121,7 +129,7 @@
       }
     });
     h+='</tbody></table></div>';
-    h+='<div class="legende"><b>Interesse 1–5</b> (per bezoeker): hoe ver de bezoeker kwam (aandeel van de stappen tot de samenvatting) + snelheid (< 30 min van factuur tot rapport: +0,5; > 1 dag: −0,5) + feedback (+0,5); contactvraag = 5. Hover voor de opbouw.<br>'+
+    h+='<div class="legende"><b>Interesse 1–5</b> (per bezoeker): hoe ver de bezoeker kwam (aandeel van de stappen tot de samenvatting) + snelheid (< 30 min van factuur tot rapport: +0,5; > 1 dag: −0,5) + rapport als PDF bewaard (+0,5) + feedback (+0,5) + offertes gevraagd (+1); contactvraag = 5. Hover voor de opbouw.<br>'+
       '<b>Vlot-score 1–5</b> (per stap): aandeel bezoekers dat de stap bereikte vanuit de vorige stap (≥ 90 % = 5, ≥ 75 % = 4, ≥ 50 % = 3, ≥ 25 % = 2, anders 1), −1 als de mediane wachttijd te lang is. Wie nog geen 30 min op de vorige stap staat, telt (nog) niet mee. Hover voor de cijfers.<br>'+
       'Cellen: tijdstip (hover = volledige datum) en de tijd sinds de vorige stap. Klik op een mailadres voor projectlog, EK-link en feedback.</div>';
     $('root').innerHTML=h;
@@ -136,6 +144,37 @@
     }; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-open]'),function(a){ a.onclick=function(e){ e.preventDefault(); var m=a.getAttribute('data-open'); OPEN[m]=!OPEN[m]; render(); }; });
   }
+
+  // ── v0.7.0: uitleg-modal (eerste keer automatisch, daarna via «ℹ️ Uitleg») ──
+  function uitleg(){
+    var o=document.getElementById('dm-ov'); if(o) o.remove();
+    o=document.createElement('div'); o.id='dm-ov';
+    o.innerHTML='<div class="k" role="dialog" aria-modal="true">'+
+      '<h3>🎬 Zo werkt het demo-overzicht</h3>'+
+      '<p>Een prospect vinkt op <b>energie-compas.eu/contact</b> «klantbeleving (demo)» aan en kiest wat hij is (energiegebruiker, energieleverancier, installatiebedrijf of verkoper van EV\'s). Hij krijgt een demo-factuur per mail, stuurt die door naar dossier@energie-compas.eu en doorloopt zelf het échte proces: project → simulatie op standaardprofiel → rapport → echt profiel → rapport op maat → samenvatting en feedback. Elke stap komt hier binnen.</p>'+
+      '<h4>De tabel</h4><ul>'+
+        '<li><b>Eén rij per bezoeker</b> (mailadres), <b>één kolom per stap</b>, van links naar rechts in de volgorde van de klantreis.</li>'+
+        '<li>Elke cel toont het <b>tijdstip</b> (hover = volledige datum) en eronder de <b>tijd sinds de vorige stap</b>. Bij de resultaten staan ook terugverdientijd en rendement. «—» = stap nog niet bereikt.</li>'+
+        '<li><b>Type</b>: wat de bezoeker op de contactpagina koos. <b>PDF standaard / PDF echt profiel</b>: hij bewaarde het rapport via 🖨️ Print. <b>Offertes gevraagd</b>: hij klikte «📨 Offertes opvragen» (in de demo wordt niets verstuurd). <b>Feedback / Contact</b>: uit de samenvatting op het einde.</li>'+
+      '</ul>'+
+      '<h4>Twee scores</h4><ul>'+
+        '<li><b>Interesse 1–5</b> (bolletje vóór het mailadres): hoe ver de bezoeker kwam + hoe snel, plus PDF bewaard (+0,5), feedback (+0,5) en offertes gevraagd (+1). Wie contact vraagt, krijgt altijd 5. Hover voor de opbouw.</li>'+
+        '<li><b>Vlot-score 1–5</b> (bovenste rij, per stap): welk deel van de bezoekers deze stap haalde vanuit de vorige. 5 = vlotte doorgang, 1 = hier haken bezoekers af. Hover voor de cijfers en de mediane wachttijd.</li>'+
+      '</ul>'+
+      '<h4>Detail en acties</h4><ul>'+
+        '<li><b>Klik op een mailadres</b>: project, 📜 projectlog, de EK-link (zie wat de bezoeker zag), feedback en eventuele herhaal-aanvragen.</li>'+
+        '<li><b>↺ Demo resetten</b> (in het detail): archiveert het demo-project; dat mailadres kan de demo daarna opnieuw doen.</li>'+
+        '<li>Bovenaan: tellers en het aantal per type, zoeken op mail/naam/bedrijf en <b>↻ Vernieuwen</b>.</li>'+
+      '</ul>'+
+      '<div class="tip">👉 Bel eerst de bezoekers met de hoogste interesse-score — zeker wie offertes of contact vroeg. Een lage vlot-score toont waar de demo beter moet.</div>'+
+      '<div class="a"><button type="button" id="dm-ok">Begrepen</button></div></div>';
+    document.body.appendChild(o);
+    document.getElementById('dm-ok').onclick=function(){ o.remove(); };
+    o.addEventListener('click', function(e){ if(e.target===o) o.remove(); });
+    try{ localStorage.setItem('EC_DEMO_UITLEG_V1','1'); }catch(e){}
+  }
+  $('uitleg-knop').onclick=uitleg;
+  function uitlegEersteKeer(){ var gezien=null; try{ gezien=localStorage.getItem('EC_DEMO_UITLEG_V1'); }catch(e){} if(!gezien) uitleg(); }
   async function authHeaders(){
     var tok=SESSION&&SESSION.access_token;
     try{ if(sb){ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } } }catch(e){}
@@ -149,6 +188,7 @@
     if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
     DATA=await r.json(); DATA.rijen=DATA.rijen||[]; DATA.stappen=DATA.stappen||Object.keys(LABEL);
     render();
+    if(!laad.ok){ laad.ok=true; uitlegEersteKeer(); }   // v0.7.0
   }
   (async function(){
     try{
