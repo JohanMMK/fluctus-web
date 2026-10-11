@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.49.0">
+<meta name="ek-build" content="0.50.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.50.0 (2026-10-11, Johan): (1) PROFIELDATA-UITLEG (echte klant): na «📶 Haal mijn profieldata op» een modal "zo gaat het verder" volgens de netbeheerder uit de factuur (server ≥ 15.270.0: j.netbeheerder) — Fluvius: bevestiging door de contracthouder via een Fluvius-mail; andere netbeheerders: wij laten per mail weten wat nodig is; wij doen het nodige en nemen contact op waar toestemming nodig is; zodra de data binnen is en de analyse klaar, krijgt de klant een mail. Statusregel volgt de netbeheerder. (2) OEKENE: knop «📣 Klant verwittigen: project bijgewerkt» → modal (reden gemeten profiel / algemene update, optionele boodschap) → POST /api/ek/klant-verwittig (mail met knop «Open mijn project»). (3) FIX dossierlink in het rapport (p. 2): was ?case=…&adv=1 (adviseur-context!) → nu de nette klantlink ?case=… (+ taal). -->
 <!-- ek.html v0.49.0 (2026-10-11, Johan): MAIL-INFO — schreef de klant in zijn mail naar dossier@ relevante info naast de factuur (server ≥ 15.269.0: j.mail_info), dan toont het invoerscherm onder "Uw factuur is ingelezen" een knop «✉️ Info uit uw mail» → modal met de punten, een korte samenvatting en de volledige eigen tekst (per mail, nieuwste eerst). NL/FR/EN, data-i18n-skip. -->
 <!-- ek.html v0.48.0 (2026-10-11, Johan): GIDS + OFFERTES. (1) Eerste resultaat-modal (demo én klant) legt de roosters uit: cel = combinatie (kolommen PV, rijen batterij), muis over een cel = voorbeeld, klik = kiezen voor het rapport, gestreept vakje = aanbeveling, keuzelijst boven elk rooster = KPI (standaard links rendement, rechts kVA). (2) Onder "Toon rapport" in de resultaat-modals: uitleg knop «📨 Offertes opvragen» (kwalitatieve installateurs, performante opstelling + juiste sturing, elk detail telt). (3) Klik op «📨 Offertes opvragen» → modal "wat gebeurt er nu" (prijsvraag in vast formaat → kwalitatieve installateurs → nagerekend op uw profiel → overzicht om de juiste partner te kiezen en te onderhandelen → bezoek + bindende offerte). Klant: na een geslaagde aanvraag. DEMO: GEEN echte aanvraag (geen mail), enkel de modal + demo-stap "offertes" (server ≥ 15.268.5). -->
 <!-- ek.html v0.47.0 (2026-10-11, Johan): RAPPORT-GIDS. (1) Na «📄 Toon rapport» verschijnt in het EK-tabblad een modal "Uw rapport staat in een nieuw tabblad" (demo én klant). De vervolg-uitleg (profiel ophalen / samenvatting) komt pas als de bezoeker het tabblad écht verliet en terugkomt (geen 5 s-timer meer). (2) KLANT-GIDS: een klant/prospect die voor het eerst door het echte proces gaat (rapport nog nooit bekeken, /api/ek/profieldata-status) krijgt dezelfde soort uitleg automatisch: welkom → resultaat → rapport in nieuw tabblad → profieldata ophalen; bij de eerste keer met het echte profiel opnieuw (per toestel onthouden). Wie eerder passeerde krijgt GEEN automatische modals maar wel de knop «ℹ️ Uitleg». Nooit in adviseur/prep/oekene-sessies. Demo: automatisch tot de samenvatting één keer getoond werd, daarna enkel de knop. (3) De rapport-payload draagt _gids {modus, fase, auto, token, lang} → klantrapport ≥ v0.33.0 toont de rapport-uitleg (standaard- vs. echt profiel, terug naar de resultaten, 🖨️ Print → PDF) en registreert het printen (demo: rapport_std_print / rapport_echt_print, server ≥ 15.268.4). -->
@@ -806,6 +807,11 @@
         <div class="sub" id="pd-uitleg" style="margin-top:4px">Uw rapport is nu gebaseerd op uw factuur en een standaardprofiel. Met uw echte kwartierdata van Fluvius wordt het exact. Wij vragen ze voor u aan; de contracthouder krijgt van Fluvius een mail om de toegang te bevestigen.</div>
       </div>
       <div class="sub" id="pd-status" style="margin-top:6px"></div>
+      <!-- v0.50.0 (Johan): oekene — klant verwittigen dat zijn project werd bijgewerkt (mail met knop naar het project) -->
+      <div id="ek-verwittig-blok" class="hidden" style="margin-top:10px">
+        <button class="btn ghost sm" type="button" id="btn-verwittig" onclick="_ekVerwittigModal()" data-nolog="1">📣 Klant verwittigen: project bijgewerkt</button>
+        <div class="sub" id="verwittig-status" style="margin-top:6px"></div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
         <button class="btn sm" type="button" id="btn-off-opvragen" onclick="offertesOpvragen()">📨 Offertes opvragen</button>
         <button class="btn ghost sm" type="button" onclick="offerteIndienen()">📝 Offerte indienen</button>
@@ -2675,7 +2681,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
         if(!j||!j.ok) return;
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
-        try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
+        try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
+        try{ window._EK_DNB=j.netbeheerder||(j.baseCase&&j.baseCase.dnb)||''; }catch(eDnb){}   // v0.50.0: netbeheerder → uitleg profieldata   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
         if(j.ev!=null && $('i-ev')) $('i-ev').value=j.ev;      // v0.6.1: onthoud aantal wagens uit de vorige input
@@ -2992,6 +2999,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var pu=$('prof-upl-blok'); if(pu){ if(EK_IS_OEKENE && EK_PREPADV && !EK_KLANTVIEW){ pu.classList.remove('hidden'); try{ _ekOekeneSamenvatting(); }catch(e){} try{ _ekPartnerLaad(); }catch(e){} } else pu.classList.add('hidden'); }
       var kb=$('adv-klant-blok'); if(kb){ kb.classList.toggle('hidden', !prepAdv); }   // v0.30.0: klant-/BTW-invoervelden zijn adviseur-only
       var eb=$('ev-def-btn'); if(eb) eb.style.display=adviseur?'inline-flex':'none';
+      var vw=$('ek-verwittig-blok'); if(vw) vw.classList.toggle('hidden', !(adviseur && TOKEN));   // v0.50.0: klant verwittigen — enkel oekene
       var ov=$('btn-off-volgen'); if(ov) ov.style.display=adviseur?'inline-block':'none';   // v0.37.0 (Johan): offertes volgen enkel voor oekene   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
       var cab=$('ek-cabine-blok'); if(cab){ cab.classList.toggle('hidden', !adviseur); if(adviseur && $('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:''); }   // v0.34 (Johan): kVA bestaande cabine enkel voor oekene
       var sp=$('ek-spanning-ovr-blok'); if(sp) sp.classList.toggle('hidden', !adviseur);   // v0.24.24: LS/MS-override enkel voor oekene
@@ -3402,7 +3410,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       horizon:NET_CFG.horizon_jaar, inflatie_pct:NET_CFG.inflatie_pct, net_extra_pct:NET_CFG.net_extra_pct,
       net_dubbel_jaar:NET_CFG.net_dubbel_jaar, net_dubbel_factor:NET_CFG.net_dubbel_factor, cap_eur_kw_jaar:(NET_TARIEF&&NET_TARIEF.cap_eur_kw_jaar)||0,
       opex_jaar:(_ekIsPart()?0:(OPEX_RATIO>0?Math.round(OPEX_RATIO*(+_bv.invPvBatt||0)):(+OPEX_JAAR||0))) };   // v0.36 (Johan): particulier → GEEN recurrente kosten. v0.33 (Johan): ONDERHOUD pro-rata op PV+batt; de sturingskost (PV+batt) telt het plan er zelf bij (geen dubbeltelling)
-    var _ekLink=''; try{ _updAdvLink(); _ekLink=($('prep-link')&&$('prep-link').value)||''; }catch(eL){}   // v0.38.0: dossierlink → p. 2 klantrapport
+    var _ekLink=''; try{ if(TOKEN){ _ekLink=location.origin+'/apps/ek.html?case='+encodeURIComponent(TOKEN)+((window.EC_LANG==='fr'||window.EC_LANG==='en')?'&lang='+window.EC_LANG:''); } else { _updAdvLink(); _ekLink=($('prep-link')&&$('prep-link').value)||''; } }catch(eL){}   // v0.38.0: dossierlink → p. 2 klantrapport · v0.50.0: klantlink zonder adv=1
     return {
       project_id: STATE_CODE||'', datum: datum, ek_link: _ekLink,
       particulier: _ekIsPart(), klanttype: (_ekIsPart()?'particulier':'bedrijf'),   // v0.36 (Johan): klantrapport past het particulier-pad toe (geen recurrente kosten, geen onbalans/windfall, …)
@@ -3919,6 +3927,45 @@ var _simVoortgang=(function(){
 })();
 </script>
 <script>
+// ══ v0.50.0 (Johan 11-10): OEKENE — klant verwittigen dat zijn project werd bijgewerkt (server ≥ 15.270.0) ══
+(function(){
+  var API_V='https://lucid-amazement-production.up.railway.app';
+  function esc(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  window._ekVerwittigModal=function(){
+    var tk=window.TOKEN; var st=document.getElementById('verwittig-status');
+    if(!tk){ if(st){ st.style.color='var(--muted)'; st.textContent='Geen dossier geladen.'; } return; }
+    var mail=(document.getElementById('i-mail')&&document.getElementById('i-mail').value)||'';
+    var prof=!!window.STATE_HEEFT_PROFIEL;
+    var o=document.getElementById('vw-ov'); if(o) o.remove();
+    o=document.createElement('div'); o.id='vw-ov'; o.setAttribute('data-i18n-skip','1');
+    o.style.cssText='position:fixed;inset:0;z-index:10002;background:rgba(15,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    o.innerHTML='<div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;max-width:540px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.25);padding:20px 22px;font:15px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1A1F2B">'+
+      '<h3 style="margin:0 0 8px;color:#1F3864;font-size:19px">📣 Klant verwittigen</h3>'+
+      '<p style="margin:0 0 10px">De klant'+(mail?' (<b>'+esc(mail)+'</b>)':'')+' krijgt een mail in zijn taal dat zijn project werd bijgewerkt, met de knop «Open mijn project».</p>'+
+      '<div style="font-weight:700;color:#1F3864;margin-bottom:4px">Reden</div>'+
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0"><input type="radio" name="vw-r" value="profiel"'+(prof?' checked':'')+'> <span>Gemeten profiel verwerkt — <span style="color:#6B7689">"uw gemeten verbruiksprofiel is binnen, de analyse is ermee bijgewerkt"</span></span></label>'+
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0"><input type="radio" name="vw-r" value="algemeen"'+(prof?'':' checked')+'> <span>Algemene update — <span style="color:#6B7689">"we hebben uw project bijgewerkt"</span></span></label>'+
+      '<div style="font-weight:700;color:#1F3864;margin:10px 0 4px">Persoonlijke boodschap (optioneel)</div>'+
+      '<textarea id="vw-b" rows="3" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #D6E0EC;border-radius:9px;font:inherit" placeholder="Komt als extra alinea in de mail (in de taal die u typt)."></textarea>'+
+      '<div id="vw-st" style="font-size:13px;min-height:1.2em;margin-top:6px"></div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" id="vw-x" style="border:1px solid #D6E0EC;background:#fff;color:#1F3864;font-weight:700;padding:10px 16px;border-radius:10px;cursor:pointer">Annuleren</button><button type="button" id="vw-s" style="border:0;background:#05B050;color:#fff;font-weight:700;padding:10px 16px;border-radius:10px;cursor:pointer">Verstuur mail</button></div></div>';
+    document.body.appendChild(o);
+    document.getElementById('vw-x').onclick=function(){ o.remove(); };
+    document.getElementById('vw-s').onclick=async function(){
+      var bt=this, s2=document.getElementById('vw-st'); bt.disabled=true; s2.style.color='#6B7689'; s2.textContent='⏳ Versturen…';
+      var r0=document.querySelector('input[name="vw-r"]:checked'); var reden=r0?r0.value:'algemeen';
+      try{
+        var h=(window._ekLogHdr?window._ekLogHdr():{'Content-Type':'application/json'}); h['Content-Type']='application/json';
+        var r=await fetch(API_V+'/api/ek/klant-verwittig',{ method:'POST', headers:h, body:JSON.stringify({ token:tk, reden:reden, boodschap:(document.getElementById('vw-b').value||'').trim() }) });
+        var j=await r.json().catch(function(){return{};});
+        if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+        o.remove(); if(st){ st.style.color='var(--green)'; st.textContent='✔ Klant verwittigd ('+(j.naar||'')+', '+String(j.taal||'nl').toUpperCase()+') — '+(reden==='profiel'?'gemeten profiel verwerkt':'algemene update')+'.'; }
+      }catch(e){ bt.disabled=false; s2.style.color='#8a1f1f'; s2.textContent='Versturen lukte niet: '+e.message; }
+    };
+  };
+})();
+</script>
+<script>
 // ══ v0.49.0 (Johan 11-10): MAIL-INFO — knop «✉️ Info uit uw mail» in het invoerscherm (server ≥ 15.269.0) ══
 (function(){
   var T={
@@ -4056,6 +4103,32 @@ var _simVoortgang=(function(){
       offm_z:'We will let you know as soon as the quotes are in.', offm_demo:'In this demo no real request is sent. Want quotes for your own site? Forward your own energy invoice to dossier@energie-compas.eu.', off_st_demo:'✔ Demo: the quote request was simulated — nothing was sent.' }
   };
   ['nl','fr','en'].forEach(function(l){ for(var k in TK2[l]) T[l][k]=TK2[l][k]; });
+
+  // v0.50.0: profieldata-opvraging uitleggen (echte klant) volgens de netbeheerder
+  var TK3={
+    nl:{ pd_t:'Uw profieldata wordt opgevraagd', pd_i:'Zo gaat het verder:',
+      pd_flu:'Uw netbeheerder is {d}. Wij vragen uw kwartierdata aan via Fluvius; Fluvius stuurt de contracthouder een mail om de toegang te bevestigen.',
+      pd_and:'Uw netbeheerder is {d}. Wij vragen uw kwartierdata bij deze netbeheerder op. Welke stappen nodig zijn, verschilt per netbeheerder — is uw toestemming als contracthouder of een export uit uw klantenzone nodig, dan laten wij u precies weten wat u moet doen.',
+      pd_onb:'Wij vragen uw kwartierdata op bij uw netbeheerder.',
+      pd_wij:'Wij doen het nodige. Is er in dat proces uw toestemming nodig, dan nemen wij op het juiste moment per mail contact met u op.',
+      pd_mail:'Zodra de profieldata binnen is en wij de analyse met uw gemeten profiel hebben bijgewerkt, sturen wij u een mail met de link naar uw project. Daar laat u het rapport met uw eigen profiel opnieuw tonen.',
+      pd_st:'✔ Aangevraagd — wij vragen uw kwartierdata op bij {d}. Zodra de analyse met uw gemeten profiel klaar is, krijgt u een mail.', pd_uw:'uw netbeheerder' },
+    fr:{ pd_t:'Vos données de profil sont demandées', pd_i:'Voici la suite :',
+      pd_flu:'Votre gestionnaire de réseau est {d}. Nous demandons vos données quart-horaires via Fluvius ; Fluvius envoie au titulaire du contrat un e-mail pour confirmer l’accès.',
+      pd_and:'Votre gestionnaire de réseau est {d}. Nous demandons vos données quart-horaires à ce gestionnaire. Les étapes diffèrent selon le gestionnaire — si votre accord en tant que titulaire du contrat ou un export de votre espace client est nécessaire, nous vous indiquons précisément quoi faire.',
+      pd_onb:'Nous demandons vos données quart-horaires à votre gestionnaire de réseau.',
+      pd_wij:'Nous faisons le nécessaire. Si votre accord est requis dans ce processus, nous vous contactons par e-mail au bon moment.',
+      pd_mail:'Dès que les données de profil sont disponibles et que nous avons mis à jour l’analyse avec votre profil mesuré, nous vous envoyons un e-mail avec le lien vers votre projet. Vous pourrez y réafficher le rapport avec votre propre profil.',
+      pd_st:'✔ Demandé — nous demandons vos données quart-horaires à {d}. Dès que l’analyse avec votre profil mesuré est prête, vous recevez un e-mail.', pd_uw:'votre gestionnaire de réseau' },
+    en:{ pd_t:'Your profile data is being requested', pd_i:'What happens next:',
+      pd_flu:'Your grid operator is {d}. We request your quarter-hour data via Fluvius; Fluvius sends the contract holder an e-mail to confirm access.',
+      pd_and:'Your grid operator is {d}. We request your quarter-hour data from this grid operator. The steps differ per grid operator — if your consent as contract holder or an export from your customer portal is needed, we will tell you exactly what to do.',
+      pd_onb:'We request your quarter-hour data from your grid operator.',
+      pd_wij:'We take care of it. If your consent is needed in this process, we will contact you by e-mail at the right moment.',
+      pd_mail:'As soon as the profile data is in and we have updated the analysis with your measured profile, we will send you an e-mail with the link to your project. There you can show the report with your own profile again.',
+      pd_st:'✔ Requested — we are requesting your quarter-hour data from {d}. As soon as the analysis with your measured profile is ready, you will receive an e-mail.', pd_uw:'your grid operator' }
+  };
+  ['nl','fr','en'].forEach(function(l){ for(var k in TK3[l]) T[l][k]=TK3[l][k]; });
   function adv(){ try{ return !!(window.ADV_MODE||window.PREP_MODE||window.EK_PREPADV||window.EK_IS_OEKENE||window.EK_KLANTVIEW||new URLSearchParams(location.search).get('prep')); }catch(e){ return false; } }
   function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
   function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -4162,6 +4235,14 @@ var _simVoortgang=(function(){
     var h='<h3>'+esc(t(demo?'offm_td':'offm_t'))+'</h3><div style="font-weight:700;color:#1F3864">'+esc(t('offm_i'))+'</div><ol style="margin:6px 0 4px;padding-left:22px">'+t('offm_l').map(function(x){ return '<li style="margin:4px 0">'+esc(x)+'</li>'; }).join('')+'</ol>'+
       (demo?'<p style="background:#FFF8E6;border:1px solid #F0DDA8;border-radius:10px;padding:10px 12px;margin:10px 0 0">'+esc(t('offm_demo'))+'</p>':'<div class="ekd-h">✔ '+esc(t('offm_z'))+'</div>');
     modal('offertes',n,h,{ force:true });
+  }
+  // v0.50.0: echte klant — uitleg na «Haal mijn profieldata op», volgens de netbeheerder
+  function mPd(){
+    var d=String(window._EK_DNB||'').trim(), flu=/fluvius/i.test(d);
+    var z1=d?t(flu?'pd_flu':'pd_and').replace('{d}',d):t('pd_onb');
+    var h='<h3>'+esc(t('pd_t'))+'</h3><div style="font-weight:700;color:#1F3864">'+esc(t('pd_i'))+'</div><ol style="margin:6px 0 4px;padding-left:22px">'+
+      [z1,t('pd_wij'),t('pd_mail')].map(function(x){ return '<li style="margin:5px 0">'+esc(x)+'</li>'; }).join('')+'</ol>';
+    modal('profieldata_gevraagd',5,h,{ force:true });
   }
   // v0.47.0: rapport staat in een NIEUW tabblad (de bezoeker blijft in het projecttabblad)
   function mRtab(){
@@ -4291,6 +4372,11 @@ var _simVoortgang=(function(){
       return r;
     };
     window.haalProfieldata=async function(){
+      if(D.aan && D.modus==='klant' && !adv()){   // v0.50.0: echte klant → na een geslaagde aanvraag uitleggen hoe het verder gaat
+        var rp=await _pd.apply(this, arguments);
+        try{ var sp=$('pd-status'); if(sp && sp.style.color.indexOf('green')>=0){ var dn=String(window._EK_DNB||'').trim(); sp.textContent=t('pd_st').replace('{d}', dn||t('pd_uw')); mPd(); } }catch(e){}
+        return rp;
+      }
       if(!D.aan || D.modus!=='demo') return _pd.apply(this, arguments);
       var b=$('btn-pd'); if(b) b.disabled=true;
       wachtModal('echt_bezig',4,t('echt_t'),t('echt_b'),t('echt_l'),0);
