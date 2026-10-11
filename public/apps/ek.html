@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.52.1">
+<meta name="ek-build" content="0.53.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.53.0 (2026-10-11, Johan): (1) «📶 Haal mijn profieldata op» is meteen zichtbaar op het resultaatscherm zodra profieldata opvraagbaar is (niet meer pas na het bekijken van het rapport met standaardprofiel; client-side uit /api/ek/profieldata-status: niet analoog, niet alles al gemeten, niet al in aanvraag). Demo blijft ongewijzigd (std → rapport → profiel). (2) Hulp-modal "Geen rendabele combinatie": stelt — als het project nog op een standaardprofiel rekent en profieldata opvraagbaar is (of in de demo-fase standaard) — voor om het echte profiel op te vragen, met de knop erbij. (3) INVOER: staat er een gemeten afnameprofiel op het dossier, dan vervangt "📈 Eigen profiel opgeladen" (+ maanden gemeten) de keuzelijst met standaardprofielen (kiezen was zinloos). NL/FR/EN. -->
 <!-- ek.html v0.52.1 (2026-10-11, Johan): HULP-DREMPEL 15 → 10 jaar — de modal "Geen rendabele combinatie gevonden?" verschijnt als geen enkele cel met PV en/of batterij zich binnen 10 jaar terugverdient (HULP_TVT_MAX; de modaltekst volgt de constante via {n}). -->
 <!-- ek.html v0.52.0 (2026-10-11, Johan): HULPVRAGEN BEANTWOORDEN (server ≥ 15.272.0). (1) OEKENE/adviseur: blok «🙋 Hulpvragen» in het rapportblok — per vraag commentaar, contact, terugbellen, beste TVT; open vragen: antwoordveld + «✉️ Verstuur antwoord» (mail naar de klant met knop naar het project) of «📞 Terugbellen gedaan» (afsluiten met notitie); beantwoorde vragen tonen antwoord, wie en wanneer. (2) KLANT/demo: in het invoerscherm (onder de factuur) en onder «🙋 Hulp vragen» de link «💬 Antwoord van onze adviseur» (of "in behandeling") → modal met vraag + antwoord (NL/FR/EN). -->
 <!-- ek.html v0.51.0 (2026-10-11, Johan): HULP VRAGEN — vindt een klant of demo-bezoeker geen rendabele combinatie (geen enkele doorgerekende cel met PV en/of batterij verdient zich terug binnen 15 jaar), dan verschijnt na de simulatie een modal "Geen rendabele combinatie gevonden?" met commentaarveld, e-mail, GSM en «Bel mij terug» → POST /api/ek/hulp (server ≥ 15.271.0: mail naar de back-office, projectlog, demo-stap). Eén keer automatisch per dossier en toestel; daarnaast altijd de knop «🙋 Hulp vragen» naast de offerte-knoppen (klant + demo, NL/FR/EN). -->
@@ -2596,7 +2597,24 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.30.0 (Johan): profieldata (afname/injectie) in de banner tonen + link naar een modal die hetzelfde toont als bij het
   //   opladen van de profielen. Bron: de net opgeladen analyse (_LAST_PROFIEL_ANALYSE) of het dossier/mail-link-profiel
   //   (STATE_PROFIEL_STATUS). Zichtbaar voor iedereen.
+  // v0.53.0 (Johan): gemeten afnameprofiel op het dossier → keuzelijst standaardprofielen vervangen door "Eigen profiel opgeladen"
+  function _ekProfielKeuzeUI(){
+    var sel=$('i-profiel'); if(!sel || !sel.parentNode) return;
+    var ps=STATE_PROFIEL_STATUS||null, la=(_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types)||null;
+    var heeft=!!((ps&&ps.afname&&ps.afname.aanwezig)||(la&&la.afname));
+    var box=$('i-profiel-eigen');
+    if(!box){ box=document.createElement('div'); box.id='i-profiel-eigen'; box.setAttribute('data-i18n-skip','1');
+      box.style.cssText='display:none;padding:10px 12px;border:1px solid var(--greenln,#cfe3d6);border-radius:10px;background:#F2FAF5;color:#0a7d3c;font-weight:600';
+      sel.parentNode.insertBefore(box, sel.nextSibling); }
+    if(heeft){
+      var l=window.EC_LANG, m=ps&&ps.afname&&ps.afname.gemeten_maanden;
+      var txt=(l==='fr')?'📈 Profil propre chargé':(l==='en'?'📈 Own profile uploaded':'📈 Eigen profiel opgeladen');
+      if(m!=null) txt+=' · '+m+(l==='fr'?' mois mesurés':(l==='en'?' months measured':' mnd gemeten'));
+      box.textContent=txt; box.style.display=''; sel.style.display='none';
+    } else { box.style.display='none'; sel.style.display=''; }
+  }
   function _ekProfielExtra(){
+    try{ _ekProfielKeuzeUI(); }catch(eK){}   // v0.53.0
     var el=$('profiel-extra'); if(!el) return;
     var ps=STATE_PROFIEL_STATUS||null, la=(_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types)||null;
     function deel(k){
@@ -2782,6 +2800,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(ps){ var d=[_deel('afname',ps.afname),_deel('injectie',ps.injectie)].filter(Boolean);
             if(d.length){ _pz.textContent='📈 Gemeten profiel op dit dossier: '+d.join(' · '); _pz.classList.remove('hidden'); return; } }
           _pz.classList.add('hidden'); })();
+        try{ _ekProfielKeuzeUI(); }catch(eKz){}   // v0.53.0: eigen profiel i.p.v. keuzelijst
         // v0.24.8 (Johan): BEVESTIGDE INVOER terugzetten. Heeft de adviseur dit dossier al doorgerekend, dan zetten we exact
         //   wat toen bevestigd werd terug (afname/piek/kost/PV/injectie/profiel/wagens/klant/BTW/adres/EAN-rollen). Overschrijft
         //   de uit-de-factuur-afgeleide waarden → geen her-afleiding uit de 1-maand-factuur, geen her-vraag van de EAN-rol.
@@ -3535,6 +3554,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekPdRender(j){
     var blok=$('pd-blok'), st=$('pd-status'); if(!blok) return;
     var toon=!!(j && j.ok && j.toon_knop);
+    // v0.53.0 (Johan): niet meer wachten tot het rapport bekeken is — tonen zodra profieldata opvraagbaar is (demo: ongewijzigd)
+    try{ var _isDemo=!!(window._ekDemo && window._ekDemo.status && window._ekDemo.status().aan && window._ekDemo.status().modus==='demo');
+      if(!_isDemo && j && j.ok && !j.analoog && !j.alles_profiel && !j.in_aanvraag && Array.isArray(j.eans) && j.eans.length) toon=true; }catch(e){}
+    window._EK_PD_TOON=toon;
     blok.classList.toggle('hidden', !toon);
     if(st && !st.getAttribute('data-vast')){
       if(j && j.ok && !toon && j.in_aanvraag){ st.style.color='var(--muted)'; st.textContent='ℹ️ Uw profieldata is aangevraagd bij Fluvius. Zodra de contracthouder de toegang bevestigt, maken wij uw exacte rapport.'; }
@@ -4229,6 +4252,14 @@ var _simVoortgang=(function(){
     en:{ ha_knop:'💬 Answer from our adviser', ha_kort:'Your question has been answered.', ha_wacht:'⏳ Your question is being handled — an adviser will contact you.', ha_t:'Your questions and our answers', ha_v:'Your question', ha_a:'Answer from our adviser', ha_g:'We contacted you by phone.', ha_o:'Being handled.' }
   };
   ['nl','fr','en'].forEach(function(l){ for(var k in TK5[l]) T[l][k]=TK5[l][k]; });
+
+  // v0.53.0: suggestie in de hulp-modal — echt profiel opvragen
+  var TK6={
+    nl:{ hk_pd_t:'💡 Tip: vraag uw échte verbruiksprofiel op', hk_pd_b:'Uw analyse rekent nu met een standaardprofiel. Met de kwartierdata van uw eigen meter kan het resultaat sterk verschillen — en wordt het exact.', hk_pd_k:'📶 Haal mijn profieldata op' },
+    fr:{ hk_pd_t:'💡 Conseil : demandez votre vrai profil de consommation', hk_pd_b:'Votre analyse calcule actuellement avec un profil standard. Avec les données quart-horaires de votre propre compteur, le résultat peut être très différent — et devient exact.', hk_pd_k:'📶 Récupérer mes données de profil' },
+    en:{ hk_pd_t:'💡 Tip: request your real consumption profile', hk_pd_b:'Your analysis currently calculates with a standard profile. With the quarter-hour data of your own meter the result can be quite different — and becomes exact.', hk_pd_k:'📶 Retrieve my profile data' }
+  };
+  ['nl','fr','en'].forEach(function(l){ for(var k in TK6[l]) T[l][k]=TK6[l][k]; });
   function adv(){ try{ return !!(window.ADV_MODE||window.PREP_MODE||window.EK_PREPADV||window.EK_IS_OEKENE||window.EK_KLANTVIEW||new URLSearchParams(location.search).get('prep')); }catch(e){ return false; } }
   function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
   function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -4379,7 +4410,9 @@ var _simVoortgang=(function(){
   function mHulp(reden){
     var nr=(reden==='niet_rendabel'), n=(D.modus==='klant')?3:(D.fase==='echt'?5:3);
     var mail=(document.getElementById('i-mail')&&document.getElementById('i-mail').value)||'';
+    var kanPd=(D.modus==='demo') ? (D.fase==='std') : (!window.STATE_HEEFT_PROFIEL && !!window._EK_PD_TOON);   // v0.53.0
     var h='<h3>'+esc(t(nr?'hk_t_nr':'hk_t'))+'</h3><p>'+esc(t(nr?'hk_b_nr':'hk_b').replace('{n}',HULP_TVT_MAX))+'</p>'+
+      (kanPd?('<div style="margin:8px 0 10px;padding:10px 12px;background:#E6F6EC;border-radius:10px"><b style="display:block;color:#0B6B35">'+esc(t('hk_pd_t'))+'</b><span style="color:#1A1F2B">'+esc(t('hk_pd_b'))+'</span><div style="margin-top:8px"><button type="button" class="ekd-btn" id="ekh-pd">'+esc(t('hk_pd_k'))+'</button></div></div>'):'')+
       '<textarea id="ekh-c" rows="4" placeholder="'+esc(t('hk_ph'))+'"></textarea>'+
       '<input type="email" id="ekh-m" placeholder="'+esc(t('hk_m'))+'" value="'+esc(mail)+'"><input type="tel" id="ekh-g" placeholder="'+esc(t('hk_g'))+'">'+
       '<label style="display:flex;gap:8px;align-items:center;margin:6px 0;font-weight:600"><input type="checkbox" id="ekh-b"> '+esc(t('hk_bel'))+'</label>'+
@@ -4388,6 +4421,7 @@ var _simVoortgang=(function(){
     if(nr) lsSet('EK_HULP_'+(window.TOKEN||''),'1');   // één keer automatisch per dossier en toestel
     modal(nr?'hulp_niet_rendabel':'hulp',n,h,{ geenKnop:true, force:true, na:function(){
       document.getElementById('ekh-x').onclick=sluit;
+      var bpd=document.getElementById('ekh-pd'); if(bpd) bpd.onclick=function(){ sluit(); try{ klog('hulp_pd_klik',{}); }catch(e){} try{ var bb=document.getElementById('btn-pd'); if(bb) bb.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} window.haalProfieldata(); };   // v0.53.0
       document.getElementById('ekh-s').onclick=async function(){
         var st=document.getElementById('ekh-st'), tx=(document.getElementById('ekh-c').value||'').trim(), bel=document.getElementById('ekh-b').checked, bt=this;
         if(!tx && !bel){ st.style.color='#8a5a00'; st.textContent=t('hk_leeg'); return; }
