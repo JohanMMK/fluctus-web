@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demo · Energie-Compas</title>
-<!-- demo.html v0.3.0 (2026-10-11, Johan): + knop "↺ Demo resetten" per bezoeker (POST /api/ek/demo-reset, server ≥ 15.268.1). v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
+<!-- demo.html v0.4.0 (2026-10-11, Johan): + kolom 'Type' (energiegebruiker / energieleverancier / installatiebedrijf / verkoper van EV's, uit het contactformulier; server ≥ 15.268.3) + teller per type bovenaan. v0.3.0 (2026-10-11, Johan): + knop "↺ Demo resetten" per bezoeker (POST /api/ek/demo-reset, server ≥ 15.268.1). v0.2.0 (2026-10-11, Johan): + herhalingen (↻ n× opnieuw: demo opnieuw gevraagd → geen nieuw project, link naar het bestaande). v0.1.0 (2026-10-11, Johan) — DEMO KLANTBELEVING (manager). Leest GET /api/ek/demo-overzicht (fluctus-proxy ≥ 15.267):
      één rij per bezoeker-mail, één kolom per demo-stap (tijdstip), interesse-score 1–5 per bezoeker (hoe ver + hoe snel) en
      bovenaan een vlot-score 1–5 per stap (5 = vlotte doorgang, 1 = hier blijven bezoekers hangen). -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -29,6 +29,8 @@
   .t{font-variant-numeric:tabular-nums;color:#1A1F2B} .d{display:block;color:var(--muted);font-size:11px} .x{color:#C8D0DA}
   .sc{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-weight:800;font-size:13px;color:#fff}
   .sc1{background:#C0392B}.sc2{background:#E67E22}.sc3{background:#D4AC0D}.sc4{background:#58B368}.sc5{background:#05B050}.sc0{background:#C8D0DA}
+  .rol{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:#EEF2F7;color:#33404f;white-space:nowrap}
+  .rol-gebruiker{background:#E6F6EC;color:#0a7d3c}.rol-leverancier{background:#FFF3D6;color:#8a5a00}.rol-installateur{background:#E8EEFF;color:#2a44a8}.rol-ev_verkoper{background:#F3E8FF;color:#6b2fa8}
   .mail{font-weight:600;color:var(--navy)} .sub{color:var(--muted);font-size:11.5px}
   tr.det td{background:#FAFBFD;white-space:normal}
   a{color:#2a44a8}
@@ -93,18 +95,18 @@
   function render(){
     var ks=DATA.stappen, rijen=DATA.rijen.filter(function(r){ if(!ZOEK) return true; return ((r.mail||'')+' '+(r.naam||'')+' '+(r.bedrijf||'')).toLowerCase().indexOf(ZOEK)>=0; });
     var n=DATA.rijen.length, nOpen=DATA.rijen.filter(function(r){return r.stappen.project_geopend;}).length, nEcht=DATA.rijen.filter(function(r){return r.stappen.rapport_echt_open;}).length, nC=DATA.rijen.filter(function(r){return r.stappen.contact;}).length;
-    var h='<div class="kpis"><div><b>'+n+'</b><span>bezoekers</span></div><div><b>'+nOpen+'</b><span>project geopend</span></div><div><b>'+nEcht+'</b><span>rapport echt profiel</span></div><div><b>'+nC+'</b><span>vragen contact</span></div></div>';
+    var h='<div class="kpis"><div><b>'+n+'</b><span>bezoekers</span></div><div><b>'+nOpen+'</b><span>project geopend</span></div><div><b>'+nEcht+'</b><span>rapport echt profiel</span></div><div><b>'+nC+'</b><span>vragen contact</span></div>'+(function(){ var c={}; DATA.rijen.forEach(function(r){ var k=r.rol_label||'onbekend'; c[k]=(c[k]||0)+1; }); return Object.keys(c).sort().map(function(k){ return '<div><b>'+c[k]+'</b><span>'+esc(k)+'</span></div>'; }).join(''); })()+'</div>';
     h+='<div class="bar"><input type="search" id="zoek" placeholder="Zoek op mail, naam of bedrijf…" value="'+esc(ZOEK)+'"><button type="button" id="ververs">↻ Vernieuwen</button></div>';
-    h+='<div class="wrap"><table><thead><tr><th class="s0">Bezoeker · interesse</th>'+ks.map(function(k){ return '<th>'+esc(LABEL[k]||k)+'</th>'; }).join('')+'</tr>';
-    h+='<tr class="vlot"><th class="s0" title="5 = vlotte doorgang · 1 = hier blijven bezoekers hangen">Vlot-score per stap</th>'+ks.map(function(k,i){ var v=vlot(k,i); if(!v) return '<th class="x">—</th>'; return '<th title="'+esc(v.txt)+'"><span class="sc sc'+v.sc+'">'+(v.sc||'–')+'</span></th>'; }).join('')+'</tr></thead><tbody>';
-    if(!rijen.length) h+='<tr><td class="s0" colspan="'+(ks.length+1)+'"><div class="state">Nog geen demo-aanvragen'+(ZOEK?' voor deze zoekterm':'')+'.</div></td></tr>';
+    h+='<div class="wrap"><table><thead><tr><th class="s0">Bezoeker · interesse</th><th>Type</th>'+ks.map(function(k){ return '<th>'+esc(LABEL[k]||k)+'</th>'; }).join('')+'</tr>';
+    h+='<tr class="vlot"><th class="s0" title="5 = vlotte doorgang · 1 = hier blijven bezoekers hangen">Vlot-score per stap</th><th></th>'+ks.map(function(k,i){ var v=vlot(k,i); if(!v) return '<th class="x">—</th>'; return '<th title="'+esc(v.txt)+'"><span class="sc sc'+v.sc+'">'+(v.sc||'–')+'</span></th>'; }).join('')+'</tr></thead><tbody>';
+    if(!rijen.length) h+='<tr><td class="s0" colspan="'+(ks.length+2)+'"><div class="state">Nog geen demo-aanvragen'+(ZOEK?' voor deze zoekterm':'')+'.</div></td></tr>';
     rijen.forEach(function(r,ix){
       var it=interesse(r), id='r'+ix;
       h+='<tr><td class="s0"><div style="display:flex;gap:9px;align-items:flex-start"><span class="sc sc'+it.sc+'" title="'+esc('Interesse '+it.sc+'/5 — '+it.uitleg)+'">'+it.sc+'</span><div><a href="#" data-open="'+esc(r.mail)+'" class="mail">'+esc(r.mail)+'</a>'+
-        '<div class="sub">'+esc([r.naam,r.bedrijf,r.tel,(r.taal||'').toUpperCase()].filter(Boolean).join(' · '))+(r.n_projecten>1?' · '+r.n_projecten+' projecten':'')+((r.herhalingen&&r.herhalingen.length)?' · <b style="color:#8a5a00" title="Demo opnieuw gevraagd terwijl er al een demo-project was">↻ '+r.herhalingen.length+'× opnieuw</b>':'')+'</div></div></div></td>'+ks.map(function(k,i){ return cel(r,k,i); }).join('')+'</tr>';
+        '<div class="sub">'+esc([r.naam,r.bedrijf,r.tel,(r.taal||'').toUpperCase()].filter(Boolean).join(' · '))+(r.n_projecten>1?' · '+r.n_projecten+' projecten':'')+((r.herhalingen&&r.herhalingen.length)?' · <b style="color:#8a5a00" title="Demo opnieuw gevraagd terwijl er al een demo-project was">↻ '+r.herhalingen.length+'× opnieuw</b>':'')+'</div></div></div></td>'+'<td>'+(r.rol_label?'<span class="rol rol-'+esc(r.rol||'')+'">'+esc(r.rol_label)+'</span>':'<span class="x">—</span>')+'</td>'+ks.map(function(k,i){ return cel(r,k,i); }).join('')+'</tr>';
       if(OPEN[r.mail]){
         var fb=r.feedback;
-        h+='<tr class="det"><td class="s0" colspan="'+(ks.length+1)+'"><div style="max-width:900px">'+
+        h+='<tr class="det"><td class="s0" colspan="'+(ks.length+2)+'"><div style="max-width:900px">'+
           (r.project_id?'<div><b>Project:</b> '+esc(r.project_id)+(r.token?' · <a target="_blank" rel="noopener" href="/apps/projectlog.html?token='+encodeURIComponent(r.token)+'">📜 Projectlog</a> · <a target="_blank" rel="noopener" href="/apps/ek.html?case='+encodeURIComponent(r.token)+'&lang='+esc(r.taal||'nl')+'">Open in EK</a>':'')+'</div>':'<div class="sub">Nog geen demo-project (factuur nog niet doorgestuurd).</div>')+
           '<div><b>Aanvragen:</b> '+r.n_aanvragen+' · <b>projecten:</b> '+r.n_projecten+'</div>'+
           '<div style="margin-top:8px"><button type="button" data-reset="'+esc(r.mail)+'" style="border:1px solid #F2C7C7;background:#fff;color:#8a1f1f;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer">↺ Demo resetten</button> <span class="sub">archiveert het demo-project en zet dit mailadres terug op nul → de demo kan opnieuw.</span></div>'+
