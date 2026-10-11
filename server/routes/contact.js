@@ -20,6 +20,7 @@ router.post('/', async (req, res) => {
   const focus = FOCUS.includes(b.focus) ? b.focus : null;
   const demo = b.demo === true;
   const taal = ['nl', 'fr', 'en'].includes(String(b.taal || '')) ? String(b.taal) : 'nl';
+  const rol = ['gebruiker', 'leverancier', 'installateur', 'ev_verkoper'].includes(String(b.rol || '')) ? String(b.rol) : null;   // 2026-10-11: kwalificatie demo-bezoeker
   const rij = {
     naam: b.naam, email: b.email, telefoon: b.telefoon || null,
     bedrijf: b.bedrijf || null, focus, bericht: b.bericht || null,
@@ -36,7 +37,7 @@ router.post('/', async (req, res) => {
         try {
           const r = await fetch(`${PROXY}/api/ek/demo-aanvraag`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ naam: b.naam, email: b.email, telefoon: b.telefoon || '', bedrijf: b.bedrijf || '', taal }),
+            body: JSON.stringify({ naam: b.naam, email: b.email, telefoon: b.telefoon || '', bedrijf: b.bedrijf || '', taal, rol }),
           });
           demoRes = await r.json().catch(() => ({ ok: false }));
         } catch (e) { console.warn('[contact] demo:', e.message); }
