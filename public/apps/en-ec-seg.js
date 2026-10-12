@@ -1,10 +1,12 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"📊 KPI's voor de nieuwe opstelling": "📊 KPIs for the new setup",
+"Voor de gekozen combinatie van zonnepanelen en batterij. Kies hieronder een andere cel in het rooster en de cijfers volgen mee.": "For the chosen combination of solar panels and battery. Pick another cell in the grid below and the figures follow.",
 /* v2026-10-12 kalibratie */
 "Je netkosten hangen voor een groot deel af van je piek (capaciteitstarief). De batterij vlakt je hoogste kwartierpieken af.": "Your grid costs depend largely on your peak (capacity tariff). The battery shaves your highest quarter-hour peaks.",
 "Je netkosten hangen voor een groot deel af van je piek (capaciteitstarief).": "Your grid costs depend largely on your peak (capacity tariff).",
