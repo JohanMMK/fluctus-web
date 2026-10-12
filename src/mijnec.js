@@ -29,12 +29,12 @@ const T = {
 // Vlaggen: altijd | managerOnly | gatedBy | extern | video.
 const APP_CATALOG = [
   { id: 'ek',           naam: 'Energie-Compas',   ico: '📊', beschrijving: 'Snelle energie-analyse → besparing & rendement in één scherm, met adviseur-link om het resultaat te delen.', url: '/apps/ek.html?prep=1', gatedBy: 'energiekompas' },
-  { id: 'adviseur',     naam: 'Mijn klanten',     ico: '👥', beschrijving: 'Nodig klanten uit voor een energie-analyse. Zij sturen hun factuur en worden automatisch aan u gekoppeld.', url: '/apps/adviseur.html', gatedBy: 'energiekompas' },
-  { id: 'energiekompas',naam: 'Energie-schil',    ico: '🔆', beschrijving: 'Uw energie-advies in één schil: particulier of bedrijf → besparing, rendement en advies.', url: '/apps/energiekompas.html' },
+  { id: 'adviseur',     naam: 'Mijn klanten',     ico: '👥', beschrijving: 'Nodig klanten uit voor een energie-analyse. Zij sturen hun factuur en worden automatisch aan jou gekoppeld.', url: '/apps/adviseur.html', gatedBy: 'energiekompas' },
+  { id: 'energiekompas',naam: 'Energie-schil',    ico: '🔆', beschrijving: 'Je energie-advies in één schil: particulier of bedrijf → besparing, rendement en advies.', url: '/apps/energiekompas.html' },
   { id: 'academy',      naam: 'Academy',          ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
   { id: 'energiemarkt', naam: 'Energiemarkt',     ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulatiedata bij.', url: '/apps/energiemarkt.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan',     ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
-  { id: 'kamino',       naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Uw pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
+  { id: 'kamino',       naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Je pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
   { id: 'simulator',    naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
   { id: 'betaalplein',  naam: 'Laadplein',        ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein' },
   { id: 'thuisladen',   naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html' },
