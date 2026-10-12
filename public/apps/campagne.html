@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPC-campagne · Energie-Compas</title>
+<link rel="icon" href="/favicon-ec.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-ec-32.png">
+<!-- campagne.html v0.1.0 (2026-10-12, Johan): EPC-CAMPAGNE — contacten (voornaam, naam, mail, telefoon, type leverancier/installateur, taal NL/FR, bedrijf) bijhouden en de campagnemail
+     "Op elke personeelsparking minstens 1 C&I-batterij" + brochure (PDF, in de taal van het contact) versturen via de dossier-mailbox.
+     Toevoegen per stuk of een lijst plakken, testmail naar jezelf, verzenden naar een selectie (standaard enkel wie nog niets kreeg),
+     status per contact. Enkel managers. Server ≥ 15.279.0 (/api/campagne/epc*). -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--ink:#14203a;--ink2:#54617a;--muted:#8a94a6;--line:#e6eaf1;--soft:#f5f8fc;--green:#05b050;--green-d:#048443;--green-bg:#e6f6ec;--amber:#B45309;--red:#c0392b}
+  *{box-sizing:border-box} body{margin:0;background:var(--soft);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink)}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header b{font-size:16px} .who{margin-left:auto;color:var(--muted);font-size:12px} .sub{color:var(--muted);font-size:12px}
+  main{max-width:1250px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .card h3{margin:0 0 10px;font-size:15px}
+  .rij{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+  .rij label{display:flex;flex-direction:column;font-size:12px;color:var(--ink2);gap:3px}
+  input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--green)}
+  button{font:inherit;cursor:pointer;border-radius:999px;padding:8px 16px;border:1px solid var(--line);background:#fff}
+  button.groen{background:var(--green);border-color:var(--green);color:#fff;font-weight:600} button.groen:hover{background:var(--green-d)}
+  button:disabled{opacity:.5;cursor:default}
+  .wrap{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%} th,td{padding:7px 10px;border-bottom:1px solid #EEF2F7;text-align:left;font-size:13px;vertical-align:middle}
+  thead th{background:#F7F9FC;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0}
+  .st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+  .st-ok{background:var(--green-bg);color:var(--green-d)} .st-nee{background:#F1F3F7;color:var(--ink2)} .st-fout{background:#FDECEC;color:var(--red)}
+  .taal{font-weight:700;font-size:12px;color:var(--ink2)} .acties a{margin-right:8px;color:#2a44a8;cursor:pointer;text-decoration:none}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .msg{font-size:13px;min-height:1.2em} .ok{color:var(--green-d)} .err{color:var(--red)}
+  pre.vb{white-space:pre-wrap;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:13px/1.5 inherit;font-family:inherit;margin:6px 0 0}
+  #ov{position:fixed;inset:0;background:rgba(13,21,38,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+  #ov .k{background:#fff;border-radius:16px;max-width:460px;width:100%;padding:20px 22px}
+  .fout{background:#FEF2F2;border:1px solid #F2C7C7;color:#8a1f1f;padding:12px;border-radius:10px} .state{color:var(--muted);padding:20px}
+  .prog{height:8px;background:var(--line);border-radius:9px;overflow:hidden;margin-top:6px} .prog div{height:100%;background:var(--green)}
+</style>
+</head>
+<body>
+<header><b>📣 EPC-campagne</b><span class="sub">mail «Op elke personeelsparking minstens 1 C&amp;I-batterij» + brochure, in de taal van het contact</span><span class="who" id="who"></span></header>
+<main><div id="root"><div class="state">Laden…</div></div></main>
+<div id="ov"><div class="k" id="ovk"></div></div>
+<script>
+  var $=function(id){return document.getElementById(id);};
+  var sb=null, SESSION=null, PROXY='', DATA=null, SEL=new Set(), ZOEK='', POLL=null, BEWERK=null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function dt(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return ''; return p2(d.getDate())+'-'+p2(d.getMonth()+1)+' '+p2(d.getHours())+':'+p2(d.getMinutes()); }
+  async function hdr(){ try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session) SESSION=d.data.session; }catch(e){} return { 'Authorization':'Bearer '+(SESSION&&SESSION.access_token), 'Content-Type':'application/json' }; }
+  async function api(pad, body){ var r=await fetch(PROXY+pad,{ method:body?'POST':'GET', headers:await hdr(), body:body?JSON.stringify(body):undefined, cache:'no-store' }); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status)); return j; }
+  function status(c){ var v=(c.verzonden||[]); var l=v[v.length-1]; if(!l) return '<span class="st st-nee">nog niet verstuurd</span>';
+    return l.ok?'<span class="st st-ok">✔ verstuurd '+esc(dt(l.ts))+'</span>':'<span class="st st-fout" title="'+esc(l.reden||'')+'">✖ fout '+esc(dt(l.ts))+'</span>'; }
+  function verstuurd(c){ return (c.verzonden||[]).some(function(v){ return v.ok; }); }
+  function render(){
+    var C=DATA.contacten||[], job=DATA.job;
+    var rij=C.filter(function(c){ if(!ZOEK) return true; return (c.voornaam+' '+c.naam+' '+c.mail+' '+(c.bedrijf||'')+' '+(c.tel||'')+' '+(c.type||'')).toLowerCase().indexOf(ZOEK)>=0; });
+    var nOk=C.filter(verstuurd).length;
+    var h='';
+    h+='<div class="card"><h3>'+(BEWERK?'✏️ Contact bewerken':'➕ Contact toevoegen')+'</h3><div class="rij">'+
+      '<label>Voornaam<input id="f-vn" value="'+esc(BEWERK?BEWERK.voornaam:'')+'"></label>'+
+      '<label>Naam<input id="f-n" value="'+esc(BEWERK?BEWERK.naam:'')+'"></label>'+
+      '<label>E-mailadres *<input id="f-m" type="email" style="min-width:240px" value="'+esc(BEWERK?BEWERK.mail:'')+'"></label>'+
+      '<label>Telefoon<input id="f-tel" type="tel" value="'+esc(BEWERK?(BEWERK.tel||''):'')+'"></label>'+'<label>Bedrijf<input id="f-b" value="'+esc(BEWERK?(BEWERK.bedrijf||''):'')+'"></label>'+'<label>Type<select id="f-ty"><option value="">—</option><option value="leverancier"'+(BEWERK&&BEWERK.type==='leverancier'?' selected':'')+'>Leverancier</option><option value="installateur"'+(BEWERK&&BEWERK.type==='installateur'?' selected':'')+'>Installateur</option></select></label>'+
+      '<label>Taal<select id="f-t"><option value="nl"'+(BEWERK&&BEWERK.taal==='fr'?'':' selected')+'>NL</option><option value="fr"'+(BEWERK&&BEWERK.taal==='fr'?' selected':'')+'>FR</option></select></label>'+
+      '<button class="groen" id="f-ok">'+(BEWERK?'Opslaan':'Toevoegen')+'</button>'+(BEWERK?'<button id="f-x">Annuleren</button>':'')+'</div>'+
+      '<div class="msg" id="f-msg"></div>'+
+      '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2a44a8">📋 Een lijst plakken (bv. uit Excel)</summary>'+
+      '<p class="sub" style="margin:6px 0">Eén contact per regel: <b>voornaam ; naam ; e-mail ; telefoon ; leverancier/installateur ; taal (nl/fr) ; bedrijf</b> — scheiding met ; of tab. E-mail, telefoon, type en taal worden herkend, ook in een andere volgorde. Enkel e-mail is verplicht; zonder taal → NL.</p>'+
+      '<textarea id="f-lijst" rows="5" style="width:100%" placeholder="Jan;Peeters;jan@peeterssolar.be;+32 470 12 34 56;installateur;nl;Peeters Solar&#10;Marie;Dubois;marie@exemple.be;leverancier;fr"></textarea>'+
+      '<div style="margin-top:6px"><button id="f-plak">Lijst toevoegen</button></div></details></div>';
+    h+='<div class="card"><h3>✉️ Versturen</h3>'+
+      '<div class="bar"><button id="b-sel">Selecteer wie nog niets kreeg</button><button id="b-geen">Selectie wissen</button>'+
+      '<button class="groen" id="b-stuur"'+((!SEL.size||(job&&job.bezig))?' disabled':'')+'>Verstuur naar selectie ('+SEL.size+')</button>'+
+      '<button id="b-test"'+((job&&job.bezig)?' disabled':'')+'>🧪 Testmail naar mij (NL + FR)</button>'+
+      '<span class="sub">Brochures: <a href="'+esc(DATA.brochures.nl)+'" target="_blank" rel="noopener">NL</a> · <a href="'+esc(DATA.brochures.fr)+'" target="_blank" rel="noopener">FR</a></span></div>'+
+      (job?('<div class="sub">'+(job.bezig?'⏳ Bezig: ':'Laatste verzending: ')+job.klaar+'/'+job.totaal+' — '+job.ok+' verstuurd'+(job.fout?', <b style="color:var(--red)">'+job.fout+' fout</b>':'')+(job.test?' (test)':'')+'</div><div class="prog"><div style="width:'+Math.round(100*job.klaar/Math.max(1,job.totaal))+'%"></div></div>'):'')+
+      '<details style="margin-top:8px"><summary style="cursor:pointer;color:#2a44a8">Voorbeeld van de mail</summary><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+      '<div><b>NL</b> — '+esc(DATA.voorbeeld.nl.subject)+'<pre class="vb">'+esc(DATA.voorbeeld.nl.txt)+'</pre></div><div><b>FR</b> — '+esc(DATA.voorbeeld.fr.subject)+'<pre class="vb">'+esc(DATA.voorbeeld.fr.txt)+'</pre></div></div></details>'+
+      '<div class="msg" id="s-msg"></div></div>';
+    h+='<div class="bar"><b>'+C.length+' contacten</b><span class="sub">'+nOk+' al verstuurd</span><input type="search" id="zoek" style="flex:1;min-width:200px" placeholder="Zoek op naam, mail of bedrijf…" value="'+esc(ZOEK)+'"></div>';
+    h+='<div class="wrap"><table><thead><tr><th><input type="checkbox" id="alle"></th><th>Voornaam</th><th>Naam</th><th>Bedrijf</th><th>Type</th><th>E-mail</th><th>Telefoon</th><th>Taal</th><th>Status</th><th></th></tr></thead><tbody>';
+    if(!rij.length) h+='<tr><td colspan="10"><div class="state">'+(C.length?'Geen resultaten.':'Nog geen contacten — voeg er hierboven toe.')+'</div></td></tr>';
+    rij.forEach(function(c){
+      h+='<tr><td><input type="checkbox" data-sel="'+esc(c.id)+'"'+(SEL.has(c.id)?' checked':'')+'></td><td>'+esc(c.voornaam)+'</td><td>'+esc(c.naam)+'</td><td>'+esc(c.bedrijf||'')+'</td><td>'+(c.type==='leverancier'?'Leverancier':(c.type==='installateur'?'Installateur':'<span class="sub">—</span>'))+'</td><td>'+esc(c.mail)+'</td><td style="white-space:nowrap">'+esc(c.tel||'')+'</td><td class="taal">'+esc((c.taal||'nl').toUpperCase())+'</td><td>'+status(c)+'</td>'+
+        '<td class="acties" style="white-space:nowrap"><a data-edit="'+esc(c.id)+'">✏️</a><a data-del="'+esc(c.id)+'">🗑</a></td></tr>';
+    });
+    h+='</tbody></table></div>';
+    $('root').innerHTML=h; bedraad(rij);
+  }
+  function msg(id, t, ok){ var e=$(id); if(e){ e.className='msg '+(ok?'ok':'err'); e.textContent=t; } }
+  function bedraad(rij){
+    $('f-ok').onclick=async function(){
+      var c={ voornaam:$('f-vn').value, naam:$('f-n').value, mail:$('f-m').value, tel:$('f-tel').value, type:$('f-ty').value, bedrijf:$('f-b').value, taal:$('f-t').value }; if(BEWERK) c.id=BEWERK.id;
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((c.mail||'').trim())){ msg('f-msg','Geef een geldig e-mailadres.'); return; }
+      try{ var j=await api('/api/campagne/epc/contact',{ contact:c }); DATA.contacten=j.contacten; BEWERK=null; render(); msg('f-msg', j.nieuw?'✔ Toegevoegd':'✔ Opgeslagen', true); }catch(e){ msg('f-msg','Opslaan lukte niet: '+e.message); }
+    };
+    if($('f-x')) $('f-x').onclick=function(){ BEWERK=null; render(); };
+    $('f-plak').onclick=async function(){
+      var regels=($('f-lijst').value||'').split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean), lijst=[];
+      regels.forEach(function(r){ var d=r.split(/\t|;/).map(function(x){ return x.trim(); }); if(d.length<2) d=r.split(',').map(function(x){ return x.trim(); }); var mi=d.findIndex(function(x){ return /@/.test(x); }); if(mi<0) return;
+        var rest=d.filter(function(x,i){ return i!==mi; }), taal='nl', type='', tel='';
+        var ti=rest.findIndex(function(x){ return /^(nl|fr)$/i.test(x); }); if(ti>=0){ taal=rest[ti].toLowerCase(); rest.splice(ti,1); }
+        var yi=rest.findIndex(function(x){ return /^(leverancier|installateur|fournisseur|installatiebedrijf|epc)$/i.test(x); }); if(yi>=0){ type=/^(leverancier|fournisseur)$/i.test(rest[yi])?'leverancier':'installateur'; rest.splice(yi,1); }
+        var pi=rest.findIndex(function(x){ return /^[+0][\d\s\/.()-]{7,}$/.test(x); }); if(pi>=0){ tel=rest[pi]; rest.splice(pi,1); }
+        lijst.push({ voornaam:rest[0]||'', naam:rest[1]||'', mail:d[mi], tel:tel, type:type, taal:taal, bedrijf:rest.slice(2).join(' ') }); });
+      if(!lijst.length){ msg('f-msg','Geen e-mailadressen gevonden in de lijst.'); return; }
+      try{ var j=await api('/api/campagne/epc/contact',{ contacten:lijst }); DATA.contacten=j.contacten; render(); msg('f-msg','✔ '+j.nieuw+' nieuw, '+j.bijgewerkt+' bijgewerkt'+(j.fouten.length?' · ongeldig: '+j.fouten.join(', '):''), !j.fouten.length); }catch(e){ msg('f-msg','Toevoegen lukte niet: '+e.message); }
+    };
+    $('zoek').oninput=function(){ ZOEK=this.value.trim().toLowerCase(); var p=this.selectionStart; render(); var z=$('zoek'); z.focus(); try{ z.setSelectionRange(p,p); }catch(e){} };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-sel]'),function(cb){ cb.onchange=function(){ var id=cb.getAttribute('data-sel'); if(cb.checked) SEL.add(id); else SEL.delete(id); render(); }; });
+    $('alle').onchange=function(){ var aan=this.checked; rij.forEach(function(c){ if(aan) SEL.add(c.id); else SEL.delete(c.id); }); render(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'),function(a){ a.onclick=function(){ BEWERK=(DATA.contacten||[]).find(function(c){ return c.id===a.getAttribute('data-edit'); })||null; render(); window.scrollTo({top:0,behavior:'smooth'}); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'),function(a){ a.onclick=function(){ var c=(DATA.contacten||[]).find(function(x){ return x.id===a.getAttribute('data-del'); }); if(!c) return;
+      bevestig('Contact verwijderen?', esc((c.voornaam+' '+c.naam).trim()||c.mail)+' ('+esc(c.mail)+') wordt uit de lijst verwijderd.', 'Verwijderen', async function(){ var j=await api('/api/campagne/epc/verwijder',{ id:c.id }); SEL.delete(c.id); DATA.contacten=j.contacten; render(); }); }; });
+    $('b-sel').onclick=function(){ SEL=new Set((DATA.contacten||[]).filter(function(c){ return !verstuurd(c); }).map(function(c){ return c.id; })); render(); };
+    $('b-geen').onclick=function(){ SEL.clear(); render(); };
+    $('b-stuur').onclick=function(){
+      var gekozen=(DATA.contacten||[]).filter(function(c){ return SEL.has(c.id); }), al=gekozen.filter(verstuurd).length, nl=gekozen.filter(function(c){ return c.taal!=='fr'; }).length;
+      bevestig('Campagnemail versturen?', '<b>'+gekozen.length+'</b> contact(en) krijgen de mail + brochure in hun taal ('+nl+' NL · '+(gekozen.length-nl)+' FR), vanuit dossier@energie-compas.eu.'+
+        (al?'<br><br><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ov-opn"> Ook opnieuw sturen naar de '+al+' die hem al kregen</label>':''), 'Versturen', async function(){
+        var opn=!!($('ov-opn')&&$('ov-opn').checked);
+        var j=await api('/api/campagne/epc/verstuur',{ ids:Array.from(SEL), opnieuw:opn }); msg('s-msg', j.aantal?('⏳ Verzending gestart naar '+j.aantal+' contact(en)…'):(j.melding||'Niets te versturen.'), !!j.aantal); if(j.aantal){ SEL.clear(); volg(); } });
+    };
+    $('b-test').onclick=async function(){ try{ var j=await api('/api/campagne/epc/verstuur',{ test:true }); msg('s-msg','⏳ Testmail (NL + FR) onderweg naar '+((SESSION.user&&SESSION.user.email)||'jou')+'…', true); volg(); }catch(e){ msg('s-msg','Testmail lukte niet: '+e.message); } };
+  }
+  function bevestig(titel, html, knop, fn){
+    $('ovk').innerHTML='<h3 style="margin:0 0 8px">'+esc(titel)+'</h3><div style="color:var(--ink2)">'+html+'</div><div class="msg" id="ov-msg"></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button id="ov-x">Annuleren</button><button class="groen" id="ov-ok">'+esc(knop)+'</button></div>';
+    $('ov').style.display='flex'; $('ov-x').onclick=function(){ $('ov').style.display='none'; };
+    $('ov-ok').onclick=async function(){ this.disabled=true; try{ await fn(); $('ov').style.display='none'; }catch(e){ this.disabled=false; msg('ov-msg', e.message); } };
+  }
+  function volg(){ if(POLL) clearInterval(POLL); POLL=setInterval(async function(){ try{ var j=await api('/api/campagne/epc'); DATA=j; render(); if(!j.job||!j.job.bezig){ clearInterval(POLL); POLL=null; msg('s-msg','✔ Klaar: '+(j.job?j.job.ok:0)+' verstuurd'+((j.job&&j.job.fout)?', '+j.job.fout+' fout':''), !(j.job&&j.job.fout)); } }catch(e){} }, 3000); }
+  async function laad(){
+    try{ DATA=await api('/api/campagne/epc'); render(); if(DATA.job&&DATA.job.bezig) volg(); }
+    catch(e){ $('root').innerHTML='<div class="fout">'+(/Manager|401/.test(e.message)?'Deze pagina is enkel voor managers. Meld je aan via de portal en open ze opnieuw.':'Fout bij ophalen: '+esc(e.message))+'</div>'; }
+  }
+  (async function(){
+    try{
+      var rc=await fetch('/api/config'); var CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'https://lucid-amazement-production.up.railway.app').replace(/\/+$/,'');
+      if(CFG.supabaseUrl&&CFG.supabaseAnonKey&&window.supabase){ sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey); var d=await sb.auth.getSession(); SESSION=d.data.session; }
+      if(!SESSION){ $('root').innerHTML='<div class="fout">Niet aangemeld. Meld je aan via de portal en open deze pagina opnieuw.</div>'; return; }
+      $('who').textContent=(SESSION.user&&SESSION.user.email)||'';
+      await laad();
+    }catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
+  })();
+</script>
+</body>
+</html>
