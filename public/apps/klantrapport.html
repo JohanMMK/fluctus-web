@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.36.0 (2026-10-12, Johan): NIEUWE BIJLAGE «Je bestaande zonnepanelen» (D.bestaande_pv, ek ≥ v0.57.0): vermogen, geschatte productie, zelfverbruik en injectie van de BESTAANDE PV. Bij een BEDRIJF met een GEMETEN injectieprofiel een extra pagina «injectie sturen»: afremmen bij negatieve spot + bijsturen op onbalans (passieve respons), beheerkost 0,72 euro/kVA/maand, extra netto-inkomsten per MWh injectie en de terugverdientijd van 3.500 euro + 2 heatmaps. -->
 <!-- klantrapport.html v0.35.0 (2026-10-12, Johan): JE-VORM — alle NL-teksten van het rapport en de rapportgids van u/uw naar je/jouw (FR/EN via de mee omgezette sleutels in fr-ec-seg/en-ec-seg/fr-ec-dict). + favicon Energie-Compas. -->
 <!-- klantrapport.html v0.34.1 (2026-10-12, Johan): rapportgids: "een goede eerste schatting" weg → "Zo krijgt u een scherper rapport, op maat:"; bij PDF bewaren ook wat te kiezen op een Windows-pc («Microsoft Print to PDF» als printer). -->
 <!-- klantrapport.html v0.34.0 (2026-10-12, Johan): RAPPORT-GIDS VLOTTER, in de stijl van de website — korte titel + één zin + 3 genummerde stappen (groene bolletjes) + offertes/PDF als twee compacte regels met icoon. Poppins, inkt #14203a, pill-knop. NL/FR/EN. -->
@@ -71,8 +72,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.2.4"></script>
-<script src="en-ec-seg.js?v=1.0.1"></script>
+<script src="fr-ec-seg.js?v=1.2.5"></script>
+<script src="en-ec-seg.js?v=1.0.2"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -1249,6 +1250,72 @@ financieelPagina();
        '<div class="don-row"><span class="don-sw" style="background:'+AMB+'"></span><span class="don-lb">Injectie op het net</span></div>'+
      '</div></div>';
   pagina(h);
+})();
+
+// A1c — BESTAANDE ZONNEPANELEN (v0.36.0, Johan): eigen bijlage voor de BESTAANDE PV (D.bestaande_pv, ek ≥ v0.57.0) +
+//   bij een bedrijf met een GEMETEN injectieprofiel een extra pagina: injectie sturen op spot (afremmen bij negatieve
+//   day-ahead) en onbalans (passieve respons), met beheerkost per kVA/maand, netto per MWh en terugverdientijd.
+(function(){
+  var BP=D.bestaande_pv; if(!BP) return;
+  var S=(!IS_PART && BP.sturing && BP.sturing.payback) ? BP.sturing : null;
+  var kwp=+BP.kwp||0; if(!(kwp>0) && !S) return;
+  var EJ=(S&&S.energie_jaar)||{};
+  var prod=(S&&+EJ.productie_mwh>0)?+EJ.productie_mwh:Math.round(kwp*0.9*10)/10;           // ± 900 kWh per kWp per jaar
+  var injM=(S&&+EJ.injectie_mwh>0);
+  var inj=injM?+EJ.injectie_mwh:(+BP.inj_mwh_factuur||0);
+  if(inj>prod) prod=inj;                                                                   // productie ≥ injectie
+  var zelf=Math.max(0, Math.round((prod-inj)*10)/10), zPct=prod>0?Math.round(zelf/prod*100):0;
+  function d1(v){ return _num(v, v<100?1:0); }
+  var h=_bijlage('Je bestaande zonnepanelen');
+  h+='<p class="lead">Je hebt al zonnepanelen. In elke berekening van dit rapport rekenen we ze mee: de zonnestroom die je zelf verbruikt, '+
+     'verlaagt je afname van het net; het overschot gaat naar het net (injectie). Nieuwe zonnepanelen uit het voorstel komen daar bovenop.</p>';
+  h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr;margin:6px 0 8px">'+
+       '<div class="box"><span class="l">Vermogen</span><div class="v">'+d1(kwp)+'</div><span class="je">kWp'+(BP.kwp_geschat?' (geschat)':'')+'</span></div>'+
+       '<div class="box"><span class="l">Productie</span><div class="v">'+d1(prod)+'</div><span class="je">MWh per jaar</span></div>'+
+       '<div class="box win"><span class="l">Injectie</span><div class="v win">'+(inj>0?d1(inj):'—')+'</div><span class="je">'+(inj>0?'MWh per jaar':'onbekend')+'</span></div>'+
+     '</div>';
+  h+='<table class="f"><thead><tr><th>Je zonnestroom</th><th>MWh per jaar</th><th>Aandeel</th></tr></thead><tbody>'+
+     '<tr><td>Productie (± 900 kWh per kWp)</td><td>'+d1(prod)+'</td><td>100 %</td></tr>'+
+     '<tr><td>Zelf verbruikt</td><td>'+(inj>0?d1(zelf):'—')+'</td><td>'+(inj>0?(zPct+' %'):'—')+'</td></tr>'+
+     '<tr><td>Injectie op het net</td><td>'+(inj>0?d1(inj):'—')+'</td><td>'+(inj>0?((100-zPct)+' %'):'—')+'</td></tr>'+
+     '</tbody></table>';
+  h+='<p class="note">'+(injM?'De injectie komt uit je gemeten injectieprofiel (kwartierdata, op jaarbasis).':
+       (inj>0?'De injectie komt uit je factuur (op jaarbasis).':'Je injectie is (nog) niet gekend: we rekenen dan met de geschatte productie en nemen aan dat je je zonnestroom grotendeels zelf verbruikt.'))+
+     ' De productie is een schatting op basis van het vermogen.</p>';
+  if(S && S.opbrengst_jaar && +S.opbrengst_jaar.vandaag_spot_eur){
+    h+='<p class="note">Waarde van je injectie vandaag, aan de spotprijs: <b>'+eur(S.opbrengst_jaar.vandaag_spot_eur)+' per jaar</b>. '+
+       'Op de volgende pagina zie je wat het sturen van die injectie extra oplevert.</p>';
+  }
+  pagina(h);
+  if(!S) return;
+  // ── extra pagina: injectie sturen (enkel bedrijf + gemeten injectieprofiel) ──
+  var pb=S.payback||{}, O=S.opbrengst_jaar||{}, IV=S.invoer||{};
+  var net=+pb.netto_beide_jaar_eur||0, pm=pb.netto_per_mwh_eur, tvt=(net>0&&pb.payback_beide_jaar!=null)?+pb.payback_beide_jaar:null;
+  var kva=+IV.inverter_kva||0, bkm=+S.beheer_eur_kva_maand||+pb.management_eur_per_kva_maand||0, injJ=+pb.injectie_mwh_jaar||inj;
+  var h2=kop('Je bestaande zonnepanelen — injectie sturen');
+  h2+='<p class="lead">Met een sturing op je bestaande zonnepanelen rem je je injectie af als de spotprijs negatief is, en stuur je ze bij '+
+      'op het onbalanssignaal van het net (passieve respons). Berekend op je gemeten injectieprofiel en de marktprijzen van het voorbije jaar.</p>';
+  h2+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr;margin:6px 0 8px">'+
+        '<div class="box win"><span class="l">Extra inkomsten netto</span><div class="v win">'+(pm!=null?('€ '+_num(pm, Math.abs(pm)<10?1:0)):'—')+'</div><span class="je">per MWh injectie</span></div>'+
+        '<div class="box"><span class="l">Netto per jaar</span><div class="v">'+eur(net)+'</div><span class="je">na beheerkost</span></div>'+
+        '<div class="box"><span class="l">Terugverdientijd</span><div class="v">'+(tvt!=null?_num(tvt, tvt<10?1:0):'—')+'</div><span class="je">'+(tvt!=null?'jaar':'niet terugverdiend')+'</span></div>'+
+      '</div>';
+  h2+='<table class="f jpj" style="font-size:12px"><thead><tr><th>Per jaar</th><th>Bedrag</th></tr></thead><tbody>'+
+      '<tr><td>Injectie (gemeten profiel, op jaarbasis)</td><td>'+d1(injJ)+' MWh</td></tr>'+
+      '<tr><td>Waarde van je injectie vandaag (spotprijs)</td><td>'+eur(O.vandaag_spot_eur||0)+'</td></tr>'+
+      '<tr><td>+ Injectie afremmen bij een negatieve spotprijs</td><td class="win">'+eur(O.meerwaarde_curtail_eur||0)+'</td></tr>'+
+      '<tr><td>+ Injectie bijsturen op het onbalanssignaal</td><td class="win">'+eur(O.meerwaarde_onbalans_eur||0)+'</td></tr>'+
+      '<tr><td>− Beheerkost (€ '+_num(bkm,2)+' per kVA per maand · ± '+_num(kva,0)+' kVA omvormer)</td><td>− '+eur(pb.management_jaar_eur||0)+'</td></tr>'+
+      '<tr class="tot"><td>Extra inkomsten netto</td><td>'+eur(net)+'</td></tr>'+
+      '<tr><td>Investering (eenmalig)</td><td>'+eur(pb.investering_eur||3500)+'</td></tr>'+
+      '</tbody></table>';
+  // één heatmap: meerwaarde van de sturing (afremmen + onbalans) per uur en per dag → past op één A4
+  var _hc=S.hm_curtail, _ho=S.hm_onbalans, _hs=null;
+  if(_hc||_ho){ _hs=[]; for(var _h=0;_h<24;_h++){ var _r=[]; for(var _d=0;_d<365;_d++){ _r.push(((_hc&&_hc[_h]&&+_hc[_h][_d])||0)+((_ho&&_ho[_h]&&+_ho[_h][_d])||0)); } _hs.push(_r); } }
+  if(_hs) h2+=heatBlok('Meerwaarde van de sturing per uur en per dag (€)', _hs, '€', 'Donkerder = meer meerwaarde: afremmen bij een negatieve spotprijs en bijsturen op onbalans samen.', null);
+  h2+='<p class="note">Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van '+(BP.kwp_geschat?'je gemeten injectiepiek':'het PV-vermogen')+'. '+
+      'Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.</p>';
+  pagina(h2);
 })();
 
 // A2 — injectiesturing (3 heatmaps)

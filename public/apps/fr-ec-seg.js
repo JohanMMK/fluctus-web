@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_FR_SEG = {
@@ -1141,7 +1141,52 @@ window.EC_FR_SEG = {
 "De verbinding met de rekenserver lijkt even weg — we blijven het proberen.": "La connexion avec le serveur de calcul semble interrompue — nous continuons d'essayer.",
 "De berekening loopt nog. Lukt het niet binnen 5 minuten, dan tonen we een melding met de knop Opnieuw proberen.": "Le calcul est toujours en cours. S'il n'aboutit pas dans les 5 minutes, nous affichons un message avec le bouton Réessayer.",
 "Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. Je hoeft niets te doen.": "Cela prend plus de temps que d'habitude — un parc de véhicules plus important demande plus de calculs. Vous n'avez rien à faire.",
-"Laat deze pagina open — het resultaat verschijnt vanzelf.": "Laissez cette page ouverte — le résultat s'affichera automatiquement."
+"Laat deze pagina open — het resultaat verschijnt vanzelf.": "Laissez cette page ouverte — le résultat s'affichera automatiquement.",
+/* v2026-10-12 (Johan): bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0) */
+"☀️ Je bestaande zonnepanelen — injectie sturen": "☀️ Vos panneaux solaires existants — piloter l’injection",
+"Op basis van je gemeten injectieprofiel. We remmen je injectie af als de spotprijs negatief is en sturen ze bij op het onbalanssignaal van het net. Enkel voor je bestaande zonnepanelen.": "Sur la base de votre profil d’injection mesuré. Nous réduisons votre injection lorsque le prix spot est négatif et l’ajustons selon le signal de déséquilibre du réseau. Uniquement pour vos panneaux solaires existants.",
+"Extra inkomsten netto": "Revenus supplémentaires nets",
+"€ {#}/MWh": "€ {#}/MWh",
+"per MWh injectie · € {#} per jaar": "par MWh injecté · € {#} par an",
+"investering € {#}": "investissement € {#}",
+"niet terugverdiend": "pas rentabilisé",
+"± {#} kVA omvormer · beheer € {#}/kVA/maand": "± {#} kVA d’onduleur · gestion € {#}/kVA/mois",
+"Bijlage {#} — Je bestaande zonnepanelen": "Annexe {#} — Vos panneaux solaires existants",
+"Je hebt al zonnepanelen. In elke berekening van dit rapport rekenen we ze mee: de zonnestroom die je zelf verbruikt, verlaagt je afname van het net; het overschot gaat naar het net (injectie). Nieuwe zonnepanelen uit het voorstel komen daar bovenop.": "Vous disposez déjà de panneaux solaires. Nous les intégrons dans chaque calcul de ce rapport : l’électricité solaire que vous consommez vous-même réduit votre prélèvement sur le réseau ; l’excédent est injecté sur le réseau. Les nouveaux panneaux solaires de la proposition s’y ajoutent.",
+"Vermogen": "Puissance",
+"kWp": "kWc",
+"kWp (geschat)": "kWc (estimé)",
+"Productie": "Production",
+"onbekend": "inconnue",
+"Je zonnestroom": "Votre électricité solaire",
+"Aandeel": "Part",
+"Productie (± {#} kWh per kWp)": "Production (± {#} kWh par kWc)",
+"Zelf verbruikt": "Autoconsommée",
+"De injectie komt uit je gemeten injectieprofiel (kwartierdata, op jaarbasis). De productie is een schatting op basis van het vermogen.": "L’injection provient de votre profil d’injection mesuré (données quart-horaires, sur base annuelle). La production est une estimation basée sur la puissance.",
+"De injectie komt uit je factuur (op jaarbasis). De productie is een schatting op basis van het vermogen.": "L’injection provient de votre facture (sur base annuelle). La production est une estimation basée sur la puissance.",
+"Je injectie is (nog) niet gekend: we rekenen dan met de geschatte productie en nemen aan dat je je zonnestroom grotendeels zelf verbruikt. De productie is een schatting op basis van het vermogen.": "Votre injection n’est pas (encore) connue : nous calculons alors avec la production estimée et supposons que vous consommez vous-même l’essentiel de votre électricité solaire. La production est une estimation basée sur la puissance.",
+"Waarde van je injectie vandaag, aan de spotprijs:": "Valeur de votre injection aujourd’hui, au prix spot :",
+"€ {#} per jaar": "€ {#} par an",
+". Op de volgende pagina zie je wat het sturen van die injectie extra oplevert.": ". La page suivante montre ce que le pilotage de cette injection rapporte en plus.",
+"Je bestaande zonnepanelen — injectie sturen": "Vos panneaux solaires existants — piloter l’injection",
+"Met een sturing op je bestaande zonnepanelen rem je je injectie af als de spotprijs negatief is, en stuur je ze bij op het onbalanssignaal van het net (passieve respons). Berekend op je gemeten injectieprofiel en de marktprijzen van het voorbije jaar.": "Avec un pilotage de vos panneaux solaires existants, vous réduisez votre injection lorsque le prix spot est négatif et l’ajustez selon le signal de déséquilibre du réseau (réponse passive). Calculé sur votre profil d’injection mesuré et les prix de marché de l’année écoulée.",
+"per MWh injectie": "par MWh injecté",
+"Netto per jaar": "Net par an",
+"na beheerkost": "après frais de gestion",
+"jaar": "ans",
+"Per jaar": "Par an",
+"Bedrag": "Montant",
+"Injectie (gemeten profiel, op jaarbasis)": "Injection (profil mesuré, sur base annuelle)",
+"Waarde van je injectie vandaag (spotprijs)": "Valeur de votre injection aujourd’hui (prix spot)",
+"+ Injectie afremmen bij een negatieve spotprijs": "+ Réduire l’injection lorsque le prix spot est négatif",
+"+ Injectie bijsturen op het onbalanssignaal": "+ Ajuster l’injection selon le signal de déséquilibre",
+"− Beheerkost (€ {#} per kVA per maand · ± {#} kVA omvormer)": "− Frais de gestion (€ {#} par kVA par mois · ± {#} kVA d’onduleur)",
+"Investering (eenmalig)": "Investissement (unique)",
+"Meerwaarde van de sturing per uur en per dag (€)": "Plus-value du pilotage par heure et par jour (€)",
+"Donkerder = meer meerwaarde: afremmen bij een negatieve spotprijs en bijsturen op onbalans samen.": "Plus foncé = plus de plus-value : réduction en cas de prix spot négatif et ajustement selon le déséquilibre, ensemble.",
+"hoog — piek {#} €": "élevé — pic {#} €",
+"Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van het PV-vermogen. Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.": "Uniquement vos panneaux solaires existants. La puissance d’onduleur (kVA) est estimée sur la base de la puissance PV. Indicatif : le résultat dépend des prix de marché, qui changent chaque année.",
+"Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van je gemeten injectiepiek. Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.": "Uniquement vos panneaux solaires existants. La puissance d’onduleur (kVA) est estimée sur la base de votre pic d’injection mesuré. Indicatif : le résultat dépend des prix de marché, qui changent chaque année.",
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */
