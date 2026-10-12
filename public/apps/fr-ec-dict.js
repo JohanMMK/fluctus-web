@@ -1,5 +1,5 @@
 /* fr-ec-dict.js — Energie-Compas NL→FR woordenboek (v0.3.0, 2026-10-08: + laadmoment-kolom; v0.2.0, 2026-10-08: + laadplein "kost per MWh verbruik" voor klantrapport v0.26.0; v0.1.0 2026-10-04)
-   Geladen VÓÓR i18n-ec.js. EXACT = volledig segment; DICT = substring; RULES = regex (dynamische zinnen). */
+   Geladen VÓÓR i18n-ec.js. EXACT = volledig segment; DICT = substring; RULES = regex (dynamische zinnen).    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 (function () {
   // ── EXACT: korte labels/titels (matchen enkel als het hele segment gelijk is) ───────────────
   window.EC_FR_EXACT = {
@@ -11,9 +11,9 @@
     'Van installatie naar volledige waarde': 'De l’installation à la valeur totale',
     'Overzicht van de investeringen': 'Aperçu des investissements',
     'Jaar per jaar': 'Année par année',
-    'Vraag dit aan uw leverancier': 'À demander à votre fournisseur',
-    'Dekking van uw dagelijkse ritten': 'Couverture de vos trajets quotidiens',
-    'Uw energie, onder uw controle': 'Votre énergie, sous votre contrôle',
+    'Vraag dit aan je leverancier': 'À demander à votre fournisseur',
+    'Dekking van je dagelijkse ritten': 'Couverture de vos trajets quotidiens',
+    'Je energie, onder je controle': 'Votre énergie, sous votre contrôle',
     // Tabelkoppen
     'Post': 'Poste',
     'Situatie': 'Situation',
@@ -43,8 +43,8 @@
     'Vandaag + laden': 'Aujourd’hui + recharge',
     'Vandaag': 'Aujourd’hui',
     '(zonder installatie)': '(sans installation)',
-    'Met uw installatie': 'Avec votre installation',
-    'U bespaart': 'Vous économisez',
+    'Met je installatie': 'Avec votre installation',
+    'Je bespaart': 'Vous économisez',
     // Knoppen
     'Print': 'Imprimer',
     'PDF opslaan': 'Enregistrer le PDF',
@@ -57,11 +57,11 @@
     'Bestaande aansluiting': 'Raccordement existant',
     'Nodig · onbeheerst laden': 'Nécessaire · recharge non pilotée',
     'Met installatie': 'Avec installation',
-    'Om de dagelijkse km’s te laden moet uw aansluiting de piek aankunnen. Onbeheerst laden — alle voertuigen samen op vol vermogen — zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.':
+    'Om de dagelijkse km’s te laden moet je aansluiting de piek aankunnen. Onbeheerst laden — alle voertuigen samen op vol vermogen — zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.':
       'Pour recharger les km quotidiens, votre raccordement doit encaisser la pointe. Une recharge non pilotée — tous les véhicules à pleine puissance en même temps — ferait fortement grimper le raccordement. L’installation lisse cette pointe.'
     ,
     // v0.2.0 (klantrapport v0.26.0) — laadplein: kost per MWh verbruik
-    'Wat kost u een MWh verbruik?': 'Combien vous coûte un MWh consommé\u00a0?',
+    'Wat kost je een MWh verbruik?': 'Combien vous coûte un MWh consommé\u00a0?',
     'Verbruik': 'Consommation',
     'MWh/jaar': 'MWh/an',
     'Energiefactuur': 'Facture d’énergie',
@@ -88,10 +88,10 @@
   // ── DICT: zinnen/fragmenten (substring binnen een tekstsegment) ─────────────────────────────
   window.EC_FR_DICT = {
     // Cover
-    'Uw energiefactuur van morgen, vandaag berekend': 'Votre facture d’énergie de demain, calculée aujourd’hui',
+    'Je energiefactuur van morgen, vandaag berekend': 'Votre facture d’énergie de demain, calculée aujourd’hui',
     'Onafhankelijke energie-analyse': 'Analyse énergétique indépendante',
     'per jaar': 'par an',
-    'U bespaart': 'Vous économisez',
+    'Je bespaart': 'Vous économisez',
     'zonder installatie': 'sans installation',
     // Aansluiting
     'Digitale meter (kwartierregistratie)': 'Compteur numérique (enregistrement au quart d’heure)',
@@ -116,7 +116,7 @@
     'coherentie': 'cohérence',
     'checks': 'contrôles',
     // Aanpak-statement (volledige zinnen, geen markup)
-    'Deze studie geeft u een integraal beeld van de opportuniteiten om, vertrekkend van uw eigen verbruik en vermogen, een beter pad uit te stippelen naar een optimale elektrificatie.':
+    'Deze studie geeft je een integraal beeld van de opportuniteiten om, vertrekkend van je eigen verbruik en vermogen, een beter pad uit te stippelen naar een optimale elektrificatie.':
       'Cette étude vous donne une vue intégrale des opportunités pour, en partant de votre propre consommation et puissance, tracer une meilleure voie vers une électrification optimale.',
     'We combineren hiervoor ervaring, kennis en AI om massale hoeveelheden data te verwerken tot bruikbaar inzicht.':
       'Pour cela, nous combinons expérience, savoir-faire et IA afin de transformer d’immenses volumes de données en informations exploitables.',
@@ -126,12 +126,12 @@
       'C’est pourquoi nous nous imposons les normes de qualité internes les plus strictes — et améliorons ce travail en continu.',
     // Slot-statement
     'Tot slot zijn we dankbaar dat we deel mogen uitmaken van': 'Enfin, nous sommes reconnaissants de pouvoir prendre part à',
-    'uw verkenning': 'votre exploration',
+    'je verkenning': 'votre exploration',
     'Elke verbruiker die met het Energie-Compas op pad gaat, brengt ons samen een stap verder op weg naar méér en betere elektrificatie.':
       'Chaque consommateur qui se met en route avec l’Energie-Compas nous fait, ensemble, avancer d’un pas vers une électrification plus large et meilleure.',
     'Bescheiden in wat het verleden ons kan leren, maar vastberaden in de richting die we kiezen':
       'Humbles quant à ce que le passé peut nous apprendre, mais déterminés dans la direction que nous choisissons',
-    'zo blijven we dat pad, samen met u, verder openleggen.':
+    'zo blijven we dat pad, samen met jou, verder openleggen.':
       'nous continuons ainsi à ouvrir cette voie, avec vous.',
     // Disclaimer
     'afgeleid uit het verleden': 'déduite du passé',
@@ -163,23 +163,23 @@
     'mét ': 'avec ',
 
     // P2 — titel + lead (fragmenten tussen de <b>-tags)
-    'Uw energiefactuur: met versus zonder ': 'Votre facture d’énergie : avec contre sans ',
+    'Je energiefactuur: met versus zonder ': 'Votre facture d’énergie : avec contre sans ',
     'Deze analyse toont wat ': 'Cette analyse montre ce que ',
-    ' u oplevert op een ': ' vous rapporte avec un ',
+    ' je oplevert op een ': ' vous rapporte avec un ',
     'optimaal dynamisch (spot) contract': 'contrat dynamique (spot) optimal',
-    'uw jaarfactuur ': 'votre facture annuelle ',
+    'je jaarfactuur ': 'votre facture annuelle ',
     'zónder installatie': 'sans installation',
-    ' — met het laden aan uw gebouw en de aansluiting die daarvoor nodig is': ' — recharge comprise à votre bâtiment et le raccordement nécessaire',
+    ' — met het laden aan je gebouw en de aansluiting die daarvoor nodig is': ' — recharge comprise à votre bâtiment et le raccordement nécessaire',
     ', slim aangestuurd op de energiemarkt. Alle cijfers komen uit een simulatie op kwartierbasis over een volledig jaar. ':
       ', pilotés intelligemment sur le marché de l’énergie. Tous les chiffres proviennent d’une simulation au quart d’heure sur une année complète. ',
-    'De overstap van uw huidige contract naar een dynamisch contract behandelen we apart in de onderhandelingsnota (bijlage).':
+    'De overstap van je huidige contract naar een dynamisch contract behandelen we apart in de onderhandelingsnota (bijlage).':
       'Le passage de votre contrat actuel à un contrat dynamique est traité séparément dans la note de négociation (annexe).',
 
     // Hero-bijschrift (cover + p2)
     'Deze besparing is wat ': 'Cette économie est ce que ',
     ' oplevert op een ': ' rapporte avec un ',
     ', becijferd op kwartierbasis over een volledig jaar.': ', calculé au quart d’heure sur une année complète.',
-    'De overstap van uw huidige contract naar zo\'n dynamisch contract wordt apart behandeld in de onderhandelingsnota (bijlage).':
+    'De overstap van je huidige contract naar zo\'n dynamisch contract wordt apart behandeld in de onderhandelingsnota (bijlage).':
       'Le passage de votre contrat actuel vers un tel contrat dynamique est traité séparément dans la note de négociation (annexe).',
     // CN_PROSE-varianten (volledige zinsdelen → juiste FR-grammatica; langste eerst)
     'zonnepanelen, een batterij en slim laden': 'des panneaux solaires, une batterie et la recharge intelligente',
@@ -194,9 +194,9 @@
     'Toon rapport': 'Afficher le rapport',
     'Print': 'Imprimer',
     // Toegangsvermogen / piekvermogen — noot-fragmenten (v0.15.9)
-    ' — zo laadt u 100% van de jaar-km’s zonder de aansluiting te verzwaren': ' — vous rechargez ainsi 100 % des km annuels sans renforcer le raccordement',
+    ' — zo laad je 100% van de jaar-km’s zonder de aansluiting te verzwaren': ' — vous rechargez ainsi 100 % des km annuels sans renforcer le raccordement',
     ', wat een eenmalige verzwaring van ± ': ', ce qui évite un renforcement unique de ± ',
-    ' kVA, binnen uw bestaande aansluiting van ': ' kVA, dans les limites de votre raccordement existant de ',
+    ' kVA, binnen je bestaande aansluiting van ': ' kVA, dans les limites de votre raccordement existant de ',
     ' kVA bij onbeheerst laden': ' kVA en recharge non pilotée',
     'De netpiek blijft op ± ': 'La pointe réseau reste à ± ',
     ' kVA, tegenover ': ' kVA, contre ',
@@ -205,9 +205,9 @@
     'LS→MS': 'BT→MT',
     'Print': 'Imprimer',
     // v0.2.0 (klantrapport v0.26.0) — laadplein: kost per MWh verbruik (noot)
-    'Kost per MWh = de all-in energiefactuur (energie + net + heffingen, min de injectie-opbrengst, excl. btw) gedeeld door uw': 'Coût par MWh = la facture d’énergie tout compris (énergie + réseau + taxes, moins les revenus d’injection, hors TVA) divisée par votre',
+    'Kost per MWh = de all-in energiefactuur (energie + net + heffingen, min de injectie-opbrengst, excl. btw) gedeeld door je': 'Coût par MWh = la facture d’énergie tout compris (énergie + réseau + taxes, moins les revenus d’injection, hors TVA) divisée par votre',
     '. De investering en afschrijving van de installatie zitten hier niet in.': '. L’investissement et l’amortissement de l’installation n’y sont pas inclus.',
-    'Met uw installatie en slim sturen daalt de kost per MWh van uw verbruik mét laden met': 'Avec votre installation et le pilotage intelligent, le coût par MWh de votre consommation avec recharge baisse de'
+    'Met je installatie en slim sturen daalt de kost per MWh van je verbruik mét laden met': 'Avec votre installation et le pilotage intelligent, le coût par MWh de votre consommation avec recharge baisse de'
   };
 
   // ── RULES: dynamische zinnen met markup/getallen (regex over de volle HTML) ──────────────────
