@@ -1,7 +1,8 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.2.6, 2026-10-12: + bijlage bestaande PV — injectie sturen; v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_FR_SEG = {
+"Bijlage {#} — Je bestaande zonnepanelen — injectie sturen": "Annexe {#} — Vos panneaux solaires existants — piloter l’injection",
 "Onafhankelijke energie-analyse": "Analyse énergétique indépendante",
 "Je energiefactuur van morgen, vandaag berekend": "Votre facture énergétique de demain, calculée dès aujourd'hui",
 "Wat zonnepanelen, een batterij en slim laden voor jou betekenen — becijferd op kwartierbasis over een volledig jaar.": "Ce que des panneaux solaires, une batterie et la recharge intelligente représentent pour vous — chiffré au quart d'heure sur une année complète.",
