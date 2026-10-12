@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.39.1 (2026-10-12, Johan): ENERGIEBALANS SLUIT — de PV die de sturing afremt bij een negatieve injectieprijs (server 15.285 zelfconsumptie.pv_afgeremd_mwh) staat nu als eigen segment in de PV-donut + productie bruto + afstemming met de injectie zonder installatie. Voorheen leek die stroom te verdwijnen (83 → 44 + 15). -->
 <!-- klantrapport.html v0.39.0 (2026-10-12, Johan): PRINT IN SAFARI — (1) de knop «🖨️ Print» start het printen pas na de klik-afhandeling (setTimeout) en het registreren gebeurt NA het printen (afterprint) → geen netwerkverkeer tijdens het opmaken van de print; (2) print-color-adjust: exact → Safari drukt achtergronden/kleurvakjes (legendes, groene kaders) mee af; (3) heatmap-PNG krijgt de achtergrondkleur (geen lichte randjes rond de vakjes in Safari). ENERGIEBALANS: noot over de stroom die de batterij aan het net verkoopt (zit in de injectie van de factuurvergelijking, niet in de zonnestroom). -->
 <!-- klantrapport.html v0.38.2 (2026-10-12, Johan): «Je dossier online» (link naar het dossier in Energie-Compas) staat nu onderaan pagina 1 (voorblad) i.p.v. op pagina 2. -->
 <!-- klantrapport.html v0.38.1 (2026-10-12, Johan): FIX BLANCO PRINT/PDF — de heatmaps tekenden elk tot 8.760 losse SVG-vakjes (± 48.000 elementen in een groot rapport); de printvoorvertoning van Chrome liep daarop vast (tab blanco, lege PDF). Nu wordt elke heatmap één afbeelding (canvas → PNG) binnen de SVG; assen en labels blijven tekst. Zonder canvas → oude manier. -->
@@ -78,8 +79,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.2.9"></script>
-<script src="en-ec-seg.js?v=1.0.6"></script>
+<script src="fr-ec-seg.js?v=1.3.0"></script>
+<script src="en-ec-seg.js?v=1.0.7"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -1254,6 +1255,7 @@ financieelPagina();
   var MND=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
   var prod=+Z.pv_productie_mwh||0, dir=+Z.pv_direct_mwh||0, vb=+Z.pv_via_batt_mwh||0, inj=+Z.pv_injectie_mwh||0;
   var verbr=+Z.verbruik_mwh||0, rte=((+Z.rte_pct||92))/100;
+  var afg=HAS_BATT?Math.max(0,Math.round((+Z.pv_afgeremd_mwh||0)*10)/10):0, nulInj=+Z.pv_nul_injectie_mwh||0;   // v0.39.1: afgeremde PV (sturing) + PV-injectie zonder installatie
   // v0.30.0 (Johan): PV via de batterij wordt niet altijd zelf verbruikt (de batterij verkoopt ook op de markt). Begrens
   //   "via de batterij → eigen verbruik" per MAAND op het resterende maandverbruik (profielanalyse; anders jaarbasis);
   //   het overschot telt als injectie. Voorkomt zelfvoorziening > 100%.
@@ -1272,7 +1274,7 @@ financieelPagina();
   if(_vbUsedM){ Z=Object.assign({},Z,{maand:{ pv_direct_mwh:_D1, pv_via_batt_mwh:_vbUsedM, pv_injectie_mwh:_IN.map(function(v,i){ return v+Math.max(0,(_D2[i]||0)-_vbUsedM[i]); }) }}); }
   var vbLoad=Math.round(vb*rte*10)/10;                       // PV via batterij die effectief de last dekt (na omzetverlies)
   var net=Math.max(0, Math.round((verbr-dir-vbLoad)*10)/10); // rest van het verbruik komt van het net
-  var zcPct=prod>0?Math.round((dir+vb)/prod*100):0;          // zelfconsumptie incl. via batterij
+  var zcPct=(prod+afg)>0?Math.round((dir+vb)/(prod+afg)*100):0;   // v0.39.1: t.o.v. de bruto productie (incl. afgeremd)          // zelfconsumptie incl. via batterij
   var zvPct=verbr>0?Math.min(100,Math.round((dir+vbLoad)/verbr*100)):0;    // zelfvoorziening incl. via batterij (≤100%)
   function _donut(segs, big, sub){
     var tot=0; segs.forEach(function(s){ tot+=Math.max(0,+s.val||0); }); if(!(tot>0)) tot=1;
@@ -1311,8 +1313,9 @@ financieelPagina();
     }
     return '<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="height:56mm">'+svg+'</svg>';
   }
-  var totP=dir+vb+inj, totV=dir+vbLoad+net;
+  var totP=dir+vb+inj+afg, totV=dir+vbLoad+net;
   var seg1=[{val:dir,color:GRN,label:'Direct zelfverbruik',tot:totP},{val:vb,color:BLW,label:'Via de batterij',tot:totP},{val:inj,color:AMB,label:'Injectie op het net',tot:totP}];
+  if(afg>=0.5) seg1.push({val:afg,color:'#C9D1DB',label:'Afgeremd (injecteren kost geld)',tot:totP});   // v0.39.1
   var seg2=[{val:dir,color:GRN,label:'PV — direct',tot:totV},{val:vbLoad,color:BLW,label:'PV — via de batterij',tot:totV},{val:net,color:GRY,label:'Van het net',tot:totV}];
   if(!HAS_BATT){ seg1=[seg1[0],seg1[2]]; seg2=[seg2[0],seg2[2]]; }   // geen batterij → geen "via batterij"-segment
   var h=_bijlage('Zelfconsumptie & zelfvoorziening');
@@ -1321,13 +1324,18 @@ financieelPagina();
      '(zelf verbruikt vs geïnjecteerd). Rechts: hoe je <b>verbruik</b> wordt gedekt (eigen zon vs het net).</p>';
   h+='<div class="don-wrap">'+
        '<div class="don-card"><div class="don-t">Zelfconsumptie van je PV</div>'+_donut(seg1, zcPct+'%','zelf verbruikt')+_leg(seg1)+
-         '<div class="don-foot">PV-productie: <b>'+_num(prod,prod<100?1:0)+' MWh/jaar</b></div></div>'+
+         '<div class="don-foot">PV-productie: <b>'+_num(prod+afg,(prod+afg)<100?1:0)+' MWh/jaar</b>'+(afg>=0.5?' (waarvan '+_num(afg,afg<10?1:0)+' MWh afgeremd)':'')+'</div></div>'+
        '<div class="don-card"><div class="don-t">Zelfvoorziening van je verbruik</div>'+_donut(seg2, zvPct+'%','zelf voorzien')+_leg(seg2)+
          '<div class="don-foot">Jaarverbruik: <b>'+_num(verbr,verbr<100?1:0)+' MWh/jaar</b></div></div>'+
      '</div>';
   if(HAS_BATT) h+='<p class="note"><b>Zelfconsumptie</b> = het deel van je zonnestroom dat je zelf verbruikt (rest = injectie). '+
      '<b>Zelfvoorziening</b> = het deel van je verbruik dat je met eigen zon dekt (rest = afname van het net). '+
      '"Via de batterij" is zonnestroom die je overdag opslaat en later verbruikt, na omzetverlies (± '+Math.round(rte*100)+'% rendement).</p>';
+  // v0.39.1 (Johan): afgeremde PV uitleggen + afstemmen met de PV-injectie zonder installatie (sluit enkel als de som klopt, bv. geen nieuwe PV).
+  if(afg>=0.5) h+='<p class="note">Afgeremd = zonnestroom die de sturing bewust niet laat injecteren op momenten dat injecteren geld kost (negatieve injectieprijs). De batterij laadt dan bij voorkeur van het net, aan die negatieve prijs.</p>';
+  (function(){ var _som=vb+inj+afg; if(!HAS_BATT||!(nulInj>0)||Math.abs(_som-nulInj)>Math.max(2,nulInj*0.05)) return;
+    h+='<p class="note">Zonder installatie injecteer je ± '+_num(nulInj,nulInj<10?1:0)+' MWh zonnestroom per jaar. Met de batterij gaat die stroom naar: via de batterij '+_num(vb,vb<10?1:0)+' MWh + injectie '+_num(inj,inj<10?1:0)+' MWh + afgeremd '+_num(afg,afg<10?1:0)+' MWh.</p>';
+  })();
   // v0.39.0 (Johan): de batterij verkoopt ook stroom aan het net (arbitrage) → die zit in de injectie van de factuurvergelijking, niet in de zonnestroom.
   (function(){ var _EM=(D.energie_mwh&&D.energie_mwh.opt)||null; if(!HAS_BATT||!_EM) return;
     var _gi=+_EM.injectie_mwh||0, _bx=Math.round((_gi-inj)*10)/10;
