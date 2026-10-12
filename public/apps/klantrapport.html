@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.38.0 (2026-10-12, Johan): KALIBRATIE (imby-vergelijking Solidaris) — (1) blok «Toegangsvermogen / piekvermogen» (kVA + loadfactor) ALTIJD, ook zonder laadplein (piek zonder/met installatie uit D.piek, met de realistische piekafvlakking van server 15.282); (2) onbalans-potentieel = NETTO (capture, extra heffingen, leveranciersvergoeding) → teksten aangepast; (3) injectie sturen: afremmen zodra de injectieprijs (spot − afslag) negatief is. -->
 <!-- klantrapport.html v0.37.1 (2026-10-12, Johan): bijlage «Je bestaande zonnepanelen — injectie sturen» staat nu net na «Profielanalyse — je injectie». -->
 <!-- klantrapport.html v0.37.0 (2026-10-12, Johan): bestaande PV — de algemene pagina «Je bestaande zonnepanelen» is weg; enkel de pagina «Je bestaande zonnepanelen — injectie sturen» blijft, als eigen bijlage NA «Je afname van het net» (bedrijf + gemeten injectieprofiel). -->
 <!-- klantrapport.html v0.36.0 (2026-10-12, Johan): NIEUWE BIJLAGE «Je bestaande zonnepanelen» (D.bestaande_pv, ek ≥ v0.57.0): vermogen, geschatte productie, zelfverbruik en injectie van de BESTAANDE PV. Bij een BEDRIJF met een GEMETEN injectieprofiel een extra pagina «injectie sturen»: afremmen bij negatieve spot + bijsturen op onbalans (passieve respons), beheerkost 0,72 euro/kVA/maand, extra netto-inkomsten per MWh injectie en de terugverdientijd van 3.500 euro + 2 heatmaps. -->
@@ -74,8 +75,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.2.6"></script>
-<script src="en-ec-seg.js?v=1.0.3"></script>
+<script src="fr-ec-seg.js?v=1.2.7"></script>
+<script src="en-ec-seg.js?v=1.0.4"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -578,6 +579,7 @@ function _combiSubBr(){
     var _vBest=Math.round(+_af2.piek_kw||(D.piek&&+D.piek.input_kw)||0);
     var _vOnb=_piekVan(_HTv.afname_laden_onbeheerst)||_piekVan(_HTv.afname_laden_zonder);
     var _vNa=_piekVan(_HTv.afname_met_sturing);
+    if(!IS_PART && D.piek && +D.piek.sim_na_kw>_vNa) _vNa=Math.round(+D.piek.sim_na_kw);   // v0.38.0: gefactureerde (realistische) piek is leidend
     // v0.27.0 (Johan): particulier — piek-vloer (server v15.256): laden zonder batterij doet de piek minstens +6 kW stijgen
     //   t.o.v. het gebouw. De heatmaps zijn uurgemiddelden; de gevloerde factuurpiek (D.piek.sim_voor/na_kw) is leidend.
     if(IS_PART && D.piek){ var _ppv=+D.piek.sim_voor_kw||0, _ppn=+D.piek.sim_na_kw||0;
@@ -611,6 +613,31 @@ function _combiSubBr(){
          (_vBest>0?(_vBinnen?(', binnen je bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden')):'')+
          ' \u2014 zo laad je 100% van de jaar-km\u2019s zonder de aansluiting te verzwaren'+
          ((_vVerm>0)?(', wat een eenmalige verzwaring van \u00b1 '+eur(_vVerm)+' vermijdt'):'')+'.</p>';
+      h+='</div>';
+    }
+  } else {
+    // v0.38.0 (Johan): kVA-blok ook ZONDER laadplein — piek zonder vs met installatie (gefactureerde kwartierpiek, D.piek).
+    var _P0=D.piek||{}, _af3=(D.aansluiting&&D.aansluiting.afname)||{};
+    var _pB=Math.round(+_af3.piek_kw||+_P0.input_kw||0), _pV=Math.round(+_P0.sim_voor_kw||0), _pN=Math.round(+_P0.sim_na_kw||0);
+    var _pr=((D.factuur&&D.factuur.onbalans_detail&&+D.factuur.onbalans_detail.piek_realisatie)||0);
+    if(_pV>0 && _pN>0){
+      h+='<div class="split-blok split-sectie">';
+      h+='<h2>Toegangsvermogen / piekvermogen</h2>';
+      h+='<p class="lead" style="margin-top:0">Je netkosten hangen voor een groot deel af van je piek (capaciteitstarief).'+(HAS_BATT?' De batterij vlakt je hoogste kwartierpieken af.':'')+'</p>';
+      h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
+           (_pB>0?('<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_pB,0)+'</div><span class="je">kVA</span></div>'):'')+
+           '<div class="box"><span class="l">Piek zonder installatie</span><div class="v">'+_num(_pV,0)+'</div><span class="je">kVA</span></div>'+
+           '<div class="box win"><span class="l">Piek met installatie</span><div class="v win">'+_num(_pN,0)+'</div><span class="je">kVA</span></div>'+
+         '</div>';
+      if(_LF.voor!=null && _LF.na!=null){
+        h+='<div class="hero" style="grid-template-columns:1fr 1fr;margin-top:8px">'+
+             '<div class="box"><span class="l">Loadfactor \u00b7 zonder installatie</span><div class="v">'+_num(_LF.voor,0)+'</div><span class="je">%</span></div>'+
+             '<div class="box win"><span class="l">Loadfactor \u00b7 met installatie</span><div class="v win">'+_num(_LF.na,0)+'</div><span class="je">%</span></div>'+
+           '</div>';
+      }
+      h+='<p class="note"><b>Wat is de loadfactor?</b> Het deel van je piekvermogen dat je gemiddeld over het jaar benut: je jaarverbruik \u00f7 (piek \u00d7 8.760 uur). '+
+         'Hoe hoger de loadfactor, hoe meer MWh je vaste netkosten dragen \u2014 en hoe lager je netkost per MWh.</p>';
+      if(HAS_BATT && _pr>0 && _pr<1) h+='<p class="note">We rekenen de piekverlaging realistisch: een sturing die de toekomst perfect kent, haalt meer. In de praktijk werkt je energiebeheersysteem met een voorspelde netlimiet; daarom tellen we '+_num(Math.round(_pr*100),0)+' % van de theoretische piekverlaging.</p>';
       h+='</div>';
     }
   }
@@ -724,7 +751,7 @@ function _combiSubBr(){
      'Die winsten zijn <b>enkel mogelijk met een dynamisch (spot) contract</b> op basis van de day-ahead-prijzen — zo profiteer je van de laagste prijsmomenten.</p>';
   if(onbExtra>0){
     h+='<div class="hero" style="grid-template-columns:1fr"><div class="box win"><span class="l">Extra met onbalans-sturing</span><div class="v win">+ '+eur(onbExtra)+'</div><span class="je">per jaar — bovenop de besparing in dit rapport</span></div></div>';
-    h+='<p>Bovenop de spotmarkt kan een <b>passieve respons op onbalans</b> nog een extra opbrengst toevoegen — in dit scenario ± '+eur(onbExtra)+' per jaar. '+
+    h+='<p>Bovenop de spotmarkt kan een <b>passieve respons op onbalans</b> nog een extra opbrengst toevoegen — in dit scenario netto ± '+eur(onbExtra)+' per jaar. '+
        'Dit is <b>niet</b> in de business case meegerekend; het is een opportuniteit die je <b>ná de installatie samen met je energieleverancier</b> opneemt.</p>';
   } else {
     h+='<p>Een <b>passieve respons op onbalans</b> kan daar later nog een extra opbrengst bovenop leggen, maar is in dit dossier <b>niet becijferd</b> en dus <b>niet in de business case meegerekend</b> — je neemt die opportuniteit ná de installatie samen met je energieleverancier op.</p>';
@@ -990,8 +1017,9 @@ financieelPagina();
   if(IS_PART) return;          // v0.27.0 (Johan): particulier → geen financieel plan 'mét onbalans'
   var caveat='<div class="ems-caveat"><b>Potentieel met onbalans-sturing.</b> Deze pagina toont hetzelfde financieel plan, maar '+
     'mét de <b>onbalans-besparing meegerekend</b> (jaarbesparing '+eur(bespOnb)+' i.p.v. '+eur((+F2.besparing_jaar)||0)+'). '+
-    'Dit is het <b>potentieel</b> als 100 % van de gesimuleerde onbalans effectief wordt geoogst — in samenspraak met je '+
-    'energieleverancier. De business case op de vorige pagina rekent bewust <b>zonder</b> onbalans; dit is de bovengrens.</div>';
+    'Dit is het <b>netto potentieel</b>: '+_num(((F2.onbalans_detail&&+F2.onbalans_detail.capture_pct)||100),0)+' % van de gesimuleerde onbalans (realistische voorspelling), '+
+    'na de extra heffingen op het bijgekochte volume en de vergoeding van je leverancier — in samenspraak met je energieleverancier. '+
+    'De business case op de vorige pagina rekent bewust <b>zonder</b> onbalans.</div>';
   financieelPagina(bespOnb, 'Financieel plan over 15 jaar — potentieel mét onbalans', caveat);
 })();
 
@@ -1070,7 +1098,7 @@ financieelPagina();
   var net=+pb.netto_beide_jaar_eur||0, pm=pb.netto_per_mwh_eur, tvt=(net>0&&pb.payback_beide_jaar!=null)?+pb.payback_beide_jaar:null;
   var kva=+IV.inverter_kva||0, bkm=+S.beheer_eur_kva_maand||+pb.management_eur_per_kva_maand||0, injJ=+pb.injectie_mwh_jaar||+EJ.injectie_mwh||0;
   var h2=_bijlage('Je bestaande zonnepanelen — injectie sturen');
-  h2+='<p class="lead">Met een sturing op je bestaande zonnepanelen rem je je injectie af als de spotprijs negatief is, en stuur je ze bij '+
+  h2+='<p class="lead">Met een sturing op je bestaande zonnepanelen rem je je injectie af als injecteren je geld kost (spotprijs onder de afslag van je leverancier), en stuur je ze bij '+
       'op het onbalanssignaal van het net (passieve respons). Berekend op je gemeten injectieprofiel en de marktprijzen van het voorbije jaar.</p>';
   h2+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr;margin:6px 0 8px">'+
         '<div class="box win"><span class="l">Extra inkomsten netto</span><div class="v win">'+(pm!=null?('€ '+_num(pm, Math.abs(pm)<10?1:0)):'—')+'</div><span class="je">per MWh injectie</span></div>'+
@@ -1079,8 +1107,8 @@ financieelPagina();
       '</div>';
   h2+='<table class="f jpj" style="font-size:12px"><thead><tr><th>Per jaar</th><th>Bedrag</th></tr></thead><tbody>'+
       '<tr><td>Injectie (gemeten profiel, op jaarbasis)</td><td>'+d1(injJ)+' MWh</td></tr>'+
-      '<tr><td>Waarde van je injectie vandaag (spotprijs)</td><td>'+eur(O.vandaag_spot_eur||0)+'</td></tr>'+
-      '<tr><td>+ Injectie afremmen bij een negatieve spotprijs</td><td class="win">'+eur(O.meerwaarde_curtail_eur||0)+'</td></tr>'+
+      '<tr><td>Waarde van je injectie vandaag (spotprijs − € '+_num(+pb.injectie_afslag_eur_mwh||0,0)+'/MWh afslag)</td><td>'+eur(O.vandaag_spot_eur||0)+'</td></tr>'+
+      '<tr><td>+ Injectie afremmen als de injectieprijs negatief is</td><td class="win">'+eur(O.meerwaarde_curtail_eur||0)+'</td></tr>'+
       '<tr><td>+ Injectie bijsturen op het onbalanssignaal</td><td class="win">'+eur(O.meerwaarde_onbalans_eur||0)+'</td></tr>'+
       '<tr><td>− Beheerkost (€ '+_num(bkm,2)+' per kVA per maand · ± '+_num(kva,0)+' kVA omvormer)</td><td>− '+eur(pb.management_jaar_eur||0)+'</td></tr>'+
       '<tr class="tot"><td>Extra inkomsten netto</td><td>'+eur(net)+'</td></tr>'+
@@ -1089,7 +1117,7 @@ financieelPagina();
   // één heatmap: meerwaarde van de sturing (afremmen + onbalans) per uur en per dag → past op één A4
   var _hc=S.hm_curtail, _ho=S.hm_onbalans, _hs=null;
   if(_hc||_ho){ _hs=[]; for(var _h=0;_h<24;_h++){ var _r=[]; for(var _d=0;_d<365;_d++){ _r.push(((_hc&&_hc[_h]&&+_hc[_h][_d])||0)+((_ho&&_ho[_h]&&+_ho[_h][_d])||0)); } _hs.push(_r); } }
-  if(_hs) h2+=heatBlok('Meerwaarde van de sturing per uur en per dag (€)', _hs, '€', 'Donkerder = meer meerwaarde: afremmen bij een negatieve spotprijs en bijsturen op onbalans samen.', null);
+  if(_hs) h2+=heatBlok('Meerwaarde van de sturing per uur en per dag (€)', _hs, '€', 'Donkerder = meer meerwaarde: afremmen als injecteren geld kost en bijsturen op onbalans samen.', null);
   h2+='<p class="note">Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van '+(BP.kwp_geschat?'je gemeten injectiepiek':'het PV-vermogen')+'. '+
       'Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.</p>';
   pagina(h2);
