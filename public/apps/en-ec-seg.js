@@ -1,10 +1,15 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"Waarvan injectie-opbrengst (reeds in de energiepost verrekend): vandaag € {#} → met PV + batterij € {#} per jaar.": "Of which injection revenue (already included in the energy item): today € {#} → with PV + battery € {#} per year.",
+"De grafieken tonen, per uur (verticaal, {#}–{#}u) en per dag van het jaar (horizontaal), hoeveel je op het net injecteert. Donkerder = meer kW. Door de injectie af te remmen op momenten dat het niets opbrengt, houd je die energie in de batterij voor een waardevoller moment.": "The charts show, per hour (vertical, {#}–{#}h) and per day of the year (horizontal), how much you inject into the grid. Darker = more kW. By curbing injection at moments when it earns nothing, you keep that energy in the battery for a more valuable moment.",
+"b. Gebouw + laden, zonder PV + batterij": "b. Building + charging, without PV + battery",
+"Zonnepanelen + batterij vlakt de afname af, lagere pieken en lagere kosten.": "Solar panels + battery flatten the offtake: lower peaks and lower costs.",
+"Daarnaast verkoopt de batterij ook stroom aan het net wanneer dat loont (± {#} MWh per jaar). Die zit mee in de injectie van de factuurvergelijking ({#} MWh), niet in je zonnestroom hierboven.": "In addition, the battery also sells electricity to the grid when it pays off (± {#} MWh per year). This is included in the injection of the invoice comparison ({#} MWh), not in your solar power above.",
 "📊 KPI's voor de nieuwe opstelling": "📊 KPIs for the new setup",
 "Voor de gekozen combinatie van zonnepanelen en batterij. Kies hieronder een andere cel in het rooster en de cijfers volgen mee.": "For the chosen combination of solar panels and battery. Pick another cell in the grid below and the figures follow.",
 /* v2026-10-12 kalibratie */
