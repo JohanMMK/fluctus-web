@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.63.0">
+<meta name="ek-build" content="0.64.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.64.0 (2026-10-13, Johan): NIEUW PRIJSANKER (= server v15.287.0) — 1 C&I (125/261) + 157 kWp = €168.000 all-in incl. varia; PV bij een batterij €350/kWp (1 C&I zonder PV = €113.050); PV zonder batterij: curve €600/€400 per kWp + varia. Varia (kabels/ontkoppelbord) zit in de PV/batterij-investering (rooster + alle plannen); extra kabel naar de laadpalen in de elektrificatie (plan met laadpalen). Label 'Overige' → 'Varia'. v0.63.0: rooster-KPI's incl. laadpalen/laadsessies. -->
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
 <!-- ek.html v0.63.0 (2026-10-13, Johan): rooster-kengetallen TVT / rendement / besparing volgen bij een laadplein het plan MÉT laadpalen + laadsessies (_planLadenCel, standaard palen-sizing); labels in de keuzelijsten en de rooster-bijlage van het rapport passen zich aan. -->
 <!-- ek.html v0.62.0 (2026-10-13, Johan): bedrijf op MS → de standaard geselecteerde cel is altijd 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH) zonder PV (dichtstbijzijnde batterij-rij als die niet exact bestaat). LS/particulier ongewijzigd. -->
@@ -558,8 +559,8 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.6"></script>
-<script src="en-ec-seg.js?v=1.0.13"></script>
+<script src="fr-ec-seg.js?v=1.3.7"></script>
+<script src="en-ec-seg.js?v=1.0.14"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
@@ -1446,7 +1447,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   + laadpalen + aansluiting voor het laden (verzwaring vóór), besparing + laadsessies (inflatie), OPEX + sturing laadpalen.
   function _planLaden(a, BV, m){
     var L=_laadsesVan(a); if(!L || !BV) return null;
-    var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)), capL=palen+Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0);
+    var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capL=palen+Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0);   // v0.64.0: + varia naar de laadpalen
     var netInv=Math.max(0,(+BV.netInv||0)+capL);
     var cf=_escCashflow((+BV.besp_rest||0)+L.besparing, (+BV.besp_net||0), (+BV.opex_jaar||0)+(+BV.sturLp||0));
     var tvt=null, cum0=0;
@@ -1828,20 +1829,27 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _dcDefault(){ var h=(CTX&&CTX.evHeavy)||0; return h>0?h:0; }   // v0.24.56 (Johan): 1 DC-laadpaal per (lichte) vrachtwagen/bus
   // v0.24.55 (Johan): BEDRIJF prijs-anker — zelfde als backend (v15.230). 125/261 + 157 kWp = €175.000 (batt+PV).
   //   PV getrapt: €600/kWp tot 100, €400/kWp daarboven. Batterij ≈ €353,26/kWh; 30/60 & 50/100 batt +25%.
-  function _pvKostBedr(pvKwp){ var p=Math.max(0,+pvKwp||0); return Math.min(p,100)*600 + Math.max(0,p-100)*400; }
-  var EK_BEDR_BATT_EUR_KWH=(175000-_pvKostBedr(157))/261;   // ≈ 353,26 €/kWh
+  // v0.64.0 (Johan, = server v15.287.0): prijsanker 1 C&I (125/261) + 157 kWp = €168.000 all-in (incl. varia). PV bij een batterij = €350/kWp
+  //   → 1 C&I zonder PV = €113.050 all-in. PV zónder batterij: getrapte curve (€600/kWp ≤100, €400 boven) + varia.
+  //   Varia (kabels, ontkoppelbord, toebehoren) zit in de PV/batterij-investering (invPvBatt) → in álle plannen + rooster.
+  function _pvKostBedr(pvKwp, battKwh){ var p=Math.max(0,+pvKwp||0); if((+battKwh||0)>0) return p*350; return Math.min(p,100)*600 + Math.max(0,p-100)*400; }
+  function _varia0(pvKwp, battKwh, part){ return kabeltrace(0, !!part, (+pvKwp||0)*0.75, (+battKwh||0)/2).totaal; }
+  var EK_BEDR_BATT_EUR_KWH=(168000-157*350-_varia0(157,261,false))/261;   // ≈ 420,11 €/kWh
   function _battKostBedr(battKwh){ var k=Math.round(+battKwh||0); var small=(k===60||k===100); return (+battKwh||0)*EK_BEDR_BATT_EUR_KWH*(small?1.25:1); }
   // Factor-vrije engineprijs (basis voor de prijs-prorata). Eén bron voor tegel + heatmap + TVT.
   function _invTotRaw(pvKwp, battKwh, ac, dc){
     var _bedr=!!(CTX && !CTX.particulier);
-    var pv=Math.round(_bedr?_pvKostBedr(pvKwp):((+pvKwp||0)*STUB.pv_eur_kwp)), bt=Math.round(_bedr?_battKostBedr(battKwh):((+battKwh||0)*STUB.batt_eur_kwh));
+    var pv=Math.round(_bedr?_pvKostBedr(pvKwp,battKwh):((+pvKwp||0)*STUB.pv_eur_kwp)), bt=Math.round(_bedr?_battKostBedr(battKwh):((+battKwh||0)*STUB.batt_eur_kwh));
     var _part=!!(CTX&&CTX.particulier), _nAc=Math.max(0,ac|0);
     // v0.36 (Johan): particulier → AC-laadpaal €1.500 + €500 installatie (= €2.000/paal, all-in); het generieke kabeltracé vervalt
     //   zodra er een paal is (de installatie zit in die €500). Zonder paal blijft de bestaande heuristiek (PV/batterij-only ongewijzigd).
     var acE=_nAc*(_part?(STUB.ac_paal_part_eur+STUB.ac_inst_part_eur):STUB.ac_paal_eur), dcE=Math.max(0,dc|0)*(STUB.dc_paal_eur||0);
     var kt=kabeltrace((ac|0)+(dc|0), _part, (+pvKwp||0)*0.75, (+battKwh||0)/2);
     if(_part && _nAc>0){ kt={ len_m:0, kabel_eur:0, ontk_eur:kt.ontk_eur, totaal:kt.ontk_eur, groot:kt.groot, part_paal:true }; }
-    return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt, invInfra:acE+dcE+kt.totaal, kt:kt };
+    // v0.64.0 (Johan): varia gesplitst — varia0 = kabels/ontkoppelbord van de PV/batterij zelf (zonder laadpalen) → in invPvBatt;
+    //   variaLaden = de extra kabel naar de laadpalen → elektrificatie. Totaal (tot) ongewijzigd = pv+bt+palen+varia.
+    var _v0=(_bedr && ((+pvKwp||0)>0 || (+battKwh||0)>0))?Math.min(kt.totaal, _varia0(pvKwp,battKwh,_part)):0;
+    return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, varia0:_v0, variaLaden:kt.totaal-_v0, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt+_v0, invInfra:acE+dcE+kt.totaal-_v0, kt:kt };
   }
   // v Fase 2 #3: prijs-prorata — elke component × PRIJS_FACTOR (uit de totale-prijs-override). f=1 → ongewijzigd gedrag.
   //   Zo schaalt ELKE heatmap-cel (investering → TVT → rendement) mee als de klant de totaalprijs van één combi aanpast.
@@ -1849,7 +1857,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var m=_invTotRaw(pvKwp, battKwh, ac, dc), f=((+factorOv>0)?factorOv:(PRIJS_FACTOR>0?PRIJS_FACTOR:1));   // v0.24.26: factorOv = per-combi prijsfactor (custom cel)
     if(f===1) return m;
     var R=Math.round;
-    return { pv:R(m.pv*f), bt:R(m.bt*f), acE:R(m.acE*f), dcE:R(m.dcE*f), overige:R(m.overige*f),
+    return { pv:R(m.pv*f), bt:R(m.bt*f), acE:R(m.acE*f), dcE:R(m.dcE*f), overige:R(m.overige*f), varia0:R(m.varia0*f), variaLaden:R(m.variaLaden*f),
              tot:R(m.tot*f), invPvBatt:R(m.invPvBatt*f), invInfra:R(m.invInfra*f), kt:m.kt };
   }
   function _invBtnLabel(){ var b=$('inv-edit-btn'); if(!b) return; b.textContent=INV_EDIT?'💾 Opslaan':'✏️ Pas aan'; b.classList.toggle('saving',INV_EDIT);
@@ -1869,13 +1877,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
            +'<span id="inv-crate" class="sub"></span></td></tr>';
       rows+=_invRijEdit('Laadpalen AC','inv-ac',Math.max(0,ac|0),'×',1);
       rows+=_invRijEdit('Laadpalen DC','inv-dc',Math.max(0,dc|0),'×',1);
-      rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
+      rows+=_invRij('Varia','kabels, ontkoppelbord, toebehoren');
     } else {
       rows+=_invRij('Zonnepanelen', num0(pvKwp)+' kWp');
       rows+=_invRij('Batterij', battKw>0?(String(battKw).replace('.',',')+' kW · '+num0(battKwh)+' kWh'):'geen');
       rows+=_invRij('Laadpalen AC', ac>0?(_ekIsPart()?(ac+' × AC-laadpaal woning (€ 1.500 + € 500 installatie)'):(ac+' × 22 kVA AC')):'geen');
       rows+=_invRij('Laadpalen DC', dc>0?(dc+' × DC (fastDC)'):'geen');   // v0.24.56 (Johan): geen kVA — EPC bepaalt later
-      rows+=_invRij('Overige','kabel, ontkoppelbord, toebehoren');
+      rows+=_invRij('Varia','kabels, ontkoppelbord, toebehoren');
     }
     if(INV_EDIT){
       // v0.24.27 (Johan): JAARLIJKSE exploitatiekost (recurring) — apart van de eenmalige investering; trekt jaarlijks van de opbrengst af, pro-rata over het rooster.
@@ -3558,7 +3566,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(battKwh) posten.push({label:'Batterij ('+battKwh+' kWh)',bedrag:_mfull.bt});
     if(acAantal) posten.push({label:(_ekIsPart()?('AC-laadpaal woning ('+acAantal+' × € 1.500 + € 500 installatie)'):('Laadpalen AC ('+acAantal+' × 22 kVA)')),bedrag:_mfull.acE});
     if(dcAantal) posten.push({label:'Laadpalen DC ('+dcAantal+' × fastDC)',bedrag:_mfull.dcE});   // v0.24.56 (Johan): geen kVA — EPC bepaalt later
-    if(_mfull.overige) posten.push({label:'Overige (kabel, ontkoppelbord, toebehoren)',bedrag:_mfull.overige});
+    if(_mfull.overige) posten.push({label:'Varia (kabels, ontkoppelbord, toebehoren)',bedrag:_mfull.overige});
     // v0.24.22 (Johan): exacte rapport-waarden voor de GEKOZEN cel in de kengetallen-bijlage, zodat die cel EXACT gelijk is aan
     //   de cover + het investeringsoverzicht (besparing = NUL−OPT, jaarfactuur = OPT.saldo, cycli = j.cycli, investering = _mfull.tot).
     // v0.33 (Johan): _bv vooraan → de kengetallen-grid-override voor de gekozen cel gebruikt de PV+batterij-investering
@@ -3608,17 +3616,19 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           laadpalen_eur: Math.round((+_mfull.acE||0)+(+_mfull.dcE||0)),
           ac_aantal: acAantal, dc_aantal: dcAantal,
           aansluiting_eur: Math.round((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0),
-          subtotaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0)),
+          varia_eur: Math.round(+_mfull.variaLaden||0),   // v0.64.0: extra kabel naar de laadpalen (varia)
+          subtotaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0)),
           diesel_eur_100km: (j&&+j.diesel_eur_100km>0)?+j.diesel_eur_100km:null
         },
         pvbatterij: {
           pv_kwp: pvKwp, batt_kw:(+sel.battKw||0), batt_kwh:battKwh,
           investering_bruto_eur: Math.round(_bv.invPvBatt),
+          varia_eur: Math.round(Math.min(+_bv.invPvBatt||0, +_mfull.varia0||0)),   // v0.64.0: kabels/ontkoppelbord van PV/batterij (zit in de bruto)
           verzwaring_vermeden_eur: Math.round(_bv.verzwaring||0),
           investering_netto_eur: Math.round(_bv.netInv),
           besparing_jaar_eur: Math.round(_bespF||0)
         },
-        totaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0) + _bv.netInv)
+        totaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + ((typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0) + _bv.netInv)
       } }),
       diesel_eur_100km: (j&&+j.diesel_eur_100km>0)?+j.diesel_eur_100km:null,   // v0.33.2 (Johan): top-level → de cover-€/100km leest D.diesel_eur_100km (vlootgewogen i.p.v. de €9-fallback)
       aansluiting: {

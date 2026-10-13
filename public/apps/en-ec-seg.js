@@ -1,10 +1,28 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"Varia (kabels, ontkoppelbord, toebehoren)": "Miscellaneous (cables, disconnection panel, accessories)",
+"Varia (kabels naar de laadpalen)": "Miscellaneous (cables to the charge points)",
+"Varia": "Miscellaneous",
+"kabels, ontkoppelbord, toebehoren": "cables, disconnection panel, accessories",
+"nodig om de laadpalen aan te sluiten": "needed to connect the charge points",
+"− Vermeden verzwaring": "− Avoided upgrade",
+"− Vermeden verzwaring (slimme sturing + batterij)": "− Avoided upgrade (smart control + battery)",
+"− Vermeden verzwaring (slimme sturing)": "− Avoided upgrade (smart control)",
+"jaarlijks (inflatie + {#} %) — dat maakt de batterij elk jaar waardevoller.": "every year (inflation + {#} %) — which makes the battery more valuable every year.",
+"jaarlijks (inflatie + {#} %) — dat maakt je installatie elk jaar waardevoller.": "every year (inflation + {#} %) — which makes your installation more valuable every year.",
+"= batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} − avoided upgrade € {#} = € {#}.",
+"= batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} = € {#}.",
+"= zonnepanelen € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= solar panels € {#} + miscellaneous € {#} + charge points and connection for charging € {#} − avoided upgrade € {#} = € {#}.",
+"= zonnepanelen € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= solar panels € {#} + miscellaneous € {#} + charge points and connection for charging € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= solar panels + battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} − avoided upgrade € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= solar panels + battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} = € {#}.",
+"= zonnepanelen en een batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= solar panels and a battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} − avoided upgrade € {#} = € {#}.",
+"= zonnepanelen en een batterij € {#} + varia € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= solar panels and a battery € {#} + miscellaneous € {#} + charge points and connection for charging € {#} = € {#}.",
 "Terugverdientijd incl. laadpalen (j)": "Payback incl. charge points (yrs)",
 "Rendement incl. laadpalen (%)": "Return incl. charge points (%)",
 "Besparing/jaar incl. laadsessies (€)": "Savings/yr incl. charging sessions (€)",
