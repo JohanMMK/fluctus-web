@@ -1,10 +1,29 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.16, 2026-10-13: + impact "For your …", home charging cheaper; v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.17, 2026-10-13: + methodology updated; v1.0.16, 2026-10-13: + impact "For your …", home charging cheaper; v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"De besparing komt uit slim in- en verkopen op de spotmarkt (day-ahead, per kwartier).": "The savings come from smart buying and selling on the spot market (day-ahead, per quarter hour).",
+"— nodig om je installatie op de spotprijzen te laten spelen. Bij een analoge meter is een overstap naar een": "— needed for your installation to respond to spot prices. With an analogue meter, switching to a",
+"vandaag (gebouw) → met laadplein (gebouw + laden) → met je installatie. Die laatste = de factuur met laadplein": "today (building) → with charging plaza (building + charging) → with your installation. The latter = the bill with charging plaza",
+"de besparing van je installatie; ze mag onder nul gaan (je wordt dan netto betaald).": "the savings of your installation; it may go below zero (you are then paid net).",
+"mét je installatie": "with your installation",
+". De besparing/jaar is het verschil tussen die twee jaarfacturen, inclusief het lagere capaciteitstarief.": ". The savings/year are the difference between those two annual bills, including the lower capacity tariff.",
+"Daarbovenop komt de besparing doordat je laadsessies niet meer elders (thuis, publiek, snelladen) gebeuren.": "On top of that comes the saving because your charging sessions no longer take place elsewhere (home, public, fast charging).",
+"vermeden aansluitingsverzwaring": "avoided connection upgrade",
+"is eenmalig en gaat af van de investering.": "is one-off and is deducted from the investment.",
+"Berekend op een plan over": "Calculated on a plan over",
+": investering = PV + batterij + varia": ": investment = PV + battery + miscellaneous",
+"+ laadpalen + aansluiting voor het laden": "+ charge points + connection for charging",
+"− vermeden verzwaring. De netkosten stijgen jaarlijks sneller dan de inflatie": "− avoided upgrade. Grid costs rise faster than inflation every year",
+"; onderhoud en slimme sturing gaan er elk jaar af": "; maintenance and smart control are deducted every year",
+". Rendement = het gemiddelde rendement per jaar over die {#} jaar.": ". Return = the average annual return over those {#} years.",
+"= wat het laden je factuur netto kost ná je installatie, gedeeld door de geladen km. De besparing van je installatie op het gebouw wordt mee toegerekend — daardoor kan dit getal negatief zijn.": "= what charging costs net on your bill after your installation, divided by the kilometres charged. The savings of your installation on the building are allocated to it — so this figure can be negative.",
+"Alle cijfers in het rooster — besparing, factuur, terugverdientijd, rendement, investering, piek en loadfactor — bewegen mee met de gekozen PV/batterij-combinatie.": "All figures in the grid — savings, bill, payback, return, investment, peak and load factor — move with the chosen PV/battery combination.",
+"Het aantal elektrische km/jaar hangt enkel af van je wagenpark.": "The number of electric km/year depends only on your fleet.",
+"Berekend op je gemeten kwartierdata (Fluvius) over een volledig jaar.": "Calculated on your measured quarter-hour data (Fluvius) over a full year.",
 "Voor je wagenverkoper": "For your car dealer",
 "Voor je installateur": "For your installer",
 "Voor je energieleverancier": "For your energy supplier",
