@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.67.4">
+<meta name="ek-build" content="0.67.5">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.67.5 (2026-10-13, Johan): BETALEND LAADPLEIN IN DE ROOSTERS — net als bij de eigen vloot (laadsessies) rekenen TVT / rendement / besparing in de roosters, de KPI-tegels en de rooster-bijlage nu mét de netto marge van het betalend laadplein (omzet − elektriciteit zónder installatie, = klantrapport v0.47 «Je betalend laadplein») en mét de investering in de laadpalen. Elektriciteitskost: commodity op inflatie, netkosten-deel op het netpad. Server ≥ 15.293 stuurt daarvoor ook bij een betalend plein de gebouw-only factuur (gebouw_saldo). -->
 <!-- ek.html v0.67.4 (2026-10-13, Johan): EIGEN PRIJS VAN EEN COMBI («Pas aan» → totaalprijs, bv. carport +400 €/kWp) telt nu overal mee: de meerprijs (eigen totaal − standaardprijs van die combi) komt bovenop de PV+batterij-investering van die cel → rooster (investering, TVT, rendement, besparing-KPI) én rapport (investering PV+batterij, plannen). Laadpalen blijven op hun standaardprijs (de meerprijs gaat niet meer pro rata over de palen). Vroeger negeerden het rooster en het rapport de eigen prijs zodra de cel exact was doorgerekend (backend-capex). -->
 <!-- ek.html v0.67.3 (2026-10-13, Johan): LEEG JAARVERBRUIK → duidelijke melding bij het veld (in de taal van het scherm) i.p.v. "De berekening kon niet worden afgerond … afname_mwh (jaarverbruik) verplicht" van de server. Geen serveraanroep zolang het jaarverbruik 0/leeg is. -->
 <!-- ek.html v0.67.2 (2026-10-13, Johan): ROOSTER FLIKKERT NIET MEER — (1) geschatte (geïnterpoleerde) cellen dragen nu ook de betalend-laadplein-cijfers (omzet/kost/MWh geïnterpoleerd, per voertuig van het dichtste anker) → de betalend-kaart boven het rooster verdwijnt niet meer bij elke tweede cel (sprong van ±550 px die de muis op een andere cel zette → lus); (2) hover houdt het rooster op dezelfde schermhoogte (scroll-compensatie) en rendert enkel bij een andere cel. -->
@@ -1458,22 +1459,35 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   // v0.61.0 (Johan): FINANCIEEL PLAN MÉT LAADPALEN + LAADSESSIES (= eerste plan in het klantrapport): netto-investering PV/batt
   //   + laadpalen + aansluiting voor het laden (verzwaring vóór), besparing + laadsessies (inflatie), OPEX + sturing laadpalen.
+  // v0.67.5 (Johan): netto marge van een BETALEND laadplein voor deze cel — omzet − elektriciteit ZONDER installatie
+  //   ((referentie − gebouw-only) × betalend aandeel van het laadvolume; de daling door PV/batterij zit al in de besparing).
+  //   Zonder gebouw_saldo (oude server) → de elektriciteitskost van de cel zelf. Netdeel = zelfde aandeel als in de cel.
+  function _plazaVan(a){ try{
+    if(_ekIsPart() || !a) return null; var bz=a.betalend; if(!bz || !(+bz.opbrengst_eur>0)) return null;
+    var omzet=+bz.opbrengst_eur||0, kC=+bz.kost_elek_eur||0, kN=(bz.kost_elek_net_eur!=null)?Math.min(kC,Math.max(0,+bz.kost_elek_net_eur||0)):0;
+    var mwh=+bz.geladen_mwh||0, tot=0; (Array.isArray(a.per_type)?a.per_type:[]).forEach(function(x){ tot+=(+(x&&x.geladen_mwh)||0); });
+    var aandeel=(tot>0&&mwh>0)?Math.min(1,mwh/tot):1, kost=kC;
+    if(typeof HM!=='undefined' && HM && HM.refKost!=null && HM.gebouwSaldo!=null && (+HM.refKost)>(+HM.gebouwSaldo)) kost=((+HM.refKost)-(+HM.gebouwSaldo))*aandeel;
+    var net=(kC>0)?(kost*kN/kC):0;
+    return { omzet:omzet, kost:kost, net:net, marge:omzet-kost };
+  }catch(e){ return null; } }
   function _planLaden(a, BV, m){
-    var L=_laadsesVan(a); if(!L || !BV) return null;
+    var L=_laadsesVan(a), Z=_plazaVan(a); if((!L && !Z) || !BV) return null;   // v0.67.5: ook bij enkel een betalend laadplein
+    var _lb=L?L.besparing:0, _zr=Z?(Z.omzet-(Z.kost-Z.net)):0, _zn=Z?(-Z.net):0, _zm=Z?Math.round(Z.marge):0;
     var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capL=palen+Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0);   // v0.64.0: + varia naar de laadpalen
     var netInv=Math.max(0,(+BV.netInv||0)+capL);
-    var cf=_escCashflow((+BV.besp_rest||0)+L.besparing, (+BV.besp_net||0), (+BV.opex_jaar||0)+(+BV.sturLp||0));
+    var cf=_escCashflow((+BV.besp_rest||0)+_lb+_zr, (+BV.besp_net||0)+_zn, (+BV.opex_jaar||0)+(+BV.sturLp||0));   // v0.67.5: + plaza (omzet & commodity → inflatie, netdeel → netpad)
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
-    return { laad:L.besparing, besp:(+BV.bespJaar1||0)+L.besparing, tvt:tvt, rend:rend, netInv:netInv, capL:capL };
+    return { laad:_lb+_zm, laadses:_lb, plaza:_zm, besp:(+BV.bespJaar1||0)+_lb+_zm, tvt:tvt, rend:rend, netInv:netInv, capL:capL };
   }
   // v0.63.0 (Johan): plan mét laadpalen voor een ROOSTER-cel (standaard palen-sizing, zoals de rooster-investering) — null zonder laadplein.
   function _planLadenCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null;
     var ac=INV_OV?(+INV_OV.ac||0):_acDefault(), dc=INV_OV?(+INV_OV.dc||0):_dcDefault();
     return _planLaden(a, bv, _invTotMajor(+a.pvKwp||0, +a.battKwh||0, ac, dc)); }
   function _hmLabelsLaden(){   // v0.63.0: rooster-labels zeggen of het plan mét laadpalen/laadsessies rekent
-    var on=!!(typeof HM!=='undefined' && HM && _laadsesVan(HM.sel||HM.best));
+    var on=!!(typeof HM!=='undefined' && HM && (_laadsesVan(HM.sel||HM.best) || _plazaVan(HM.sel||HM.best)));   // v0.67.5: + betalend
     var T={ tvt:on?'Terugverdientijd incl. laadpalen (j)':'Terugverdientijd PV+batterij (j)', rendement:on?'Rendement incl. laadpalen (%)':'Rendement PV+batterij (%)', besparing:on?'Besparing/jaar incl. laadsessies (€)':'Besparing/jaar (€)' };
     ['hm-mx-L','hm-mx-R'].forEach(function(id){ var sel=$(id); if(!sel) return; [].forEach.call(sel.options,function(o){ if(T[o.value]!=null && o.textContent!==T[o.value]) o.textContent=T[o.value]; }); });
   }
@@ -3522,7 +3536,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(_heeftLaden()) order.splice(4,0,'km100');
       if(H.lpMwh>0) order.push('kmdekking');   // v0.24.47 (Johan §6c): km-dekking-rooster in het rapport bij een laadplein
       if(H.lpMwh>0) order.push('piek');       order.push('loadfactor');   // v0.40.0 (Johan): loadfactor net na piekverbruik (kVA). v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
-      var _onL=!!_laadsesVan(H.sel||H.best);   // v0.63.0: rooster-bijlage rekent mét laadpalen/laadsessies bij een laadplein
+      var _onL=!!(_laadsesVan(H.sel||H.best) || _plazaVan(H.sel||H.best));   // v0.67.5: + betalend laadplein   // v0.63.0: rooster-bijlage rekent mét laadpalen/laadsessies bij een laadplein
       var titel={tvt:(_onL?'Terugverdientijd incl. laadpalen (jaar)':'Terugverdientijd PV + batterij (jaar)'),rendement:(_onL?'Rendement incl. laadpalen (%)':'Rendement PV + batterij (%)'),besparing:(_onL?'Besparing per jaar incl. laadsessies (€)':'Besparing per jaar (€)'),factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)',loadfactor:'Loadfactor (%)'};
       var best=H.sel||H.best||{};   // v0.24.15 (Johan): de stippellijn markeert de GEKOZEN oplossing van het rapport (H.sel), niet de eerst-voorgestelde beste (H.best)
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
