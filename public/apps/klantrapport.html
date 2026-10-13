@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.42.0 (2026-10-13, Johan): (1) voorblad: rendement van het financieel plan MET laadpalen en laadsessies naast de loadfactor, met uitleg factuurbesparing + laadsessies = totaal; (2) NIEUWE p. 2 «Ons advies» (aansluiting · hardware · besparing incl. laadsessies met opsplitsing zelfconsumptie / netkosten / arbitrage / laadsessies (server 15.286 factuur.geen) · EMS/onbalans); (3) inhoudstafel op p. 3 (ingevuld na de her-paginering); (4) hoofdstukken genummerd (hoofdstuk()), vervolgbladen behouden het nummer. -->
 <!-- klantrapport.html v0.41.1 (2026-10-13, Johan): met laadplein (plan «met laadpalen en laadsessies» aanwezig) vermelden het tweede plan en het plan mét onbalans in de titel «zonder laadpalen en zonder laadsessies». -->
 <!-- klantrapport.html v0.41.0 (2026-10-13, Johan): laadsessie-besparing NIET meer in de bestaande plannen; nieuw EERSTE financieel plan «met laadpalen en laadsessies» = capex PV/batt + elektrificatie (laadpalen + aansluiting voor het laden, twee_beslissingen) − vermeden verzwaring, besparing = factuurvergelijking + laadsessies naar het bedrijf, OPEX incl. sturing laadpalen. Enkel bij een laadsessie-besparing (dus laadplein); anders weggelaten. -->
 <!-- klantrapport.html v0.40.0 (2026-10-13, Johan): NIEUW HOOFDSTUK «Extra besparing: laadsessies naar het bedrijf brengen» tussen de factuurvergelijking en het onbalans-hoofdstuk — per voertuigtype (eigen vloot) de kost van laden elders (gezonde mix thuis @ CREG-forfait gewest Q4 2026 / publiek 400 / snel 550 €/MWh; thuis enkel personenwagens) vs laden op het bedrijf (meerkost laden zonder installatie ÷ laadverbruik), op de MWh die het model op de parking laadt. De besparing telt mee in beide financiële plannen (indexeert met inflatie). -->
@@ -83,8 +84,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.4"></script>
-<script src="en-ec-seg.js?v=1.0.11"></script>
+<script src="fr-ec-seg.js?v=1.3.5"></script>
+<script src="en-ec-seg.js?v=1.0.12"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -120,6 +121,7 @@
   .hero .arr{display:flex;align-items:center;font-size:22px;color:var(--grijs)}
   /* tabel */
   table.f{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+  .adv .card{padding:9px 13px;margin-top:8px!important} .adv .card p{margin:3px 0 0;font-size:12.5px;line-height:1.45} .adv table.f{margin-top:4px;font-size:12px} .adv table.f td{padding:4px 8px} .adv table.f tr.tot td{font-size:12.5px}   /* v0.42.0: advies compact op 1 blad */
   table.f th,table.f td{padding:8px 10px;border-bottom:1px solid var(--lijn);text-align:right}
   table.f th:first-child,table.f td:first-child{text-align:left}
   table.f thead th{background:#f3f6fa;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
@@ -365,11 +367,11 @@ function pagina(inner){
   var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent=_identRight();   // ná increment → fysiek bladnummer klopt
   return p;
 }
-function kop(titel){
+function kop(titel, nr){
   var id=[ (PID?'Dossier '+esc(PID):''), (KLANT?esc(KLANT):''), (ADRES?esc(ADRES):''), (BTW?'BTW '+esc(BTW):'') ].filter(Boolean).join('<br>');
   return '<div class="kop"><div class="merk">Energie<span>·</span>analyse</div>'+
     '<div class="meta">'+(D.datum?esc(D.datum)+'<br>':'')+(id||'')+'</div></div>'+
-    (titel?'<h1>'+esc(titel)+'</h1>':'');
+    (titel?'<h1>'+(nr?'<span class="hnr">'+nr+'.</span> ':'')+esc(titel)+'</h1>':'');
 }
 function band(src){ return src?'<img class="band" src="'+src+'" alt="">':''; }
 
@@ -487,6 +489,47 @@ function _combiSubBr(){
   return p.length?p.join('<br>'):'je installatie';   // PV en batterij elk op eigen regel
 }
 
+// v0.42.0 (Johan): laadsessie-besparing VROEG berekend (voorblad, advies, hoofdstuk en plannen gebruiken ze).
+var _LAADSES=null;
+(function(){
+  if(IS_PART) return;
+  var L=D.laadplein||null; if(!HAS_LP || !L) return;
+  var rows=(PER_TYPE||[]).filter(function(x){ return !x.betalend && (+x.geladen_mwh>0); });
+  if(!rows.length) return;
+  var mwhL=+L.mwh||0, mkV=+L.meerkost_voor;
+  var kostB=(mwhL>0 && isFinite(mkV)) ? Math.max(0, mkV/mwhL) : ((+D.allin_eur_mwh>0)?(+D.allin_eur_mwh):null);
+  if(kostB==null) return;
+  // CREG-forfait thuisladen bedrijfswagens, Q4 2026 (€/MWh) per gewest — uit de postcode van het verbruiksadres.
+  var _pc=(String(ADRES||'').match(/\b(\d{4})\b/)||[])[1], _pcN=_pc?+_pc:0;
+  var _gw=(_pcN>=1000&&_pcN<=1299)?'Brussel':(((_pcN>=1300&&_pcN<=1499)||(_pcN>=4000&&_pcN<=7999))?'Wallonie':'Vlaanderen');
+  var CREG={ Vlaanderen:322.5, Brussel:368.8, Wallonie:377.9 }[_gw], P_PUB=400, P_SNEL=550;
+  var _gwTxt={ Vlaanderen:'Vlaanderen', Brussel:'Brussel', Wallonie:'Wallonië' }[_gw];
+  // Gezonde laadmix per voertuigtype (aandeel van de energie). Thuisladen enkel voor personenwagens.
+  var MIX={ personenwagen:{t:0.60,p:0.25,s:0.15}, bestelwagen:{t:0,p:0.55,s:0.45}, lichte_vracht:{t:0,p:0.35,s:0.65},
+            vrachtwagen:{t:0,p:0.10,s:0.90}, bus:{t:0,p:0.10,s:0.90} };
+  var totE=0, totB=0, totMwh=0, lijst=[];
+  rows.forEach(function(x){
+    var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
+    var prijs=m.t*CREG+m.p*P_PUB+m.s*P_SNEL, mwh=+x.geladen_mwh||0;
+    var kE=mwh*prijs, kB=mwh*kostB;
+    totE+=kE; totB+=kB; totMwh+=mwh;
+    lijst.push({ naam:(x.voertuig||x.type||'—'), km:+x.km_geleverd||0, mwh:mwh, m:m, prijs:prijs, kE:kE, kB:kB, b:kE-kB });
+  });
+  var besp=Math.round(totE-totB);
+  if(!(besp>0)) return;
+  _LAADSES={ besparing:besp, kost_elders:Math.round(totE), kost_bedrijf:Math.round(totB), mwh:totMwh, eur_mwh_bedrijf:kostB,
+             lijst:lijst, creg:CREG, p_pub:P_PUB, p_snel:P_SNEL, gw_txt:_gwTxt };
+})();
+
+// v0.42.0 (Johan): KPI's van de financiële plannen vooraf (voorblad + advies + EK gebruiken het plan MET laadpalen en laadsessies).
+function _capLaden(){ var TB=(D.financieel&&D.financieel.twee_beslissingen)||null, E=(TB&&TB.elektrificatie)||{}; return Math.max(0,+E.subtotaal_eur||0); }
+var _PLAN_L=null, _PLAN_B=null;
+try{ _PLAN_B=financieelPagina(null,null,null,null,true)||null; }catch(e){ _PLAN_B=null; }
+try{ if(_LAADSES && +_LAADSES.besparing>0) _PLAN_L=financieelPagina(null,null,null,{ capex:_capLaden(), besparing:+_LAADSES.besparing },true)||null; }catch(e){ _PLAN_L=null; }
+var _PLAN_HOOFD=_PLAN_L||_PLAN_B;   // het plan dat voorblad + advies tonen
+// v0.42.0 (Johan): hoofdstuknummering — main chapters krijgen een volgnummer (kop(titel, nr)); bijlagen blijven 'Bijlage N'.
+var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
+
 // VOORPAGINA (p1) — titel + dossier/klant/BTW + kernvergelijking op beeldband-blad
 (function(){
   var idlines='';
@@ -512,7 +555,19 @@ function _combiSubBr(){
   })();   // voorblad: géén vermelding van batterij/cycli
   // v0.30.0 (Johan): LOADFACTOR als tweede kerngetal naast de €/100 km (zonder laadplein: alleen de loadfactor).
   (function(){
-    if(_LF.na==null) return;
+    // v0.42.0 (Johan): RENDEMENT van het financieel plan (mét laadpalen en laadsessies als die er zijn) als derde kerngetal.
+    var rendBox='';
+    (function(){ var P=_PLAN_HOOFD; if(!P || P.rendGem==null) return;
+      var bF=Math.round(besp), bL=(_PLAN_L&&_LAADSES)?Math.round(+_LAADSES.besparing||0):0;
+      var uitleg = bL>0
+        ? ('We tellen de besparing op je factuur ('+eur(bF)+') en de besparing door je laadsessies niet meer elders te doen ('+eur(bL)+') samen: '+eur(bF+bL)+' per jaar. Financieel plan mét laadpalen.')
+        : ('Op de besparing van je factuur ('+eur(bF)+' per jaar), over 15 jaar.');
+      rendBox='<div class="cover-km" style="background:#eef7f0;border:1px solid #bfe6cc;border-radius:12px;padding:12px 16px;text-align:center">'
+        +'<span style="font-size:.82rem;color:#54617a;text-transform:uppercase;letter-spacing:.05em">Rendement (gemiddeld/jaar)</span>'
+        +'<div style="font-size:1.6rem;font-weight:800;color:#037a3d;line-height:1.1;margin:2px 0">'+_num(P.rendGem,0)+'<span style="font-size:.9rem;font-weight:600"> %</span></div>'
+        +'<span style="font-size:.72rem;color:#54617a;line-height:1.35;display:block">'+uitleg+'</span></div>';
+    })();
+    if(_LF.na==null){ if(rendBox){ var _kb0=km100strip?km100strip.replace('margin:14px 0 0;',''):''; var _bx0=[_kb0,rendBox].filter(Boolean); km100strip='<div style="display:grid;grid-template-columns:repeat('+_bx0.length+',1fr);gap:10px;margin:14px 0 0">'+_bx0.join('')+'</div>'; } return; }
     // referentie = zelfde waarde als in de sectie "Toegangsvermogen": bij een laadplein "vandaag (gebouw)", anders "zonder installatie".
     var _af0=((D.aansluiting||{}).afname)||{}, _pB=Math.round(+_af0.piek_kw||(D.piek&&+D.piek.input_kw)||0);
     var _lfRef=(HAS_LP&&_LF.vGeb&&_pB>0)?_LF.lf(_LF.vGeb,_pB):_LF.voor, _lfRefLbl=(HAS_LP&&_LF.vGeb&&_pB>0)?'vandaag (gebouw)':'zonder installatie';
@@ -521,12 +576,8 @@ function _combiSubBr(){
       +'<div style="font-size:1.6rem;font-weight:800;color:#1F3864;line-height:1.1;margin:2px 0">'+_num(_LF.na,0)+'<span style="font-size:.9rem;font-weight:600"> %</span></div>'
       +'<span style="font-size:.78rem;color:#54617a">'+(_lfRef!=null&&_lfRef!==_LF.na?(_lfRefLbl+' '+_num(_lfRef,0)+' % · '):'')+'hoger = je netkosten verdelen zich over meer MWh</span>'
       +'</div>';
-    if(km100strip){
-      var kmBox=km100strip.replace('margin:14px 0 0;','');
-      km100strip='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 0">'+kmBox+lfBox+'</div>';
-    } else {
-      km100strip='<div style="margin:14px 0 0">'+lfBox+'</div>';
-    }
+    var _bx=[(km100strip?km100strip.replace('margin:14px 0 0;',''):''), lfBox, rendBox].filter(Boolean);
+    km100strip='<div style="display:grid;grid-template-columns:repeat('+_bx.length+',1fr);gap:10px;margin:14px 0 0">'+_bx.join('')+'</div>';
   })();
   // v0.11 (Johan): naam + afname-adres centraal en groot op de voorpagina. (ADRES nu module-breed — zie boven.)
   var klantBlok=(KLANT||ADRES)?('<div class="cover-klant">'+(KLANT?'<div class="cover-naam">'+esc(KLANT)+'</div>':'')+(ADRES?'<div class="cover-adres">'+esc(ADRES)+'</div>':'')+'</div>'):'';
@@ -547,10 +598,95 @@ function _combiSubBr(){
   _appendPage('cover', h);
 })();
 
+// ADVIES (p2, v0.42.0 Johan) — vier adviespunten: aansluiting, hardware, besparing (incl. laadsessies) + opsplitsing, EMS/onbalans.
+(function(){
+  var F2=D.factuur||{}, N0=F2.nul||{}, O0=F2.opt||{}, G0=F2.geen||null;
+  var BW0=D.battwaarde||{}, TB=(D.financieel&&D.financieel.twee_beslissingen)||null, E0=(TB&&TB.elektrificatie)||{};
+  var PL=_PLAN_HOOFD||{};
+  var h=kop('Ons advies');
+  h+='<div class="adv"><p class="lead" style="margin-bottom:4px">Kort samengevat: wat we je aanraden en wat het oplevert. De details staan in de hoofdstukken hierna.</p>';
+  // 1 — aansluiting
+  var a1='';
+  (function(){
+    function _piekVan(hh){ if(!hh) return 0; var m=hh.mat||hh, p=0; (m||[]).forEach(function(r){ (r||[]).forEach(function(v){ if(+v>p) p=+v; }); }); return Math.round(p); }
+    var _af=((D.aansluiting||{}).afname)||{}, _best=Math.round(+_af.piek_kw||(D.piek&&+D.piek.input_kw)||0);
+    if(HAS_LP){
+      var HTv=D.heat||{};
+      var onb=_piekVan(HTv.afname_laden_onbeheerst)||_piekVan(HTv.afname_laden_zonder), na=_piekVan(HTv.afname_met_sturing);
+      if(!IS_PART && D.piek && +D.piek.sim_na_kw>na) na=Math.round(+D.piek.sim_na_kw);
+      if(!(onb>0 && na>0)) return;
+      var binnen=(_best<=0)||(na<=_best*1.02), vz=Math.round(+BW0.verzwaring||0);
+      if(binnen) a1='<b>Nee.</b> Met de installatie blijft je netpiek op ± '+_num(na,0)+' kVA'+(_best>0?(', binnen je bestaande aansluiting van '+_num(_best,0)+' kVA'):'')+
+        '. Onbeheerst laden zou ± '+_num(onb,0)+' kVA vragen'+(vz>0?(' — een verzwaring van ± '+eur(vz)+' die je zo vermijdt'):'')+'.';
+      else { var rest=Math.max(0,Math.round((+E0.aansluiting_eur||0)-vz));
+        a1='<b>Ja.</b> Om alle km’s te laden stijgt je netpiek tot ± '+_num(na,0)+' kVA, boven je bestaande aansluiting van '+_num(_best,0)+' kVA'+
+           (rest>0?(' — reken op een verzwaring van ± '+eur(rest)):'')+'. Onbeheerst laden zou zelfs ± '+_num(onb,0)+' kVA vragen.'; }
+    } else {
+      var P0=D.piek||{}, pV=Math.round(+P0.sim_voor_kw||0), pN=Math.round(+P0.sim_na_kw||0);
+      if(!(pV>0 && pN>0)) return;
+      var b2=(_best<=0)||(pN<=_best*1.02);
+      a1=b2?('<b>Nee.</b> Je piek gaat van ± '+_num(pV,0)+' naar ± '+_num(pN,0)+' kVA'+(_best>0?(', binnen je bestaande aansluiting van '+_num(_best,0)+' kVA'):'')+'.')
+           :('<b>Mogelijk.</b> Je piek met installatie (± '+_num(pN,0)+' kVA) ligt boven je bestaande aansluiting ('+_num(_best,0)+' kVA) — bespreek een verzwaring met je netbeheerder.');
+    }
+  })();
+  h+='<div class="card" style="margin-top:10px"><div class="t">1 · Uitbreiding van je aansluiting nodig?</div><p>'+(a1||'Op basis van de beschikbare gegevens is geen verzwaring voorzien.')+'</p></div>';
+  // 2 — hardware
+  var hw='<table class="f"><tbody>';
+  if(HAS_PV||HAS_BATT) hw+='<tr><td>Zonnepanelen en batterij</td><td style="text-align:right">'+esc(_combiSub())+'</td></tr>';
+  var _ac=+E0.ac_aantal||((combi.laadpalen_ac&&+combi.laadpalen_ac.aantal)||0), _dc=+E0.dc_aantal||((combi.laadpalen_dc&&+combi.laadpalen_dc.aantal)||0);
+  if(_ac>0||_dc>0) hw+='<tr><td>Laadpalen</td><td style="text-align:right">'+[(_ac>0?_ac+' × AC':''),(_dc>0?_dc+' × DC (snellader)':'')].filter(Boolean).join(' + ')+'</td></tr>';
+  hw+='<tr><td>Energiebeheersysteem (EMS)</td><td style="text-align:right">slimme sturing op de spotmarkt</td></tr>';
+  if(_PLAN_B && +_PLAN_B.invBruto>0) hw+='<tr><td>Investering zonnepanelen + batterij</td><td style="text-align:right">'+eur(_PLAN_B.invBruto)+'</td></tr>';
+  if(_PLAN_L && +_PLAN_L.capL>0) hw+='<tr><td>Investering laadpalen + aansluiting voor het laden</td><td style="text-align:right">'+eur(_PLAN_L.capL)+'</td></tr>';
+  if(+PL.netInv>0) hw+='<tr class="tot"><td>'+((+BW0.verzwaring>0)?'Netto-investering (na vermeden verzwaring)':'Totale investering')+'</td><td style="text-align:right" class="win">'+eur(PL.netInv)+'</td></tr>';
+  hw+='</tbody></table>';
+  h+='<div class="card" style="margin-top:10px"><div class="t">2 · Gekozen hardware</div>'+hw+'</div>';
+  // 3 — besparing + opsplitsing
+  var bF=besp, bL=(_LAADSES&&+_LAADSES.besparing>0)?+_LAADSES.besparing:0, bT=bF+bL;
+  var posten=[];
+  if(G0 && G0.saldo!=null){
+    var eN=(+N0.energie||0)+(+N0.heffingen||0), eG=(+G0.energie||0)+(+G0.heffingen||0), eO=(+O0.energie||0)+(+O0.heffingen||0);
+    var pNet=(+N0.netkosten||0)-(+O0.netkosten||0), pZc=eN-eG, pArb=bF-pNet-pZc;
+    if(HAS_PV) posten.push(['Extra zelfconsumptie (zonnestroom zelf gebruiken)', pZc]); else pArb+=pZc;
+    posten.push(['Verlaging netkosten (piek en capaciteit)', pNet]);
+    if(HAS_BATT) posten.push(['Arbitrage op de spotmarkt', pArb]); else if(posten.length) posten[0][1]+=pArb;
+  } else {
+    posten.push(['Zelfconsumptie en arbitrage op de spotmarkt (energie)', ((+N0.energie||0)+(+N0.heffingen||0))-((+O0.energie||0)+(+O0.heffingen||0))]);
+    posten.push(['Verlaging netkosten (piek en capaciteit)', (+N0.netkosten||0)-(+O0.netkosten||0)]);
+  }
+  if(bL>0) posten.push(['Laadsessies naar het bedrijf halen', bL]);
+  var tb='<table class="f"><tbody>';
+  posten.forEach(function(r){ tb+='<tr><td>'+esc(r[0])+'</td><td style="text-align:right;white-space:nowrap">'+signEur(Math.round(r[1]))+'</td></tr>'; });
+  tb+='<tr class="tot"><td>Totale besparing per jaar</td><td style="text-align:right;white-space:nowrap" class="win">'+eur(bT)+'</td></tr></tbody></table>';
+  h+='<div class="card" style="margin-top:10px"><div class="t">3 · '+(bL>0?'Besparing op je factuur versterken door laadsessies naar het bedrijf te halen':'Besparing op je factuur')+'</div>'+
+     '<p>'+(bL>0?('Bovenop de besparing op je factuur ('+eur(bF)+') breng je de laadsessies naar je eigen parking (+ '+eur(bL)+'). '):'')+
+     'Dit geeft een <b>totale besparing van '+eur(bT)+' per jaar</b>'+
+     (PL.rendGem!=null?(', een <b>rendement van '+pct(PL.rendGem,0)+'</b>'):'')+
+     (PL.tvt!=null?(' en een <b>terugverdientijd van '+_num(PL.tvt,1)+' jaar</b>'):'')+
+     (bL>0?' (investering in de laadpalen meegerekend).':'.')+'</p>'+tb+'</div>';
+  // 4 — EMS / onbalans
+  var onb=(+F2.onbalans_extra_jaar)||0;
+  if(!IS_PART && (HAS_PV||HAS_BATT)){
+    h+='<div class="card" style="margin-top:10px"><div class="t">4 · Kies een EMS dat je vrij laat onderhandelen</div><p>'+
+       'Kies bij de installatie een <b>EMS</b> dat je de vrijheid geeft om met <b>elke leverancier</b> te onderhandelen over extra inkomsten uit onbalans'+
+       (onb>0?(' — met deze installatie kan dat oplopen tot ± <b>'+eur(onb)+' per jaar</b>, een bedrag waar de leverancier ook zijn deel van zal willen.'):'.')+
+       '</p></div>';
+  }
+  h+='</div>';
+  pagina(h);
+})();
+
+// INHOUDSTAFEL (v0.42.0 Johan) — op een eigen pagina na het advies; ingevuld ná de her-paginering (echte paginanummers).
+(function(){
+  var h=kop('Inhoud');
+  h+='<div id="toc-lijst" data-i18n-skip="1"></div>';
+  var pg=pagina(h); if(pg) pg.setAttribute('data-toc','1');
+})();
+
 // P2 — samenvatting (de kernvergelijking staat nu op de voorpagina)
 (function(){
   var h='';
-  h+=kop('Je energiefactuur: met versus zonder '+CN);
+  h+=hoofdstuk('Je energiefactuur: met versus zonder '+CN);
   h+='<p class="lead">Deze analyse toont wat '+CN_PROSE+' je oplevert op een <b>optimaal dynamisch (spot) contract</b>: '+
      'je jaarfactuur <b>zónder installatie</b>'+(HAS_LADEN?' — met het laden aan je gebouw en de aansluiting die daarvoor nodig is':'')+
      ' versus <b>mét '+CN_PROSE+'</b>, slim aangestuurd op de energiemarkt. Alle cijfers komen uit een simulatie op kwartierbasis over een volledig jaar.'+
@@ -697,7 +833,7 @@ function _combiSubBr(){
 
 // P2 — factuurvergelijking
 (function(){
-  var h=kop('Factuurvergelijking in detail');
+  var h=hoofdstuk('Factuurvergelijking in detail');
   // v0.14 (Johan): ZONDER vs MET installatie, BEIDE op een optimaal dynamisch (spot) contract (NUL vs OPT). Besparing = besp
   //   (= cover, = terugverdientijd). Geen 1-maand→jaar-extrapolatie van de échte (vaste) factuur meer in deze tabel — die
   //   contractvergelijking staat, als één-maand-cijfer (energie), in de onderhandelingsnota (bijlage). Alles overal consistent.
@@ -768,36 +904,12 @@ function _combiSubBr(){
 //   bedrijfsparking laadt (per_type.geladen_mwh, enkel eigen vloot) t.o.v. de kost van laden op het bedrijf (meerkost laden
 //   ZONDER installatie ÷ laadverbruik — de installatiewinst op het laden zit al in de factuurvergelijking → geen dubbeltelling).
 //   Resultaat (_LAADSES.besparing) telt ook mee in het financieel plan (normaal + mét onbalans).
-var _LAADSES=null;
 (function(){
-  if(IS_PART) return;
-  var L=D.laadplein||null; if(!HAS_LP || !L) return;
-  var rows=(PER_TYPE||[]).filter(function(x){ return !x.betalend && (+x.geladen_mwh>0); });
-  if(!rows.length) return;
-  var mwhL=+L.mwh||0, mkV=+L.meerkost_voor;
-  var kostB=(mwhL>0 && isFinite(mkV)) ? Math.max(0, mkV/mwhL) : ((+D.allin_eur_mwh>0)?(+D.allin_eur_mwh):null);
-  if(kostB==null) return;
-  // CREG-forfait thuisladen bedrijfswagens, Q4 2026 (€/MWh) per gewest — uit de postcode van het verbruiksadres.
-  var _pc=(String(ADRES||'').match(/\b(\d{4})\b/)||[])[1], _pcN=_pc?+_pc:0;
-  var _gw=(_pcN>=1000&&_pcN<=1299)?'Brussel':(((_pcN>=1300&&_pcN<=1499)||(_pcN>=4000&&_pcN<=7999))?'Wallonie':'Vlaanderen');
-  var CREG={ Vlaanderen:322.5, Brussel:368.8, Wallonie:377.9 }[_gw], P_PUB=400, P_SNEL=550;
-  var _gwTxt={ Vlaanderen:'Vlaanderen', Brussel:'Brussel', Wallonie:'Wallonië' }[_gw];
-  // Gezonde laadmix per voertuigtype (aandeel van de energie). Thuisladen enkel voor personenwagens.
-  var MIX={ personenwagen:{t:0.60,p:0.25,s:0.15}, bestelwagen:{t:0,p:0.55,s:0.45}, lichte_vracht:{t:0,p:0.35,s:0.65},
-            vrachtwagen:{t:0,p:0.10,s:0.90}, bus:{t:0,p:0.10,s:0.90} };
-  var totE=0, totB=0, totMwh=0, lijst=[];
-  rows.forEach(function(x){
-    var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
-    var prijs=m.t*CREG+m.p*P_PUB+m.s*P_SNEL, mwh=+x.geladen_mwh||0;
-    var kE=mwh*prijs, kB=mwh*kostB;
-    totE+=kE; totB+=kB; totMwh+=mwh;
-    lijst.push({ naam:(x.voertuig||x.type||'—'), km:+x.km_geleverd||0, mwh:mwh, m:m, prijs:prijs, kE:kE, kB:kB, b:kE-kB });
-  });
-  var besp=Math.round(totE-totB);
-  if(!(besp>0)) return;
-  _LAADSES={ besparing:besp, kost_elders:Math.round(totE), kost_bedrijf:Math.round(totB), mwh:totMwh, eur_mwh_bedrijf:kostB };
+  if(!_LAADSES) return;
+  var lijst=_LAADSES.lijst, totE=_LAADSES.kost_elders, totB=_LAADSES.kost_bedrijf, totMwh=_LAADSES.mwh, besp=_LAADSES.besparing, kostB=_LAADSES.eur_mwh_bedrijf;
+  var CREG=_LAADSES.creg, P_PUB=_LAADSES.p_pub, P_SNEL=_LAADSES.p_snel, _gwTxt=_LAADSES.gw_txt;
   function _pct(v){ return Math.round(v*100)+'%'; }
-  var h=kop('Extra besparing: laadsessies naar het bedrijf brengen');
+  var h=hoofdstuk('Extra besparing: laadsessies naar het bedrijf brengen');
   h+='<p class="lead">Zonder laadpalen op je bedrijfsparking laden je voertuigen <b>elders</b>: thuis (enkel personenwagens, terugbetaald aan het CREG-forfait), '+
      'aan publieke laadpalen of aan snelladers — telkens aan een veel hogere prijs per kWh. Breng je die laadsessies naar je eigen parking, '+
      'dan betaal je enkel je eigen energiefactuur.</p>';
@@ -839,7 +951,7 @@ var _LAADSES=null;
   // v0.15.2 (Johan, optie a): zonder becijferde onbalanswaarde (onbExtra=0) klappen we deze pagina in tot een COMPACTE
   //   EMS-keuzeraad — geen lege "potentieel"-plan-pagina (hero + stappenplan) meer. De EMS-deur-open-raad + de
   //   dynamisch-contract-vereiste blijven (nummeronafhankelijk nuttig advies). Mét waarde → volledige potentieel-pagina.
-  var h=kop(onbExtra>0?'Extra potentieel: onbalans-sturing':'Je dynamisch contract & EMS-keuze');
+  var h=hoofdstuk(onbExtra>0?'Extra potentieel: onbalans-sturing':'Je dynamisch contract & EMS-keuze');
   h+='<p class="lead">De besparing in dit rapport komt uit slim in- en verkopen op de <b>spotmarkt</b> (day-ahead). '+
      'Die winsten zijn <b>enkel mogelijk met een dynamisch (spot) contract</b> op basis van de day-ahead-prijzen — zo profiteer je van de laagste prijsmomenten.</p>';
   if(onbExtra>0){
@@ -872,7 +984,7 @@ var _LAADSES=null;
   var E=TB.elektrificatie||{}, P=TB.pvbatterij||{};
   if(!(+E.subtotaal_eur>0)) return;   // geen laadpalen/aansluiting → geen twee-beslissingen-splitsing nodig
   var _r=function(l,v,cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+esc(l)+'</td><td style="text-align:right"'+(cls==='tot'?' class="win"':'')+'>'+v+'</td></tr>'; };
-  var h=kop('Je investering in twee beslissingen');
+  var h=hoofdstuk('Je investering in twee beslissingen');
   h+='<p class="lead">Dit dossier bevat <b>twee losse beslissingen</b>. We tonen ze apart, zodat elk op zijn eigen merites staat: '+
      'eerst de keuze om je vloot <b>elektrisch te maken</b> (t.o.v. diesel), daarna de keuze om er <b>zonnepanelen en een batterij</b> bij te nemen.</p>';
   // ── Blok 1 — elektrificatie ──
@@ -917,7 +1029,7 @@ var _LAADSES=null;
   var posten=Array.isArray(FIN.posten)?FIN.posten:[];
   var totaal=(+FIN.investering)|| posten.reduce(function(s,p){return s+(+p.bedrag||0);},0);
   if(!(totaal>0) && !posten.length) return;
-  var h=kop('Overzicht van de investeringen');
+  var h=hoofdstuk('Overzicht van de investeringen');
   h+='<p class="lead">Dit is de eenmalige investering die aan de basis ligt van het financieel plan op de volgende '+
      'pagina. De bedragen zijn indicatief en exclusief btw.</p>';
   if(combi.pv_kwp||combi.batt_kwh){
@@ -988,7 +1100,7 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 // v0.11 (Johan): herbruikbaar → 1× normaal (spot-sturing) + 1× "potentieel met onbalans" (P5-bis). energieOverride vervangt
 //   de jaar-1 energiebesparing (de onbalans-extra is commodity/spot → indexeert op inflatie, net als 'rest').
 var _FINKPI=null;   // v0.16.0 (Johan, Fase 2): KPI's van het basis-financieel-plan, voor de kwaliteitscontrole-bijlage.
-function financieelPagina(energieOverride, titelArg, extraNote, optLaden){
+function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){   // v0.42.0: dry=true → enkel KPI's teruggeven (voorblad/advies), geen pagina
   // v0.41.0 (Johan): optLaden = {capex, besparing} → plan MET laadpalen (capex elektrificatie) + laadsessies naar het bedrijf + sturingskost laadpalen.
   var _mL=!!(optLaden && optLaden.besparing>0), _capL=_mL?Math.max(0,+optLaden.capex||0):0;
   var BW=D.battwaarde||null;
@@ -1047,9 +1159,10 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden){
   var rendGem=netInv>0?(som/HOR/netInv*100):0;
   // v0.16.0 (Johan, Fase 2): bewaar de KPI's van het BASISplan (spot-sturing, geen override) op moduleniveau, zodat de
   //   kwaliteitscontrole-bijlage EXACT dezelfde cijfers scoort als het financieel plan (coherentie by construction).
+  if(dry) return { tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, invBruto:invBruto, laadS0:laadS0, energie:energie, opex:_opexTot, capL:_capL };
   if(energieOverride==null && !_mL){ _FINKPI={ tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, horizon:HOR }; }
 
-  var h=kop(titelArg||'Financieel plan over 15 jaar');
+  var h=hoofdstuk(titelArg||'Financieel plan over 15 jaar');
   if(extraNote) h+=extraNote;
   h+='<p class="lead">Deze berekening gaat uit van een investering <b>uit eigen middelen</b> (geen lening of leasing). '+
      'Ze toont wat je elk jaar bespaart en wanneer je investering is terugverdiend.'+(BW?' De <b>netkosten stijgen</b> jaarlijks (inflatie + '+_num(extra*100,0)+' %'+(dubJ<9999?', met een eenmalige verdubbeling in '+dubJ:'')+') — dat maakt de batterij elk jaar waardevoller.':'')+'</p>';
@@ -1112,8 +1225,7 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden){
 //   Enkel als er een laadplein met een laadsessie-besparing is; anders zou het identiek zijn aan het plan hieronder.
 (function(){
   if(!(_LAADSES && +_LAADSES.besparing>0)) return;
-  var TB=(D.financieel&&D.financieel.twee_beslissingen)||null, E=(TB&&TB.elektrificatie)||{};
-  var capL=Math.max(0,+E.subtotaal_eur||0);
+  var capL=_capLaden();
   var intro='<div class="ems-caveat"><b>Volledig project: laadpalen + zonnepanelen/batterij.</b> Dit plan neemt naast de installatie ook de '+
     '<b>investering in de laadpalen</b>'+(capL>0?(' ('+eur(capL)+')'):'')+' mee, en de besparing van het <b>laden op je eigen parking</b> i.p.v. elders '+
     '(+ '+eur(_LAADSES.besparing)+' per jaar, zie «Extra besparing: laadsessies naar het bedrijf brengen»). Het plan hierna rekent enkel op de zonnepanelen en de batterij.</div>';
@@ -2027,7 +2139,10 @@ async function _genPdf(){
       var np=document.createElement('div'); np.className='a4';
       var nc=document.createElement('div'); nc.className='a4-content';
       if(kopNode) nc.appendChild(kopNode.cloneNode(true));
-      if(titel){ var nh=document.createElement('h1'); nh.textContent=titel+' (vervolg)'; nc.appendChild(nh); }
+      if(titel){ var nh=document.createElement('h1'); var _mn=titel.match(/^\s*(\d+)\.\s+([\s\S]*)$/);   // v0.42.0: hoofdstuknummer apart houden (vertaling)
+        if(_mn){ var _sp=document.createElement('span'); _sp.className='hnr'; _sp.textContent=_mn[1]+'.'; nh.appendChild(_sp); nh.appendChild(document.createTextNode(' '+_mn[2]+' (vervolg)')); }
+        else nh.textContent=titel+' (vervolg)';
+        nc.appendChild(nh); }
       move.forEach(function(m){ nc.appendChild(m); });   // verplaatst de knopen uit de oude pagina
       var nf=document.createElement('div'); nf.className='a4-foot';
       nf.innerHTML='<span>'+(typeof _identLeft==='function'?_identLeft():'')+(window._DEMO?' · voorbeeld':'')+'</span><span class="a4-nr"></span>';
@@ -2040,6 +2155,23 @@ async function _genPdf(){
     var allp=R.querySelectorAll('.a4');
     for(var n=0;n<allp.length;n++){ var nr=allp[n].querySelector('.a4-nr'); if(nr) nr.textContent=pref+'p. '+(n+1); }
   }catch(e){ try{console.warn('splitRooster',e);}catch(_){} }
+})();
+
+// v0.42.0 (Johan): INHOUDSTAFEL invullen ná de her-paginering — hoofdstukken (genummerd) + bijlagen met hun paginanummer.
+(function(){
+  try{
+    var box=document.getElementById('toc-lijst'); if(!box || !R) return;
+    var allp=R.querySelectorAll('.a4'), rows='', bijStart=false;
+    for(var n=0;n<allp.length;n++){
+      var pg=allp[n]; if(pg.classList.contains('cover')||pg.classList.contains('back')||pg.classList.contains('divider')||pg.getAttribute('data-toc')) continue;
+      var h1=pg.querySelector('.a4-content > h1'); if(!h1) continue;
+      var t=(h1.textContent||'').replace(/\s+/g,' ').trim(); if(!t || /\((vervolg|suite|continued)\)$/i.test(t)) continue;
+      var isBij=!h1.querySelector('.hnr') && /^(Bijlage|Annexe|Appendix)\b/i.test(t);
+      if(isBij && !bijStart){ bijStart=true; rows+='<tr><td colspan="2" style="padding:10px 0 4px;font-weight:700;color:#0A2540;border-bottom:1px solid #E2E8F0">'+(window.EC_T_HTML?EC_T_HTML('Bijlagen'):'Bijlagen')+'</td></tr>'; }
+      rows+='<tr><td style="padding:5px 0;'+(isBij?'padding-left:10px;':'font-weight:600;')+'">'+esc(t)+'</td><td style="padding:5px 0;text-align:right;white-space:nowrap;color:#54617a">'+(n+1)+'</td></tr>';
+    }
+    box.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tbody>'+rows+'</tbody></table>';
+  }catch(e){ try{console.warn('toc',e);}catch(_){} }
 })();
 
 // Bij ECHTE data met een e-mailadres: EK laat het rapport als PDF naar de klant mailen (fire-and-forget, 1×).

@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.60.0">
+<meta name="ek-build" content="0.61.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.61.0 (2026-10-13, Johan): KPI's besparing / TVT / rendement in het resultaatscherm volgen bij een laadplein het financieel plan MÉT laadpalen en laadsessies (zelfde rekenregel als klantrapport: laadsessie-besparing per voertuigtype uit per_type, kost bedrijf = (referentie − gebouwfactuur) ÷ laadvolume; netto-investering + laadpalen + verzwaring vóór; OPEX + sturing laadpalen). -->
 <!-- ek.html v0.60.0 (2026-10-12, Johan): handmatige LS/MS-keuze (oekene) wordt nu op het dossier bewaard (bevestigd.spanning, server 15.285) en bij heropenen teruggezet — sprong voorheen terug naar Auto (= LS uit de factuur). -->
 <!-- ek.html v0.59.0 (2026-10-12, Johan): de kerngetallen van het resultaatscherm staan nu in een eigen kader met titel «📊 KPI's voor de nieuwe opstelling» (zelfde stijl als de injectie-sturingskaart). -->
 <!-- ek.html v0.58.0 (2026-10-12, Johan): injectie-sturingskaart — afremmen zodra de injectieprijs (spot − afslag) negatief is (server 15.282). -->
@@ -555,8 +556,8 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.4"></script>
-<script src="en-ec-seg.js?v=1.0.11"></script>
+<script src="fr-ec-seg.js?v=1.3.5"></script>
+<script src="en-ec-seg.js?v=1.0.12"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
@@ -1419,6 +1420,38 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return { energie:energie, besp_net:bespNet, besp_rest:bespRest, cap:0, cap_info:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
              invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend };
   }
+  // v0.61.0 (Johan): LAADSESSIES NAAR HET BEDRIJF — zelfde rekenregel als klantrapport v0.40+: per voertuigtype (eigen vloot) de MWh
+  //   die de cel op de parking laadt × (gezonde mix thuis@CREG-gewest Q4 2026 / publiek 400 / snel 550 €/MWh − kost laden op het
+  //   bedrijf). Kost op het bedrijf = (referentie mét laden − gebouwfactuur) ÷ laadvolume (= meerkost laden zonder installatie).
+  function _laadsesVan(a){
+    try{
+      if(_ekIsPart()) return null;
+      if(typeof HM==='undefined' || !HM || !(+HM.lpMwh>0) || HM.refKost==null || HM.gebouwSaldo==null) return null;
+      var pt=(a && Array.isArray(a.per_type) && a.per_type.length) ? a.per_type : null;
+      if(!pt && Array.isArray(HM.real)){ for(var i=0;i<HM.real.length;i++){ var r=HM.real[i]; if(r && Array.isArray(r.per_type) && r.per_type.length){ pt=r.per_type; break; } } }
+      if(!pt) return null;
+      var kostB=Math.max(0, ((+HM.refKost)-(+HM.gebouwSaldo))/(+HM.lpMwh));
+      var adr=String(STATE_ADRES||(($('i-adres')&&$('i-adres').value)||'')), pc=+((adr.match(/\b(\d{4})\b/)||[])[1]||0);
+      var gw=(pc>=1000&&pc<=1299)?'B':(((pc>=1300&&pc<=1499)||(pc>=4000&&pc<=7999))?'W':'V');
+      var CREG={V:322.5,B:368.8,W:377.9}[gw], P_PUB=400, P_SNEL=550;
+      var MIX={ personenwagen:{t:0.60,p:0.25,s:0.15}, bestelwagen:{t:0,p:0.55,s:0.45}, lichte_vracht:{t:0,p:0.35,s:0.65}, vrachtwagen:{t:0,p:0.10,s:0.90}, bus:{t:0,p:0.10,s:0.90} };
+      var b=0; pt.forEach(function(x){ if(!x || x.betalend || !(+x.geladen_mwh>0)) return; var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
+        b+=(+x.geladen_mwh)*((m.t*CREG+m.p*P_PUB+m.s*P_SNEL)-kostB); });
+      b=Math.round(b); return b>0 ? { besparing:b, kostB:kostB } : null;
+    }catch(e){ return null; }
+  }
+  // v0.61.0 (Johan): FINANCIEEL PLAN MÉT LAADPALEN + LAADSESSIES (= eerste plan in het klantrapport): netto-investering PV/batt
+  //   + laadpalen + aansluiting voor het laden (verzwaring vóór), besparing + laadsessies (inflatie), OPEX + sturing laadpalen.
+  function _planLaden(a, BV, m){
+    var L=_laadsesVan(a); if(!L || !BV) return null;
+    var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)), capL=palen+Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0);
+    var netInv=Math.max(0,(+BV.netInv||0)+capL);
+    var cf=_escCashflow((+BV.besp_rest||0)+L.besparing, (+BV.besp_net||0), (+BV.opex_jaar||0)+(+BV.sturLp||0));
+    var tvt=null, cum0=0;
+    for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
+    var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
+    return { laad:L.besparing, besp:(+BV.bespJaar1||0)+L.besparing, tvt:tvt, rend:rend, netInv:netInv, capL:capL };
+  }
   function _bespTot(a){ var v=_battValue(a); return v?v.bespJaar1:((a&&+a.besparing)||0); }   // besparing jaar 1 = factuurvergelijking (NUL−OPT)
   function _rendNetto(a){ var v=_battValue(a); return v?v.rend:null; }   // v0.19: gemiddeld rendement/jaar over 15 jaar
   function _besteAnker(anchors){ var c=(anchors||[]).filter(function(a){return a&&a.besparing>0&&_rendNetto(a)!=null;});
@@ -1969,6 +2002,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var BV=_battValue(a) || { bespJaar1:bespJaar, energie:bespJaar, cap:0, verzwaring:0, shaved:0, netInv:invTot, tvt:(bespJaar>0?Math.round(invTot/bespJaar*10)/10:null), rend:(bespJaar>0&&invTot>0?Math.round(bespJaar/invTot*100):null), som15:bespJaar*15 };
     var bespTot = BV.bespJaar1;
     var tvt = BV.tvt;
+    var _PLd = _planLaden(a, BV, _m);   // v0.61.0 (Johan): KPI's op het plan MÉT laadpalen + laadsessies (indien laadplein)
+    var bespKpi = _PLd ? _PLd.besp : bespTot, tvtKpi = _PLd ? _PLd.tvt : tvt;
     // v0.10.5 (Johan): de nieuwe factuur MET PV+batterij = factuur met laadplein − de energiebesparing van deze combi.
     // v0.10.7 (Johan): factuur MAG onder nul (besparing > totale kost → netto-inkomst). Niet klemmen op 0.
     // v0.24.40 (Johan: "nieuwe factuur > bestaande maar toch besparing?!"): de tegel baseerde zich op C.kostNieuw
@@ -2003,8 +2038,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!STATE_BTW && $('i-btw')) STATE_BTW=($('i-btw').value||'').trim();
     if($('ek-titel-naam')) $('ek-titel-naam').textContent = STATE_KLANT || 'Je Energie-Compas';   // v0.38.0 (Johan): klantnaam als titel (geen dubbele "Energie-Compas")
     if($('ek-klant')){ var _kb=STATE_KLANT ? [STATE_ADRES, (STATE_BTW?'BTW '+STATE_BTW:'')].filter(Boolean).join(' · ') : _dossierBits(); $('ek-klant').textContent=_kb; $('ek-klant').style.display=_kb?'':'none'; }   // v0.38.0: naam staat al in de titel
-    $('sig-besp').textContent=eur(bespTot);   // v0.16: totale besparing/jaar (energie + diesel→elektrisch) — ENKEL PV+batt (hier hangt de TVT aan)
-    if($('sig-besp-tvt')) $('sig-besp-tvt').textContent=(tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'');
+    $('sig-besp').textContent=eur(bespKpi);   // v0.61.0: incl. laadsessies naar het bedrijf (plan mét laadpalen). v0.16: totale besparing/jaar (energie + diesel→elektrisch) — ENKEL PV+batt (hier hangt de TVT aan)
+    if($('sig-besp-tvt')) $('sig-besp-tvt').textContent = _PLd
+      ? ('factuur '+eur(bespTot)+' + laadsessies '+eur(_PLd.laad)+(tvtKpi!=null?(' · terugverdiend in ± '+String(tvtKpi).replace('.',',')+' j (incl. laadpalen)'):''))
+      : (tvt!=null?('terugverdiend in ± '+String(tvt).replace('.',',')+' j'):'');
     // v0.24.2 (Johan): contractswitch als APARTE subregel onder de tegel — commodity-consistent, identiek aan de
     //   onderhandelingsmarge in het rapport (bijlage 1). Blijft LOS van de hoofdtegel: geen investering → geen TVT.
     if($('sig-besp-cs')){
@@ -2023,7 +2060,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // "Uw impact"-blok: échte kerngetallen uit deze simulatie (geen slogans)
     var _cregKm=+C.cregKm100||0;
     var _dalPct = (ev>0 && _cregKm>0) ? Math.round((_cregKm - km100Cell)/_cregKm*100) : null;   // effectieve daling €/km t.o.v. gewoon laden (CREG)
-    var _rendCell = (BV.rend!=null) ? Math.round(BV.rend) : null;      // v0.19: gemiddeld rendement/jaar over 15 jaar
+    var _rendCell = _PLd ? (_PLd.rend!=null?Math.round(_PLd.rend):null) : ((BV.rend!=null) ? Math.round(BV.rend) : null);   // v0.61.0: plan mét laadpalen + laadsessies      // v0.19: gemiddeld rendement/jaar over 15 jaar
     var _verbrPct = (ev>0 && C.afnameMwh>0 && C.laadMwh>0) ? Math.round(C.laadMwh/C.afnameMwh*100) : null;   // stijging verbruik/loadfactor door laden
     if($('pk-wp'))   $('pk-wp').textContent   = (_dalPct!=null)?('−'+_dalPct+'%'):'—';
     if($('pk-vk'))   $('pk-vk').textContent   = (ev>0)?('€ '+eur2(km100Cell)):'—';
@@ -2036,7 +2073,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     $('inv-foot').textContent='Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op je echte meetgegevens.';
     // v0.19 (Johan): batterijwaarde over 15 jaar (escalerende netkosten). TVT/rendement op de netto-investering (na vermeden verzwaring).
     if($('pay-cap-all')) $('pay-cap-all').textContent = eur(invTot);
-    if($('pay-tvt-all')) $('pay-tvt-all').textContent = (tvt!=null?(String(tvt).replace('.',',')+' j'):'> 15 j');
+    if($('pay-tvt-all')) $('pay-tvt-all').textContent = (tvtKpi!=null?(String(tvtKpi).replace('.',',')+' j'):'> 15 j');   // v0.61.0: plan mét laadpalen + laadsessies
     if($('pay-rend-all')) $('pay-rend-all').textContent = (_rendCell!=null?(_rendCell+'%'):'—');
     if($('pay-foot')){ var _bf=''; if(BV && (BV.cap>0 || BV.verzwaring>0)){ _bf='Batterijwaarde: energiebesparing '+eur(BV.energie)+'/j'+(BV.cap>0?(' · vermeden capaciteitstarief '+eur(BV.cap)+'/j'):'')+(BV.verzwaring>0?(' · vermeden aansluitingsverzwaring '+eur(BV.verzwaring)+' eenmalig'):'')+'. '; }
       $('pay-foot').textContent=_bf+'Terugverdientijd en rendement over 15 jaar; alle kosten +'+(NET_CFG.inflatie_pct||2)+'% inflatie, netkosten +'+(NET_CFG.net_extra_pct||2)+'% bovenop inflatie en eenmalige verdubbeling in '+(NET_CFG.net_dubbel_jaar||2029)+'. Base = dom laden (aansluiting moet stijgen); de batterij shaaft de piek tot haar vermogen.'; }
