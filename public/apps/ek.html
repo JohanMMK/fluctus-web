@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.67.3">
+<meta name="ek-build" content="0.67.4">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.67.4 (2026-10-13, Johan): EIGEN PRIJS VAN EEN COMBI («Pas aan» → totaalprijs, bv. carport +400 €/kWp) telt nu overal mee: de meerprijs (eigen totaal − standaardprijs van die combi) komt bovenop de PV+batterij-investering van die cel → rooster (investering, TVT, rendement, besparing-KPI) én rapport (investering PV+batterij, plannen). Laadpalen blijven op hun standaardprijs (de meerprijs gaat niet meer pro rata over de palen). Vroeger negeerden het rooster en het rapport de eigen prijs zodra de cel exact was doorgerekend (backend-capex). -->
 <!-- ek.html v0.67.3 (2026-10-13, Johan): LEEG JAARVERBRUIK → duidelijke melding bij het veld (in de taal van het scherm) i.p.v. "De berekening kon niet worden afgerond … afname_mwh (jaarverbruik) verplicht" van de server. Geen serveraanroep zolang het jaarverbruik 0/leeg is. -->
 <!-- ek.html v0.67.2 (2026-10-13, Johan): ROOSTER FLIKKERT NIET MEER — (1) geschatte (geïnterpoleerde) cellen dragen nu ook de betalend-laadplein-cijfers (omzet/kost/MWh geïnterpoleerd, per voertuig van het dichtste anker) → de betalend-kaart boven het rooster verdwijnt niet meer bij elke tweede cel (sprong van ±550 px die de muis op een andere cel zette → lus); (2) hover houdt het rooster op dezelfde schermhoogte (scroll-compensatie) en rendert enkel bij een andere cel. -->
 <!-- ek.html v0.67.1 (2026-10-13, Johan): rapport-payload twee_beslissingen.elektrificatie.aansluiting_kw (kVA-verhoging zonder eigen infrastructuur) → klantrapport v0.47 legt de netverzwaring uit. -->
@@ -1705,7 +1706,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.16.2 (Johan): heatmap-investering (+ TVT/rendement) op EXACT dezelfde functie als de tegel/paycard (_invTotMajor)
   //   met de standaard-palensizing (AC = wagens/2, geen DC). Voorheen rekende de heatmap via _invBreakdown, die het AANTAL
   //   WAGENS i.p.v. het aantal palen aan de kabeltracé-heuristiek gaf → andere kabel/ontkoppelbord-drempel → heatmap ≠ tegel.
+  // v0.67.4 (Johan): meerprijs van een eigen combi (Pas aan → totaalprijs) = eigen totaal − standaardprijs van die combi; telt op PV+batterij.
+  function _customExtra(a){ if(!a || !a._custom) return 0; var f=+a._prijsFactor||1; if(Math.abs(f-1)<1e-6) return 0;
+    var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0), ac=(a._ac!=null?a._ac:_acDefault()), dc=(a._dc!=null?a._dc:0);
+    return Math.round(_invTotRaw(pvKwp, battKwh, ac, dc).tot*(f-1)); }
   function _invVan(a){ if(!a) return null;
+    if(a._custom && a.capex!=null) return Math.round((+a.capex||0)+_customExtra(a));   // v0.67.4: backend-capex + eigen meerprijs
     // v0.33.4 (Johan): TOTALE investering = de backend-capex (anker PV+batterij + laadpalen), zodat "Totale investering" = het
     //   PV+batterij-getal (capex_pvbatt) + de laadpalen, overal consistent. Custom cel → eigen frontend-prijszetting.
     if(!a._custom && a.capex!=null) return Math.round(+a.capex||0);
@@ -1717,7 +1723,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   installatie). Bv. 125/261 + 150 kWp = €172k ≈ jouw €168k turn-key. (De frontend _invTotMajor gaf een lagere, afwijkende prijs →
   //   rooster 115k; nu overal de anker, consistent met het rapport-hoofdstuk en het plan.) Custom cel → frontend-prijszetting als fallback.
   function _invPvbCell(a){ if(!a) return null;
-    if(a.capex_pvbatt!=null) return Math.round(+a.capex_pvbatt||0);
+    if(a.capex_pvbatt!=null) return Math.round((+a.capex_pvbatt||0)+_customExtra(a));   // v0.67.4: + eigen meerprijs (custom combi)
     var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return Math.round(_invTotMajor(pvKwp, battKwh, 0, 0, (a._custom?a._prijsFactor:undefined)).tot); }
   // v0.33 (Johan): elektrificatie-investering = laadpalen + de aansluiting/verzwaring die het laden sowieso vraagt (referentie, zonder PV/batt).
   function _invElekCell(a){ if(!a) return null; var lp=(a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0; var vzVoor=(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0; return Math.round(lp+vzVoor); }
@@ -1889,7 +1895,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
              tot:R(m.tot*f), invPvBatt:R(m.invPvBatt*f), invInfra:R(m.invInfra*f), kt:m.kt };
   }
   function _invBtnLabel(){ var b=$('inv-edit-btn'); if(!b) return; b.textContent=INV_EDIT?'💾 Opslaan':'✏️ Pas aan'; b.classList.toggle('saving',INV_EDIT);
-    var hint=$('inv-edit-hint'); if(hint) hint.textContent=INV_EDIT?'Pas kWp, batterij (kW × kWh), palen en de totaalprijs aan. Bij Opslaan komt je combi op de heatmap; een andere C-factor of prijs geldt voor álle opties.':''; }
+    var hint=$('inv-edit-hint'); if(hint) hint.textContent=INV_EDIT?'Pas kWp, batterij (kW × kWh), palen en de totaalprijs aan. Bij Opslaan komt je combi op de heatmap. Een andere C-factor geldt voor álle opties; een eigen totaalprijs (bv. carport) geldt voor déze combinatie — de meerprijs telt op de PV+batterij-investering.':''; }
   function _invRij(label, spec){ return '<tr><td>'+esc0(label)+'<div class="invspec">'+spec+'</div></td><td class="r"></td></tr>'; }
   function _invRijEdit(label, id, val, unit, step, extra){
     return '<tr><td>'+esc0(label)+'</td><td class="r"><input type="number" id="'+id+'" value="'+val+'" step="'+step+'" min="0" inputmode="decimal" class="invin"> '+unit+(extra||'')+'</td></tr>'; }
@@ -3610,7 +3616,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var datum=''; try{ datum=new Date().toLocaleDateString('nl-BE',{month:'long',year:'numeric'}); }catch(e){}
     // v0.16.1 (Johan): all-in investering (PV + batterij + laadpalen AC/DC + overige) → dezelfde totale investering als
     //   op het EK-scherm, zodat de klantrapport-terugverdientijd all-in is en gelijkloopt met EK (niet enkel PV+batt-capex).
-    var _mfull=_invTotMajor(pvKwp, battKwh, acAantal, dcAantal);
+    var _mfull=_invTotMajor(pvKwp, battKwh, acAantal, dcAantal, 1);   // v0.67.4: standaardprijzen (palen niet meer pro rata geschaald) …
+    (function(){ var x=_customExtra(sel); if(x){ _mfull=Object.assign({}, _mfull); _mfull.pv=(+_mfull.pv||0)+x; _mfull.tot=(+_mfull.tot||0)+x; _mfull.invPvBatt=(+_mfull.invPvBatt||0)+x; } })();   // … + de eigen meerprijs op PV/batterij
     var posten=[];
     if(pvKwp) posten.push({label:'Zonnepanelen ('+pvKwp+' kWp)',bedrag:_mfull.pv});
     if(battKwh) posten.push({label:'Batterij ('+battKwh+' kWh)',bedrag:_mfull.bt});
