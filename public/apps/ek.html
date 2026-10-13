@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.67.1">
+<meta name="ek-build" content="0.67.2">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.67.2 (2026-10-13, Johan): ROOSTER FLIKKERT NIET MEER — (1) geschatte (geïnterpoleerde) cellen dragen nu ook de betalend-laadplein-cijfers (omzet/kost/MWh geïnterpoleerd, per voertuig van het dichtste anker) → de betalend-kaart boven het rooster verdwijnt niet meer bij elke tweede cel (sprong van ±550 px die de muis op een andere cel zette → lus); (2) hover houdt het rooster op dezelfde schermhoogte (scroll-compensatie) en rendert enkel bij een andere cel. -->
 <!-- ek.html v0.67.1 (2026-10-13, Johan): rapport-payload twee_beslissingen.elektrificatie.aansluiting_kw (kVA-verhoging zonder eigen infrastructuur) → klantrapport v0.47 legt de netverzwaring uit. -->
 <!-- ek.html v0.67.0 (2026-10-13, Johan): BETALEND LAADPLEIN — (1) het laadmoment van de rij (overdag 7–19 / 's nachts 19–7 / 24 u) is het aankomstvenster van de sessies (vroeger altijd 0–24); (2) aantal laadpunten = gemiddeld gelijktijdig (sessies ÷ vensteruren × laadduur) + veiligheidsmarge (2,2× bij weinig sessies, √-marge bij veel), max. het aantal sessies; (3) standaard laadpalen tellen de betalende laadpunten mee (AC: 1 dubbele paal per 2 punten, DC: 1 per punt) i.p.v. sessies ÷ 2. -->
 <!-- ek.html v0.66.0 (2026-10-13, Johan): VAST AANTAL LAADPALEN per dossier (oekene-invoer bij de cabine-kVA): AC/DC, leeg = automatisch (1 AC per 2 lichte voertuigen); ingevuld = dat aantal, volledig aangerekend (rooster, plannen, rapport). Bewaard in ek_bevestigd.palen_ac/dc (server ≥ 15.289) → gaat mee naar demo-projecten. -->
@@ -1649,7 +1650,11 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _aansl=bil(function(c){return +c.aansluiting_totaal_kw||0;});   // v0.31 (Johan): totale contractuele aansluiting (incl. energie-floor) → LS/MS-grens in het rooster
     var _capPvb=bil(function(c){return +c.capex_pvbatt||0;});   // v0.33 (Johan): PV+batterij-capex (TVT/rendement-noemer) interpoleren uit de ankers
     var _capLp=bil(function(c){return +c.capex_laadpalen||0;});   // v0.33 (Johan): laadpalen-capex (elektrificatie) interpoleren uit de ankers
-    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),capex_pvbatt:Math.round(_capPvb),capex_laadpalen:Math.round(_capLp),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw),jaarpiek:Math.round(_piek),aansluiting_totaal_kw:Math.round(_aansl) }; }
+    // v0.67.2 (Johan): betalend-laadplein mee interpoleren (anders verdween de betalend-kaart bij elke geschatte cel → schermsprong/flikkeren).
+    var _bz=null; if(c00.betalend&&c01.betalend&&c10.betalend&&c11.betalend){ var _bf=function(k){ return bil(function(c){ return +(c.betalend[k])||0; }); };
+      _bz={ opbrengst_eur:Math.round(_bf('opbrengst_eur')), kost_elek_eur:Math.round(_bf('kost_elek_eur')), kost_elek_net_eur:Math.round(_bf('kost_elek_net_eur')), geladen_mwh:Math.round(_bf('geladen_mwh')*100)/100, gevraagd_mwh:Math.round(_bf('gevraagd_mwh')*100)/100 }; }
+    var _near=(b.t<0.5?(p.t<0.5?c00:c01):(p.t<0.5?c10:c11));
+    return { _ry:ry,_cx:cx,_interp:true,pvKwp:cx,battKw:((H.battMap&&H.battMap[ry])?H.battMap[ry].kw:ry),battKwh:((H.battMap&&H.battMap[ry])?H.battMap[ry].kwh:Math.round(ry*(H.crate||2))),kost:Math.round(kost),capex:Math.round(capex),capex_pvbatt:Math.round(_capPvb),capex_laadpalen:Math.round(_capLp),ref_kost:H.refKost,besparing:Math.round(besp),besp_net:Math.round(bespNet),rendement:(rend!=null?Math.round(rend*100)/100:null),cycli:Math.round(cyc),kmDekking:(_kmd!=null?Math.round(_kmd):null),verzwaring_eenmalig:Math.round(_verzw),jaarpiek:Math.round(_piek),aansluiting_totaal_kw:Math.round(_aansl),betalend:_bz,per_type:(_near&&_near.per_type)||null }; }
   function _cellAt(H,ry,cx){ var k=ry+'|'+cx; if(H.computed[k]) return H.computed[k]; var real=H.realFind(ry,cx); if(real) return real; return H.interp?_interpCel(H,ry,cx):null; }
   function _hmDetail(a){ var el=$('hm-detail'); if(!el) return; if(!a){ el.innerHTML=''; return; } el.innerHTML=(a._exact||!a._interp)?'<span style="color:var(--green)">✔ exact doorgerekend</span>':'± geschat — <b>klik</b> voor de exacte berekening'; }
   function _hmParticulier(tl){ var A=tl.anchors.map(function(a){ return Object.assign({},a,{_ry:a.battKwh,_cx:a.pvPan}); });
@@ -1822,11 +1827,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       noteEl.textContent = _nt;
     }
     Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){ var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
-      td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a){ renderRapport(a); _hmDetail(a); } };
+      td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); if(a) _hmHoverRender(T, a, ry+'|'+cx); };
       td.onclick=function(){ _hmKies(ry,cx); }; });
-    T.onmouseleave=function(){ var a=H.sel||H.best; if(a){ renderRapport(a); _hmDetail(a); } };
+    T.onmouseleave=function(){ var a=H.sel||H.best; if(a) _hmHoverRender(T, a, 'sel'); };
   }
-  function renderHeatmap(){ try{ _hmLabelsLaden(); }catch(e){}
+  // v0.67.2 (Johan): hover-render zonder schermsprong — enkel bij een andere cel, en het rooster blijft op dezelfde schermhoogte
+  //   (verandert de inhoud erboven van hoogte, dan scrollen we evenveel mee) → geen flikker-lus meer onder de muis.
+  var _hmHovKey=null;
+  function _hmHoverRender(T, a, key){ if(key===_hmHovKey) return; _hmHovKey=key;
+    var y0=T.getBoundingClientRect().top; renderRapport(a); _hmDetail(a);
+    var d=T.getBoundingClientRect().top-y0; if(Math.abs(d)>1){ try{ window.scrollBy(0,d); }catch(e){} } }
+  function renderHeatmap(){ _hmHovKey=null; try{ _hmLabelsLaden(); }catch(e){}
     var H=HM, card=$('heatmap-card'); if(!H||!H.real){ if(card) card.classList.add('hidden'); return; }
     _renderHM('hm-tabel-L', HMMETRIC_L); _renderHM('hm-tabel-R', HMMETRIC_R);
     if(card) card.classList.remove('hidden');
