@@ -1,10 +1,27 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"Investering PV + batterij ({#} kW / {#} kWh)": "Investment PV + battery ({#} kW / {#} kWh)",
+"Deze extra besparing komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij. Het eerste financieel plan hierna rekent ze mee, samen met de investering in de laadpalen.": "This extra saving comes from charging on your own car park (the charge points), not from the solar panels or the battery. The first financial plan that follows includes it, together with the investment in the charge points.",
+"= elektrificatie € {#} (eenmalig) + PV/batterij netto € {#}. Het": "= electrification € {#} (one-off) + PV/battery net € {#}. The",
+"eerste financieel plan": "first financial plan",
+"hierna rekent het volledige project (laadpalen + laadsessies naar het bedrijf + PV/batterij); het tweede enkel het": "that follows covers the complete project (charge points + charging sessions brought to the company + PV/battery); the second only the",
+"Financieel plan over {#} jaar — met laadpalen en laadsessies": "Financial plan over {#} years — with charge points and charging sessions",
+"Volledig project: laadpalen + zonnepanelen/batterij.": "Complete project: charge points + solar panels/battery.",
+"Dit plan neemt naast de installatie ook de": "Besides the installation, this plan also includes the",
+"investering in de laadpalen": "investment in the charge points",
+"(€ {#}) mee, en de besparing van het": "(€ {#}), and the saving from",
+"mee, en de besparing van het": ", and the saving from",
+"laden op je eigen parking": "charging on your own car park",
+"i.p.v. elders (+ € {#} per jaar, zie «Extra besparing: laadsessies naar het bedrijf brengen»). Het plan hierna rekent enkel op de zonnepanelen en de batterij.": "instead of elsewhere (+ € {#} per year, see “Extra savings: bringing charging sessions to the company”). The next plan covers only the solar panels and the battery.",
+"= zonnepanelen + batterij € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= solar panels + battery € {#} + charge points and grid connection for charging € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= solar panels + battery € {#} + charge points and grid connection for charging € {#} − avoided grid upgrade € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} − vermeden verzwaring € {#} = € {#}.": "= solar panels + battery € {#} − avoided grid upgrade € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} = € {#}.": "= solar panels + battery € {#} = € {#}.",
 "Extra besparing: laadsessies naar het bedrijf brengen": "Extra savings: bringing charging sessions to the company",
 "Zonder laadpalen op je bedrijfsparking laden je voertuigen": "Without charge points on your company car park, your vehicles charge",
 "elders": "elsewhere",

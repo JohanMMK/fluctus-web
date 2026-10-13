@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.41.0 (2026-10-13, Johan): laadsessie-besparing NIET meer in de bestaande plannen; nieuw EERSTE financieel plan «met laadpalen en laadsessies» = capex PV/batt + elektrificatie (laadpalen + aansluiting voor het laden, twee_beslissingen) − vermeden verzwaring, besparing = factuurvergelijking + laadsessies naar het bedrijf, OPEX incl. sturing laadpalen. Enkel bij een laadsessie-besparing (dus laadplein); anders weggelaten. -->
 <!-- klantrapport.html v0.40.0 (2026-10-13, Johan): NIEUW HOOFDSTUK «Extra besparing: laadsessies naar het bedrijf brengen» tussen de factuurvergelijking en het onbalans-hoofdstuk — per voertuigtype (eigen vloot) de kost van laden elders (gezonde mix thuis @ CREG-forfait gewest Q4 2026 / publiek 400 / snel 550 €/MWh; thuis enkel personenwagens) vs laden op het bedrijf (meerkost laden zonder installatie ÷ laadverbruik), op de MWh die het model op de parking laadt. De besparing telt mee in beide financiële plannen (indexeert met inflatie). -->
 <!-- klantrapport.html v0.39.2 (2026-10-12, Johan): uitleg "Afgeremd" aangepast aan simulator v1.16 (opslaan gaat vóór afremmen; geen laden van het net aan negatieve prijs meer als uitleg). -->
 <!-- klantrapport.html v0.39.1 (2026-10-12, Johan): ENERGIEBALANS SLUIT — de PV die de sturing afremt bij een negatieve injectieprijs (server 15.285 zelfconsumptie.pv_afgeremd_mwh) staat nu als eigen segment in de PV-donut + productie bruto + afstemming met de injectie zonder installatie. Voorheen leek die stroom te verdwijnen (83 → 44 + 15). -->
@@ -81,8 +82,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.2"></script>
-<script src="en-ec-seg.js?v=1.0.9"></script>
+<script src="fr-ec-seg.js?v=1.3.3"></script>
+<script src="en-ec-seg.js?v=1.0.10"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -824,7 +825,7 @@ var _LAADSES=null;
      'De kost op je bedrijf is de meerkost van het laden op je eigen factuur zónder installatie (energie + net + heffingen, gedeeld door het laadverbruik); '+
      'de extra besparing van je installatie op dat laden zit al in de factuurvergelijking en telt hier niet dubbel. '+
      'Toegepast op de kilometers die het model op je bedrijfsparking laadt. Bedragen exclusief btw, richtprijzen.</p>';
-  h+='<p class="note">Deze extra besparing telt mee in het financieel plan hierna. Ze komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij.</p>';
+  h+='<p class="note">Deze extra besparing komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij. Het eerste financieel plan hierna rekent ze mee, samen met de investering in de laadpalen.</p>';
   h+='</div>';
   pagina(h);
 })();
@@ -903,7 +904,7 @@ var _LAADSES=null;
   // ── Totaal ──
   h+='<div style="margin-top:14px;background:#eef7f0;border:1px solid #bfe6cc;border-left:4px solid #05b050;border-radius:12px;padding:12px 16px">'+
      '<div style="font-weight:800;color:#037a3d;font-size:1.12rem">Totale projectinvestering: '+eur(TB.totaal_eur)+'</div>'+
-     '<div style="color:#54617a;font-size:.9rem;margin-top:2px">= elektrificatie '+eur(E.subtotaal_eur)+' (eenmalig) + PV/batterij netto '+eur(P.investering_netto_eur)+'. Het financieel plan hierna rekent de terugverdientijd op het <b>PV/batterij-deel</b>, want dát is wat zich terugbetaalt.</div>'+
+     '<div style="color:#54617a;font-size:.9rem;margin-top:2px">= elektrificatie '+eur(E.subtotaal_eur)+' (eenmalig) + PV/batterij netto '+eur(P.investering_netto_eur)+'. '+((_LAADSES&&+_LAADSES.besparing>0)?'Het <b>eerste financieel plan</b> hierna rekent het volledige project (laadpalen + laadsessies naar het bedrijf + PV/batterij); het tweede enkel het <b>PV/batterij-deel</b>.':'Het financieel plan hierna rekent de terugverdientijd op het <b>PV/batterij-deel</b>, want dát is wat zich terugbetaalt.')+'</div>'+
      '</div>';
   h+='<p class="note">Bedragen indicatief, exclusief btw.</p>';
   pagina(h);
@@ -986,13 +987,16 @@ function _fmtK(v){ v=+v||0; var a=Math.abs(v); var s=(v<0?'−':''); if(a>=1000)
 // v0.11 (Johan): herbruikbaar → 1× normaal (spot-sturing) + 1× "potentieel met onbalans" (P5-bis). energieOverride vervangt
 //   de jaar-1 energiebesparing (de onbalans-extra is commodity/spot → indexeert op inflatie, net als 'rest').
 var _FINKPI=null;   // v0.16.0 (Johan, Fase 2): KPI's van het basis-financieel-plan, voor de kwaliteitscontrole-bijlage.
-function financieelPagina(energieOverride, titelArg, extraNote){
+function financieelPagina(energieOverride, titelArg, extraNote, optLaden){
+  // v0.41.0 (Johan): optLaden = {capex, besparing} → plan MET laadpalen (capex elektrificatie) + laadsessies naar het bedrijf + sturingskost laadpalen.
+  var _mL=!!(optLaden && optLaden.besparing>0), _capL=_mL?Math.max(0,+optLaden.capex||0):0;
   var BW=D.battwaarde||null;
   var FIN=D.financieel||{};
   var invBruto=(BW&&+BW.invTot)||+FIN.investering||0;
   if(!(invBruto>0)) return;
   var verzw=(BW&&+BW.verzwaring)||0;
   var netInv=(BW&&BW.netInv!=null)?+BW.netInv:invBruto;
+  var invPvB=invBruto; invBruto+=_capL; netInv+=_capL;   // v0.41.0: + laadpalen/aansluiting voor het laden (enkel plan met laden)
   var energie=(BW&&BW.energie!=null)?+BW.energie:((+FIN.besparing_jaar)||besp);
   if(energieOverride!=null && isFinite(+energieOverride)) energie=+energieOverride;
   var cap=(BW&&+BW.cap)||0;
@@ -1015,14 +1019,14 @@ function financieelPagina(energieOverride, titelArg, extraNote){
   // v0.22.0 (Johan): het financieel plan draait op de PV/batterij-beslissing. De sturingskost van de LAADPALEN (AC 30 / DC 300
   //   €/paal/jaar) is een exploitatiekost van de elektrificatie, niet van PV/batterij → hoort NIET in deze PV/batt-TVT.
   var _stuurLaad=IS_PART ? 0 : Math.round(30*_acN + 300*_dcN);                           // (elektrificatie-opex — apart; zie "twee beslissingen")
-  var _sturingskost=_stuurKva, _opexTot=opexJ+_sturingskost;
+  var _sturingskost=_stuurKva+(_mL?_stuurLaad:0), _opexTot=opexJ+_sturingskost;   // v0.41.0: plan met laden → ook de sturingskost van de laadpalen
   // v0.19 (Johan): BETALEND LAADPLEIN — twee extra posten in het financieel model. Omzet (verkoop aan de paal) = NIEUWE
   //   externe inkomst (zit niet in de factuur). Kost elektriciteit = de inkoop om te laden; evolueert "volgens inflatie én
   //   netkosten zoals in de besparing" (Johan) → zelfde snellere net-pad (+extra +2029-verdubbeling). Omzet indexeert met
   //   inflatie. Netto plaza-bijdrage per jaar = omzet − kost elek, bovenop de PV/batt-besparing (correcte business case
   //   t.o.v. een gebouw-only basis: de laadenergie is een nieuwe kost, de verkoop een nieuwe opbrengst).
   var omzet0=HAS_BZ?(+BZ.opbrengst_eur||0):0, kostE0=HAS_BZ?(+BZ.kost_elek_eur||0):0;
-  var laadS0=(_LAADSES&&+_LAADSES.besparing>0)?+_LAADSES.besparing:0;   // v0.40.0: laadsessies naar het bedrijf
+  var laadS0=_mL?(+optLaden.besparing||0):0;   // v0.41.0: laadsessies naar het bedrijf — enkel in het plan met laden
   var besp1=Math.max(0, energie+cap-_opexTot+(HAS_BZ?(omzet0-kostE0):0)+laadS0);   // netto jaar-1 = factuurvergelijking − OPEX (+ plaza-marge bij betalend)
   var rows=[], cum=-netInv, tvt=null, som=0;
   for(var t=1;t<=HOR;t++){ var jaar=y0+(t-1);
@@ -1042,7 +1046,7 @@ function financieelPagina(energieOverride, titelArg, extraNote){
   var rendGem=netInv>0?(som/HOR/netInv*100):0;
   // v0.16.0 (Johan, Fase 2): bewaar de KPI's van het BASISplan (spot-sturing, geen override) op moduleniveau, zodat de
   //   kwaliteitscontrole-bijlage EXACT dezelfde cijfers scoort als het financieel plan (coherentie by construction).
-  if(energieOverride==null){ _FINKPI={ tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, horizon:HOR }; }
+  if(energieOverride==null && !_mL){ _FINKPI={ tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, horizon:HOR }; }
 
   var h=kop(titelArg||'Financieel plan over 15 jaar');
   if(extraNote) h+=extraNote;
@@ -1054,6 +1058,7 @@ function financieelPagina(energieOverride, titelArg, extraNote){
        '<div class="box"><span class="l">Netto meerwaarde<br>na 15 jaar</span><div class="v">'+eur(meerwaarde)+'</div><span class="je">na aftrek investering</span></div>'+
        '<div class="box"><span class="l">Rendement<br>(gemiddeld/jaar)</span><div class="v">'+pct(rendGem,0)+'</div><span class="je">15j · ROI '+pct(roi15,0)+'</span></div>'+
      '</div>';
+  if(_mL) h+='<p class="note" style="margin-top:8px"><b>Investering</b> = zonnepanelen + batterij '+eur(invPvB)+(_capL>0?(' + laadpalen en aansluiting voor het laden '+eur(_capL)):'')+(verzw>0?(' − vermeden verzwaring '+eur(verzw)):'')+' = '+eur(netInv)+'.</p>';
   // v0.20.0 (Johan): kost slimme sturing (4 €/kVA/jaar PV + batterij; laadpalen AC 30 / DC 300 €/paal/jaar) + onderhoud = OPEX,
   //   beide in mindering op de besparing (_opexTot, hierboven berekend en in de cashflow verrekend). Anoniem (geen merknaam).
   (function(){
@@ -1102,6 +1107,17 @@ function financieelPagina(energieOverride, titelArg, extraNote){
   h+='</div>';
   pagina(h);
 }
+// P5-voor (v0.41.0, Johan) — EERSTE financieel plan: MET laadpalen (capex elektrificatie) + laadsessies naar het bedrijf.
+//   Enkel als er een laadplein met een laadsessie-besparing is; anders zou het identiek zijn aan het plan hieronder.
+(function(){
+  if(!(_LAADSES && +_LAADSES.besparing>0)) return;
+  var TB=(D.financieel&&D.financieel.twee_beslissingen)||null, E=(TB&&TB.elektrificatie)||{};
+  var capL=Math.max(0,+E.subtotaal_eur||0);
+  var intro='<div class="ems-caveat"><b>Volledig project: laadpalen + zonnepanelen/batterij.</b> Dit plan neemt naast de installatie ook de '+
+    '<b>investering in de laadpalen</b>'+(capL>0?(' ('+eur(capL)+')'):'')+' mee, en de besparing van het <b>laden op je eigen parking</b> i.p.v. elders '+
+    '(+ '+eur(_LAADSES.besparing)+' per jaar, zie «Extra besparing: laadsessies naar het bedrijf brengen»). Het plan hierna rekent enkel op de zonnepanelen en de batterij.</div>';
+  financieelPagina(null, 'Financieel plan over 15 jaar — met laadpalen en laadsessies', intro, { capex:capL, besparing:+_LAADSES.besparing });
+})();
 // P5 — normaal financieel plan (spot-sturing).
 financieelPagina();
 // P5-bis (Johan) — zelfde plan MET de onbalans-besparing meegerekend, als potentieel.

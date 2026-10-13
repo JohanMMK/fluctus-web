@@ -1,7 +1,24 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.3.2, 2026-10-13: + laadsessies naar het bedrijf; v1.3.1, 2026-10-12: + uitleg afgeremd v1.16; v1.3.0, 2026-10-12: + afgeremde PV energiebalans; v1.2.9, 2026-10-12: + noot batterij-verkoop energiebalans; v1.2.8, 2026-10-12: + KPI-kader EK; v1.2.7, 2026-10-12: + kalibratie (kVA-blok zonder laadplein, netto onbalans, injectieprijs); v1.2.6, 2026-10-12: + bijlage bestaande PV — injectie sturen; v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.3.3, 2026-10-13: + financieel plan met laadpalen; v1.3.2, 2026-10-13: + laadsessies naar het bedrijf; v1.3.1, 2026-10-12: + uitleg afgeremd v1.16; v1.3.0, 2026-10-12: + afgeremde PV energiebalans; v1.2.9, 2026-10-12: + noot batterij-verkoop energiebalans; v1.2.8, 2026-10-12: + KPI-kader EK; v1.2.7, 2026-10-12: + kalibratie (kVA-blok zonder laadplein, netto onbalans, injectieprijs); v1.2.6, 2026-10-12: + bijlage bestaande PV — injectie sturen; v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_FR_SEG = {
+"Investering PV + batterij ({#} kW / {#} kWh)": "Investissement PV + batterie ({#} kW / {#} kWh)",
+"Deze extra besparing komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij. Het eerste financieel plan hierna rekent ze mee, samen met de investering in de laadpalen.": "Cette économie supplémentaire provient de la recharge sur votre propre parking (les bornes), pas des panneaux solaires ni de la batterie. Le premier plan financier qui suit l’intègre, avec l’investissement dans les bornes.",
+"= elektrificatie € {#} (eenmalig) + PV/batterij netto € {#}. Het": "= électrification € {#} (unique) + PV/batterie net € {#}. Le",
+"eerste financieel plan": "premier plan financier",
+"hierna rekent het volledige project (laadpalen + laadsessies naar het bedrijf + PV/batterij); het tweede enkel het": "qui suit calcule le projet complet (bornes + sessions de recharge ramenées dans l’entreprise + PV/batterie) ; le second uniquement la",
+"Financieel plan over {#} jaar — met laadpalen en laadsessies": "Plan financier sur {#} ans — avec bornes et sessions de recharge",
+"Volledig project: laadpalen + zonnepanelen/batterij.": "Projet complet : bornes + panneaux solaires/batterie.",
+"Dit plan neemt naast de installatie ook de": "Outre l’installation, ce plan intègre aussi l’",
+"investering in de laadpalen": "investissement dans les bornes",
+"(€ {#}) mee, en de besparing van het": "(€ {#}), ainsi que l’économie de la",
+"mee, en de besparing van het": ", ainsi que l’économie de la",
+"laden op je eigen parking": "recharge sur votre propre parking",
+"i.p.v. elders (+ € {#} per jaar, zie «Extra besparing: laadsessies naar het bedrijf brengen»). Het plan hierna rekent enkel op de zonnepanelen en de batterij.": "au lieu d’ailleurs (+ € {#} par an, voir « Économie supplémentaire : ramener les sessions de recharge dans l’entreprise »). Le plan suivant ne porte que sur les panneaux solaires et la batterie.",
+"= zonnepanelen + batterij € {#} + laadpalen en aansluiting voor het laden € {#} = € {#}.": "= panneaux solaires + batterie € {#} + bornes et raccordement pour la recharge € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} + laadpalen en aansluiting voor het laden € {#} − vermeden verzwaring € {#} = € {#}.": "= panneaux solaires + batterie € {#} + bornes et raccordement pour la recharge € {#} − renforcement évité € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} − vermeden verzwaring € {#} = € {#}.": "= panneaux solaires + batterie € {#} − renforcement évité € {#} = € {#}.",
+"= zonnepanelen + batterij € {#} = € {#}.": "= panneaux solaires + batterie € {#} = € {#}.",
 "Extra besparing: laadsessies naar het bedrijf brengen": "Économie supplémentaire : ramener les sessions de recharge dans l’entreprise",
 "Zonder laadpalen op je bedrijfsparking laden je voertuigen": "Sans bornes de recharge sur votre parking d’entreprise, vos véhicules se rechargent",
 "elders": "ailleurs",
