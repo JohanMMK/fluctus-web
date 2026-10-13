@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.62.0">
+<meta name="ek-build" content="0.63.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.63.0 (2026-10-13, Johan): rooster-kengetallen TVT / rendement / besparing volgen bij een laadplein het plan MÉT laadpalen + laadsessies (_planLadenCel, standaard palen-sizing); labels in de keuzelijsten en de rooster-bijlage van het rapport passen zich aan. -->
 <!-- ek.html v0.62.0 (2026-10-13, Johan): bedrijf op MS → de standaard geselecteerde cel is altijd 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH) zonder PV (dichtstbijzijnde batterij-rij als die niet exact bestaat). LS/particulier ongewijzigd. -->
 <!-- ek.html v0.61.0 (2026-10-13, Johan): KPI's besparing / TVT / rendement in het resultaatscherm volgen bij een laadplein het financieel plan MÉT laadpalen en laadsessies (zelfde rekenregel als klantrapport: laadsessie-besparing per voertuigtype uit per_type, kost bedrijf = (referentie − gebouwfactuur) ÷ laadvolume; netto-investering + laadpalen + verzwaring vóór; OPEX + sturing laadpalen). -->
 <!-- ek.html v0.60.0 (2026-10-12, Johan): handmatige LS/MS-keuze (oekene) wordt nu op het dossier bewaard (bevestigd.spanning, server 15.285) en bij heropenen teruggezet — sprong voorheen terug naar Auto (= LS uit de factuur). -->
@@ -557,8 +558,8 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.5"></script>
-<script src="en-ec-seg.js?v=1.0.12"></script>
+<script src="fr-ec-seg.js?v=1.3.6"></script>
+<script src="en-ec-seg.js?v=1.0.13"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
@@ -1453,6 +1454,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
     return { laad:L.besparing, besp:(+BV.bespJaar1||0)+L.besparing, tvt:tvt, rend:rend, netInv:netInv, capL:capL };
   }
+  // v0.63.0 (Johan): plan mét laadpalen voor een ROOSTER-cel (standaard palen-sizing, zoals de rooster-investering) — null zonder laadplein.
+  function _planLadenCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null;
+    var ac=INV_OV?(+INV_OV.ac||0):_acDefault(), dc=INV_OV?(+INV_OV.dc||0):_dcDefault();
+    return _planLaden(a, bv, _invTotMajor(+a.pvKwp||0, +a.battKwh||0, ac, dc)); }
+  function _hmLabelsLaden(){   // v0.63.0: rooster-labels zeggen of het plan mét laadpalen/laadsessies rekent
+    var on=!!(typeof HM!=='undefined' && HM && _laadsesVan(HM.sel||HM.best));
+    var T={ tvt:on?'Terugverdientijd incl. laadpalen (j)':'Terugverdientijd PV+batterij (j)', rendement:on?'Rendement incl. laadpalen (%)':'Rendement PV+batterij (%)', besparing:on?'Besparing/jaar incl. laadsessies (€)':'Besparing/jaar (€)' };
+    ['hm-mx-L','hm-mx-R'].forEach(function(id){ var sel=$(id); if(!sel) return; [].forEach.call(sel.options,function(o){ if(T[o.value]!=null && o.textContent!==T[o.value]) o.textContent=T[o.value]; }); });
+  }
   function _bespTot(a){ var v=_battValue(a); return v?v.bespJaar1:((a&&+a.besparing)||0); }   // besparing jaar 1 = factuurvergelijking (NUL−OPT)
   function _rendNetto(a){ var v=_battValue(a); return v?v.rend:null; }   // v0.19: gemiddeld rendement/jaar over 15 jaar
   function _besteAnker(anchors){ var c=(anchors||[]).filter(function(a){return a&&a.besparing>0&&_rendNetto(a)!=null;});
@@ -1702,9 +1712,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _fmtEurK(v){ v=Math.round(v); var a=Math.abs(v); if(a<1000) return (v<0?'-€':'€')+a; return (v<0?'-€':'€')+_kNum(a); }
   var HM_METRICS = {
     // combi-AFHANKELIJK (variëren per PV/batterij-cel)
-    tvt:         { val:function(a){return _tvtVan(a);}, fmt:function(v){return String(Math.round(v*10)/10).replace('.',',');}, goedHoog:false },   // v0.16: all-in
-    rendement:   { val:function(a){return _rendNetto(a);}, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },   // v0.16: all-in
-    besparing:   { val:function(a){return _bespTot(a);}, fmt:_fmtEurK, goedHoog:true },   // v0.16: totale besparing/jaar (energie + diesel→elektrisch)
+    // v0.63.0 (Johan): met een laadplein volgen TVT / rendement / besparing het plan MÉT laadpalen + laadsessies (= KPI's + eerste plan rapport).
+    tvt:         { val:function(a){ var p=_planLadenCel(a); return p?p.tvt:_tvtVan(a); }, fmt:function(v){return String(Math.round(v*10)/10).replace('.',',');}, goedHoog:false },
+    rendement:   { val:function(a){ var p=_planLadenCel(a); return p?p.rend:_rendNetto(a); }, fmt:function(v){return Math.round(v)+'%';}, goedHoog:true },
+    besparing:   { val:function(a){ var p=_planLadenCel(a); return p?p.besp:_bespTot(a); }, fmt:_fmtEurK, goedHoog:true },
     factuur_na:  { val:function(a){ var b=(a&&+a.besparing)||0; return CTX?(CTX.kostNieuw-b):null; }, fmt:_fmtEurK, goedHoog:false },  // factuur met laadplein − besparing (mag < 0 → netto-inkomst)
     investering: { val:function(a){return _invPvbCell(a);}, fmt:_fmtEurK, goedHoog:false },   // v0.33 (Johan): PV + batterij alleen (de TVT-noemer); elektrificatie staat apart in de noot + het rapport
     cycli:       { val:function(a){ return (a&&a.cycli!=null)?+a.cycli:null; }, fmt:function(v){return Math.round(v)+'/j';}, goedHoog:false },   // v0.13.11: batterijcycli/jaar
@@ -1804,7 +1815,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       td.onclick=function(){ _hmKies(ry,cx); }; });
     T.onmouseleave=function(){ var a=H.sel||H.best; if(a){ renderRapport(a); _hmDetail(a); } };
   }
-  function renderHeatmap(){
+  function renderHeatmap(){ try{ _hmLabelsLaden(); }catch(e){}
     var H=HM, card=$('heatmap-card'); if(!H||!H.real){ if(card) card.classList.add('hidden'); return; }
     _renderHM('hm-tabel-L', HMMETRIC_L); _renderHM('hm-tabel-R', HMMETRIC_R);
     if(card) card.classList.remove('hidden');
@@ -3447,7 +3458,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(_heeftLaden()) order.splice(4,0,'km100');
       if(H.lpMwh>0) order.push('kmdekking');   // v0.24.47 (Johan §6c): km-dekking-rooster in het rapport bij een laadplein
       if(H.lpMwh>0) order.push('piek');       order.push('loadfactor');   // v0.40.0 (Johan): loadfactor net na piekverbruik (kVA). v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
-      var titel={tvt:'Terugverdientijd PV + batterij (jaar)',rendement:'Rendement PV + batterij (%)',besparing:'Besparing per jaar (€)',factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)',loadfactor:'Loadfactor (%)'};
+      var _onL=!!_laadsesVan(H.sel||H.best);   // v0.63.0: rooster-bijlage rekent mét laadpalen/laadsessies bij een laadplein
+      var titel={tvt:(_onL?'Terugverdientijd incl. laadpalen (jaar)':'Terugverdientijd PV + batterij (jaar)'),rendement:(_onL?'Rendement incl. laadpalen (%)':'Rendement PV + batterij (%)'),besparing:(_onL?'Besparing per jaar incl. laadsessies (€)':'Besparing per jaar (€)'),factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)',loadfactor:'Loadfactor (%)'};
       var best=H.sel||H.best||{};   // v0.24.15 (Johan): de stippellijn markeert de GEKOZEN oplossing van het rapport (H.sel), niet de eerst-voorgestelde beste (H.best)
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
       var batt_as=rows.map(function(r){return H.rowLabel?H.rowLabel(r):String(r);});
