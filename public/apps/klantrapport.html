@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.46.0 (2026-10-13, Johan): BETALEND LAADPLEIN — (1) financieel plan: enkel het NETKOSTEN-deel van de kost elektriciteit (server v15.291 kost_elek_net_eur) volgt het snellere netpad + 2029-verdubbeling, de rest volgt de inflatie (vroeger de volledige laadkost op het netpad → sprong in jaar 4); (2) kVA-tekst: stijgt de netpiek boven de bestaande aansluiting, dan zeggen we niet meer "zonder de aansluiting te verzwaren" maar dat er een (kleinere) verzwaring nodig is. -->
 <!-- klantrapport.html v0.45.0 (2026-10-13, Johan): (1) ENERGIE-COMPAS-HUISSTIJL — blauwe kompas-banner weg: voorblad wit met het volledige Energie-Compas-logo, op elke volgende pagina het logo linksboven (i.p.v. «Energie·analyse»), achterblad met het logo centraal (klein); Poppins voor titels, palet ink #14203a / groen #05B050 (blauwe accenten → ink / #f5f8fc), kopregel groen; beeldbanners (IMG) geschrapt (−340 kB). (2) NIEUWE BIJLAGE «Laadverplichtingen voor parkings» (enkel met laadplein, niet particulier): overzicht per gewest (kolom van het gewest van het verbruiksadres gemarkeerd), EPBD IV, wat het voor jou betekent, digitale veiligheid & privacy — NL/FR/EN volledig in de rapporttaal; staat in de inhoudstafel. -->
 <!-- klantrapport.html v0.44.0 (2026-10-13, Johan): hoofdstuk «twee beslissingen» met de logica: 1 = vloot elektrificeren (besparen, fiscaal gestimuleerd, belangrijk voor klanten); 2 = laadsessies leveren zonder dat de piek ontspoort — netverzwaring vs eigen infrastructuur (congestie/onbalans). -->
 <!-- klantrapport.html v0.43.1 (2026-10-13, Johan): post heet gewoon 'Varia' (geen specificatie). -->
@@ -90,8 +91,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.4.1"></script>
-<script src="en-ec-seg.js?v=1.0.18"></script>
+<script src="fr-ec-seg.js?v=1.4.2"></script>
+<script src="en-ec-seg.js?v=1.0.19"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -807,8 +808,9 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
       })();
       h+='<p class="note">De netpiek blijft op \u00b1 '+_num(_vNa,0)+' kVA'+
          (_vBest>0?(_vBinnen?(', binnen je bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden')):'')+
-         ' \u2014 zo laad je 100% van de jaar-km\u2019s zonder de aansluiting te verzwaren'+
-         ((_vVerm>0)?(', wat een eenmalige verzwaring van \u00b1 '+eur(_vVerm)+' vermijdt'):'')+'.</p>';
+         (_vBinnen||_vBest<=0
+           ? (' \u2014 zo laad je 100% van de jaar-km\u2019s zonder de aansluiting te verzwaren'+((_vVerm>0)?(', wat een eenmalige verzwaring van \u00b1 '+eur(_vVerm)+' vermijdt'):''))
+           : (' \u2014 om 100% van de jaar-km\u2019s te laden is een verzwaring nodig, maar veel kleiner dan zonder installatie'+((_vVerm>0)?(', wat \u00b1 '+eur(_vVerm)+' verzwaringskost vermijdt'):'')))+'.</p>';
       h+='</div>';
     }
   } else {
@@ -1189,6 +1191,8 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){ 
   //   inflatie. Netto plaza-bijdrage per jaar = omzet − kost elek, bovenop de PV/batt-besparing (correcte business case
   //   t.o.v. een gebouw-only basis: de laadenergie is een nieuwe kost, de verkoop een nieuwe opbrengst).
   var omzet0=HAS_BZ?(+BZ.opbrengst_eur||0):0, kostE0=HAS_BZ?(+BZ.kost_elek_eur||0):0;
+  // v0.46.0 (Johan): enkel het netkosten-deel van de laadkost volgt het netpad; oude server zonder kost_elek_net_eur → alles netpad (ongewijzigd).
+  var kostN0=HAS_BZ?((BZ.kost_elek_net_eur!=null)?Math.min(kostE0,Math.max(0,+BZ.kost_elek_net_eur||0)):kostE0):0;
   var laadS0=_mL?(+optLaden.besparing||0):0;   // v0.41.0: laadsessies naar het bedrijf — enkel in het plan met laden
   var besp1=Math.max(0, energie+cap-_opexTot+(HAS_BZ?(omzet0-kostE0):0)+laadS0);   // netto jaar-1 = factuurvergelijking − OPEX (+ plaza-marge bij betalend)
   var rows=[], cum=-netInv, tvt=null, som=0;
@@ -1197,7 +1201,7 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){ 
     var nB=(bespNet+cap)*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1);           // netkosten-deel + vermeden capaciteitstarief → sneller pad + 2029
     var oB=_opexTot*Math.pow(1+infl,t-1);                                                // OPEX (onderhoud + sturing) → inflatie, in mindering
     var omzetT=HAS_BZ?(omzet0*Math.pow(1+infl,t-1)):0;                                    // omzet betalend plein → inflatie
-    var kostET=HAS_BZ?(kostE0*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1)):0;    // kost elek betalend laden → inflatie + netkostenpad (Johan)
+    var kostET=HAS_BZ?((kostE0-kostN0)*Math.pow(1+infl,t-1) + kostN0*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1)):0;    // v0.46.0: commodity/heffingen → inflatie; netkosten-deel → netpad (+2029)
     var plazaT=omzetT-kostET;
     var laadT=laadS0*Math.pow(1+infl,t-1);                                                // v0.40.0: laadsessies naar het bedrijf → inflatie
     var b=eB+nB-oB+plazaT+laadT; som+=b; var prev=cum; cum+=b;

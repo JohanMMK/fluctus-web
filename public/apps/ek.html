@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.66.0">
+<meta name="ek-build" content="0.67.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.67.0 (2026-10-13, Johan): BETALEND LAADPLEIN — (1) het laadmoment van de rij (overdag 7–19 / 's nachts 19–7 / 24 u) is het aankomstvenster van de sessies (vroeger altijd 0–24); (2) aantal laadpunten = gemiddeld gelijktijdig (sessies ÷ vensteruren × laadduur) + veiligheidsmarge (2,2× bij weinig sessies, √-marge bij veel), max. het aantal sessies; (3) standaard laadpalen tellen de betalende laadpunten mee (AC: 1 dubbele paal per 2 punten, DC: 1 per punt) i.p.v. sessies ÷ 2. -->
 <!-- ek.html v0.66.0 (2026-10-13, Johan): VAST AANTAL LAADPALEN per dossier (oekene-invoer bij de cabine-kVA): AC/DC, leeg = automatisch (1 AC per 2 lichte voertuigen); ingevuld = dat aantal, volledig aangerekend (rooster, plannen, rapport). Bewaard in ek_bevestigd.palen_ac/dc (server ≥ 15.289) → gaat mee naar demo-projecten. -->
 <!-- ek.html v0.65.4 (2026-10-13, Johan): methodiek-tekst bijgewerkt (kwartierprijzen, vermeden verzwaring eenmalig op de investering, 15-jaar-plan met stijgende netkosten + OPEX, rendement = gemiddelde/jaar, €/100 km kan negatief, laadsessies, alles in het rooster beweegt mee, voetnoot volgt databron). -->
 <!-- ek.html v0.65.3 (2026-10-13, Johan): 'Je impact' — rollen 'Voor je wagenverkoper / installateur / energieleverancier / netbeheerder'; thuisladen: 'kunnen je werknemers ook thuis goedkoper laden'. -->
@@ -564,8 +565,8 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.4.1"></script>
-<script src="en-ec-seg.js?v=1.0.18"></script>
+<script src="fr-ec-seg.js?v=1.4.2"></script>
+<script src="en-ec-seg.js?v=1.0.19"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
@@ -1260,13 +1261,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var fullKwh=Math.max(1,+t.fullload_kwh||250);
       var paalKw=Math.max(1,(+r.paal_kw>0)?+r.paal_kw:(+t.paal_kw||150));
       var duurMin=Math.max(5,Math.round(fullKwh/paalKw*60));
-      var gelijk=(perDag/24)*(duurMin/60);                       // gem. gelijktijdige sessies
-      var palen=Math.max(1,Math.ceil(gelijk*2.2)+1);             // piekfactor 2,2 + 1 reserve
+      // v0.67.0 (Johan): aankomstvenster = laadmoment van de rij (overdag / 's nachts / 24 u).
+      var bm=EV_MOMENT[r.moment]||EV_MOMENT.h24, vUren=(bm.ve>bm.vs)?(bm.ve-bm.vs):(24-bm.vs+bm.ve);
+      var gelijk=(perDag/Math.max(1,vUren))*(duurMin/60);       // gem. gelijktijdige sessies in het venster
+      var palen=Math.max(1,Math.min(perDag, Math.ceil(gelijk*2.2)+1, Math.ceil(gelijk+2.33*Math.sqrt(gelijk))+1));   // marge 2,2× (weinig) / √ (veel) + 1 reserve
       var verk=(+r.verkoop>0)?+r.verkoop:0.55;
       return { naam:t.label+' (betalend)', type_plein:'bezoekers', betalend:true, paaltype:(paalKw>=600?'DC600':(paalKw>=50?'DC160':'AC22')),
         type:t.key, voertuig:t.label, paal_kw:paalKw, aantal_palen:palen, duur_min:duurMin,
         opbrengst_eur_mwh:Math.round(verk*1000), sessies_paal_dag:Math.round(perDag/palen*10)/10,
-        kwh_per_km:t.kwhkm, vensters:[{start:0,eind:24,sessies:perDag}] };
+        kwh_per_km:t.kwhkm, vensters:[{start:bm.vs,eind:bm.ve,sessies:perDag}] };
     }
     return { naam:t.label, type_plein:'wagenpark', betalend:false, type:t.key, voertuig:t.label, aantal:Math.max(1,Math.round(+r.aantal||0)),
       km_per_jaar:t.kmjaar, kwh_per_km:t.kwhkm, laadverm_kw:((+r.laadverm_kw>0)?+r.laadverm_kw:_ownKw(t.key)), venster_start:m.vs, venster_eind:m.ve, dagen_per_week:(r.weekend?7:5), creg:true }; }); }   // v0.34 (Johan): laadvermogen/voertuig per rij → server onbeheerst-profiel + aansluitingscapaciteit
@@ -1831,8 +1834,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // ── v0.15: bewerkbaar "Wat u investeert"-blok — hoofdcomponenten + specs, prijs enkel op totaal, "Pas aan"→"Opslaan" ──
   var INV_EDIT=false, INV_OV=null;   // INV_OV={pvKwp,battKw,ac,dc} na Opslaan → stuurt investering + rapport-voorstel + standaardkeuze
   // v0.18: lichte voertuigen → AC-palen (2/paal); zware (vrachtwagen/bus) → DC-palen 300 kVA (2/paal). Split uit CTX.
-  function _acDefault(){ if(PALEN_AC>0) return PALEN_AC; var n=(CTX&&CTX.evLight!=null)?CTX.evLight:(+(CTX&&CTX.ev)||0); return Math.max(0, Math.ceil(n/2)); }
-  function _dcDefault(){ if(PALEN_DC>0) return PALEN_DC; var h=(CTX&&CTX.evHeavy)||0; return h>0?h:0; }   // v0.24.56 (Johan): 1 DC-laadpaal per (lichte) vrachtwagen/bus
+  // v0.67.0 (Johan): betalende rijen tellen met hun LAADPUNTEN (uit _pleinenV2), niet met sessies/dag. AC: dubbele paal per 2 punten.
+  function _betPunten(){ var o={ac:0,dc:0,sessL:0,sessH:0}; if(KLANTTYPE!=='bedrijf') return o;
+    try{ EV_ROWS.forEach(function(r){ if(!r.betalend||!((+r.aantal||0)>0)) return; var hv=(r.type==='lichte_vracht'||r.type==='vrachtwagen'||r.type==='bus'); if(hv) o.sessH+=Math.round(+r.aantal||0); else o.sessL+=Math.round(+r.aantal||0); });
+      _pleinenV2().forEach(function(p){ if(!p.betalend) return; if((+p.paal_kw||0)>=50) o.dc+=(+p.aantal_palen||0); else o.ac+=(+p.aantal_palen||0); }); }catch(e){}
+    return o; }
+  function _acDefault(){ if(PALEN_AC>0) return PALEN_AC; var n=(CTX&&CTX.evLight!=null)?CTX.evLight:(+(CTX&&CTX.ev)||0); var B=_betPunten(); n=Math.max(0,n-B.sessL); return Math.max(0, Math.ceil(n/2)+Math.ceil(B.ac/2)); }
+  function _dcDefault(){ if(PALEN_DC>0) return PALEN_DC; var h=(CTX&&CTX.evHeavy)||0; var B=_betPunten(); h=Math.max(0,h-B.sessH); return Math.max(0,h+B.dc); }   // v0.24.56 (Johan): 1 DC-laadpaal per (lichte) vrachtwagen/bus
   // v0.24.55 (Johan): BEDRIJF prijs-anker — zelfde als backend (v15.230). 125/261 + 157 kWp = €175.000 (batt+PV).
   //   PV getrapt: €600/kWp tot 100, €400/kWp daarboven. Batterij ≈ €353,26/kWh; 30/60 & 50/100 batt +25%.
   // v0.64.0 (Johan, = server v15.287.0): prijsanker 1 C&I (125/261) + 157 kWp = €168.000 all-in (incl. varia). PV bij een batterij = €350/kWp
