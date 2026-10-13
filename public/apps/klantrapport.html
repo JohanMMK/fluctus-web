@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.40.0 (2026-10-13, Johan): NIEUW HOOFDSTUK «Extra besparing: laadsessies naar het bedrijf brengen» tussen de factuurvergelijking en het onbalans-hoofdstuk — per voertuigtype (eigen vloot) de kost van laden elders (gezonde mix thuis @ CREG-forfait gewest Q4 2026 / publiek 400 / snel 550 €/MWh; thuis enkel personenwagens) vs laden op het bedrijf (meerkost laden zonder installatie ÷ laadverbruik), op de MWh die het model op de parking laadt. De besparing telt mee in beide financiële plannen (indexeert met inflatie). -->
 <!-- klantrapport.html v0.39.2 (2026-10-12, Johan): uitleg "Afgeremd" aangepast aan simulator v1.16 (opslaan gaat vóór afremmen; geen laden van het net aan negatieve prijs meer als uitleg). -->
 <!-- klantrapport.html v0.39.1 (2026-10-12, Johan): ENERGIEBALANS SLUIT — de PV die de sturing afremt bij een negatieve injectieprijs (server 15.285 zelfconsumptie.pv_afgeremd_mwh) staat nu als eigen segment in de PV-donut + productie bruto + afstemming met de injectie zonder installatie. Voorheen leek die stroom te verdwijnen (83 → 44 + 15). -->
 <!-- klantrapport.html v0.39.0 (2026-10-12, Johan): PRINT IN SAFARI — (1) de knop «🖨️ Print» start het printen pas na de klik-afhandeling (setTimeout) en het registreren gebeurt NA het printen (afterprint) → geen netwerkverkeer tijdens het opmaken van de print; (2) print-color-adjust: exact → Safari drukt achtergronden/kleurvakjes (legendes, groene kaders) mee af; (3) heatmap-PNG krijgt de achtergrondkleur (geen lichte randjes rond de vakjes in Safari). ENERGIEBALANS: noot over de stroom die de batterij aan het net verkoopt (zit in de injectie van de factuurvergelijking, niet in de zonnestroom). -->
@@ -80,8 +81,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.3.1"></script>
-<script src="en-ec-seg.js?v=1.0.8"></script>
+<script src="fr-ec-seg.js?v=1.3.2"></script>
+<script src="en-ec-seg.js?v=1.0.9"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -759,6 +760,75 @@ function _combiSubBr(){
   pagina(h);
 })();
 
+// P2-bis (v0.40.0, Johan) — EXTRA BESPARING: LAADSESSIES NAAR HET BEDRIJF BRENGEN. Zonder laadpalen op de bedrijfsparking
+//   laden de eigen voertuigen elders: thuis (enkel personenwagens, terugbetaald aan het CREG-forfait van het gewest), publiek AC
+//   (400 €/MWh) en snelladers (550 €/MWh), in een gezonde mix per voertuigtype. Toegepast op de MWh die het model op de
+//   bedrijfsparking laadt (per_type.geladen_mwh, enkel eigen vloot) t.o.v. de kost van laden op het bedrijf (meerkost laden
+//   ZONDER installatie ÷ laadverbruik — de installatiewinst op het laden zit al in de factuurvergelijking → geen dubbeltelling).
+//   Resultaat (_LAADSES.besparing) telt ook mee in het financieel plan (normaal + mét onbalans).
+var _LAADSES=null;
+(function(){
+  if(IS_PART) return;
+  var L=D.laadplein||null; if(!HAS_LP || !L) return;
+  var rows=(PER_TYPE||[]).filter(function(x){ return !x.betalend && (+x.geladen_mwh>0); });
+  if(!rows.length) return;
+  var mwhL=+L.mwh||0, mkV=+L.meerkost_voor;
+  var kostB=(mwhL>0 && isFinite(mkV)) ? Math.max(0, mkV/mwhL) : ((+D.allin_eur_mwh>0)?(+D.allin_eur_mwh):null);
+  if(kostB==null) return;
+  // CREG-forfait thuisladen bedrijfswagens, Q4 2026 (€/MWh) per gewest — uit de postcode van het verbruiksadres.
+  var _pc=(String(ADRES||'').match(/\b(\d{4})\b/)||[])[1], _pcN=_pc?+_pc:0;
+  var _gw=(_pcN>=1000&&_pcN<=1299)?'Brussel':(((_pcN>=1300&&_pcN<=1499)||(_pcN>=4000&&_pcN<=7999))?'Wallonie':'Vlaanderen');
+  var CREG={ Vlaanderen:322.5, Brussel:368.8, Wallonie:377.9 }[_gw], P_PUB=400, P_SNEL=550;
+  var _gwTxt={ Vlaanderen:'Vlaanderen', Brussel:'Brussel', Wallonie:'Wallonië' }[_gw];
+  // Gezonde laadmix per voertuigtype (aandeel van de energie). Thuisladen enkel voor personenwagens.
+  var MIX={ personenwagen:{t:0.60,p:0.25,s:0.15}, bestelwagen:{t:0,p:0.55,s:0.45}, lichte_vracht:{t:0,p:0.35,s:0.65},
+            vrachtwagen:{t:0,p:0.10,s:0.90}, bus:{t:0,p:0.10,s:0.90} };
+  var totE=0, totB=0, totMwh=0, lijst=[];
+  rows.forEach(function(x){
+    var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
+    var prijs=m.t*CREG+m.p*P_PUB+m.s*P_SNEL, mwh=+x.geladen_mwh||0;
+    var kE=mwh*prijs, kB=mwh*kostB;
+    totE+=kE; totB+=kB; totMwh+=mwh;
+    lijst.push({ naam:(x.voertuig||x.type||'—'), km:+x.km_geleverd||0, mwh:mwh, m:m, prijs:prijs, kE:kE, kB:kB, b:kE-kB });
+  });
+  var besp=Math.round(totE-totB);
+  if(!(besp>0)) return;
+  _LAADSES={ besparing:besp, kost_elders:Math.round(totE), kost_bedrijf:Math.round(totB), mwh:totMwh, eur_mwh_bedrijf:kostB };
+  function _pct(v){ return Math.round(v*100)+'%'; }
+  var h=kop('Extra besparing: laadsessies naar het bedrijf brengen');
+  h+='<p class="lead">Zonder laadpalen op je bedrijfsparking laden je voertuigen <b>elders</b>: thuis (enkel personenwagens, terugbetaald aan het CREG-forfait), '+
+     'aan publieke laadpalen of aan snelladers — telkens aan een veel hogere prijs per kWh. Breng je die laadsessies naar je eigen parking, '+
+     'dan betaal je enkel je eigen energiefactuur.</p>';
+  h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
+       '<div class="box"><span class="l">Kost laden elders</span><div class="v">'+eur(totE)+'</div><span class="je">per jaar</span></div>'+
+       '<div class="box"><span class="l">Kost laden op je bedrijf</span><div class="v">'+eur(totB)+'</div><span class="je">per jaar</span></div>'+
+       '<div class="box win"><span class="l">Extra besparing</span><div class="v win">+ '+eur(besp)+'</div><span class="je">per jaar</span></div>'+
+     '</div>';
+  h+='<table class="f"><thead><tr><th>Voertuig</th><th>Geladen<br>MWh/jaar</th><th>Laadmix elders<br><span class="muted" style="font-weight:400;white-space:nowrap">thuis / publiek / snel</span></th><th>Prijs elders<br>€/MWh</th><th>Kost elders</th><th>Kost op je bedrijf</th><th>Besparing</th></tr></thead><tbody>';
+  lijst.forEach(function(r){
+    h+='<tr><td>'+esc(r.naam)+(r.km>0?'<br><span class="muted">'+_num(r.km,0)+' km</span>':'')+'</td><td>'+_num(r.mwh,1)+'</td>'+
+       '<td style="white-space:nowrap">'+Math.round(r.m.t*100)+' / '+Math.round(r.m.p*100)+' / '+Math.round(r.m.s*100)+' %</td><td>'+_num(Math.round(r.prijs),0)+'</td>'+
+       '<td style="white-space:nowrap">'+eur(r.kE)+'</td><td style="white-space:nowrap">'+eur(r.kB)+'</td><td class="pos" style="white-space:nowrap">'+signEur(r.b)+'</td></tr>';
+  });
+  if(lijst.length>1) h+='<tr class="tot"><td>Totaal</td><td>'+_num(totMwh,1)+'</td><td></td><td></td><td style="white-space:nowrap">'+eur(totE)+'</td><td style="white-space:nowrap">'+eur(totB)+'</td><td class="pos" style="white-space:nowrap">'+signEur(besp)+'</td></tr>';
+  h+='</tbody></table>';
+  h+='<div class="split-blok"><h2>Gebruikte laadprijzen</h2>';
+  h+='<table class="f"><tbody>'+
+     '<tr><td>Thuisladen — CREG-forfait '+_gwTxt+' (Q4 2026)</td><td style="text-align:right">'+_num(CREG,1)+' €/MWh</td></tr>'+
+     '<tr><td>Publiek laden (AC)</td><td style="text-align:right">'+_num(P_PUB,0)+' €/MWh</td></tr>'+
+     '<tr><td>Snelladen (DC)</td><td style="text-align:right">'+_num(P_SNEL,0)+' €/MWh</td></tr>'+
+     '<tr class="tot"><td>Laden op je bedrijf (zonder installatie)</td><td style="text-align:right" class="win">'+_num(Math.round(kostB),0)+' €/MWh</td></tr>'+
+     '</tbody></table>';
+  h+='<p class="note">Laadmix elders = het aandeel van de energie dat een voertuig zonder laadpaal op het werk thuis, publiek en aan snelladers zou laden. '+
+     'Thuisladen geldt enkel voor personenwagens; bestelwagens en zwaardere voertuigen laden publiek of aan snelladers. '+
+     'De kost op je bedrijf is de meerkost van het laden op je eigen factuur zónder installatie (energie + net + heffingen, gedeeld door het laadverbruik); '+
+     'de extra besparing van je installatie op dat laden zit al in de factuurvergelijking en telt hier niet dubbel. '+
+     'Toegepast op de kilometers die het model op je bedrijfsparking laadt. Bedragen exclusief btw, richtprijzen.</p>';
+  h+='<p class="note">Deze extra besparing telt mee in het financieel plan hierna. Ze komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij.</p>';
+  h+='</div>';
+  pagina(h);
+})();
+
 // P3-bis (Johan) — spotmarkt = dynamisch contract + onbalans-potentieel + EMS-waarschuwing + stappenplan
 (function(){
   if(!(HAS_PV||HAS_BATT)) return;   // enige slimme installatie volstaat (EMS stuurt PV én/of batterij)
@@ -952,7 +1022,8 @@ function financieelPagina(energieOverride, titelArg, extraNote){
   //   inflatie. Netto plaza-bijdrage per jaar = omzet − kost elek, bovenop de PV/batt-besparing (correcte business case
   //   t.o.v. een gebouw-only basis: de laadenergie is een nieuwe kost, de verkoop een nieuwe opbrengst).
   var omzet0=HAS_BZ?(+BZ.opbrengst_eur||0):0, kostE0=HAS_BZ?(+BZ.kost_elek_eur||0):0;
-  var besp1=Math.max(0, energie+cap-_opexTot+(HAS_BZ?(omzet0-kostE0):0));   // netto jaar-1 = factuurvergelijking − OPEX (+ plaza-marge bij betalend)
+  var laadS0=(_LAADSES&&+_LAADSES.besparing>0)?+_LAADSES.besparing:0;   // v0.40.0: laadsessies naar het bedrijf
+  var besp1=Math.max(0, energie+cap-_opexTot+(HAS_BZ?(omzet0-kostE0):0)+laadS0);   // netto jaar-1 = factuurvergelijking − OPEX (+ plaza-marge bij betalend)
   var rows=[], cum=-netInv, tvt=null, som=0;
   for(var t=1;t<=HOR;t++){ var jaar=y0+(t-1);
     var eB=rest*Math.pow(1+infl,t-1);                                                    // commodity/heffingen → inflatie
@@ -961,7 +1032,8 @@ function financieelPagina(energieOverride, titelArg, extraNote){
     var omzetT=HAS_BZ?(omzet0*Math.pow(1+infl,t-1)):0;                                    // omzet betalend plein → inflatie
     var kostET=HAS_BZ?(kostE0*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1)):0;    // kost elek betalend laden → inflatie + netkostenpad (Johan)
     var plazaT=omzetT-kostET;
-    var b=eB+nB-oB+plazaT; som+=b; var prev=cum; cum+=b;
+    var laadT=laadS0*Math.pow(1+infl,t-1);                                                // v0.40.0: laadsessies naar het bedrijf → inflatie
+    var b=eB+nB-oB+plazaT+laadT; som+=b; var prev=cum; cum+=b;
     if(tvt===null && cum>=0) tvt=(t-1)+(prev<0?(-prev/b):0);
     rows.push({ jaar:t, besparing:b, cumulatief:cum, omzet:omzetT, kostE:kostET });
   }
@@ -992,7 +1064,7 @@ function financieelPagina(energieOverride, titelArg, extraNote){
       h+='<p class="note" style="margin-top:8px"><b>Jaarlijkse exploitatiekosten (OPEX):</b> '+_dl.join(' · ')+' = ± '+eur(_opexTot)+'/jaar — <b>in mindering</b> op de besparing (verrekend in terugverdientijd en cashflow).</p>';
     }
   })();
-  h+='<p class="note" style="margin-top:8px">Besparing jaar 1 = <b>factuurvergelijking voor − na</b> '+eur(energie)+' (energie + netgebruik/capaciteit)'+(_opexTot>0?(' − OPEX '+eur(_opexTot)):'')+(HAS_BZ?(' + <b>plaza-marge</b> (omzet '+eur(omzet0)+' − elektriciteit '+eur(kostE0)+')'):'')+' = <b>'+eur(besp1)+'/jaar</b>'+(verzw>0?('. Daarnaast vermijdt de batterij een <b>aansluitingsverzwaring</b> van '+eur(verzw)+' (eenmalig, in mindering op de investering)'):'')+'.</p>';
+  h+='<p class="note" style="margin-top:8px">Besparing jaar 1 = <b>factuurvergelijking voor − na</b> '+eur(energie)+' (energie + netgebruik/capaciteit)'+(_opexTot>0?(' − OPEX '+eur(_opexTot)):'')+(HAS_BZ?(' + <b>plaza-marge</b> (omzet '+eur(omzet0)+' − elektriciteit '+eur(kostE0)+')'):'')+(laadS0>0?(' + <b>laadsessies naar het bedrijf</b> '+eur(laadS0)):'')+' = <b>'+eur(besp1)+'/jaar</b>'+(verzw>0?('. Daarnaast vermijdt de batterij een <b>aansluitingsverzwaring</b> van '+eur(verzw)+' (eenmalig, in mindering op de investering)'):'')+'.</p>';
   // v0.14.12 (Johan): grafiekhoogte iets kleiner (46mm) zodat de "Jaar per jaar"-tabel er integraal onder past;
   //   op de onbalans-variant (extraNote → extra caveat-blok van ~16mm) een compactere grafiek (32mm) voor headroom.
   h+='<div class="heat-wrap"><div class="heat-titel">Cumulatieve cashflow (eigen middelen)</div>'+
@@ -1025,7 +1097,8 @@ function financieelPagina(energieOverride, titelArg, extraNote){
      (opexJ>0?(' − exploitatiekost '+eur(opexJ)+'/jaar = <b>'+eur(besp1-opexJ)+' netto jaar 1</b>'):'')+
      '. Kosten geïndexeerd met '+_num(infl*100,0)+' %/jaar'+(BW&&extra>0?(', het netkosten-deel van de besparing (net­gebruik + capaciteitstarief) met inflatie + '+_num(extra*100,0)+' %/jaar'+(dubJ<9999?' + eenmalige verdubbeling in '+dubJ:'')):'')+
      (HAS_BZ?('. <b>Betalend laadplein:</b> de omzet aan de paal indexeert met '+_num(infl*100,0)+' %/jaar; de elektriciteitskost om te laden volgt hetzelfde (snellere) netkostenpad als de besparing. De netto plaza-marge (omzet − elektriciteit) telt bovenop de PV/batterij-besparing in de cashflow en terugverdientijd.'):'')+
-     '. Bedragen exclusief btw. Indicatieve raming, geen persoonlijk financieel advies.</p>';
+     '. Bedragen exclusief btw. Indicatieve raming, geen persoonlijk financieel advies.'+
+     (laadS0>0?'<span> De besparing op laadsessies naar het bedrijf indexeert met de inflatie.</span>':'')+'</p>';
   h+='</div>';
   pagina(h);
 }

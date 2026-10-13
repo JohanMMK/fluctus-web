@@ -1,10 +1,33 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"Extra besparing: laadsessies naar het bedrijf brengen": "Extra savings: bringing charging sessions to the company",
+"Zonder laadpalen op je bedrijfsparking laden je voertuigen": "Without charge points on your company car park, your vehicles charge",
+"elders": "elsewhere",
+": thuis (enkel personenwagens, terugbetaald aan het CREG-forfait), aan publieke laadpalen of aan snelladers — telkens aan een veel hogere prijs per kWh. Breng je die laadsessies naar je eigen parking, dan betaal je enkel je eigen energiefactuur.": ": at home (passenger cars only, reimbursed at the CREG flat rate), at public charge points or at fast chargers — each time at a much higher price per kWh. Bring those charging sessions to your own car park and you only pay your own energy bill.",
+"Kost laden elders": "Cost of charging elsewhere",
+"Kost laden op je bedrijf": "Cost of charging at your company",
+"Extra besparing": "Extra savings",
+"Laadmix elders": "Charging mix elsewhere",
+"thuis / publiek / snel": "home / public / fast",
+"Prijs elders": "Price elsewhere",
+"Kost elders": "Cost elsewhere",
+"Kost op je bedrijf": "Cost at your company",
+"Gebruikte laadprijzen": "Charging prices used",
+"Thuisladen — CREG-forfait Vlaanderen (Q{#} {#})": "Home charging — CREG flat rate Flanders (Q{#} {#})",
+"Thuisladen — CREG-forfait Brussel (Q{#} {#})": "Home charging — CREG flat rate Brussels (Q{#} {#})",
+"Thuisladen — CREG-forfait Wallonië (Q{#} {#})": "Home charging — CREG flat rate Wallonia (Q{#} {#})",
+"Publiek laden (AC)": "Public charging (AC)",
+"Snelladen (DC)": "Fast charging (DC)",
+"Laden op je bedrijf (zonder installatie)": "Charging at your company (without installation)",
+"Laadmix elders = het aandeel van de energie dat een voertuig zonder laadpaal op het werk thuis, publiek en aan snelladers zou laden. Thuisladen geldt enkel voor personenwagens; bestelwagens en zwaardere voertuigen laden publiek of aan snelladers. De kost op je bedrijf is de meerkost van het laden op je eigen factuur zónder installatie (energie + net + heffingen, gedeeld door het laadverbruik); de extra besparing van je installatie op dat laden zit al in de factuurvergelijking en telt hier niet dubbel. Toegepast op de kilometers die het model op je bedrijfsparking laadt. Bedragen exclusief btw, richtprijzen.": "Charging mix elsewhere = the share of the energy a vehicle without a charge point at work would charge at home, at public charge points and at fast chargers. Home charging applies to passenger cars only; vans and heavier vehicles charge at public points or fast chargers. The cost at your company is the extra cost of charging on your own bill without the installation (energy + grid + levies, divided by the charging consumption); the additional saving of your installation on that charging is already in the invoice comparison and is not counted twice here. Applied to the kilometres the model charges on your company car park. Amounts excluding VAT, indicative prices.",
+"Deze extra besparing telt mee in het financieel plan hierna. Ze komt van het laden op je eigen parking (de laadpalen), niet van zonnepanelen of de batterij.": "This extra saving is included in the financial plan that follows. It comes from charging on your own car park (the charge points), not from the solar panels or the battery.",
+"laadsessies naar het bedrijf": "charging sessions brought to the company",
+"De besparing op laadsessies naar het bedrijf indexeert met de inflatie.": "The saving on charging sessions brought to the company is indexed with inflation.",
 "Afgeremd = zonnestroom die de batterij op dat moment niet meer kan opnemen en die je enkel met verlies zou kunnen injecteren (negatieve injectieprijs). Opslaan voor eigen verbruik gaat altijd voor: zo vermijd je later netkosten, heffingen en accijns op afname.": "Curtailed = solar power that the battery can no longer absorb at that moment and that you could only inject at a loss (negative injection price). Storing for your own consumption always comes first: this way you later avoid grid costs, levies and excise duties on offtake.",
 "Zonder installatie injecteer je ± {#} MWh zonnestroom per jaar. Met de batterij gaat die stroom naar: via de batterij {#} MWh + injectie {#} MWh + afgeremd {#} MWh.": "Without the installation you inject ± {#} MWh of solar power per year. With the battery, that power goes: via the battery {#} MWh + injection {#} MWh + curtailed {#} MWh.",
 "Afgeremd (injecteren kost geld)": "Curtailed (injecting costs money)",
