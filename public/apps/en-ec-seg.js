@@ -1,10 +1,15 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.16, 2026-10-13: + impact "For your …", home charging cheaper; v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+"Voor je wagenverkoper": "For your car dealer",
+"Voor je installateur": "For your installer",
+"Voor je energieleverancier": "For your energy supplier",
+"Voor je netbeheerder": "For your grid operator",
+"Zoals je op de parking goedkoop laadt, kunnen je werknemers ook thuis goedkoper laden — dezelfde aanpak, twee plekken.": "Just as you charge cheaply at the car park, your employees can also charge more cheaply at home — the same approach, two locations.",
 "Twee beslissingen, in deze volgorde: eerst maak je je vloot": "Two decisions, in this order: first you make your fleet",
 "elektrisch": "electric",
 ", daarna zorg je dat je parking die laadsessies kan leveren": ", then you make sure your car park can deliver those charging sessions",
