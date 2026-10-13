@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.67.2">
+<meta name="ek-build" content="0.67.3">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.67.3 (2026-10-13, Johan): LEEG JAARVERBRUIK → duidelijke melding bij het veld (in de taal van het scherm) i.p.v. "De berekening kon niet worden afgerond … afname_mwh (jaarverbruik) verplicht" van de server. Geen serveraanroep zolang het jaarverbruik 0/leeg is. -->
 <!-- ek.html v0.67.2 (2026-10-13, Johan): ROOSTER FLIKKERT NIET MEER — (1) geschatte (geïnterpoleerde) cellen dragen nu ook de betalend-laadplein-cijfers (omzet/kost/MWh geïnterpoleerd, per voertuig van het dichtste anker) → de betalend-kaart boven het rooster verdwijnt niet meer bij elke tweede cel (sprong van ±550 px die de muis op een andere cel zette → lus); (2) hover houdt het rooster op dezelfde schermhoogte (scroll-compensatie) en rendert enkel bij een andere cel. -->
 <!-- ek.html v0.67.1 (2026-10-13, Johan): rapport-payload twee_beslissingen.elektrificatie.aansluiting_kw (kVA-verhoging zonder eigen infrastructuur) → klantrapport v0.47 legt de netverzwaring uit. -->
 <!-- ek.html v0.67.0 (2026-10-13, Johan): BETALEND LAADPLEIN — (1) het laadmoment van de rij (overdag 7–19 / 's nachts 19–7 / 24 u) is het aankomstvenster van de sessies (vroeger altijd 0–24); (2) aantal laadpunten = gemiddeld gelijktijdig (sessies ÷ vensteruren × laadduur) + veiligheidsmarge (2,2× bij weinig sessies, √-marge bij veel), max. het aantal sessies; (3) standaard laadpalen tellen de betalende laadpunten mee (AC: 1 dubbele paal per 2 punten, DC: 1 per punt) i.p.v. sessies ÷ 2. -->
@@ -2239,6 +2240,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var profiel=$('i-profiel').value;
     var ev=+$('i-ev').value||0;
     var afnameMwh=+$('i-afname').value||0;
+    // v0.67.3 (Johan): zonder jaarverbruik kan de server niet rekenen → meteen een duidelijke melding bij het veld.
+    if(!(afnameMwh>0) && !PREWARM){ _ekAfnameLeeg(); return; }
+    try{ var _fl=$('sim-fout'); if(_fl && _fl.getAttribute('data-afname')==='1') _fl.remove(); }catch(e){}
     var toegangKw=+$('i-toegang').value||0;   // ingevulde waarde = realistische kwartierPIEK (analoog: SLP-piek; digitaal/bedrijf: gemeten)
     var kost=+$('i-kost').value||0;
     var bestPvKwp=+($('i-best-pv')&&$('i-best-pv').value)||0;   // Fase 2 #4: bestaande PV (kWp) — zit in de base case
@@ -2430,6 +2434,22 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       '<div style="margin-top:8px"><button type="button" class="btn ghost sm" onclick="(function(){var b=document.getElementById(\'sim-fout\'); if(b) b.remove(); LAST_SIG=null; toonRapport();})()">↻ Opnieuw proberen</button></div>'+
       ((err&&err.message&&!druk)?('<div style="margin-top:6px;font-size:11.5px;color:#8a6d1f">Technische melding: '+esc0(err.message)+'</div>'):'');
     try{ box.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+  }
+  // v0.67.3 (Johan): melding als het jaarverbruik leeg/0 is (vóór de berekening) — veld markeren + focus.
+  function _ekAfnameLeeg(){
+    try{ _simVoortgang.stop(false); }catch(e){}
+    var btn=document.querySelector('#intake .btn.block'); if(btn){ btn.disabled=false; }
+    try{ _advOverlay(false); }catch(e){}
+    var L=window.EC_LANG, msg=(L==='fr')?'<b>Votre consommation annuelle (MWh) est manquante.</b> Indiquez la consommation annuelle de prélèvement de votre facture annuelle (ou chargez votre facture ou votre profil de mesure), puis relancez la simulation.'
+      :((L==='en')?'<b>Your annual consumption (MWh) is missing.</b> Enter the annual offtake from your annual bill (or upload your bill or metering profile), then start the simulation again.'
+      :'<b>Je jaarverbruik (MWh) ontbreekt.</b> Vul het jaarverbruik afname van je jaarfactuur in (of laad je factuur of meetprofiel op) en start de simulatie opnieuw.');
+    var box=$('sim-fout'); if(!box && btn){ box=document.createElement('div'); box.id='sim-fout'; btn.parentNode.insertBefore(box, btn.nextSibling); }
+    if(box){ box.setAttribute('data-afname','1'); box.setAttribute('data-i18n-skip','1');
+      box.style.cssText='margin:10px 0 0;padding:12px 14px;border:1px solid #F0C36D;background:#FFF8E6;border-radius:10px;color:#6B4E00;font-size:13.5px;line-height:1.5';
+      box.innerHTML=msg; }
+    var f=$('i-afname'); if(f){ f.style.borderColor='#d97706'; f.style.boxShadow='0 0 0 3px rgba(217,119,6,.18)';
+      f.addEventListener('input', function _clr(){ f.style.borderColor=''; f.style.boxShadow=''; f.removeEventListener('input', _clr); });
+      try{ f.scrollIntoView({behavior:'smooth',block:'center'}); f.focus({preventScroll:true}); }catch(e){} }
   }
   function esc0(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
