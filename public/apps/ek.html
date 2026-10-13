@@ -2,11 +2,12 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.61.0">
+<meta name="ek-build" content="0.62.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
 <!-- ek.html v0.44.4 (2026-10-10): automatisch doorrekenen (deeplink/prewarm) wacht op de server-config → identieke sweep-body als de klant → cache-treffer. -->
+<!-- ek.html v0.62.0 (2026-10-13, Johan): bedrijf op MS → de standaard geselecteerde cel is altijd 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH) zonder PV (dichtstbijzijnde batterij-rij als die niet exact bestaat). LS/particulier ongewijzigd. -->
 <!-- ek.html v0.61.0 (2026-10-13, Johan): KPI's besparing / TVT / rendement in het resultaatscherm volgen bij een laadplein het financieel plan MÉT laadpalen en laadsessies (zelfde rekenregel als klantrapport: laadsessie-besparing per voertuigtype uit per_type, kost bedrijf = (referentie − gebouwfactuur) ÷ laadvolume; netto-investering + laadpalen + verzwaring vóór; OPEX + sturing laadpalen). -->
 <!-- ek.html v0.60.0 (2026-10-12, Johan): handmatige LS/MS-keuze (oekene) wordt nu op het dossier bewaard (bevestigd.spanning, server 15.285) en bij heropenen teruggezet — sprong voorheen terug naar Auto (= LS uit de factuur). -->
 <!-- ek.html v0.59.0 (2026-10-12, Johan): de kerngetallen van het resultaatscherm staan nu in een eigen kader met titel «📊 KPI's voor de nieuwe opstelling» (zelfde stijl als de injectie-sturingskaart). -->
@@ -1659,6 +1660,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // Default-selectie naar een zichtbare rooster-cel snappen (anker-PV → dichtstbijzijnde staffel-kolom).
     try{ var _snap=function(cx){ var bc=pvCols[0],bd=Infinity; pvCols.forEach(function(c){var d=Math.abs(c-cx); if(d<bd){bd=d;bc=c;}}); return bc; };
       var _sr=best?best._ry:(realRows[0]||0), _sc=_snap(best?best._cx:0), _sel=_cellAt(HM,_sr,_sc); if(_sel) HM.sel=_sel; }catch(e){}
+    // v0.62.0 (Johan): BEDRIJF OP MS → standaardcel = 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH, config of project-override) ZONDER PV.
+    //   Bestaat die rij niet exact in het rooster, dan de dichtstbijzijnde batterij-rij (kW>0). Particulier/LS: ongewijzigd.
+    try{ if(!_ekIsPart() && String((payload&&payload.spanning)||'')==='MS'){
+      var _kCI=KEY(BATT_EENHEID_KW,BATT_EENHEID_KWH), _rCI=(realRows.indexOf(_kCI)>=0)?_kCI:null;
+      if(_rCI==null){ var _bd=Infinity; realRows.forEach(function(k){ var m=battMap[k]; if(!m||!(m.kw>0)) return; var d=Math.abs(m.kw-BATT_EENHEID_KW)+Math.abs(m.kwh-BATT_EENHEID_KWH)/10; if(d<_bd){ _bd=d; _rCI=k; } }); }
+      if(_rCI!=null){ var _ci=_cellAt(HM,_rCI,0); if(_ci){ HM.sel=_ci; HM.best=_ci; } }
+    } }catch(e){}
     HM.compute=function(ry,cx,done){ var key=ry+'|'+cx; if(HM.computed[key]){ done&&done(HM.computed[key]); return; }
       var _m=HM.battMap[ry]||{kw:0,kwh:0};
       _post('/api/energiekompas/bedrijf-cel', Object.assign({},payload,{pv_kwp:cx,batt_kw:_m.kw,batt_kwh:_m.kwh})).then(function(j){
