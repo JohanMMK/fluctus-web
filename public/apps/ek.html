@@ -6,6 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.70.0 (2026-10-14, Johan): batterijprijs PER C&I-EENHEID ongeacht de grootte (= server v15.296.0) — 1e eenheid €85.000 all-in, elke extra +€60.000; < ¾ eenheid blijft per kWh. -->
 <!-- ek.html v0.69.1 (2026-10-14, Johan): FIX eigen totaalprijs (Pas aan) schaalde mee met de nieuwe standaardprijs (Seuropak 85.000 → 63.910): de eigen prijs wordt nu als BEDRAG bewaard (prijsTot) en de factor bij elk herstel herrekend; oude combi's gereconstrueerd met de prijzen van v0.65–v0.68. -->
 <!-- ek.html v0.69.0 (2026-10-14, Johan): PRIJSANKERS (= server v15.295.0) — 1 C&I zonder PV €85.000 all-in, elke extra C&I +€60.000, 1 C&I + 157 kWp €168.000 → PV bij een batterij ≈ €528,66/kWp. -->
 <!-- ek.html v0.68.0 (2026-10-14, Johan): PROFIELANALYSE-MODAL IN HET ADVISEURSBEELD — na het opladen/lezen van een profiel opent dezelfde weergave als in de portaltegel Profiel-import (gedeelde /apps/profiel-viz.js): herkend formaat, dekking, kerncijfers, typische week, heatmap maand × uur (maanden horizontaal, uren verticaal, rapport-groen), volume per maand, energiebalans. Ook later op te roepen via «📊 Profielanalyse» in dossierbeheer (GET /api/profiel/overzicht, server ≥ 15.294.0). -->
@@ -1890,11 +1891,19 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _varia0(pvKwp, battKwh, part){ return kabeltrace(0, !!part, (+pvKwp||0)*0.75, (+battKwh||0)/2).totaal; }
   var EK_BEDR_BATT_EUR_KWH=(85000-_varia0(0,261,false))/261;   // v0.69.0: ≈ 312,64 €/kWh (was 420,11)
   // v0.65.0 (Johan, = server v15.288.0): vanaf de 2e C&I geen extra ontkoppelbord/kabeltracé → kWh boven de eerste C&I (261) aan €300/kWh.
+  // v0.70.0 (Johan 14-10, = server v15.296.0): prijs PER C&I-EENHEID ongeacht de grootte (BATT_EENHEID_KWH, per dossier instelbaar):
+  //   1e eenheid €85.000 all-in (incl. varia), elke extra +€60.000. Aantal = ceil(kWh ÷ eenheid-kWh) (5% tolerantie).
+  //   < ¾ eenheid (kleine staffels / eigen kleine combi) → per kWh zoals voorheen. Geeft het batterijdeel EXCL. varia0 terug
+  //   (varia0 wordt in _invTotRaw apart opgeteld → totaal = €85.000 + extra eenheden + PV).
+  function _ekCiUnitKwh(){ return Math.max(1, Math.round(+BATT_EENHEID_KWH||261)); }
+  function _ekCiEenheden(kwh){ return Math.max(1, Math.ceil((+kwh||0)/_ekCiUnitKwh() - 0.05)); }
+  function _battKostBedrUnit(battKwh, pvKwp){ var kw=Math.max(0,+battKwh||0); if(!(kw>0) || kw < 0.75*_ekCiUnitKwh()) return null;
+    return 85000 + (_ekCiEenheden(kw)-1)*60000 - _varia0(pvKwp, kw, false); }
   function _battKostBedr(battKwh){ var kw=Math.max(0,+battKwh||0), k=Math.round(kw); var small=(k===60||k===100); return Math.min(kw,261)*EK_BEDR_BATT_EUR_KWH*(small?1.25:1) + Math.max(0,kw-261)*EK_BEDR_EXTRA_EUR_KWH; }
   // Factor-vrije engineprijs (basis voor de prijs-prorata). Eén bron voor tegel + heatmap + TVT.
   function _invTotRaw(pvKwp, battKwh, ac, dc){
     var _bedr=!!(CTX && !CTX.particulier);
-    var pv=Math.round(_bedr?_pvKostBedr(pvKwp,battKwh):((+pvKwp||0)*STUB.pv_eur_kwp)), bt=Math.round(_bedr?_battKostBedr(battKwh):((+battKwh||0)*STUB.batt_eur_kwh));
+    var pv=Math.round(_bedr?_pvKostBedr(pvKwp,battKwh):((+pvKwp||0)*STUB.pv_eur_kwp)), bt=Math.round(_bedr?((function(){ var u=_battKostBedrUnit(battKwh, pvKwp); return u!=null?u:_battKostBedr(battKwh); })()):((+battKwh||0)*STUB.batt_eur_kwh));
     var _part=!!(CTX&&CTX.particulier), _nAc=Math.max(0,ac|0);
     // v0.36 (Johan): particulier → AC-laadpaal €1.500 + €500 installatie (= €2.000/paal, all-in); het generieke kabeltracé vervalt
     //   zodra er een paal is (de installatie zit in die €500). Zonder paal blijft de bestaande heuristiek (PV/batterij-only ongewijzigd).
