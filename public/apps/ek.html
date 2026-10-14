@@ -6,6 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.69.1 (2026-10-14, Johan): FIX eigen totaalprijs (Pas aan) schaalde mee met de nieuwe standaardprijs (Seuropak 85.000 → 63.910): de eigen prijs wordt nu als BEDRAG bewaard (prijsTot) en de factor bij elk herstel herrekend; oude combi's gereconstrueerd met de prijzen van v0.65–v0.68. -->
 <!-- ek.html v0.69.0 (2026-10-14, Johan): PRIJSANKERS (= server v15.295.0) — 1 C&I zonder PV €85.000 all-in, elke extra C&I +€60.000, 1 C&I + 157 kWp €168.000 → PV bij een batterij ≈ €528,66/kWp. -->
 <!-- ek.html v0.68.0 (2026-10-14, Johan): PROFIELANALYSE-MODAL IN HET ADVISEURSBEELD — na het opladen/lezen van een profiel opent dezelfde weergave als in de portaltegel Profiel-import (gedeelde /apps/profiel-viz.js): herkend formaat, dekking, kerncijfers, typische week, heatmap maand × uur (maanden horizontaal, uren verticaal, rapport-groen), volume per maand, energiebalans. Ook later op te roepen via «📊 Profielanalyse» in dossierbeheer (GET /api/profiel/overzicht, server ≥ 15.294.0). -->
 <!-- ek.html v0.67.5 (2026-10-13, Johan): BETALEND LAADPLEIN IN DE ROOSTERS — net als bij de eigen vloot (laadsessies) rekenen TVT / rendement / besparing in de roosters, de KPI-tegels en de rooster-bijlage nu mét de netto marge van het betalend laadplein (omzet − elektriciteit zónder installatie, = klantrapport v0.47 «Je betalend laadplein») en mét de investering in de laadpalen. Elektriciteitskost: commodity op inflatie, netkosten-deel op het netpad. Server ≥ 15.293 stuurt daarvoor ook bij een betalend plein de gebouw-only factuur (gebouw_saldo). -->
@@ -1983,7 +1984,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var crate=(bkw>0&&bkwh>0)?(bkwh/bkw):_crate();
     INV_OV={ pvKwp:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc }; INV_EDIT=false; _invBtnLabel();
     // v0.24.26 (Johan): onthoud deze manuele combi (incl. prijs + exploitatiekost) → overleeft "opnieuw"/herrekening → terug op de heatmap.
-    (function(){ var e={ pv:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc, prijsFactor:PRIJS_FACTOR, opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:crate };
+    (function(){ var e={ pv:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc, prijsFactor:PRIJS_FACTOR, prijsTot:((manual>0&&rawTot>0)?Math.round(manual):null), opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:crate };   // v0.69.1: eigen totaal ABSOLUUT bewaren
       var key=Math.round(pv)+'|'+Math.round(bkw), i=-1;
       for(var k=0;k<CUSTOM_COMBOS.length;k++){ if((Math.round(CUSTOM_COMBOS[k].pv)+'|'+Math.round(CUSTOM_COMBOS[k].battKw))===key){ i=k; break; } }
       if(i>=0) CUSTOM_COMBOS[i]=e; else CUSTOM_COMBOS.push(e); })();
@@ -2044,11 +2045,34 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var j=await r.json().catch(function(){return{};}); if(j&&j.ok){ if(j.token) TOKEN=j.token; if(j.project_id) STATE_CODE=j.project_id; }
     }catch(e){}
   }
+  // v0.69.1 (Johan 14-10): EIGEN TOTAALPRIJS = BEDRAG, NIET EEN FACTOR. Een "Pas aan"-combi bewaarde enkel prijsFactor = eigen totaal ÷
+  //   standaardprijs op dat moment. Bij een nieuwe standaardprijs (v0.69.0: 1 C&I 113.050 → 85.000) schaalde het eigen totaal
+  //   mee (Seuropak: eigen 85.000 × 85.000/113.050 = 63.910). Nu: prijsTot (absoluut) wordt bewaard en de factor telkens herrekend
+  //   op de huidige prijzen. Oude combi's zonder prijsTot: totaal gereconstrueerd met de prijzen van v0.65–v0.68 (anker 168.000 /
+  //   PV bij batterij 350 €/kWp / batterij ≈ 420,11 €/kWh, extra kWh 300 €/kWh) — de periode waarin die factoren bewaard werden.
+  function _invTotRawOud(pvKwp, battKwh, ac, dc){
+    var m=_invTotRaw(pvKwp, battKwh, ac, dc); if(!(CTX && !CTX.particulier)) return m.tot;
+    var p=Math.max(0,+pvKwp||0), kw=Math.max(0,+battKwh||0), k=Math.round(kw), small=(k===60||k===100);
+    var pvO=(kw>0)?p*350:(Math.min(p,100)*600+Math.max(0,p-100)*400);
+    var bO=(168000-157*350-_varia0(157,261,false))/261;
+    var btO=Math.min(kw,261)*bO*(small?1.25:1)+Math.max(0,kw-261)*300;
+    return m.tot-m.pv-m.bt+Math.round(pvO)+Math.round(btO);
+  }
+  function _ekNormCombo(c){
+    if(!c) return c;
+    var kwh=(c.battKwh!=null&&c.battKwh>0)?+c.battKwh:(+c.battKw||0)*_crate(), ac=(c.ac!=null?c.ac:0), dc=(c.dc!=null?c.dc:0);
+    var nu=_invTotRaw(+c.pv||0, kwh, ac, dc).tot; if(!(nu>0)) return c;
+    var f=+c.prijsFactor||1;
+    if(!(+c.prijsTot>0) && Math.abs(f-1)>1e-6){ var oud=_invTotRawOud(+c.pv||0, kwh, ac, dc); if(oud>0) c.prijsTot=Math.round(f*oud); }
+    if(+c.prijsTot>0) c.prijsFactor=(+c.prijsTot)/nu;
+    return c;
+  }
   // v0.24.26 (Johan): zet de onthouden manuele combi's (CUSTOM_COMBOS) terug op een NET herrekende heatmap → je vindt ze terug.
   function _herstelCustomCombos(){
     var H=HM; if(!H || !H.real || !H.real.length || !CUSTOM_COMBOS.length) return;
     H.customCells=H.customCells||{};
     CUSTOM_COMBOS.forEach(function(c){
+      try{ _ekNormCombo(c); }catch(eN){}   // v0.69.1: eigen totaalprijs blijft een BEDRAG, ook als de standaardprijzen wijzigen
       var _kwh=Math.round((c.battKwh!=null&&c.battKwh>0)?c.battKwh:(c.battKw*_crate()));
       var ry=_ekBattKey(c.battKw,_kwh), cx=Math.round(c.pv);
       H.battMap=H.battMap||{}; if(c.battKw>0) H.battMap[ry]={kw:Math.round(c.battKw),kwh:_kwh};
@@ -4947,7 +4971,7 @@ var _simVoortgang=(function(){
   function wacht(fn, ms){ return new Promise(function(res){ var t0=Date.now(); (function lus(){ var v=null; try{ v=fn(); }catch(e){} if(v||Date.now()-t0>ms) return res(v); setTimeout(lus,400); })(); }); }
   async function echtCombo(){
     var c=D.combo, key=_ekBattKey(c.kw,c.kwh)+'|'+c.pv;
-    try{ var e={ pv:c.pv, battKw:c.kw, battKwh:c.kwh, ac:(INV_OV?INV_OV.ac:0), dc:(INV_OV?INV_OV.dc:0), prijsFactor:PRIJS_FACTOR, opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:c.kwh/c.kw };
+    try{ var e={ pv:c.pv, battKw:c.kw, battKwh:c.kwh, ac:(INV_OV?INV_OV.ac:0), dc:(INV_OV?INV_OV.dc:0), prijsFactor:PRIJS_FACTOR, prijsTot:(Math.abs(PRIJS_FACTOR-1)>1e-6?Math.round(PRIJS_FACTOR*_invTotRaw(c.pv,c.kwh,(INV_OV?INV_OV.ac:0),(INV_OV?INV_OV.dc:0)).tot):null), opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:c.kwh/c.kw };
       var i=-1; for(var k=0;k<CUSTOM_COMBOS.length;k++){ if(Math.round(CUSTOM_COMBOS[k].pv)===c.pv && Math.round(CUSTOM_COMBOS[k].battKw)===c.kw){ i=k; break; } }
       if(i>=0) CUSTOM_COMBOS[i]=e; else CUSTOM_COMBOS.push(e); }catch(e){}
     try{ if(window.HM&&HM.computed) delete HM.computed[key]; }catch(e){}
