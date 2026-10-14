@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.48.0 (2026-10-14, Johan): PROFIELANALYSE-BIJLAGE AANGEVULD met wat de profielanalyse-modal toont (server ≥ 15.294.0): hoogste gemeten piek + % gemeten kwartierdata, volume per maand gekleurd naar dekking (gemeten / deels / afgeleid), typische week (kW per uur, ma → zo) en een heatmap maand × uur (maanden horizontaal, uren verticaal, gemiddeld kW). Zonder die velden (oudere server) blijft de bijlage zoals voorheen. -->
 <!-- klantrapport.html v0.47.1 (2026-10-13, Johan): hoofdstuk «Je betalend laadplein» staat nu net vóór «Extra potentieel: onbalans-sturing». -->
 <!-- klantrapport.html v0.47.0 (2026-10-13, Johan): BETALEND LAADPLEIN COHERENT — (1) nieuw hoofdstuk «Je betalend laadplein — energie, kosten en marge» (geleverde MWh, verkoopprijs, omzet, elektriciteitskost zónder installatie = meerkost op de factuur, sturing, netto marge, investering, hoe het in het plan telt); (2) de plaza-marge telt enkel nog in het plan «met laadpalen en laadsessies» (mét de investering in het laadplein), niet meer in het PV/batterij-plan; de elektriciteitskost is die zónder installatie (de daling door PV/batterij zit al in de factuurbesparing → geen dubbeltelling); (3) advies + voorblad tonen de plaza-marge apart; (4) beslissing 1 noemt de verzwaring «netverzwaring als je laadt zonder eigen infrastructuur» + uitleg hoe ze in beslissing 2 terugkomt. Nieuwe teksten in NL/FR/EN (data-i18n-skip). -->
 <!-- klantrapport.html v0.46.0 (2026-10-13, Johan): BETALEND LAADPLEIN — (1) financieel plan: enkel het NETKOSTEN-deel van de kost elektriciteit (server v15.291 kost_elek_net_eur) volgt het snellere netpad + 2029-verdubbeling, de rest volgt de inflatie (vroeger de volledige laadkost op het netpad → sprong in jaar 4); (2) kVA-tekst: stijgt de netpiek boven de bestaande aansluiting, dan zeggen we niet meer "zonder de aansluiting te verzwaren" maar dat er een (kleinere) verzwaring nodig is. -->
@@ -1460,14 +1461,16 @@ financieelPagina(null, _FIN_ZONDER_LAAD?'Financieel plan over 15 jaar — zonder
   var MND=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
   function _paDatum(s){ if(!s) return ''; try{ var str=String(s).trim(); var m=str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); var d=m?new Date(+m[3],+m[2]-1,+m[1]):new Date(str); if(!isNaN(d)) return d.toLocaleDateString('nl-BE',{day:'numeric',month:'short',year:'numeric'}); }catch(e){} return esc(String(s)); }
   // Volume per maand — verticale staven (MWh). maand[12].
-  function _paMaandBars(maand){
+  function _paMaandBars(maand, pct){
     var arr=(maand||[]).map(function(v){return +v||0;}); if(!arr.length) return '';
+    var PC=Array.isArray(pct)?pct:null;   // v0.48.0: kleur naar dekking (≥ 90% gemeten = groen, deels = lichtgroen, afgeleid = oranje)
     var mx=0; arr.forEach(function(v){ if(v>mx)mx=v; }); if(!(mx>0)) mx=1;
     var W=760,H=190,padL=30,padB=18,padT=14, n=12, gw=(W-padL)/n, bw=gw*0.62;
     var s='<rect x="'+padL+'" y="'+padT+'" width="'+(W-padL)+'" height="'+(H-padB-padT)+'" fill="#F7F9FB"/>';
     for(var g=0;g<=4;g++){ var gy=padT+(H-padB-padT)*g/4; s+='<line x1="'+padL+'" y1="'+gy.toFixed(1)+'" x2="'+W+'" y2="'+gy.toFixed(1)+'" stroke="#E2E8F0" stroke-width="0.5"/>'; }
     for(var i=0;i<n;i++){ var v=arr[i]||0, bh=(H-padB-padT)*(v/mx), x=padL+i*gw+(gw-bw)/2, y=H-padB-bh;
-      s+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,bh).toFixed(1)+'" rx="1.5" fill="#0AB050"/>';
+      var _p=PC?(+PC[i]||0):100, _f=_p>=90?'#0AB050':(_p>0?'#9AD4A6':'#E0A458');
+      s+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,bh).toFixed(1)+'" rx="1.5" fill="'+_f+'"/>';
       if(v>0) s+='<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-2).toFixed(1)+'" font-size="7.5" text-anchor="middle" fill="#3B4757">'+_num(v,v<10?1:0)+'</text>';
       s+='<text x="'+(padL+i*gw+gw/2).toFixed(1)+'" y="'+(H-5)+'" font-size="8" text-anchor="middle" fill="#5A6577">'+MND[i]+'</text>'; }
     return '<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+s+'</svg>';
@@ -1486,6 +1489,22 @@ financieelPagina(null, _FIN_ZONDER_LAAD?'Financieel plan over 15 jaar — zonder
       s+='<text x="'+(x+cw/2).toFixed(1)+'" y="'+(H-3)+'" font-size="8" text-anchor="middle" fill="#5A6577">'+MND[mi]+'</text>'; }
     return '<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+s+'</svg>';
   }
+  // v0.48.0 (Johan): typische week — kW per uur, maandag → zondag (168 punten), zoals in de profielanalyse-modal.
+  function _paWeek(wk){
+    var d=(wk&&wk.kw)||[]; if(d.length<24) return '';
+    var W=760,H=170,padL=30,padB=16,padT=10, mx=0; d.forEach(function(v){ if(+v>mx) mx=+v; }); if(!(mx>0)) mx=1;
+    var iw=W-padL, ih=H-padB-padT, s='<rect x="'+padL+'" y="'+padT+'" width="'+iw+'" height="'+ih+'" fill="#F7F9FB"/>';
+    for(var g=0;g<=4;g++){ var gy=padT+ih*g/4; s+='<line x1="'+padL+'" y1="'+gy.toFixed(1)+'" x2="'+W+'" y2="'+gy.toFixed(1)+'" stroke="#E2E8F0" stroke-width="0.5"/>';
+      s+='<text x="'+(padL-3)+'" y="'+(gy+3).toFixed(1)+'" font-size="7.5" text-anchor="end" fill="#5A6577">'+_num(mx*(1-g/4),mx<20?1:0)+'</text>'; }
+    // dag-labels als datum (dd/mm): het profiel staat op een 2025-kalenderindex, de meting kan uit een ander jaar komen → weekdagnaam niet gegarandeerd.
+    var DG=['1','2','3','4','5','6','7'], _mm=String(wk.van||'').match(/^(\d{1,2})\/(\d{1,2})/);
+    if(_mm){ var _t0=Date.UTC(2025,+_mm[2]-1,+_mm[1]); DG=DG.map(function(_,k){ var dd=new Date(_t0+k*86400000); return ('0'+dd.getUTCDate()).slice(-2)+'/'+('0'+(dd.getUTCMonth()+1)).slice(-2); }); }
+    for(var k=0;k<7;k++){ var x=padL+k*iw/7; s+='<line x1="'+x.toFixed(1)+'" y1="'+padT+'" x2="'+x.toFixed(1)+'" y2="'+(H-padB)+'" stroke="#D5DEE8" stroke-width="0.6"/>';
+      s+='<text x="'+(x+iw/14).toFixed(1)+'" y="'+(H-4)+'" font-size="8" text-anchor="middle" fill="#5A6577">'+DG[k]+'</text>'; }
+    var pts=d.map(function(v,i){ return (padL+i/(d.length-1)*iw).toFixed(1)+','+(padT+ih-(+v||0)/mx*ih).toFixed(1); }).join(' ');
+    s+='<polyline points="'+pts+'" fill="none" stroke="#05B050" stroke-width="1.6"/>';
+    return '<svg class="heat-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+s+'</svg>';
+  }
   function _paPagina(pa, isInj){
     var titel=isInj?'Profielanalyse — je injectie':'Profielanalyse — je afname';
     var eenh=isInj?'geïnjecteerd':'afgenomen';
@@ -1501,9 +1520,33 @@ financieelPagina(null, _FIN_ZONDER_LAAD?'Financieel plan over 15 jaar — zonder
          '<div class="box"><span class="l">Maandpiek</span><div class="v">'+_num(pa.maandpiek_kw||0,pa.maandpiek_kw<100?1:0)+'</div><span class="je">kW</span></div>'+
          '<div class="box"><span class="l">Gemeten periode</span><div class="v" style="font-size:15px;line-height:1.25">'+(periode?esc(periode):'—')+'</div><span class="je">'+(_paMnd!=null?(_num(_paMnd,0)+' maanden'):'kwartierdata')+'</span></div>'+
        '</div>';
-    h+='<div class="heat-wrap"><div class="heat-titel">Volume per maand ('+eenh+', MWh)</div>'+_paMaandBars(pa.maand_mwh)+'</div>';
+    // v0.48.0 (Johan): extra kerncijfers uit de profielanalyse (enkel als de server ze levert).
+    var _ex=[];
+    if(pa.piek_gemeten_kw!=null) _ex.push(_L3('Hoogste gemeten piek','Pic mesuré le plus élevé','Highest measured peak')+': <b>'+_num(pa.piek_gemeten_kw,pa.piek_gemeten_kw<100?1:0)+' kW</b>');
+    if(pa.pct_gemeten!=null) _ex.push(_L3('Gemeten kwartierdata','Données quart-horaires mesurées','Measured quarter-hour data')+': <b>'+_num(Math.min(100,pa.pct_gemeten),0)+'%</b>'+(pa.pct_gemeten<99.5?' '+_L3('(de rest aangevuld op basis van je eigen verbruikspatroon of een standaardprofiel)','(le reste complété sur la base de votre propre profil de consommation ou d’un profil standard)','(the rest completed from your own consumption pattern or a standard profile)'):''));
+    if(_ex.length) h+='<div class="heat-duid" style="margin:0 0 6px">'+_ex.join(' &nbsp;·&nbsp; ')+'</div>';
+    var _pc=Array.isArray(pa.maand_pct_gemeten)?pa.maand_pct_gemeten:null;
+    h+='<div class="heat-wrap"><div class="heat-titel">Volume per maand ('+eenh+', MWh)</div>'+_paMaandBars(pa.maand_mwh,_pc)+
+       (_pc?'<div class="heat-leg"><span style="display:inline-block;width:9px;height:9px;background:#0AB050;border-radius:2px"></span>'+_L3('≥ 90% gemeten','≥ 90 % mesuré','≥ 90% measured')+
+            ' <span style="display:inline-block;width:9px;height:9px;background:#9AD4A6;border-radius:2px;margin-left:8px"></span>'+_L3('deels gemeten','partiellement mesuré','partly measured')+
+            ' <span style="display:inline-block;width:9px;height:9px;background:#E0A458;border-radius:2px;margin-left:8px"></span>'+_L3('aangevuld','complété','completed')+'</div>':'')+'</div>';
+    if(pa.week&&pa.week.kw&&pa.week.kw.length){
+      h+='<div class="heat-wrap"><div class="heat-titel">'+_L3('Typische week: ','Semaine type : ','Typical week: ')+(isInj?_L3('injectie','injection','injection'):_L3('afname','prélèvement','offtake'))+' '+_L3('per uur (kW)','par heure (kW)','per hour (kW)')+'</div>'+
+         '<div class="heat-duid">'+_L3('Een representatieve week uit je metingen','Une semaine représentative de vos mesures','A representative week from your measurements')+(pa.week.van?' ('+_L3('vanaf','à partir du','from')+' '+esc(pa.week.van)+')':'')+'. '+
+         _L3('Zo zie je het dag- en weekritme en de uren waarop het verbruik piekt.','Vous voyez ainsi le rythme journalier et hebdomadaire, et les heures de pointe.','This shows the daily and weekly rhythm and the peak hours.')+'</div>'+
+         _paWeek(pa.week)+'</div>';
+    }
     // v0.14.1 (Johan): "heatmap" i.p.v. "warmtekaart", en per uur × per DAG (24×365) — zelfde engine/stijl als de andere bijlage-heatmaps.
     h+=heatBlok('Heatmap: '+(isInj?'injectie':'afname')+' per uur en per dag (kW)', pa.heatmap, 'kW', '', null);   // v0.25.0: profielanalyse is kalender-geïndexeerd (doy 2025) → vaste 1 jan→31 dec-as, niet het rolling-venster
+    // v0.48.0 (Johan): heatmap maand × uur (gemiddeld kW) — maanden horizontaal, uren verticaal (0u onder), zoals in de modal.
+    if(pa.maand_uur&&pa.maand_uur.length){
+      var _mx=0; pa.maand_uur.forEach(function(r){ (r||[]).forEach(function(v){ if(+v>_mx) _mx=+v; }); });
+      h+='<div class="heat-wrap"><div class="heat-titel">'+_L3('Heatmap: gemiddelde ','Carte thermique : ','Heatmap: average ')+(isInj?_L3('injectie','injection','injection'):_L3('afname','prélèvement','offtake'))+' '+_L3('per uur en per maand (kW)','par heure et par mois (kW)','per hour and per month (kW)')+'</div>'+
+         '<div class="heat-duid">'+_L3('Per maand het gemiddelde vermogen op elk uur van de dag. Zo zie je meteen in welke maanden en op welke uren je het meest ','Pour chaque mois, la puissance moyenne à chaque heure de la journée. Vous voyez immédiatement les mois et les heures où vous ','For each month, the average power at every hour of the day. You see at once in which months and at which hours you ')+
+         (isInj?_L3('injecteert.','injectez le plus.','inject most.'):_L3('afneemt.','prélevez le plus.','draw most from the grid.'))+'</div>'+
+         _paMaandUur(pa.maand_uur)+
+         '<div class="heat-leg"><span>'+_L3('laag','bas','low')+'</span><span class="bar"></span><span>'+_L3('hoog — max ','élevé — max ','high — max ')+_num(_mx,_mx<100?1:0)+' kW</span></div></div>';
+    }
     pagina(h);
   }
   if(PA.afname)   _paPagina(PA.afname, false);

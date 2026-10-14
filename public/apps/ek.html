@@ -6,6 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.68.0 (2026-10-14, Johan): PROFIELANALYSE-MODAL IN HET ADVISEURSBEELD — na het opladen/lezen van een profiel opent dezelfde weergave als in de portaltegel Profiel-import (gedeelde /apps/profiel-viz.js): herkend formaat, dekking, kerncijfers, typische week, heatmap maand × uur (maanden horizontaal, uren verticaal, rapport-groen), volume per maand, energiebalans. Ook later op te roepen via «📊 Profielanalyse» in dossierbeheer (GET /api/profiel/overzicht, server ≥ 15.294.0). -->
 <!-- ek.html v0.67.5 (2026-10-13, Johan): BETALEND LAADPLEIN IN DE ROOSTERS — net als bij de eigen vloot (laadsessies) rekenen TVT / rendement / besparing in de roosters, de KPI-tegels en de rooster-bijlage nu mét de netto marge van het betalend laadplein (omzet − elektriciteit zónder installatie, = klantrapport v0.47 «Je betalend laadplein») en mét de investering in de laadpalen. Elektriciteitskost: commodity op inflatie, netkosten-deel op het netpad. Server ≥ 15.293 stuurt daarvoor ook bij een betalend plein de gebouw-only factuur (gebouw_saldo). -->
 <!-- ek.html v0.67.4 (2026-10-13, Johan): EIGEN PRIJS VAN EEN COMBI («Pas aan» → totaalprijs, bv. carport +400 €/kWp) telt nu overal mee: de meerprijs (eigen totaal − standaardprijs van die combi) komt bovenop de PV+batterij-investering van die cel → rooster (investering, TVT, rendement, besparing-KPI) én rapport (investering PV+batterij, plannen). Laadpalen blijven op hun standaardprijs (de meerprijs gaat niet meer pro rata over de palen). Vroeger negeerden het rooster en het rapport de eigen prijs zodra de cel exact was doorgerekend (backend-capex). -->
 <!-- ek.html v0.67.3 (2026-10-13, Johan): LEEG JAARVERBRUIK → duidelijke melding bij het veld (in de taal van het scherm) i.p.v. "De berekening kon niet worden afgerond … afname_mwh (jaarverbruik) verplicht" van de server. Geen serveraanroep zolang het jaarverbruik 0/leeg is. -->
@@ -1610,6 +1611,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       function deel(nm,o){ if(!o||!o.aanwezig) return null; var b=[]; if(o.mwh!=null) b.push(_ekNf(o.mwh)+' MWh/j'); if(o.piek_kw!=null) b.push('piek '+_ekNf(o.piek_kw)+' kW'); if(o.gemeten_maanden!=null) b.push(o.gemeten_maanden+' mnd gemeten'+(o.aangevuld?', aangevuld':'')); return nm+(b.length?': '+b.join(' · '):''); }
       var pP=[deel('afname',ps&&ps.afname),deel('injectie',ps&&ps.injectie)].filter(Boolean);
       html+='<br><b>Opgeladen profielen:</b> '+(pP.length?pP.join('&nbsp;&nbsp;|&nbsp;&nbsp;'):'<span style="color:#8a94a6">nog geen</span>');
+      if(pP.length && STATE_CODE) html+=' <button type="button" class="btn ghost sm" style="margin-left:6px;padding:2px 9px" onclick="_ekProfielOverzicht()" data-nolog="1">📊 Profielanalyse</button>';   // v0.68.0
       el.innerHTML=html;
     }catch(e){}
     try{ _ekPartnerLaad(); }catch(e){}   // v0.28.0: partner-koppeling (idempotent — enkel (her)laden bij nieuw dossier)
@@ -3494,7 +3496,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       lijn('afname')+lijn('injectie')+jv+
       '<div style="display:flex;gap:8px;margin-top:10px">'+
         '<button id="prof-bevestig" type="button" class="btn sm" onclick="_ekProfielBevestig(\''+_ekEsc(j.concept_id)+'\')">💾 Bewaar op dossier '+_ekEsc(j.project_id)+'</button>'+
+        '<button type="button" class="btn ghost sm" onclick="_ekProfielModal(_LAST_PROFIEL_ANALYSE)">📊 Toon profielanalyse</button>'+
       '</div></div>';
+    try{ _ekProfielModal(j); }catch(eM){}   // v0.68.0 (Johan): meteen dezelfde analyse-weergave als de portaltegel Profiel-import
     // v0.24.38 (Johan: "ik upload een profiel maar hij neemt hem niet mee"): het bewaren was een aparte 2e klik die makkelijk
     //   gemist werd → profiel_status bleef leeg. Staat er nog GEEN profiel op dit dossier (geen overschrijf-conflict), dan
     //   bewaren we nu meteen automatisch; bij een bestaand profiel blijft de expliciete "toch overschrijven"-knop (409).
@@ -3512,12 +3516,59 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         return;
       }
       if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('bewaren faalde ('+r.status+')'));
-      var st=$('prof-status'); if(st){ st.style.color='#1E7A42'; st.innerHTML='<div style="border:1px solid #B7E0C6;background:#F3FBF6;border-radius:8px;padding:10px 12px;font-weight:700;color:#1E7A42">✔ Profiel bewaard op '+_ekEsc(j.project_id)+'. De studie rekent voortaan op deze meetgegevens.'+(j.rapport2?' Het definitieve rapport wordt automatisch bijgewerkt.':'')+'</div>'; }
+      var st=$('prof-status'); if(st){ st.style.color='#1E7A42'; st.innerHTML='<div style="border:1px solid #B7E0C6;background:#F3FBF6;border-radius:8px;padding:10px 12px;font-weight:700;color:#1E7A42">✔ Profiel bewaard op '+_ekEsc(j.project_id)+'. De studie rekent voortaan op deze meetgegevens.'+(j.rapport2?' Het definitieve rapport wordt automatisch bijgewerkt.':'')+
+        ' <button type="button" class="btn ghost sm" style="margin-left:6px" onclick="_ekProfielOverzicht()">📊 Toon profielanalyse</button></div>'; }
       // v0.24.30 (Johan): opgeladen-profielen in de blijvende samenvatting bijwerken (uit de laatste analyse-coverage: jaarverbruik + piek).
       try{ var _t=_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types; if(_t){ STATE_PROFIEL_STATUS=STATE_PROFIEL_STATUS||{}; ['afname','injectie'].forEach(function(k){ var c=_t[k]&&_t[k].coverage; if(c){ STATE_PROFIEL_STATUS[k]={ aanwezig:true, mwh:(c.jaar_mwh!=null?+c.jaar_mwh:null), piek_kw:(c.maandpiek_kw!=null?+c.maandpiek_kw:null), gemeten_maanden:(c.gemeten_maanden!=null?+c.gemeten_maanden:null), aangevuld:(c.gemeten_maanden!=null&&+c.gemeten_maanden<12) }; } }); STATE_HEEFT_PROFIEL=!!(STATE_PROFIEL_STATUS.afname||STATE_PROFIEL_STATUS.injectie); } _ekOekeneSamenvatting(); try{ _ekProfielExtra(); }catch(e){} }catch(e){}
     }catch(e){ if(b){ b.disabled=false; b.textContent='💾 Bewaar op dossier'; } var st=$('prof-status'); if(st){ var er=document.createElement('div'); er.style.cssText='font-size:12px;color:#C0392B;margin-top:6px'; er.textContent='Bewaren mislukt: '+e.message; st.appendChild(er); } }
   }
 
+  // v0.68.0 (Johan 14-10): PROFIELANALYSE-MODAL — dezelfde weergave als de portaltegel Profiel-import (gedeelde renderer
+  //   /apps/profiel-viz.js). j = response van /api/profiel/analyse (concept, nog niet of net bewaard) of /api/profiel/overzicht
+  //   (bewaard profiel op het dossier).
+  async function _ekProfielViz(){ if(!window.ProfielViz) await _ekLaadScript('/apps/profiel-viz.js?v=1.0.0'); return window.ProfielViz; }
+  async function _ekProfielModal(j){
+    if(!j||!j.types) return;
+    var PV; try{ PV=await _ekProfielViz(); }catch(e){ alert('Kon de profielweergave niet laden: '+e.message); return; }
+    var oud=$('ek-pvz-modal'); if(oud) try{ document.body.removeChild(oud); }catch(e){}
+    var nf1=function(v){ return (v==null||isNaN(v))?'—':Number(v).toLocaleString('nl-BE',{maximumFractionDigits:1}); };
+    var jv='';
+    if(j.jaarverbruik){ var ja=j.types.afname&&j.types.afname.coverage;
+      jv='<div class="'+(j.jaarverbruik.bron==='factuur'?'warn-box':'ok-box')+'" style="font-size:12.5px">Jaarverbruik in de simulaties: <b>'+(j.jaarverbruik.bron==='factuur'?'factuurvolume (jaarfactuur)':'jaartotaal van dit profiel'+(ja&&ja.jaar_mwh!=null?' ('+nf1(ja.jaar_mwh)+' MWh)':''))+'</b> — '+_ekEsc(j.jaarverbruik.uitleg||'')+'. De vorm komt altijd uit het profiel.</div>'; }
+    var bw=j.bewaard||{}, bwTxt=['afname','injectie'].filter(function(t){ return bw[t]&&bw[t].op; }).map(function(t){ return t+' bewaard op '+_ekEsc(String(bw[t].op).slice(0,16).replace('T',' '))+(bw[t].door?' door '+_ekEsc(bw[t].door):''); }).join(' · ');
+    var nogNiet=!j.opgeslagen && j.concept_id && j.huidig && j.huidig.afname;   // bestaand profiel → niet automatisch bewaard
+    var voet=j.opgeslagen
+      ? '<span class="sub">Bewaard profiel op het dossier'+(bwTxt?' — '+bwTxt:'')+'.</span>'
+      : (nogNiet ? '<span class="sub">Nog niets bewaard — er staat al een profiel op dit dossier.</span>' : '<span class="sub">Geanalyseerd — wordt op het dossier bewaard (zie status onder de knop).</span>');
+    var ov=document.createElement('div'); ov.id='ek-pvz-modal';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,40,.55);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+    ov.innerHTML='<div style="background:#F4F7FB;border-radius:14px;max-width:1040px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.3);font-family:inherit">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">'+
+        '<div style="font-size:18px;font-weight:800;color:#1F3864">📈 Profielanalyse '+_ekEsc(j.project_id||STATE_CODE||'')+(j.project_naam?' <span style="font-weight:600;color:#5A6577;font-size:14px">· '+_ekEsc(j.project_naam)+'</span>':'')+'</div>'+
+        '<button type="button" id="ek-pvz-x" style="border:none;background:none;font-size:22px;cursor:pointer;color:#5A6577" aria-label="Sluiten">✕</button></div>'+
+      '<div class="pvz">'+PV.render(j)+jv+'</div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:8px;flex-wrap:wrap">'+voet+
+        (nogNiet?'<button type="button" id="ek-pvz-bev" class="btn sm">💾 Toch bewaren op dossier</button>':'')+
+        '<button type="button" id="ek-pvz-sluit" class="btn ghost sm">Sluiten</button></div></div>';
+    document.body.appendChild(ov);
+    function sluit(){ try{ document.body.removeChild(ov); }catch(e){} document.removeEventListener('keydown',esc); }
+    function esc(e){ if(e.key==='Escape') sluit(); }
+    document.addEventListener('keydown',esc);
+    ov.addEventListener('click',function(e){ if(e.target===ov) sluit(); });
+    $('ek-pvz-x').onclick=sluit; $('ek-pvz-sluit').onclick=sluit;
+    var bb=$('ek-pvz-bev'); if(bb) bb.onclick=function(){ sluit(); _ekProfielBevestig(j.concept_id, true); };
+  }
+  async function _ekProfielOverzicht(){
+    var pid=STATE_CODE||(_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.project_id)||'';
+    if(!pid){ alert('Geen dossier (FLX-id) gekend.'); return; }
+    try{
+      var hdr=await _ekAuthHeaders();
+      var r=await fetch(API+'/api/profiel/overzicht?project_id='+encodeURIComponent(pid)+'&_='+Date.now(),{ headers:hdr, cache:'no-store' });
+      var j=await r.json().catch(function(){ return {}; });
+      if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status));
+      _ekProfielModal(j);
+    }catch(e){ alert('Profielanalyse niet beschikbaar: '+e.message); }
+  }
   // v0.14.4: serialiseer de kengetallen-roosters (PV×batterij per kengetal) uit de heatmap-state, zodat het
   //   klantrapport ze als extra bijlage kan tonen (elk rooster als gekleurde tabel in rapportstijl, onder elkaar).
   //   We geven per cel de kleurintensiteit t (0..1, al gedraaid naar "donker = gunstiger") + de opgemaakte tekst mee,

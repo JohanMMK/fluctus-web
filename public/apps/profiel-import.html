@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Profiel-import · Fluctus</title>
-<!-- profiel-import.html v1.1.0 (2026-09-22) — MANUELE REVIEW + JAARVERBRUIK-BRON: een bestand dat niet automatisch te converteren is,
+<!-- profiel-import.html v1.2.0 (2026-10-14, Johan): weergave van de analyse via de gedeelde profiel-viz.js (zelfde als de modal in het
+     EK-adviseursbeeld); heatmap maanden horizontaal (jan→dec), uren verticaal (0u onder), groenladder zoals de rapport-heatmaps.
+     v1.1.0 (2026-09-22) — MANUELE REVIEW + JAARVERBRUIK-BRON: een bestand dat niet automatisch te converteren is,
      komt in de lijst "Manuele review" (bestand bewaard, downloadbaar). Daar vul/corrigeer je de conversie-spec (JSON, voorgevuld
      met de beste poging), test je ze op het bewaarde bestand en loopt de analyse verder. Het formaat is daarna gekend. Analyse toont
      ook of het jaarverbruik uit het profiel of uit de jaarfactuur komt (server v15.160.0).
@@ -17,6 +19,7 @@
      Endpoints: POST /api/profiel/analyse · POST /api/profiel/bevestig · GET /api/kamino/projecten-overzicht · GET /api/profielen-lijst.
      Los van de EnergieKompas-flow; dezelfde /api/profiel/* kan later door de EK-intake aangeroepen worden. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/profiel-viz.js?v=1.0.0"></script>
 <style>
   :root{ --navy:#1F3864; --navy2:#12315E; --ink:#2A3140; --muted:#5A6577; --bg:#F4F7FB; --line:#dbe3ef; --green:#05B050; --amber:#9E480E;
          --h0:#1F3864; --h1:#5B8BD0; --h2:#8FB3E6; --h3:#E0A458; --h4:#7FB8A4; --h5:#C07AB8; }
@@ -236,24 +239,9 @@
   // ─── render ───
   var BRON={ builtin:['gekend formaat','p-ok'], registry:['uit registry (hergebruikt)','p-ok'], ai:['nieuw — spec door AI gebouwd','p-info'], heuristiek:['heuristiek — review aanbevolen','p-wacht'] };
   function render(j){
-    var h='<div class="card"><h2>2 · Herkend formaat</h2>';
-    j.formaten.forEach(function(f){
-      var b=BRON[f.bron]||[f.bron,'p-neu'];
-      h+='<div style="margin-bottom:8px"><b>'+esc(f.rol)+'</b> · '+esc(f.bestand)+' <span class="pill '+b[1]+'">'+esc(b[0])+'</span><div class="sub">'+esc(f.spec_naam)+' · '+f.resolutie_min+' min · eenheid '+esc(f.spec_kort.unit||'per rij')+' · '+(f.spec_kort.timezone==='utc'?'UTC→lokaal':'lokale tijd')+(f.spec_kort.label==='end'?' · tijdstempel = einde interval':'')+(f.spec_kort.long_format?' · lang formaat (registers)':'')+' · '+nf(f.parse_rate)+'% rijen geparst · bevat '+esc((f.bevat||[]).join(' + '))+' · <span class="id">'+esc(f.fingerprint)+'</span></div>';
-      if(f.manuele_review_aanbevolen) h+='<div class="warn-box">De AI-herkenning was niet beschikbaar; een heuristiek herkende het formaat. Controleer eenheid (kW vs kWh) en kolommen hieronder vóór je bevestigt.</div>';
-      if(f.waarschuwingen && f.waarschuwingen.length) h+='<div class="warn-box">'+f.waarschuwingen.map(esc).join('<br>')+'</div>';
-      h+='</div>';
-    });
-    h+='<div class="sub">Aanvulling met standaardprofiel: <b>'+esc(j.slp_profiel)+'</b>'+(j.pv_opts&&j.pv_opts.pv_kwp?' · PV '+nf(j.pv_opts.pv_kwp)+' kWp':'')+'</div></div>';
-    ['afname','injectie'].forEach(function(t){ if(j.types[t]) h+=renderType(t,j.types[t]); });
-    if(j.energiebalans){
-      var e=j.energiebalans;
-      h+='<div class="card"><h2>Energiebalans-reconstructie (prosument)</h2><div class="sub">C = A + (P − I) · per kwartier S = min(C, P) · P gekalibreerd op de gemeten injectie.</div><div class="kpis">'+
-        kpi(nf(e.pv.kwp_gekalibreerd)+' kWp','PV gekalibreerd (start '+nf(e.pv.kwp_start)+')')+kpi(nf(e.pv.jaarproductie_mwh)+' MWh','jaarproductie P')+
-        kpi(nf(e.pv.verbruik_totaal_mwh)+' MWh','totaal verbruik C')+kpi(nf(e.pv.zelfconsumptie_pct)+' %','zelfconsumptie Z')+
-        kpi(nf(e.kwaliteit.injectie_afwijking_pct)+' %','restafwijking injectie')+kpi(nf(e.kwaliteit.afname_afwijking_pct)+' %','restafwijking afname')+'</div>'+
-        ((!j.pv_opts||!j.pv_opts.pv_kwp)?'<div class="warn-box">Geen kWp opgegeven — de reconstructie schat PV uit de injectie. Geef het echte kWp op (boven) en analyseer opnieuw voor een betrouwbaarder resultaat.</div>':'')+'</div>';
-    }
+    // v1.2.0 (Johan 14-10): formaat/afname/injectie/energiebalans via de GEDEELDE renderer profiel-viz.js (ook gebruikt door
+    //   de modal in het EK-adviseursbeeld) → overal dezelfde weergave; heatmap maanden horizontaal, uren verticaal, rapport-groen.
+    var h=window.ProfielViz?window.ProfielViz.render(j):'<div class="fout">profiel-viz.js niet geladen</div>';
     var hu=j.huidig||{};
     h+='<div class="card"><h2>3 · Bevestigen</h2>';
     if(hu.afname||hu.injectie){
@@ -262,46 +250,9 @@
     if(j.jaarverbruik) h+='<div class="'+(j.jaarverbruik.bron==='factuur'?'warn-box':'ok-box')+'" style="font-size:12.5px">Jaarverbruik in de simulaties: <b>'+(j.jaarverbruik.bron==='factuur'?'factuurvolume (jaarfactuur)':'jaartotaal van dit profiel ('+nf(j.types.afname.coverage.jaar_mwh)+' MWh)')+'</b> — '+esc(j.jaarverbruik.uitleg)+'. De vorm komt altijd uit het profiel.</div>';
     if(j.review_id) h+='<div class="sub" style="margin-bottom:6px">Via manuele review '+esc(j.review_id)+' — formaat is nu gekend.</div>';
     h+='<div class="row"><button class="btn go" id="bBev" onclick="bevestig(false)">✅ Gebruik als gemeten profiel</button><span class="sub" id="bevStatus"></span></div><div id="bevOut"></div></div>';
-    $('out').innerHTML=h;
+    $('out').innerHTML='<div class="pvz">'+h+'</div>';
   }
   function kpi(v,l){ return '<div class="kpi"><b>'+v+'</b><span>'+esc(l)+'</span></div>'; }
-  function renderType(t,x){
-    var c=x.coverage, onb=(c.flags&&c.flags.length), cls=onb?'p-mis':(c.label_type==='gemeten'?'p-ok':'p-wacht');
-    var parts=[c.pct_gemeten,c.pct_interpolatie,c.pct_typische_dag,c.pct_slp,c.pct_uurresolutie,c.pct_energiebalans];
-    var h='<div class="card"><h2>'+(t==='afname'?'Afname':'Injectie')+'</h2><span class="label-big '+cls+'">'+esc(c.label)+'</span>';
-    h+='<div class="stack">'+parts.map(function(p,i){ return p>0?'<div title="'+HLAB[i]+' '+p+'%" style="width:'+p+'%;background:'+HCOL[i]+'"></div>':''; }).join('')+'</div>';
-    h+='<div class="legend">'+parts.map(function(p,i){ return p>0?'<span><i style="background:'+HCOL[i]+'"></i>'+HLAB[i]+' '+nf(p)+'%</span>':''; }).join('')+'</div>';
-    if(onb) h+='<div class="flags">⚠ '+c.flags.map(esc).join('<br>⚠ ')+'</div>';
-    h+='<div class="kpis">'+kpi(nf(c.jaar_mwh,1)+' MWh','jaarvolume (12 mnd)')+kpi(nf(c.maandpiek_kw)+' kW','maandpiek (profiel)')+kpi(nf(c.maandpiek_kw_gemeten)+' kW','hoogste gemeten piek')+
-      kpi(esc(c.gemeten_span),'effectief gemeten')+kpi('<span style="font-size:12px">'+esc(c.van||'—')+'<br>'+esc(c.tot||'—')+'</span>','venster van – tot')+kpi(nf(c.pct_gemeten+c.pct_uurresolutie)+' %','gemeten (drempel label '+(100-c.drempel_pct)+'%)')+'</div>';
-    h+='<div class="viz"><div>'+weekSvg(x.preview)+'</div><div>'+heatSvg(x.preview.heatmap_kw)+'</div></div>';
-    h+=maandSvg(c.maand_mwh,c.maand_pct_gemeten);
-    if(c.periodes && c.periodes.length){
-      h+='<details><summary>Afgeleide periodes ('+c.periodes.length+')</summary><table class="per"><tr><th>van</th><th>tot</th><th>methode</th><th>kwartieren</th></tr>'+
-        c.periodes.map(function(p){ return '<tr><td>'+esc(p.van)+'</td><td>'+esc(p.tot)+'</td><td>'+esc(p.methode)+'</td><td>'+p.kwartieren+'</td></tr>'; }).join('')+'</table></details>';
-    }
-    return h+'</div>';
-  }
-  function weekSvg(pv){
-    var d=pv.week_kw, W=520, H=120, mx=Math.max.apply(null,d.concat([0.001]));
-    var pts=d.map(function(v,i){ return (i/(d.length-1)*W).toFixed(1)+','+(H-8-v/mx*(H-22)).toFixed(1); }).join(' ');
-    var days=['ma','di','wo','do','vr','za','zo'], g='';
-    for(var k=0;k<7;k++){ var x=k*W/7; g+='<line x1="'+x+'" y1="10" x2="'+x+'" y2="'+(H-8)+'" stroke="#e6ecf5"/><text x="'+(x+3)+'" y="'+(H-1)+'">'+days[k]+'</text>'; }
-    return '<div class="sub">Typische week vanaf '+esc(pv.week_van)+' ('+pv.week_gemeten_pct+'% gemeten) · kW</div><svg viewBox="0 0 '+W+' '+H+'" width="100%" preserveAspectRatio="none" role="img" aria-label="Typische week">'+g+
-      '<polyline points="'+pts+'" fill="none" stroke="var(--navy)" stroke-width="1.5"/><text x="'+(W-2)+'" y="10" text-anchor="end">max '+nf(mx,1)+' kW</text></svg>';
-  }
-  function heatSvg(hm){
-    var W=24*12, H=12*12, mx=Math.max.apply(null,hm.concat([0.001])), g='', M=['j','f','m','a','m','j','j','a','s','o','n','d'];
-    for(var m=0;m<12;m++){ for(var h=0;h<24;h++){ var v=hm[m*24+h]/mx, l=Math.round(96-v*62); g+='<rect x="'+(14+h*11)+'" y="'+(m*11)+'" width="11" height="11" fill="hsl(215,55%,'+l+'%)"><title>'+M[m]+' '+h+'u: '+nf(hm[m*24+h],2)+' kW</title></rect>'; } g+='<text x="2" y="'+(m*11+9)+'">'+M[m]+'</text>'; }
-    return '<div class="sub">Gemiddeld kW per maand × uur</div><svg viewBox="0 0 '+(W+20)+' '+(H+4)+'" width="100%" role="img" aria-label="Heatmap maand x uur">'+g+'</svg>';
-  }
-  function maandSvg(mwh,pct){
-    var W=520, H=70, mx=Math.max.apply(null,mwh.concat([0.001])), bw=W/12, g='', M=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
-    mwh.forEach(function(v,i){ var h=v/mx*(H-22), x=i*bw+3, y=H-12-h; var col=pct[i]>=90?'var(--h0)':(pct[i]>0?'var(--h1)':'var(--h3)');
-      g+='<rect x="'+x+'" y="'+y+'" width="'+(bw-6)+'" height="'+h+'" fill="'+col+'"><title>'+M[i]+': '+nf(v,2)+' MWh · '+pct[i]+'% gemeten</title></rect><text x="'+(x+(bw-6)/2)+'" y="'+(H-2)+'" text-anchor="middle">'+M[i]+'</text>'; });
-    return '<div class="sub" style="margin-top:8px">Volume per maand (donker = ≥ 90% gemeten · licht = deels · oranje = volledig afgeleid)</div><svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Volume per maand">'+g+'</svg>';
-  }
-
   async function bevestig(forceer){
     if(!RES) return;
     $('bBev').disabled=true; $('bevStatus').textContent='Bewaren…'; $('bevOut').innerHTML='';
