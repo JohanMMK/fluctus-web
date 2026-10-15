@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
+<!-- Gebruikersbeheer v1.9 (15-10, Johan): alle kiesbare portal-tegels in de eerste rij — actief links, minder gebruikt rechts (grijs, met scheidingslijn); Academy niet meer automatisch (standaard uit, per gebruiker aan te zetten); tegels met «of via …» (Energie-Compas/Mijn klanten via EnergieKompas, Laadplein via Simulator). -->
 <!-- Gebruikersbeheer v1.8 (26-08, Fase 2): rollen partnermanager/klant erbij + bedrijf/EPC-veld per gebruiker (action:'company'). Bedrijf = scopingsleutel: partnermanager ziet alle projecten van dat bedrijf. Vereist server v15.93.0. // v1.7 (09-08): geen mail bij verwijderen (enkel lokale export) + terminologie 'verkoper'→'adviseur' (rol-waarde seller ongewijzigd). // v1.6 (09-08): authHeaders() async → altijd live token (fix 401 "niet ingelogd" op manager-acties na token-expiry). // v1.5 (08-08): "Preview"-knop per rij = dry-run van het verwijderen (server v15.64.0): toont
      hoeveel scenario’s/Kamino zouden herlinken naar oekene, wat er zou verwijderd worden, of GitHub-token + Brevo
      geconfigureerd zijn — zonder iets te wijzigen. Zo testbaar zonder wegwerp-account. Preview-export wordt gedownload.
@@ -42,6 +43,9 @@
   th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--lijn); vertical-align:middle; }
   th{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--grijs); font-weight:700; white-space:nowrap; }
   th.app,td.app{ text-align:center; }
+  th.app.passief, td.app.passief{ background:#f7f8fa; }
+  th.app.grens, td.app.grens{ border-left:2px solid #c7d0dc; }
+  th.app .alt.mg{ color:#8a94a6; }
   th.app .alt{ display:block; font-size:8px; color:var(--green); font-weight:700; letter-spacing:.02em; }
   tbody tr:hover{ background:#FAFBFC; }
   .u-email{ font-weight:600; color:#1F2430; }
@@ -85,17 +89,27 @@
 <script>
 (function(){
   "use strict";
-  // Alle apps op Mijn Fluctus behalve de Gebruikers-app zelf. 'altijd:true' =
-  // elke gebruiker/genodigde heeft er altijd toegang toe (Academy) → geen toggle.
+  // v1.9 (Johan 15-10): ALLE kiesbare tegels van de portal, in de eerste rij — actieve tegels links, niet-actieve
+  //   (= onderaan in de portal, «Minder gebruikt») rechts. Academy is GEEN automatische toegang meer: per gebruiker
+  //   aan te zetten (staat standaard uit). 'via' = de tegel verschijnt ook als de gebruiker die (oudere) app heeft
+  //   (portal ≥ v1.17.0: tegel zichtbaar bij eigen toekenning OF toekenning van de via-app). Manager-only tegels
+  //   (Gebruikers, Mandaten, Projecten, Profiel-import, Demo, Hulpvragen, EPC-campagne) zijn niet toe te kennen.
   var APPS = [
-    { id:'jacops',       naam:'Jacops' },
-    { id:'kamino',       naam:'Kamino' },
-    { id:'simulator',    naam:'Simulator' },
-    { id:'betaalplein',  naam:'Laadplein' },
-    { id:'gemeenteplan', naam:'Gemeenteplan' },
-    { id:'energiemarkt', naam:'Energiemarkt' },
-    { id:'academy',      naam:'Academy', altijd:true },
+    { id:'ek',            naam:'Energie-Compas', via:'energiekompas' },
+    { id:'simulator',     naam:'Simulator' },
+    { id:'energiemarkt',  naam:'Energiemarkt' },
+    { id:'gemeenteplan',  naam:'Gemeenteplan' },
+    { id:'adviseur',      naam:'Mijn klanten', via:'energiekompas', passief:true },
+    { id:'energiekompas', naam:'EnergieKompas', passief:true },
+    { id:'academy',       naam:'Academy', passief:true },
+    { id:'kamino',        naam:'Kamino', passief:true },
+    { id:'betaalplein',   naam:'Laadplein', via:'simulator', passief:true },
+    { id:'thuisladen',    naam:'Thuisladen', passief:true },
+    { id:'jacops',        naam:'Jacops', passief:true, geenTegel:true },
   ];
+  function _appNaam(id){ var a=APPS.filter(function(x){ return x.id===id; })[0]; return a?a.naam:id; }
+  function _eersteP(a){ var f=APPS.filter(function(x){ return x.passief; })[0]; return f && f.id===a.id; }
+
 
   var CFG=null, sb=null, SESSION=null, PROXY='', USERS=[];
   var FILT={ q:'', status:'', app:'', access:'' };
@@ -137,12 +151,12 @@
     render();
   }
 
-  // Heeft gebruiker toegang tot app? Managers = alles; academy = altijd; anders grant.
+  // Heeft gebruiker toegang tot app? Managers = alles; anders eigen grant of grant van de via-app.
   function heeftToegang(u, appId){
     var app = APPS.filter(function(a){ return a.id===appId; })[0];
-    if(app && app.altijd) return true;
     if(u.role==='manager') return true;
-    return (u.apps||[]).indexOf(appId)>=0;
+    if((u.apps||[]).indexOf(appId)>=0) return true;
+    return !!(app && app.via && (u.apps||[]).indexOf(app.via)>=0);
   }
 
   function filtered(){
@@ -167,7 +181,7 @@
           '<div class="veld"><label>Bedrijf</label><input type="text" id="inv-bedrijf" placeholder="Bedrijfsnaam"></div>'+
           '<button id="inv-btn" class="gr">Uitnodigen</button>'+
         '</div>'+
-        '<p class="hint">Nieuwe gebruikers krijgen rol <b>adviseur</b>, een uitnodigingsmail én automatisch toegang tot de <b>Academy</b>. Andere tools ken je hieronder toe.</p>'+
+        '<p class="hint">Nieuwe gebruikers krijgen rol <b>adviseur</b> en een uitnodigingsmail. Tools (ook de <b>Academy</b>) ken je hieronder toe — standaard staat alles uit.</p>'+
         '<div class="msg" id="inv-msg"></div>'+
       '</div>'+
       '<div class="kaart">'+
@@ -190,12 +204,12 @@
         '</div>'+
         '<div style="overflow-x:auto"><table><thead><tr>'+
           '<th>Gebruiker</th><th>Rol</th><th>Status</th>'+
-          APPS.map(function(a){ return '<th class="app">'+esc(a.naam)+(a.altijd?'<span class="alt">altijd</span>':'')+'</th>'; }).join('')+
+          APPS.map(function(a){ return '<th class="app'+(a.passief?' passief':'')+(_eersteP(a)?' grens':'')+'"'+(a.geenTegel?' title="Geen tegel op de portal"':'')+'>'+esc(a.naam)+(a.via?'<span class="alt">of via '+esc(_appNaam(a.via))+'</span>':'')+(_eersteP(a)?'<span class="alt mg">minder gebruikt →</span>':'')+'</th>'; }).join('')+
           '<th>Acties</th>'+
         '</tr></thead><tbody id="tbody"></tbody></table></div>'+
         '<div class="legende">'+
           '<span><b class="lg lg-on"></b> aangevinkt = heeft toegang (klik om toe te kennen / in te trekken)</span>'+
-          '<span><b class="lg lg-auto"></b> vergrendeld = automatisch — managers hebben alle tools, iedereen heeft de Academy</span>'+
+          '<span><b class="lg lg-auto"></b> vergrendeld = automatisch — managers hebben alle tools; «of via …» = zichtbaar via een andere toekenning</span>'+
           '<span><b class="lg lg-wait"></b> grijs met <span class="noaid">·</span> = adviseur moet eerst één keer inloggen; daarna kan je toekennen</span>'+
         '</div>'+
         '<div class="msg" id="g-msg"></div>'+
@@ -238,11 +252,12 @@
     var appsCells=APPS.map(function(a){
       var mgr=u.role==='manager';
       var kanNiet=!u.auth_uid;
-      var checked=(a.altijd || mgr || (u.apps||[]).indexOf(a.id)>=0) ? ' checked' : '';
-      var dis=(a.altijd || mgr || kanNiet) ? ' disabled' : '';
-      var tip = a.altijd ? 'title="Iedereen heeft altijd toegang tot de Academy"' : (mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : ''));
-      return '<td class="app"><input type="checkbox" class="app-toggle" id="'+rid+'_'+a.id+'" data-app="'+a.id+'"'+checked+dis+' '+tip+'>'+
-        (kanNiet && !mgr && !a.altijd ? '<div class="noaid">·</div>' : '')+'</td>';
+      var eigen=(u.apps||[]).indexOf(a.id)>=0, viaV=!!(a.via && (u.apps||[]).indexOf(a.via)>=0 && !eigen);
+      var checked=(mgr || eigen || viaV) ? ' checked' : '';
+      var dis=(mgr || kanNiet || viaV) ? ' disabled' : '';
+      var tip = mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : (viaV ? 'title="Zichtbaar via de toegang tot '+esc(_appNaam(a.via))+' — trek die in om deze tegel apart te beheren"' : ''));
+      return '<td class="app'+(a.passief?' passief':'')+(_eersteP(a)?' grens':'')+'"><input type="checkbox" class="app-toggle" id="'+rid+'_'+a.id+'" data-app="'+a.id+'"'+checked+dis+' '+tip+'>'+
+        (kanNiet && !mgr ? '<div class="noaid">·</div>' : '')+'</td>';
     }).join('');
     var deact = st==='active'
       ? '<button class="sec" id="'+rid+'_deact">Deactiveren</button>'
@@ -267,7 +282,6 @@
     var sel=$(rid+'_rol'); if(sel) sel.onchange=function(){ zetRol(u, sel.value); };
     var bd=$(rid+'_bedrijf'); if(bd) bd.onchange=function(){ zetBedrijf(u, bd.value); };
     APPS.forEach(function(a){
-      if(a.altijd) return;
       var cb=$(rid+'_'+a.id); if(cb && !cb.disabled) cb.onchange=function(){ zetToegang(u, a.id, cb.checked, cb); };
     });
     var da=$(rid+'_deact'); if(da) da.onclick=function(){ zetStatus(u,'inactive'); };
