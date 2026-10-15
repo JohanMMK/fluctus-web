@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.48.2 (2026-10-15, Johan): (1) window.__KR_SAMENVATTING — kerncijfers van het advies (factuur voor/na, besparing + posten, investering, rendement, TVT, piek, loadfactor, afname, onbalans-potentieel, databron) voor de concept-mail met PDF (server ≥ 15.298.0, EK-knop «✉️ Concept-mail met rapport»); (2) FIX piekblok: gemeten kwartierprofiel werd als standaardprofiel (SLP) gelabeld (keek naar D.piek.databron i.p.v. aansluiting.profiel_bron / databron.bron). -->
 <!-- klantrapport.html v0.48.1 (2026-10-14, Johan): bijlage Profielanalyse zonder heatmaps (uur × dag én maand × uur staan al in de verdere bijlagen) — enkel kerncijfers, volume per maand en typische week. -->
 <!-- klantrapport.html v0.48.0 (2026-10-14, Johan): PROFIELANALYSE-BIJLAGE AANGEVULD met wat de profielanalyse-modal toont (server ≥ 15.294.0): hoogste gemeten piek + % gemeten kwartierdata, volume per maand gekleurd naar dekking (gemeten / deels / afgeleid), typische week (kW per uur, ma → zo) en een heatmap maand × uur (maanden horizontaal, uren verticaal, gemiddeld kW). Zonder die velden (oudere server) blijft de bijlage zoals voorheen. -->
 <!-- klantrapport.html v0.47.1 (2026-10-13, Johan): hoofdstuk «Je betalend laadplein» staat nu net vóór «Extra potentieel: onbalans-sturing». -->
@@ -734,6 +735,28 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
        '</p></div>';
   }
   h+='</div>';
+  // v0.48.2 (Johan 15-10): kerncijfers voor de CONCEPT-MAIL (server 15.298 leest window.__KR_SAMENVATTING na de headless render).
+  try {
+    var _EMs=D.energie_mwh||{}, _Ps=D.piek||{}, _AFs=((D.aansluiting||{}).afname)||{};
+    var _dbs=((D.aansluiting||{}).profiel_bron)||(D.databron&&D.databron.bron)||'';
+    var _rn=function(v,d){ v=+v; if(!isFinite(v)) return null; var f=Math.pow(10,d||0); return Math.round(v*f)/f; };
+    window.__KR_SAMENVATTING={
+      v:1, klant:KLANT||'', dossier:PID||'', ek_link:(D.ek_link&&/^https:\/\//.test(String(D.ek_link)))?String(D.ek_link):'',
+      particulier:!!IS_PART, laadplein:!!HAS_LP, pv:!!HAS_PV, batterij:!!HAS_BATT,
+      hardware:(HAS_PV||HAS_BATT)?_combiSub():'',
+      investering:_rn(PL.netInv,0), factuur_voor:_rn(N0.saldo,0), factuur_na:_rn(O0.saldo,0),
+      besparing_factuur:_rn(bF,0), laadsessies:_rn(bL,0), plaza:_rn(bZ,0), besparing_totaal:_rn(bT,0),
+      besparing_pct:(+N0.saldo>0)?_rn(bF/(+N0.saldo)*100,0):null,
+      rendement:(PL.rendGem!=null)?_rn(PL.rendGem,1):null, tvt:(PL.tvt!=null)?_rn(PL.tvt,1):null,
+      posten:posten.map(function(r){ return { label:String(r[0]), eur:_rn(r[1],0) }; }),
+      piek_voor:_rn(_Ps.sim_voor_kw,0), piek_na:_rn(_Ps.sim_na_kw,0), aansluiting:_rn(+_AFs.piek_kw||+_Ps.input_kw||0,0),
+      lf_voor:_LF.voor, lf_na:_LF.na,
+      afname_voor:(_EMs.nul?_rn(_EMs.nul.afname_mwh,0):null), afname_na:(_EMs.opt?_rn(_EMs.opt.afname_mwh,0):null),
+      onbalans:(!IS_PART&&(HAS_PV||HAS_BATT))?_rn(onb,0):0,
+      gemeten:/gemeten|kwartier/i.test(String(_dbs)),
+      aansluiting_tekst:String(a1||'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim()
+    };
+  } catch(_e){ window.__KR_SAMENVATTING={ v:1, fout:String(_e&&_e.message||_e) }; }
   pagina(h);
 })();
 
@@ -937,7 +960,8 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
   var _PK=D.piek||null;
   if(_PK && (+_PK.input_kw>0 || +_PK.slp_gebouw_kw>0)){
     var _din=Math.round(+_PK.input_kw||0), _dslp=Math.round(+_PK.slp_gebouw_kw||0);
-    var _isSLP=!(_PK.databron && /gemeten|kwartier/i.test(String(_PK.databron)));
+    var _dbx=((D.aansluiting||{}).profiel_bron)||(D.databron&&D.databron.bron)||_PK.databron||'';   // v0.48.2: databron is een object/aansluiting-veld, niet D.piek.databron
+    var _isSLP=!/gemeten|kwartier/i.test(String(_dbx));
     h+='<div class="card" style="margin-top:10px"><div class="t">Piek: ingegeven vs gebruikt profiel</div>'+
        '<p>Je gaf een piek / toegangsvermogen op van <b>'+_num(_din,0)+' kW</b>. '+
        'Het '+(_isSLP?'standaardprofiel (SLP), enkel op je jaarverbruik geschaald,':'gemeten kwartierprofiel')+
