@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.71.0">
+<meta name="ek-build" content="0.71.1">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.71.1 (2026-10-15, Johan): link uit de mail «Je hebt een nieuw bericht van onze adviseur» (…&chat=1, server ≥ 15.303.0) opent het project meteen op het gesprek (klant + demo); parameter daarna uit de URL; een automatische gids-modal sluit een open gesprek niet meer. -->
 <!-- ek.html v0.71.0 (2026-10-15, Johan): HULPVRAAG ALS CHAT (server ≥ 15.302.0) — «🙋 Hulp vragen» opent bij een bestaande hulpvraag het GESPREK (berichten klant ↔ adviseur, reageren, «Bel mij terug», afgesloten gesprek heropent bij een nieuw bericht; ververst elke 20 s zolang het open staat, en elke 60 s op de achtergrond bij een open vraag). Oekene-blok «Hulpvragen van deze klant» toont het hele gesprek met antwoordvak per gesprek + ✉️ antwoord mailen / 📞 gebeld / ✔ afsluiten / ↻ vernieuwen. -->
 <!-- ek.html v0.70.4 (2026-10-15, Johan): knop «🙋 Hulp vragen» bereikbaar voor IEDEREEN (ook adviseur/oekene/klantweergave) naast de offerte-knoppen; adviseur zonder dossier-token → dossier eerst bewaren; ingelogd → bearer mee (server ≥ 15.299.0 noteert wie de hulp vroeg). -->
 <!-- ek.html v0.70.3 (2026-10-15, Johan): knop «← Naar MijnEC» rechtsboven in de merkbalk (huisstijl, mijnec-knop.js) — enkel in een adviseurssessie, niet in klantweergave. -->
@@ -4865,6 +4866,7 @@ var _simVoortgang=(function(){
     opt=opt||{}; css();
     if(!opt.tijdelijk) _laatsteModal={ id:id, n:n, inner:inner, opt:opt };
     if(!opt.force && (!isAuto() || opt.stil)){ pill(); return; }   // v0.50.1: opt.stil = enkel onthouden voor de knop
+    if(!opt.force && document.getElementById('ekc-lijst')){ pill(); return; }   // v0.71.1: open gesprek niet wegklikken door een automatische modal
     sluit();
     var o=document.createElement('div'); o.id='ekd-ov'; o.setAttribute('data-i18n-skip','1');
     o.innerHTML='<div class="ekd-k" role="dialog" aria-modal="true">'+(opt.geenFase?'':fase(n))+inner+(opt.geenKnop?'':'<div class="ekd-acties"><button type="button" class="ekd-btn" id="ekd-ok">'+esc(opt.knop||t('ok'))+'</button></div>')+'</div>';
@@ -4986,6 +4988,15 @@ var _simVoortgang=(function(){
     klog('hulp_chat_open',{ n:hulpLijst().length });
   }
   function mAntw(){ mChat(); }   // v0.71.0: oude «antwoord»-modal = gesprek
+  // v0.71.1: link uit de meldingsmail (…&chat=1) → meteen het gesprek openen (max. 6 pogingen tot de hulpvragen geladen zijn)
+  var _chatLinkGedaan=false;
+  function chatViaLink(poging){
+    try{ if(_chatLinkGedaan) return; var q=new URLSearchParams(location.search); if(q.get('chat')!=='1') return;
+      if(!(window.TOKEN && (window._EK_HULP||[]).length)){ if((poging||0)<6) setTimeout(function(){ chatViaLink((poging||0)+1); }, 800); return; }
+      _chatLinkGedaan=true; mChat(); klog('hulp_chat_via_mail',{});
+      try{ q.delete('chat'); var u=location.pathname+(q.toString()?'?'+q.toString():'')+location.hash; history.replaceState(history.state,'',u); }catch(eU){}
+    }catch(e){}
+  }
   function hulpOpen(){ var L=window._EK_HULP||[]; if(L.length && window.TOKEN && !(window.EK_IS_OEKENE && !window.EK_KLANTVIEW)) mChat(); else mHulp('knop'); }
   function hulpAntw(){
     try{
@@ -5226,7 +5237,7 @@ var _simVoortgang=(function(){
   window._ekDemo={
     init:function(j){
       if(window.PREWARM || D.aan || !j || !j.demo) return;
-      D.aan=true; D.modus='demo'; setTimeout(hulpAntw, 50); D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
+      D.aan=true; D.modus='demo'; setTimeout(hulpAntw, 50); setTimeout(chatViaLink, 900); D.info=j.demo; D.fase=(j.demo.fase==='echt')?'echt':'std';
       try{ var _dc=j.demo.combo; if(_dc && +_dc.kw>0 && +_dc.kwh>0) D.combo={ pv:Math.max(0,Math.round(+_dc.pv||0)), kw:Math.round(+_dc.kw), kwh:Math.round(+_dc.kwh) }; }catch(eC){}   // v0.66.0
       D.auto=!((j.demo.stappen||{}).samenvatting);   // v0.47.0: wie de demo al doorliep (samenvatting gezien) → geen automatische modals, enkel de knop
       try{ document.body.classList.add('ek-demo'); }catch(e){}
@@ -5250,7 +5261,7 @@ var _simVoortgang=(function(){
         if(D.aan || adv()) return;
         var ps=null; try{ var r=await fetch(API_D+'/api/ek/profieldata-status?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{cache:'no-store'}); ps=await r.json(); }catch(e){}
         if(!ps || !ps.ok || adv()) return;
-        D.aan=true; D.modus='klant'; D.autoBasis=!ps.rapport_bekeken; setTimeout(hulpAntw, 50);   // v0.52.0
+        D.aan=true; D.modus='klant'; D.autoBasis=!ps.rapport_bekeken; setTimeout(hulpAntw, 50); setTimeout(chatViaLink, 900);   // v0.52.0 · v0.71.1
         css(); installeer();
         klog('gids_start',{ auto:isAuto(), eerste:D.autoBasis });
         var dash=$('dash'); if(!dash || dash.classList.contains('hidden')) mWelkomK();
