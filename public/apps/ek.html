@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.67.5">
+<meta name="ek-build" content="0.71.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.71.0 (2026-10-15, Johan): HULPVRAAG ALS CHAT (server ≥ 15.302.0) — «🙋 Hulp vragen» opent bij een bestaande hulpvraag het GESPREK (berichten klant ↔ adviseur, reageren, «Bel mij terug», afgesloten gesprek heropent bij een nieuw bericht; ververst elke 20 s zolang het open staat, en elke 60 s op de achtergrond bij een open vraag). Oekene-blok «Hulpvragen van deze klant» toont het hele gesprek met antwoordvak per gesprek + ✉️ antwoord mailen / 📞 gebeld / ✔ afsluiten / ↻ vernieuwen. -->
 <!-- ek.html v0.70.4 (2026-10-15, Johan): knop «🙋 Hulp vragen» bereikbaar voor IEDEREEN (ook adviseur/oekene/klantweergave) naast de offerte-knoppen; adviseur zonder dossier-token → dossier eerst bewaren; ingelogd → bearer mee (server ≥ 15.299.0 noteert wie de hulp vroeg). -->
 <!-- ek.html v0.70.3 (2026-10-15, Johan): knop «← Naar MijnEC» rechtsboven in de merkbalk (huisstijl, mijnec-knop.js) — enkel in een adviseurssessie, niet in klantweergave. -->
 <!-- ek.html v0.70.2 (2026-10-15, Johan): knop «✉️ Concept-mail met rapport» (enkel oekene, adviseursweergave) — server 15.298.0 rendert het rapport als PDF en zet in Outlook een concept klaar met de kerncijfers + PDF-bijlage; niets wordt verstuurd. -->
@@ -4410,6 +4411,17 @@ var _simVoortgang=(function(){
   function p2(n){ return (n<10?'0':'')+n; }
   function dt(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return '—'; return p2(d.getDate())+'/'+p2(d.getMonth()+1)+' '+p2(d.getHours())+':'+p2(d.getMinutes()); }
   function duur(ms){ var m=Math.round(ms/60000); if(m<60) return m+' min'; var h=Math.round(m/60); if(h<48) return h+' u'; return Math.round(h/24)+' d'; }
+  // v0.71.0: gesprek (chat) per hulpvraag — server ≥ 15.302.0 geeft x.berichten; oudere vragen: commentaar + antwoord.
+  function berichten(x){ if(x.berichten&&x.berichten.length) return x.berichten; var B=[]; if(x.commentaar||x.terugbellen) B.push({ ts:x.ts, van:'klant', tekst:x.commentaar||'', bel:x.terugbellen }); if(x.beantwoord_ts&&(x.antwoord||x.notitie||x.status!=='open')) B.push({ ts:x.beantwoord_ts, van:'ek', soort:(x.status==='gebeld'?'gebeld':'mail'), tekst:x.antwoord||x.notitie||'', naam:x.door }); return B; }
+  function bubbel(m){
+    var ek=(m.van==='ek');
+    if(ek && m.soort==='gesloten') return '<div style="text-align:center;font-size:12px;color:#6B7689;margin:4px 0">✔ afgesloten'+(m.naam?' door '+esc(m.naam):'')+' · '+esc(dt(m.ts))+(m.tekst?' — '+esc(m.tekst):'')+'</div>';
+    var wie=ek?('✉️ '+(m.naam||'EK')+(m.soort==='gebeld'?' · 📞 gebeld (notitie)':'')):((m.wie&&m.wie.naam&&m.wie.rol&&m.wie.rol!=='klant')?(esc(m.wie.rol)+' '+esc(m.wie.naam)):'klant');
+    return '<div style="display:flex;justify-content:'+(ek?'flex-end':'flex-start')+'"><div style="max-width:86%;border-radius:12px;padding:6px 10px;'+(ek?(m.soort==='gebeld'?'background:#E8EEFF;':'background:#E6F6EC;'):'background:#fff;border:1px solid #EEF2F7;')+'">'+
+      '<div style="font-size:11.5px;color:#6B7689">'+wie+' · '+esc(dt(m.ts))+(m.bel?' · <b style="color:#B45309">📞 wil teruggebeld worden</b>':'')+'</div>'+
+      (m.tekst?'<div style="white-space:pre-wrap">'+esc(m.tekst)+'</div>':'')+'</div></div>';
+  }
+  async function vernieuw(){ try{ var r=await fetch(API_H+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN||'')+'&cb='+Date.now(),{ cache:'no-store' }); var j=await r.json(); if(j&&j.ok&&Array.isArray(j.hulp)){ window._EK_HULP=j.hulp; window._ekHulpAdvRender(); } }catch(e){} }
   window._ekHulpAdvRender=function(){
     var b=document.getElementById('ek-hulpadv-blok'); if(!b) return;
     var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
@@ -4417,25 +4429,22 @@ var _simVoortgang=(function(){
     if(!L.length){ b.innerHTML=''; return; }
     var nOpen=L.filter(function(h){ return h.status==='open'; }).length;
     var h='<div style="border:1px solid #F0DDA8;background:#FFFBF0;border-radius:12px;padding:12px 14px">'+
-      '<div style="font-weight:800;color:#1F3864;margin-bottom:6px">🙋 Hulpvragen van deze klant'+(nOpen?' — <span style="color:#B45309">'+nOpen+' open</span>':' — alles beantwoord')+'</div>';
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><div style="font-weight:800;color:#1F3864">💬 Hulpvragen van deze klant'+(nOpen?' — <span style="color:#B45309">'+nOpen+' wacht op ons</span>':' — alles beantwoord')+'</div><button type="button" class="btn ghost sm" data-hver="1" data-nolog="1" style="margin-left:auto">↻ Vernieuwen</button></div>';
     L.forEach(function(x){
-      var c=x.context||{}, open=(x.status==='open');
+      var c=x.context||{}, open=(x.status==='open'), B=berichten(x);
+      var stTxt=open?'<b style="color:#B45309">wacht op ons</b>':(x.status==='beantwoord'?'<b style="color:#1E7A42">beantwoord</b>':'<b style="color:#2a44a8">'+(x.status==='gebeld'?'gebeld':'afgesloten')+'</b>');
       h+='<div style="border-top:1px solid #F0E6C8;padding:8px 0">'+
-        '<div style="font-size:12.5px;color:#6B7689">'+esc(dt(x.ts))+' · '+(x.reden==='niet_rendabel'?'geen rendabele combinatie':'via de knop')+(x.terugbellen?' · <b style="color:#B45309">📞 wil teruggebeld worden</b>':'')+
-          ' · '+(open?'<b style="color:#B45309">open</b>':'<b style="color:#1E7A42">'+(x.status==='gebeld'?'gebeld':'beantwoord')+'</b>')+'</div>'+
-        (x.commentaar?'<div style="white-space:pre-wrap;margin:4px 0;background:#fff;border:1px solid #EEF2F7;border-radius:8px;padding:6px 10px">'+esc(x.commentaar)+'</div>':'')+
-        '<div style="font-size:12.5px;color:#4A5568">'+[x.mail?'✉ '+esc(x.mail):'', x.gsm?'📞 '+esc(x.gsm):'', (c.beste_tvt!=null?'beste TVT '+String(c.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j'), (c.pv||c.batt_kw)?('combi '+c.pv+' kWp / '+c.batt_kw+' kW / '+c.batt_kwh+' kWh'):'' ].filter(Boolean).join(' · ')+'</div>';
-      if(open){
-        h+='<textarea data-hid="'+esc(x.id)+'" rows="4" style="width:100%;box-sizing:border-box;margin-top:6px;padding:8px 10px;border:1px solid #D6E0EC;border-radius:8px;font:inherit" placeholder="Je antwoord aan de klant (wordt gemaild in zijn taal — schrijf in die taal), of een notitie bij terugbellen"></textarea>'+
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" data-hact="mail" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Verstuur antwoord</button><button type="button" class="btn ghost sm" data-hact="gebeld" data-hid="'+esc(x.id)+'" data-nolog="1">📞 Terugbellen gedaan (afsluiten)</button></div>'+
-          '<div class="sub" data-hst="'+esc(x.id)+'" style="margin-top:4px"></div>';
-      } else {
-        h+='<div style="margin-top:6px;font-size:13px"><b>'+(x.status==='gebeld'?'📞 Gebeld':'✉️ Antwoord')+'</b> — '+esc(x.door||'')+', '+esc(dt(x.beantwoord_ts))+' (na '+esc(duur((+x.beantwoord_ts||0)-(+x.ts||0)))+')'+
-          ((x.antwoord||x.notitie)?'<div style="white-space:pre-wrap;margin-top:3px;border-left:3px solid #05B050;padding-left:8px">'+esc(x.antwoord||x.notitie)+'</div>':'')+'</div>';
-      }
-      h+='</div>';
+        '<div style="font-size:12.5px;color:#6B7689">gestart '+esc(dt(x.ts))+' · '+(x.reden==='niet_rendabel'?'geen rendabele combinatie':'via de knop')+(x.terugbellen?' · <b style="color:#B45309">📞 terugbellen</b>':'')+' · '+stTxt+' · '+B.length+' bericht'+(B.length===1?'':'en')+'</div>'+
+        '<div style="font-size:12.5px;color:#4A5568;margin:2px 0 6px">'+[x.mail?'✉ '+esc(x.mail):'', x.gsm?'📞 '+esc(x.gsm):'', (c.beste_tvt!=null?'beste TVT '+String(c.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j'), (c.pv||c.batt_kw)?('combi '+c.pv+' kWp / '+c.batt_kw+' kW / '+c.batt_kwh+' kWh'):'' ].filter(Boolean).join(' · ')+'</div>'+
+        '<div style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow:auto;padding:2px">'+B.map(bubbel).join('')+'</div>'+
+        '<textarea data-hid="'+esc(x.id)+'" rows="3" style="width:100%;box-sizing:border-box;margin-top:8px;padding:8px 10px;border:1px solid #D6E0EC;border-radius:8px;font:inherit" placeholder="'+(open?'Je antwoord aan de klant (wordt gemaild in zijn taal en verschijnt in het gesprek — schrijf in die taal), of een notitie bij terugbellen':'Nog iets toevoegen aan dit gesprek? (wordt gemaild en verschijnt in het gesprek)')+'"></textarea>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" data-hact="mail" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Verstuur antwoord</button>'+
+          (open?'<button type="button" class="btn ghost sm" data-hact="gebeld" data-hid="'+esc(x.id)+'" data-nolog="1">📞 Gebeld (afsluiten)</button>':'')+
+          ((x.status!=='gesloten'&&x.status!=='gebeld')?'<button type="button" class="btn ghost sm" data-hact="sluiten" data-hid="'+esc(x.id)+'" data-nolog="1">✔ Afsluiten zonder mail</button>':'')+'</div>'+
+        '<div class="sub" data-hst="'+esc(x.id)+'" style="margin-top:4px"></div></div>';
     });
     b.innerHTML=h+'</div>';
+    var vb=b.querySelector('[data-hver]'); if(vb) vb.onclick=function(){ vb.disabled=true; vernieuw(); };
     Array.prototype.forEach.call(b.querySelectorAll('[data-hact]'),function(bt){ bt.onclick=async function(){
       var id=bt.getAttribute('data-hid'), act=bt.getAttribute('data-hact'), ta=b.querySelector('textarea[data-hid="'+id+'"]'), st=b.querySelector('[data-hst="'+id+'"]');
       var tx=(ta&&ta.value||'').trim();
@@ -4693,6 +4702,20 @@ var _simVoortgang=(function(){
   };
   ['nl','fr','en'].forEach(function(l){ for(var k in TK6[l]) T[l][k]=TK6[l][k]; });
 
+  // v0.71.0 (Johan 15-10): HULPVRAAG ALS CHAT
+  var TK8={
+    nl:{ hc_t:'Gesprek met onze adviseur', hc_jij:'Jij', hc_ek:'Adviseur Energie-Compas', hc_ph:'Typ je bericht…', hc_s:'Verstuur', hc_knop:'💬 Gesprek met onze adviseur',
+      hc_info:'Een adviseur antwoordt hier zo snel mogelijk. Je krijgt ook een mail zodra er een antwoord is.', hc_dicht:'Dit gesprek is afgesloten. Stuur een bericht om het opnieuw te openen.',
+      hc_gesl:'Gesprek afgesloten', hc_nieuw:'nieuwe vraag', hc_leeg:'Nog geen berichten.', hc_nieuwA:'Nieuw antwoord van onze adviseur.' },
+    fr:{ hc_t:'Conversation avec notre conseiller', hc_jij:'Vous', hc_ek:'Conseiller Energie-Compas', hc_ph:'Votre message…', hc_s:'Envoyer', hc_knop:'💬 Conversation avec notre conseiller',
+      hc_info:'Un conseiller répond ici dès que possible. Vous recevez aussi un e-mail dès qu’il y a une réponse.', hc_dicht:'Cette conversation est clôturée. Envoyez un message pour la rouvrir.',
+      hc_gesl:'Conversation clôturée', hc_nieuw:'nouvelle question', hc_leeg:'Pas encore de messages.', hc_nieuwA:'Nouvelle réponse de notre conseiller.' },
+    en:{ hc_t:'Conversation with our adviser', hc_jij:'You', hc_ek:'Energie-Compas adviser', hc_ph:'Type your message…', hc_s:'Send', hc_knop:'💬 Conversation with our adviser',
+      hc_info:'An adviser replies here as soon as possible. You also get an e-mail when there is an answer.', hc_dicht:'This conversation is closed. Send a message to reopen it.',
+      hc_gesl:'Conversation closed', hc_nieuw:'new question', hc_leeg:'No messages yet.', hc_nieuwA:'New answer from our adviser.' }
+  };
+  ['nl','fr','en'].forEach(function(l){ for(var k in TK8[l]) T[l][k]=TK8[l][k]; });
+
   // v0.55.0 (Johan 12-10): KORTER & VLOTTER — overschrijft de langere teksten hierboven. Regels = [icoon, tekst].
   var TK7={
     nl:{ meer:'Meer uitleg',
@@ -4903,34 +4926,90 @@ var _simVoortgang=(function(){
   function rendabel(){ var m=besteTvt(); return m!=null && m<=HULP_TVT_MAX; }
   // v0.52.0: antwoorden op hulpvragen (klant/demo) — link in het invoerscherm én onder «Hulp vragen» → modal
   function dtK(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return ''; return p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear(); }
-  function mAntw(){
-    var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
-    var h='<h3>'+esc(t('ha_t'))+'</h3>'+L.map(function(x,i){
-      return '<div style="'+(i?'border-top:1px solid #EEF2F7;margin-top:10px;padding-top:10px':'')+'"><div style="font-size:12.5px;color:#6B7689">'+esc(dtK(x.ts))+'</div>'+
-        (x.commentaar?'<div style="margin:4px 0"><b>'+esc(t('ha_v'))+':</b> <span style="white-space:pre-wrap">'+esc(x.commentaar)+'</span></div>':'')+
-        (x.antwoord?'<div style="margin-top:6px"><b style="color:#1F3864">'+esc(t('ha_a'))+'</b><div style="white-space:pre-wrap;border-left:4px solid #05B050;background:#F4F7FB;border-radius:8px;padding:8px 12px;margin-top:4px">'+esc(x.antwoord)+'</div></div>'
-          :(x.status==='gebeld'?'<div style="margin-top:6px;color:#1E7A42">✔ '+esc(t('ha_g'))+'</div>':'<div style="margin-top:6px;color:#B45309">⏳ '+esc(t('ha_o'))+'</div>'))+'</div>';
-    }).join('');
-    modal('hulp_antwoord',(D.modus==='klant')?3:(D.fase==='echt'?5:3),h,{ force:true });
+  // v0.71.0: GESPREK (chat) — alle hulpvragen van dit dossier chronologisch, reageren in het laatste gesprek.
+  function hulpLijst(){ return (window._EK_HULP||[]).slice().sort(function(a,c){ return (+a.ts||0)-(+c.ts||0); }); }
+  function chatB(x){ if(x.berichten&&x.berichten.length) return x.berichten; var B=[]; if(x.commentaar||x.terugbellen) B.push({ ts:x.ts, van:'klant', tekst:x.commentaar||'', bel:x.terugbellen }); if(x.antwoord) B.push({ ts:x.beantwoord_ts, van:'ek', soort:'mail', tekst:x.antwoord }); else if(x.status==='gebeld') B.push({ ts:x.beantwoord_ts, van:'ek', soort:'gebeld', tekst:'' }); return B; }
+  function chatSleutel(){ return hulpLijst().map(function(x){ var B=chatB(x); return x.id+':'+B.length+':'+(x.status||''); }).join('|'); }
+  function chatHtml(){
+    var L=hulpLijst(); if(!L.length) return '<div style="color:#6B7689;font-size:13.5px">'+esc(t('hc_leeg'))+'</div>';
+    var h=''; L.forEach(function(x,i){
+      if(i>0) h+='<div style="text-align:center;font-size:11.5px;color:#9AA5B8;margin:6px 0">— '+esc(t('hc_nieuw'))+' · '+esc(dtK(x.ts))+' —</div>';
+      chatB(x).forEach(function(m){
+        var ek=(m.van==='ek');
+        if(ek && (m.soort==='gebeld'||m.soort==='gesloten')){ h+='<div style="text-align:center;font-size:12.5px;color:'+(m.soort==='gebeld'?'#1E7A42':'#6B7689')+';margin:2px 0">'+(m.soort==='gebeld'?'📞 '+esc(t('ha_g')):'✔ '+esc(t('hc_gesl')))+' · '+esc(dtK(m.ts))+'</div>'; return; }
+        var wie=ek?t('hc_ek'):((m.wie&&m.wie.naam&&m.wie.rol&&m.wie.rol!=='klant')?m.wie.naam:t('hc_jij'));
+        h+='<div style="display:flex;justify-content:'+(ek?'flex-start':'flex-end')+'"><div style="max-width:85%;border-radius:14px;padding:8px 12px;'+(ek?'background:#F4F7FB;border-left:4px solid #05B050':'background:#e6f6ec')+'">'+
+          '<div style="font-size:11.5px;color:#6B7689;margin-bottom:2px">'+esc(wie)+' · '+esc(dtK(m.ts))+'</div>'+
+          (m.tekst?'<div style="white-space:pre-wrap;color:#14203a;font-size:14.5px">'+esc(m.tekst)+'</div>':'')+
+          (m.bel?'<div style="font-size:12px;color:#B45309;margin-top:2px">📞 '+esc(t('hk_bel'))+'</div>':'')+'</div></div>';
+      });
+    });
+    return h;
   }
+  var _chatPoll=null;
+  async function chatHaal(){
+    try{ if(!window.TOKEN) return false; var r=await fetch(API_D+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{ cache:'no-store' });
+      var j=await r.json(); if(!(j&&j.ok&&Array.isArray(j.hulp))) return false;
+      var oud=chatSleutel(); window._EK_HULP=j.hulp; if(chatSleutel()===oud) return false;
+      hulpAntw(); try{ if(window._ekHulpAdvRender) window._ekHulpAdvRender(); }catch(e){} return true; }catch(e){ return false; }
+  }
+  function chatTeken(){ var l=document.getElementById('ekc-lijst'); if(!l) return; l.innerHTML=chatHtml(); l.scrollTop=l.scrollHeight;
+    var L=hulpLijst(), lt=L[L.length-1], dicht=!!(lt && (lt.status==='gebeld'||lt.status==='gesloten')); var i=document.getElementById('ekc-info'); if(i) i.textContent=t(dicht?'hc_dicht':'hc_info');
+    try{ lsSet('EK_HULP_GEZIEN_'+(window.TOKEN||''), chatSleutel()); }catch(e){} hulpAntw(); }
+  function mChat(){
+    var n=(D.modus==='klant')?3:(D.fase==='echt'?5:3);
+    var h='<h3>'+esc(t('hc_t'))+'</h3><div id="ekc-lijst" style="max-height:46vh;overflow:auto;padding:4px 2px;margin:6px 0 8px;display:flex;flex-direction:column;gap:8px"></div>'+
+      '<div id="ekc-info" style="font-size:12.5px;color:#6B7689;margin-bottom:4px"></div>'+
+      '<textarea id="ekc-tx" rows="3" placeholder="'+esc(t('hc_ph'))+'"></textarea>'+
+      '<label style="display:flex;gap:8px;align-items:center;margin:4px 0;font-weight:600;font-size:14px"><input type="checkbox" id="ekc-b"> '+esc(t('hk_bel'))+'</label>'+
+      '<div id="ekc-st" style="font-size:13px;min-height:1.2em;margin-top:2px"></div>'+
+      '<div class="ekd-acties"><button type="button" class="ekd-btn g" id="ekc-x">'+esc(t('hk_x'))+'</button><button type="button" class="ekd-btn" id="ekc-s">'+esc(t('hc_s'))+'</button></div>';
+    modal('hulp_chat',n,h,{ geenKnop:true, force:true, tijdelijk:true, geenFase:true, geenPill:!D.aan, na:function(){
+      chatTeken();
+      document.getElementById('ekc-x').onclick=function(){ if(_chatPoll){ clearInterval(_chatPoll); _chatPoll=null; } sluit(); };
+      document.getElementById('ekc-s').onclick=async function(){
+        var st=document.getElementById('ekc-st'), ta=document.getElementById('ekc-tx'), tx=(ta.value||'').trim(), bel=document.getElementById('ekc-b').checked, bt=this;
+        if(!tx && !bel){ st.style.color='#8a5a00'; st.textContent=t('hk_leeg'); return; }
+        bt.disabled=true; st.textContent='';
+        try{ var L=hulpLijst(), lt=L[L.length-1];
+          var _hd={'Content-Type':'application/json'}; if(!D.aan && typeof _ekAuthHeaders==='function'){ try{ Object.assign(_hd, (await _ekAuthHeaders())||{}); }catch(eA){} }
+          var r=await fetch(API_D+'/api/ek/hulp-bericht',{ method:'POST', headers:_hd, body:JSON.stringify({ token:window.TOKEN, id:lt?lt.id:undefined, tekst:tx, bel:bel }) });
+          var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error('x');
+          window._EK_HULP=j.hulp||window._EK_HULP; ta.value=''; document.getElementById('ekc-b').checked=false; chatTeken(); hulpAntw();
+          try{ if(window._ekHulpAdvRender) window._ekHulpAdvRender(); }catch(e){}
+        }catch(e){ st.style.color='#8a1f1f'; st.textContent=t('hk_nok'); }
+        bt.disabled=false;
+      };
+      if(_chatPoll) clearInterval(_chatPoll);
+      _chatPoll=setInterval(async function(){ if(!document.getElementById('ekc-lijst')){ clearInterval(_chatPoll); _chatPoll=null; return; } if(await chatHaal()) chatTeken(); }, 20000);
+    } });
+    klog('hulp_chat_open',{ n:hulpLijst().length });
+  }
+  function mAntw(){ mChat(); }   // v0.71.0: oude «antwoord»-modal = gesprek
+  function hulpOpen(){ var L=window._EK_HULP||[]; if(L.length && window.TOKEN && !(window.EK_IS_OEKENE && !window.EK_KLANTVIEW)) mChat(); else mHulp('knop'); }
   function hulpAntw(){
     try{
       var L=window._EK_HULP||[]; if(!D.aan || adv()) return;
-      var heeftA=L.some(function(x){ return x.antwoord; }), open=L.some(function(x){ return x.status==='open'; });
-      var html=!L.length?'':(heeftA?('<button type="button" class="btn ghost sm" data-ha="1">'+esc(t('ha_knop'))+'</button> <span style="color:#6B7689">'+esc(t('ha_kort'))+'</span>'):(open?'<span style="color:#B45309">'+esc(t('ha_wacht'))+'</span>':''));
+      var lt=hulpLijst().slice(-1)[0], B=lt?chatB(lt):[], lm=B[B.length-1];
+      var nieuw=!!(lm && lm.van==='ek' && lm.soort!=='gesloten' && lsGet('EK_HULP_GEZIEN_'+(window.TOKEN||''))!==chatSleutel());
+      var open=L.some(function(x){ return x.status==='open'; });
+      var html=!L.length?'':('<button type="button" class="btn ghost sm" data-ha="1">'+esc(t(nieuw?'ha_knop':'hc_knop'))+'</button> '+
+        (nieuw?'<b style="color:#048443">'+esc(t('hc_nieuwA'))+'</b>':(open?'<span style="color:#B45309">'+esc(t('ha_wacht'))+'</span>':'')));
       // 1) invoerscherm (onder de factuur)
       var fo=document.getElementById('factuur-ok'), a1=document.getElementById('ek-hulp-antw1');
       if(fo && !a1){ a1=document.createElement('div'); a1.id='ek-hulp-antw1'; a1.className='sub'; a1.setAttribute('data-i18n-skip','1'); a1.style.cssText='margin-top:6px;line-height:1.55;padding-left:26px'; fo.appendChild(a1); }
       // 2) resultaatscherm (onder de knoppen)
       var ob=document.getElementById('btn-off-opvragen'), a2=document.getElementById('ek-hulp-antw2');
       if(ob && ob.parentNode && !a2){ a2=document.createElement('div'); a2.id='ek-hulp-antw2'; a2.className='sub'; a2.setAttribute('data-i18n-skip','1'); a2.style.cssText='margin-top:8px'; ob.parentNode.parentNode.insertBefore(a2, ob.parentNode.nextSibling); }
-      [a1,a2].forEach(function(el){ if(!el) return; el.innerHTML=html; el.style.display=html?'':'none'; var k=el.querySelector('[data-ha]'); if(k) k.onclick=mAntw; });
+      [a1,a2].forEach(function(el){ if(!el) return; el.innerHTML=html; el.style.display=html?'':'none'; var k=el.querySelector('[data-ha]'); if(k) k.onclick=mChat; });
     }catch(e){}
   }
+  // v0.71.0: achtergrond — bij een open gesprek elke 60 s kijken of er een antwoord is (enkel zichtbare pagina)
+  setInterval(function(){ try{ if(!window.TOKEN || document.visibilityState!=='visible' || document.getElementById('ekc-lijst')) return; if(!(window._EK_HULP||[]).some(function(x){ return x.status==='open'; })) return; chatHaal(); }catch(e){} }, 60000);
   function hulpKnop(){
     try{ if(document.getElementById('ek-hulp-knop')) return; var ob=document.getElementById('btn-off-opvragen'); if(!ob||!ob.parentNode) return;
       var b=document.createElement('button'); b.type='button'; b.id='ek-hulp-knop'; b.className='btn ghost sm'; b.setAttribute('data-i18n-skip','1'); b.textContent=t('hk_knop');
-      b.onclick=function(){ mHulp('knop'); }; ob.parentNode.appendChild(b); }catch(e){}
+      b.onclick=function(){ hulpOpen(); }; ob.parentNode.appendChild(b); }catch(e){}
     hulpAntw();   // v0.52.0
   }
   function mHulp(reden){
@@ -4964,12 +5043,13 @@ var _simVoortgang=(function(){
           var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error('x');
           if(Array.isArray(j.hulp)){ window._EK_HULP=j.hulp; hulpAntw(); }   // v0.52.0: 'in behandeling' tonen
           st.style.color='#1E7A42'; st.textContent=t('hk_ok'); bt.style.display='none'; lsSet('EK_HULP_'+(window.TOKEN||''),'1');
+          if(Array.isArray(j.hulp) && window.TOKEN) setTimeout(function(){ if(document.getElementById('ekh-c')) mChat(); }, 1400);   // v0.71.0: meteen het gesprek tonen
         }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent=t('hk_nok'); }
       };
     } });
   }
   // v0.70.4 (Johan 15-10): «🙋 Hulp vragen» voor IEDEREEN (klant, demo, adviseur, oekene, klantweergave) — vaste knop naast de offerte-knoppen.
-  window.ekHulpVragen=function(){ try{ mHulp('knop'); }catch(e){} };
+  window.ekHulpVragen=function(){ try{ hulpOpen(); }catch(e){} };   // v0.71.0: bestaand gesprek → chat
   (function(){ function zet(){ var hb=document.getElementById('ek-hulp-knop'); if(hb) hb.textContent=t('hk_knop'); }
     if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', zet); else zet(); })();
   function hulpNodig(){ try{ return !!(window.HM && !D.toond.hulp && !lsGet('EK_HULP_'+(window.TOKEN||'')) && !rendabel()); }catch(e){ return false; } }
