@@ -1,4 +1,4 @@
-// portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
+// portal.js v1.17.0 — 2026-10-15 — manager-portal: niet-actieve tegels (Mijn klanten, EnergieKompas, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne) onderaan onder een lijn «Minder gebruikt», gedempt; Academy niet meer automatisch (per gebruiker toe te kennen); gatedBy-tegels (Energie-Compas, Mijn klanten, Laadplein) ook apart toe te kennen. portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
 // v1.11.0 — 2026-09-23 — nieuwe tegel 'ek' (📊 Energie-Compas) → /apps/ek.html?prep=1: de snelle energie-analyse
@@ -63,7 +63,7 @@ const $ = (id) => document.getElementById(id);
 // Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
 //   1 Academy · 2 Energiemarkt · 3 Gemeenteplan · 4 Kamino · 5 Simulator · 6 Thuisladen · 7 Gebruikers
 const APP_CATALOG = [
-  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
+  { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html' },   // v1.17.0 (Johan 15-10): niet meer automatisch — per gebruiker toe te kennen (Gebruikers-app)
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
   // toekenning via de Gebruikers-tegel (app_id 'energiemarkt'). Ze werkt de
   // gedeelde marktdata bij die de simulator gebruikt.
@@ -206,7 +206,7 @@ async function hulpTeller(token) {
 
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.gatedBy);
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);   // v1.17.0: ook gatedBy-tegels apart checken (eigen toekenning)
   const verleend = new Set();
   let role = 'seller';
   await Promise.all(echte.map(async (app) => {
@@ -231,10 +231,13 @@ async function toegankelijkeApps(token) {
     if (a.altijd) return true;
     if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';
-    if (a.gatedBy) return role === 'manager' || verleend.has(a.gatedBy);   // zelfde toegang als de gating-app
+    if (a.gatedBy) return role === 'manager' || verleend.has(a.id) || verleend.has(a.gatedBy);   // v1.17.0: eigen toekenning OF die van de gating-app
     return verleend.has(a.id);   // partnermanager: de proxy verleent de klant-toolset → komt hier binnen
   });
 }
+
+// v1.17.0 (Johan 15-10): niet-actieve tegels — onderaan, onder de lijn «Minder gebruikt».
+const NIET_ACTIEF = new Set(['adviseur', 'energiekompas', 'academy', 'kamino', 'betaalplein', 'thuisladen', 'campagne']);
 
 function renderLauncher(apps) {
   const host = $('apps'); host.innerHTML = '';
@@ -243,7 +246,22 @@ function renderLauncher(apps) {
     return;
   }
   ensureVideoUI();
+  // v1.17.0 (Johan 15-10): minder gebruikte tegels onderaan, onder een scheidingslijn en gedempt (enkel in de
+  //   manager-portal; adviseurs/partners zien hun tegels ongewijzigd).
+  const isManager = apps.some((a) => a.managerOnly);
+  const actief = isManager ? apps.filter((a) => !NIET_ACTIEF.has(a.id)) : apps;
+  const passief = isManager ? apps.filter((a) => NIET_ACTIEF.has(a.id)) : [];
+  if (passief.length && actief.length) {
+    apps = actief.concat([{ _scheiding: true }], passief);
+  }
   apps.forEach(a => {
+    if (a._scheiding) {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:10px 0 0;color:#8a94a6;font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase';
+      sep.innerHTML = '<span style="flex:1;height:1px;background:#d9dee7"></span><span>Minder gebruikt</span><span style="flex:1;height:1px;background:#d9dee7"></span>';
+      host.appendChild(sep);
+      return;
+    }
     const t = document.createElement('a');
     t.className = 'app-tile'; t.dataset.app = a.id;   // v1.15.0: data-app voor tellers
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
@@ -273,6 +291,7 @@ function renderLauncher(apps) {
       alt.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openVideoModal(a.video2, (a.video2Label === 'W' ? a.naam + ' · Wattkraft' : a.naam)); });
       t.appendChild(alt);
     }
+    if (isManager && NIET_ACTIEF.has(a.id)) { t.style.opacity = '.6'; t.style.background = '#f7f8fa'; }
     host.appendChild(t);
   });
 }
