@@ -6,6 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.70.4 (2026-10-15, Johan): knop «🙋 Hulp vragen» bereikbaar voor IEDEREEN (ook adviseur/oekene/klantweergave) naast de offerte-knoppen; adviseur zonder dossier-token → dossier eerst bewaren; ingelogd → bearer mee (server ≥ 15.299.0 noteert wie de hulp vroeg). -->
 <!-- ek.html v0.70.3 (2026-10-15, Johan): knop «← Naar MijnEC» rechtsboven in de merkbalk (huisstijl, mijnec-knop.js) — enkel in een adviseurssessie, niet in klantweergave. -->
 <!-- ek.html v0.70.2 (2026-10-15, Johan): knop «✉️ Concept-mail met rapport» (enkel oekene, adviseursweergave) — server 15.298.0 rendert het rapport als PDF en zet in Outlook een concept klaar met de kerncijfers + PDF-bijlage; niets wordt verstuurd. -->
 <!-- ek.html v0.70.1 (2026-10-14, Johan): server-brede EK-instellingen (netkosten/aansluiting + globale defaults) enkel opslaan als oekene@gmail.com (server 15.297.0 weigert anderen); per-project waarden ongemoeid. -->
@@ -880,6 +881,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
         <button class="btn sm" type="button" id="btn-off-opvragen" onclick="offertesOpvragen()">📨 Offertes opvragen</button>
         <button class="btn ghost sm" type="button" onclick="offerteIndienen()">📝 Offerte indienen</button>
+        <button class="btn ghost sm" type="button" id="ek-hulp-knop" onclick="ekHulpVragen()" data-i18n-skip="1">🙋 Hulp vragen</button>
         <button class="btn ghost sm" type="button" id="btn-off-volgen" style="display:none" onclick="offertesVolgen()">📋 Offertes volgen</button>
       </div>
       <div class="sub" id="offerte-status" style="margin-top:8px"></div>
@@ -4842,12 +4844,12 @@ var _simVoortgang=(function(){
     if(!opt.force && (!isAuto() || opt.stil)){ pill(); return; }   // v0.50.1: opt.stil = enkel onthouden voor de knop
     sluit();
     var o=document.createElement('div'); o.id='ekd-ov'; o.setAttribute('data-i18n-skip','1');
-    o.innerHTML='<div class="ekd-k" role="dialog" aria-modal="true">'+fase(n)+inner+(opt.geenKnop?'':'<div class="ekd-acties"><button type="button" class="ekd-btn" id="ekd-ok">'+esc(opt.knop||t('ok'))+'</button></div>')+'</div>';
+    o.innerHTML='<div class="ekd-k" role="dialog" aria-modal="true">'+(opt.geenFase?'':fase(n))+inner+(opt.geenKnop?'':'<div class="ekd-acties"><button type="button" class="ekd-btn" id="ekd-ok">'+esc(opt.knop||t('ok'))+'</button></div>')+'</div>';
     document.body.appendChild(o);
     var b=document.getElementById('ekd-ok'); if(b) b.onclick=function(){ sluit(); if(opt.puls) puls(opt.puls); if(opt.naSluit) opt.naSluit(); };
     if(opt.na){ try{ opt.na(o); }catch(e){} }
     if(!opt.geenLog && !opt.tijdelijk){ if(D.modus==='demo') stap('modal',{ id:id }); else klog('gids_modal',{ id:id }); }
-    pill();
+    if(!opt.geenPill) pill();   // v0.70.4: geen «Uitleg»-pill buiten de klant-/demo-gids (adviseur)
   }
   function pill(){
     if(document.getElementById('ekd-pill')) return;
@@ -4934,7 +4936,7 @@ var _simVoortgang=(function(){
   function mHulp(reden){
     var nr=(reden==='niet_rendabel'), n=(D.modus==='klant')?3:(D.fase==='echt'?5:3);
     var mail=(document.getElementById('i-mail')&&document.getElementById('i-mail').value)||'';
-    var kanPd=(D.modus==='demo') ? (D.fase==='std') : (!window.STATE_HEEFT_PROFIEL && !!window._EK_PD_TOON);   // v0.53.0
+    var kanPd=!D.aan ? false : ((D.modus==='demo') ? (D.fase==='std') : (!window.STATE_HEEFT_PROFIEL && !!window._EK_PD_TOON));   // v0.53.0 · v0.70.4: niet buiten de gids
     var h='<h3>'+esc(t(nr?'hk_t_nr':'hk_t'))+'</h3><p>'+esc(t(nr?'hk_b_nr':'hk_b').replace('{n}',HULP_TVT_MAX))+'</p>'+
       (kanPd?('<div style="margin:8px 0 10px;padding:12px 14px;background:#e6f6ec;border-radius:12px;font-size:14px"><b style="display:block;color:#048443">'+esc(t('hk_pd_t'))+'</b><span style="color:#14203a">'+esc(t('hk_pd_b'))+'</span><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ekd-btn" id="ekh-pd">'+esc(t('hk_pd_k'))+'</button>'+(D.modus==='klant'&&document.getElementById('pu-knop')?'<button type="button" class="ekd-btn g" id="ekh-pu">'+esc(t('hk_pu_k'))+'</button>':'')+'</div></div>'):'')+
       '<textarea id="ekh-c" rows="4" placeholder="'+esc(t('hk_ph'))+'"></textarea>'+
@@ -4943,7 +4945,7 @@ var _simVoortgang=(function(){
       '<div id="ekh-st" style="font-size:13px;min-height:1.2em;margin-top:4px"></div>'+
       '<div class="ekd-acties"><button type="button" class="ekd-btn g" id="ekh-x">'+esc(t('hk_x'))+'</button><button type="button" class="ekd-btn" id="ekh-s">'+esc(t('hk_s'))+'</button></div>';
     if(nr) lsSet('EK_HULP_'+(window.TOKEN||''),'1');   // één keer automatisch per dossier en toestel
-    modal(nr?'hulp_niet_rendabel':'hulp',n,h,{ geenKnop:true, force:true, na:function(){
+    modal(nr?'hulp_niet_rendabel':'hulp',n,h,{ geenKnop:true, force:true, geenFase:!D.aan, geenPill:!D.aan, geenLog:!D.aan, na:function(){
       document.getElementById('ekh-x').onclick=sluit;
       var bpu=document.getElementById('ekh-pu'); if(bpu) bpu.onclick=function(){ sluit(); try{ klog('hulp_pu_klik',{}); }catch(e){} try{ var pb=document.getElementById('pu-blok'); if(pb) pb.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} if(window._ekPuOpen) window._ekPuOpen(); };   // v0.54.0
       var bpd=document.getElementById('ekh-pd'); if(bpd) bpd.onclick=function(){ sluit(); try{ klog('hulp_pd_klik',{}); }catch(e){} try{ var bb=document.getElementById('btn-pd'); if(bb) bb.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} window.haalProfieldata(); };   // v0.53.0
@@ -4952,7 +4954,11 @@ var _simVoortgang=(function(){
         if(!tx && !bel){ st.style.color='#8a5a00'; st.textContent=t('hk_leeg'); return; }
         bt.disabled=true;
         try{ var w=waarden()||{};
-          var r=await fetch(API_D+'/api/ek/hulp',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:window.TOKEN, commentaar:tx, terugbellen:bel, reden:reden,
+          // v0.70.4: ook voor adviseurs — dossier eerst bewaren als er nog geen token is; ingelogd → bearer (server noteert wie vroeg)
+          var _tok=window.TOKEN||''; if(!_tok && typeof _offToken==='function'){ try{ _tok=await _offToken(); }catch(eT){} }
+          if(!_tok) throw new Error('geen dossier');
+          var _hd={'Content-Type':'application/json'}; if(!D.aan && typeof _ekAuthHeaders==='function'){ try{ Object.assign(_hd, (await _ekAuthHeaders())||{}); }catch(eA){} }
+          var r=await fetch(API_D+'/api/ek/hulp',{ method:'POST', headers:_hd, body:JSON.stringify({ token:_tok, commentaar:tx, terugbellen:bel, reden:reden,
             mail:(document.getElementById('ekh-m').value||'').trim(), gsm:(document.getElementById('ekh-g').value||'').trim(),
             context:{ beste_tvt:besteTvt(), pv:w.pv, batt_kw:w.batt_kw, batt_kwh:w.batt_kwh, rend:w.rend, tvt:w.tvt, taal:L() } }) });
           var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error('x');
@@ -4962,6 +4968,10 @@ var _simVoortgang=(function(){
       };
     } });
   }
+  // v0.70.4 (Johan 15-10): «🙋 Hulp vragen» voor IEDEREEN (klant, demo, adviseur, oekene, klantweergave) — vaste knop naast de offerte-knoppen.
+  window.ekHulpVragen=function(){ try{ mHulp('knop'); }catch(e){} };
+  (function(){ function zet(){ var hb=document.getElementById('ek-hulp-knop'); if(hb) hb.textContent=t('hk_knop'); }
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', zet); else zet(); })();
   function hulpNodig(){ try{ return !!(window.HM && !D.toond.hulp && !lsGet('EK_HULP_'+(window.TOKEN||'')) && !rendabel()); }catch(e){ return false; } }
   // v0.50.0: echte klant — uitleg na «Haal mijn profieldata op», volgens de netbeheerder
   function mPd(){
