@@ -1,4 +1,4 @@
-// mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
 // v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
@@ -31,7 +31,7 @@ const APP_CATALOG = [
   { id: 'ek',           naam: 'Energie-Compas',   ico: '📊', beschrijving: 'Snelle energie-analyse → besparing & rendement in één scherm, met adviseur-link om het resultaat te delen.', url: '/apps/ek.html?prep=1', gatedBy: 'energiekompas' },
   { id: 'adviseur',     naam: 'Mijn klanten',     ico: '👥', beschrijving: 'Nodig klanten uit voor een energie-analyse. Zij sturen hun factuur en worden automatisch aan jou gekoppeld.', url: '/apps/adviseur.html', gatedBy: 'energiekompas' },
   { id: 'energiekompas',naam: 'Energie-schil',    ico: '🔆', beschrijving: 'Je energie-advies in één schil: particulier of bedrijf → besparing, rendement en advies.', url: '/apps/energiekompas.html' },
-  { id: 'academy',      naam: 'Academy',          ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html', altijd: true },
+  { id: 'academy',      naam: 'Academy',          ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html' }   /* v1.8.0: niet meer automatisch — per gebruiker toe te kennen */,
   { id: 'energiemarkt', naam: 'Energiemarkt',     ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulatiedata bij.', url: '/apps/energiemarkt.html' },
   { id: 'gemeenteplan', naam: 'Gemeenteplan',     ico: '🗺️', beschrijving: 'Laadplan per gemeente → mail met PPTX + PDF.', url: '/apps/gemeenteplan.html' },
   { id: 'kamino',       naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Je pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
@@ -145,7 +145,7 @@ async function hulpTeller(token) {
 
 async function toegankelijkeApps(token) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.gatedBy);
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);   // v1.8.0: ook gatedBy-tegels apart checken
   const verleend = new Set();
   let role = 'seller';
   await Promise.all(echte.map(async (app) => {
@@ -165,10 +165,13 @@ async function toegankelijkeApps(token) {
     if (a.altijd) return true;
     if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';
-    if (a.gatedBy) return role === 'manager' || verleend.has(a.gatedBy);
+    if (a.gatedBy) return role === 'manager' || verleend.has(a.id) || verleend.has(a.gatedBy);   // v1.8.0: eigen toekenning OF gating-app
     return verleend.has(a.id);
   });
 }
+
+// v1.8.0 (Johan 15-10): niet-actieve tegels (Mijn klanten, Energie-schil, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne).
+const NIET_ACTIEF = new Set(['adviseur', 'energiekompas', 'academy', 'kamino', 'betaalplein', 'thuisladen', 'campagne']);
 
 function renderLauncher(apps) {
   const host = $('apps'); host.innerHTML = '';
@@ -176,12 +179,26 @@ function renderLauncher(apps) {
     host.innerHTML = '<p class="notice">' + T.geenApps + '</p>';
     return;
   }
+  // v1.8.0 (Johan 15-10): minder gebruikte tegels onderaan onder een lijn, gedempt — enkel in de manager-portal.
+  const isManager = apps.some((a) => a.managerOnly);
+  if (isManager) {
+    const actief = apps.filter((a) => !NIET_ACTIEF.has(a.id)), passief = apps.filter((a) => NIET_ACTIEF.has(a.id));
+    if (actief.length && passief.length) apps = actief.concat([{ _scheiding: true }], passief);
+  }
   apps.forEach((a) => {
+    if (a._scheiding) {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:10px 0 0;color:#8a94a6;font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase';
+      sep.innerHTML = '<span style="flex:1;height:1px;background:#d9dee7"></span><span>' + _t('Minder gebruikt', 'Moins utilisé', 'Less used') + '</span><span style="flex:1;height:1px;background:#d9dee7"></span>';
+      host.appendChild(sep);
+      return;
+    }
     const t = document.createElement('a');
     t.className = 'app-tile'; t.dataset.app = a.id;   // v1.6.0: data-app voor tellers
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p>${a.beschrijving}</p>`;
+    if (isManager && NIET_ACTIEF.has(a.id)) { t.style.opacity = '.6'; t.style.background = '#f7f8fa'; }
     host.appendChild(t);
   });
 }
