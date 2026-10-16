@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.71.2">
+<meta name="ek-build" content="0.72.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.72.0 (2026-10-16, Johan): PROFIEL UIT DE FACTUURMAIL (server ≥ 15.305.0) — zat er een verbruiksprofiel (csv/txt/tsv/xls/xlsx/xlsm/zip) bij de factuurmail, dan toont EK bij het openen «📈 We vonden een verbruiksprofiel in je mail», leest het bestand in (zip via JSZip, Excel via SheetJS), vraagt welke reeks (of welk bestand) afname en welke injectie is, toont jaarvolume + % gemeten en bewaart het profiel na bevestiging (pagina herlaadt). Niet herkend → adviseur verwerkt het manueel (back-office-mail). Ook «Later» en «Dit is geen verbruiksprofiel». -->
 <!-- ek.html v0.71.2 (2026-10-15, Johan): zodra er een hulpgesprek is: ZWEVENDE KNOP «💬 Gesprek» rechtsonder (boven «Uitleg»), op invoer- én resultatenscherm, met badge «nieuw» bij een nieuw antwoord → opent het gesprek als chat-modal. Zelfde knop in het klantrapport (ek-chat.js). -->
 <!-- ek.html v0.71.1 (2026-10-15, Johan): link uit de mail «Je hebt een nieuw bericht van onze adviseur» (…&chat=1, server ≥ 15.303.0) opent het project meteen op het gesprek (klant + demo); parameter daarna uit de URL; een automatische gids-modal sluit een open gesprek niet meer. -->
 <!-- ek.html v0.71.0 (2026-10-15, Johan): HULPVRAAG ALS CHAT (server ≥ 15.302.0) — «🙋 Hulp vragen» opent bij een bestaande hulpvraag het GESPREK (berichten klant ↔ adviseur, reageren, «Bel mij terug», afgesloten gesprek heropent bij een nieuw bericht; ververst elke 20 s zolang het open staat, en elke 60 s op de achtergrond bij een open vraag). Oekene-blok «Hulpvragen van deze klant» toont het hele gesprek met antwoordvak per gesprek + ✉️ antwoord mailen / 📞 gebeld / ✔ afsluiten / ↻ vernieuwen. -->
@@ -3018,6 +3019,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
             if(d.length){ _pz.textContent='📈 Gemeten profiel op dit dossier: '+d.join(' · '); _pz.classList.remove('hidden'); return; } }
           _pz.classList.add('hidden'); })();
         try{ _ekProfielKeuzeUI(); }catch(eKz){}   // v0.53.0: eigen profiel i.p.v. keuzelijst
+        try{ if(j.profiel_wacht && window._ekProfielMail) setTimeout(function(){ window._ekProfielMail(j); }, 1200); }catch(ePm){}   // v0.72.0: profiel uit de factuurmail
         // v0.24.8 (Johan): BEVESTIGDE INVOER terugzetten. Heeft de adviseur dit dossier al doorgerekend, dan zetten we exact
         //   wat toen bevestigd werd terug (afname/piek/kost/PV/injectie/profiel/wagens/klant/BTW/adres/EAN-rollen). Overschrijft
         //   de uit-de-factuur-afgeleide waarden → geen her-afleiding uit de 1-maand-factuur, geen her-vraag van de EAN-rol.
@@ -5283,5 +5285,157 @@ var _simVoortgang=(function(){
   };
 })();
 </script>
+<script>
+// ══ v0.72.0 (Johan 16-10): PROFIEL UIT DE FACTUURMAIL (server ≥ 15.305.0) ══
+//   Zat er een verbruiksprofiel (csv/xlsx/zip …) bij de factuurmail, dan leest EK het bij het openen van het project in en
+//   vraagt welke reeks AFNAME en welke INJECTIE is → profiel op het project (token-endpoints /api/ek/profiel-klant-*).
+(function(){
+  var API_P='https://lucid-amazement-production.up.railway.app';
+  var T={
+    nl:{ t:'📈 We vonden een verbruiksprofiel in je mail', b:'Samen met je factuur stuurde je dit bestand mee:', v:'Duid aan wat de afname is (stroom die je van het net haalt) en wat de injectie is (stroom die je terug op het net zet). Dan rekenen we met je eigen gemeten verbruik.',
+      verder:'Verder', later:'Later', geen:'Dit is geen verbruiksprofiel', lezen:'⏳ Bestand inlezen…', t2:'Welke reeks is wat?', b2:'We vonden deze meetreeksen in je bestand:', b2f:'Per bestand: wat staat erin?',
+      af:'Afname', inj:'Injectie', niets:'Niet gebruiken', lang:'In dit bestand herkenden we de meetregisters van je netbeheerder:', analyse:'⏳ Profiel omzetten en aanvullen (kan even duren)…', t3:'Klopt dit?',
+      jaar:'MWh per jaar', gem:'gemeten', per:'periode', bev:'Bevestigen', terug:'Terug', ok:'✔ Je profiel staat in je project. De pagina wordt vernieuwd…', bezig:'⏳ Bewaren…',
+      kies_af:'Duid minstens één reeks als afname aan.', fout:'We konden dit bestand niet automatisch lezen. Een adviseur verwerkt het voor jou en je krijgt een mail zodra je project bijgewerkt is.',
+      beter:'Er staat al een vollediger profiel op je project — we behouden dat.', sluit:'Sluiten', zip:'In het zip-bestand vonden we geen leesbaar profiel.' },
+    fr:{ t:'📈 Nous avons trouvé un profil de consommation dans votre e-mail', b:'Avec votre facture, vous avez joint ce fichier :', v:'Indiquez ce qui est le prélèvement (électricité prise sur le réseau) et ce qui est l’injection (électricité renvoyée sur le réseau). Nous calculerons alors avec votre propre consommation mesurée.',
+      verder:'Continuer', later:'Plus tard', geen:'Ce n’est pas un profil de consommation', lezen:'⏳ Lecture du fichier…', t2:'Quelle série est quoi ?', b2:'Nous avons trouvé ces séries de mesure dans votre fichier :', b2f:'Par fichier : que contient-il ?',
+      af:'Prélèvement', inj:'Injection', niets:'Ne pas utiliser', lang:'Dans ce fichier, nous avons reconnu les registres de mesure de votre gestionnaire de réseau :', analyse:'⏳ Conversion et complément du profil (cela peut prendre un moment)…', t3:'Est-ce correct ?',
+      jaar:'MWh par an', gem:'mesuré', per:'période', bev:'Confirmer', terug:'Retour', ok:'✔ Votre profil est enregistré dans votre projet. La page se recharge…', bezig:'⏳ Enregistrement…',
+      kies_af:'Indiquez au moins une série comme prélèvement.', fout:'Nous n’avons pas pu lire ce fichier automatiquement. Un conseiller le traite pour vous et vous recevez un e-mail dès que votre projet est mis à jour.',
+      beter:'Un profil plus complet figure déjà dans votre projet — nous le conservons.', sluit:'Fermer', zip:'Aucun profil lisible trouvé dans le fichier zip.' },
+    en:{ t:'📈 We found a consumption profile in your e-mail', b:'Together with your invoice you sent this file:', v:'Indicate which is the offtake (electricity taken from the grid) and which is the injection (electricity fed back into the grid). We then calculate with your own measured consumption.',
+      verder:'Continue', later:'Later', geen:'This is not a consumption profile', lezen:'⏳ Reading the file…', t2:'Which series is what?', b2:'We found these measurement series in your file:', b2f:'Per file: what does it contain?',
+      af:'Offtake', inj:'Injection', niets:'Do not use', lang:'In this file we recognised the meter registers of your grid operator:', analyse:'⏳ Converting and completing the profile (this may take a moment)…', t3:'Is this correct?',
+      jaar:'MWh per year', gem:'measured', per:'period', bev:'Confirm', terug:'Back', ok:'✔ Your profile is saved in your project. The page reloads…', bezig:'⏳ Saving…',
+      kies_af:'Mark at least one series as offtake.', fout:'We could not read this file automatically. An adviser processes it for you and you will get an e-mail as soon as your project is updated.',
+      beter:'A more complete profile is already in your project — we keep that one.', sluit:'Close', zip:'No readable profile found in the zip file.' }
+  };
+  function L(){ var l=window.EC_LANG; return (l==='fr'||l==='en')?l:'nl'; }
+  function t(k){ var d=T[L()]||T.nl; return d[k]!=null?d[k]:T.nl[k]; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function nf(x,d){ if(x==null||!isFinite(+x)) return '—'; var s=(+x).toFixed(d==null?1:d); return L()==='en'?s:s.replace('.',','); }
+  function log(ev,d){ try{ if(window._ekLog) window._ekLog(ev,d||{}); }catch(e){} }
+  function css(){ if(document.getElementById('ekpm-css')) return; var s=document.createElement('style'); s.id='ekpm-css';
+    s.textContent='#ekpm-ov{position:fixed;inset:0;z-index:10060;background:rgba(15,28,48,.45);display:flex;align-items:center;justify-content:center;padding:16px}'+
+      '#ekpm-ov .k{background:#fff;border-radius:18px;max-width:540px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(13,21,38,.25);padding:22px;font:15px/1.55 Poppins,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#14203a}'+
+      '#ekpm-ov h3{margin:0 0 8px;font-size:20px;font-weight:700}#ekpm-ov p{margin:0 0 8px;color:#54617a}#ekpm-ov .f{background:#f5f8fc;border-radius:10px;padding:8px 12px;margin:6px 0;font-weight:600}'+
+      '#ekpm-ov .r{display:flex;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid #EEF2F7;padding:7px 0}#ekpm-ov select{padding:6px 8px;border:1px solid #D6E0EC;border-radius:8px;font:inherit}'+
+      '#ekpm-ov .a{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}#ekpm-ov .btn{border:0;background:#05b050;color:#fff;font:600 15px Poppins,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:10px 20px;border-radius:999px;cursor:pointer}'+
+      '#ekpm-ov .btn.g{background:#fff;color:#05b050;border:2px solid #05b050;padding:8px 18px}#ekpm-ov .lnk{background:none;border:0;color:#6B7689;text-decoration:underline;cursor:pointer;font:inherit;font-size:13px;margin-right:auto}'+
+      '#ekpm-ov .st{font-size:13.5px;min-height:1.2em;margin-top:8px}#ekpm-ov .kpi{background:#f5f8fc;border-radius:12px;padding:10px 12px;margin:6px 0}#ekpm-ov .kpi b{color:#048443;font-size:20px}';
+    document.head.appendChild(s); }
+  function toon(html){ css(); var o=document.getElementById('ekpm-ov'); if(!o){ o=document.createElement('div'); o.id='ekpm-ov'; o.setAttribute('data-i18n-skip','1'); o.className='noprint'; document.body.appendChild(o); }
+    o.innerHTML='<div class="k" role="dialog" aria-modal="true">'+html+'</div>'; return o; }
+  function sluit(){ var o=document.getElementById('ekpm-ov'); if(o) o.remove(); }
+  function st(txt,kleur){ var e=document.querySelector('#ekpm-ov .st'); if(e){ e.style.color=kleur||'#6B7689'; e.textContent=txt||''; } }
+  async function post(pad,body){ var r=await fetch(API_P+pad,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(Object.assign({ token:window.TOKEN },body||{})) }); var j=await r.json().catch(function(){return{};}); j._status=r.status; return j; }
+  async function later(reden,fout){ try{ await post('/api/ek/profiel-mail-later',{ reden:reden, fout:fout||undefined }); }catch(e){} }
+  function manueel(reden,fout){ log('profiel_mail_manueel',{ reden:reden }); later(reden,fout);
+    toon('<h3>'+esc(t('t'))+'</h3><p>'+esc(t('fout'))+'</p><div class="a"><button type="button" class="btn" id="ekpm-x">'+esc(t('sluit'))+'</button></div>');
+    document.getElementById('ekpm-x').onclick=sluit; }
+  function b64File(naam,b64){ var bin=atob(b64), u=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new File([u], naam); }
+  async function laadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=nok; document.head.appendChild(s); }); }
+  async function uitZip(f){
+    if(!window.JSZip) await laadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+    var z=await window.JSZip.loadAsync(await f.arrayBuffer()), uit=[];
+    var namen=Object.keys(z.files).filter(function(n){ return !z.files[n].dir && /\.(csv|txt|tsv|xls|xlsx|xlsm)$/i.test(n) && !/__MACOSX/.test(n); }).slice(0,4);
+    for(var i=0;i<namen.length;i++){ var buf=await z.files[namen[i]].async('uint8array'); uit.push(new File([buf], namen[i].split('/').pop())); }
+    return uit;
+  }
+  var W=null;   // { files:[{naam, bestand, det?}], mapping }
+  window._ekProfielMail=function(j){
+    try{
+      if(!j || j.demo || !j.profiel_wacht || !window.TOKEN) return;
+      var ps=window.STATE_PROFIEL_STATUS; if(ps && ps.afname && ps.afname.aanwezig) return;   // er staat al een afnameprofiel
+      if(document.getElementById('ekpm-ov')) return;
+      var B=j.profiel_wacht.bestanden||[]; if(!B.length) return;
+      log('profiel_mail_toon',{ n:B.length });
+      toon('<h3>'+esc(t('t'))+'</h3><p>'+esc(t('b'))+'</p>'+B.map(function(x){ return '<div class="f">📄 '+esc(x.naam)+'</div>'; }).join('')+'<p style="margin-top:10px">'+esc(t('v'))+'</p><div class="st"></div>'+
+        '<div class="a"><button type="button" class="lnk" id="ekpm-geen">'+esc(t('geen'))+'</button><button type="button" class="btn g" id="ekpm-later">'+esc(t('later'))+'</button><button type="button" class="btn" id="ekpm-verder">'+esc(t('verder'))+'</button></div>');
+      document.getElementById('ekpm-later').onclick=function(){ log('profiel_mail_later',{}); sluit(); };
+      document.getElementById('ekpm-geen').onclick=function(){ log('profiel_mail_geen',{}); later('geen'); sluit(); };
+      document.getElementById('ekpm-verder').onclick=stap2;
+    }catch(e){}
+  };
+  async function stap2(){
+    var bt=document.getElementById('ekpm-verder'); if(bt) bt.disabled=true; st(t('lezen'));
+    try{
+      var r=await fetch(API_P+'/api/ek/profiel-mail?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{ cache:'no-store' }); var j=await r.json();
+      if(!j || !j.ok || !j.wacht) throw new Error('geen bestanden');
+      var files=[];
+      for(var i=0;i<j.wacht.bestanden.length;i++){ var x=j.wacht.bestanden[i], f=b64File(x.naam,x.base64);
+        if(/\.zip$/i.test(x.naam)){ var zz=await uitZip(f); if(!zz.length) return manueel('zip_leeg', t('zip')); files=files.concat(zz); } else files.push(f); }
+      files=files.slice(0,4);
+      W={ files:[] };
+      for(var k=0;k<files.length;k++){ W.files.push({ naam:files[k].name, bestand: await _ekLeesBestand(files[k]) }); }
+      if(W.files.length===1){
+        var d=await post('/api/ek/profiel-klant-detect',{ bestand:W.files[0].bestand });
+        if(!d || !d.ok) throw new Error((d&&d.error)||'detect');
+        W.files[0].det=d; return keuzeReeksen();
+      }
+      return keuzeBestanden();
+    }catch(e){ manueel('niet_gelezen', e && e.message); }
+  }
+  function sel(id, rol){ return '<select data-k="'+esc(id)+'"><option value="afname"'+(rol==='afname'?' selected':'')+'>'+esc(t('af'))+'</option><option value="injectie"'+(rol==='injectie'?' selected':'')+'>'+esc(t('inj'))+'</option><option value="geen"'+(rol!=='afname'&&rol!=='injectie'?' selected':'')+'>'+esc(t('niets'))+'</option></select>'; }
+  function keuzeReeksen(){
+    var d=W.files[0].det, h='<h3>'+esc(t('t2'))+'</h3>';
+    if(d.long_format && d.long_reeksen){
+      var lr=d.long_reeksen;
+      h+='<p>'+esc(t('lang'))+'</p>'+((lr.afname||[]).length?'<div class="f">'+esc(t('af'))+': '+esc(lr.afname.join(', '))+'</div>':'')+((lr.injectie||[]).length?'<div class="f">'+esc(t('inj'))+': '+esc(lr.injectie.join(', '))+'</div>':'');
+    } else {
+      var R=d.reeksen||[]; var heeftAf=R.some(function(x){ return x.rol==='afname'; });
+      h+='<p>'+esc(t('b2'))+'</p>'+R.map(function(x,i){ var rol=x.rol||(!heeftAf && i===R.length-1?'afname':null); return '<div class="r"><span>'+esc(x.naam)+'</span>'+sel(x.idx, rol)+'</div>'; }).join('');
+    }
+    h+='<div class="st"></div><div class="a"><button type="button" class="btn g" id="ekpm-later">'+esc(t('later'))+'</button><button type="button" class="btn" id="ekpm-ok">'+esc(t('verder'))+'</button></div>';
+    toon(h);
+    document.getElementById('ekpm-later').onclick=function(){ sluit(); };
+    document.getElementById('ekpm-ok').onclick=function(){
+      var body={ afname:W.files[0].bestand };
+      if(!(d.long_format && d.long_reeksen) && d.voorstel_spec){
+        var af=[], inj=[]; Array.prototype.forEach.call(document.querySelectorAll('#ekpm-ov select[data-k]'),function(s){ var k=+s.getAttribute('data-k'); if(s.value==='afname') af.push(k); else if(s.value==='injectie') inj.push(k); });
+        if(!af.length){ st(t('kies_af'),'#8a5a00'); return; }
+        var spec=JSON.parse(JSON.stringify(d.voorstel_spec)); spec.value_columns={ afname:af, injectie:inj.length?inj:null }; spec.long_format=null; body.specs={ afname:spec };
+        log('profiel_mail_mapping',{ afname:af.length, injectie:inj.length });
+      }
+      analyse(body);
+    };
+  }
+  function keuzeBestanden(){
+    var eerste=true;
+    var h='<h3>'+esc(t('t2'))+'</h3><p>'+esc(t('b2f'))+'</p>'+W.files.map(function(x,i){ var rol=/inj|teruglever|export|productie|feed/i.test(x.naam)?'injectie':(eerste?'afname':null); if(rol==='afname') eerste=false; return '<div class="r"><span>📄 '+esc(x.naam)+'</span>'+sel(i, rol)+'</div>'; }).join('')+
+      '<div class="st"></div><div class="a"><button type="button" class="btn g" id="ekpm-later">'+esc(t('later'))+'</button><button type="button" class="btn" id="ekpm-ok">'+esc(t('verder'))+'</button></div>';
+    toon(h);
+    document.getElementById('ekpm-later').onclick=function(){ sluit(); };
+    document.getElementById('ekpm-ok').onclick=function(){
+      var af=null, inj=null; Array.prototype.forEach.call(document.querySelectorAll('#ekpm-ov select[data-k]'),function(s){ var i=+s.getAttribute('data-k'); if(s.value==='afname' && !af) af=W.files[i].bestand; else if(s.value==='injectie' && !inj) inj=W.files[i].bestand; });
+      if(!af){ st(t('kies_af'),'#8a5a00'); return; }
+      analyse(inj?{ afname:af, injectie:inj }:{ afname:af });
+    };
+  }
+  async function analyse(body){
+    var bt=document.getElementById('ekpm-ok'); if(bt) bt.disabled=true; st(t('analyse'));
+    try{
+      var j=await post('/api/ek/profiel-klant-analyse', body);
+      if(!j || !j.ok) return manueel(j && j.manuele_review ? 'niet_herkend' : 'analyse_fout', (j&&j.error)||('status '+(j&&j._status)));
+      var T2=j.types||{}, h='<h3>'+esc(t('t3'))+'</h3>';
+      ['afname','injectie'].forEach(function(k){ var c=T2[k]&&T2[k].coverage; if(!c) return;
+        h+='<div class="kpi"><div style="font-size:12.5px;color:#6B7689;text-transform:uppercase;letter-spacing:.05em">'+esc(t(k==='afname'?'af':'inj'))+'</div><b>'+nf(c.jaar_mwh,1)+'</b> '+esc(t('jaar'))+
+          '<div style="font-size:13px;color:#54617a">'+nf(c.pct_gemeten,0)+' % '+esc(t('gem'))+(c.van&&c.tot?' · '+esc(t('per'))+' '+esc(c.van)+' – '+esc(c.tot):'')+'</div></div>'; });
+      h+='<div class="st"></div><div class="a"><button type="button" class="btn g" id="ekpm-terug">'+esc(t('terug'))+'</button><button type="button" class="btn" id="ekpm-bev">'+esc(t('bev'))+'</button></div>';
+      toon(h);
+      document.getElementById('ekpm-terug').onclick=function(){ if(W.files.length===1) keuzeReeksen(); else keuzeBestanden(); };
+      document.getElementById('ekpm-bev').onclick=async function(){
+        this.disabled=true; st(t('bezig'));
+        var b=await post('/api/ek/profiel-klant-bevestig',{ concept_id:j.concept_id });
+        if(b && b.ok){ log('profiel_mail_bevestigd',{}); st(t('ok'),'#1E7A42'); setTimeout(function(){ location.reload(); }, 1600); return; }
+        if(b && b._status===409 && b.conflict){ later('bestaand_beter'); toon('<h3>'+esc(t('t3'))+'</h3><p>'+esc(t('beter'))+'</p><div class="a"><button type="button" class="btn" id="ekpm-x">'+esc(t('sluit'))+'</button></div>'); document.getElementById('ekpm-x').onclick=sluit; return; }
+        manueel('bewaren_fout', (b&&b.error)||'');
+      };
+    }catch(e){ manueel('analyse_fout', e && e.message); }
+  }
+})();
+</script>
+
 </body>
 </html>
