@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     FLUCTUS LEAD GENERATOR — KAART PER GEMEENTE  v1.1  (16-10-2026, Johan)
+     FLUCTUS LEAD GENERATOR — KAART PER GEMEENTE  v1.2  (16-10-2026, Johan)
      v1.1: tabblad draagt de gemeentenaam; terminologie «Lead Generator».
+     v1.2: basiskaart OpenStreetMap (CARTO voyager vroeg een API-key); leesbare parkingtypes + groep auto/tankstation.
      public/apps/gemeentekaart.html — opent vanuit de Lead Generator in een nieuw tabblad.
      ?slug=<Kaart-slug>&nis=<niscode>&naam=<gemeentenaam>
      - Enkel voor ingelogde gebruikers (Supabase-sessie; zelfde gate als gemeenteplan.html).
@@ -143,8 +144,19 @@
     var PROXY_BASE = 'https://lucid-amazement-production.up.railway.app';
     var APP_ID     = 'gemeenteplan';
     var REPO_BASE  = 'https://johanmmk.github.io/gemeenten/';
-    var TYPE_KLEUR = { industrial:'#34568C', commercial:'#9E480E', retail:'#9E480E', office:'#05803B' };
-    var TYPE_LBL   = { industrial:'Industrie', commercial:'Handel', retail:'Handel', office:'Kantoor' };
+    // v1.2: groepen + leesbare labels voor de OSM-types uit de gemeentekaarten
+    var GROEP_KLEUR = { industrie:'#34568C', handel:'#9E480E', kantoor:'#05803B', auto:'#8A6A00' };
+    var TYPE_GROEP  = { industrial:'industrie', works:'industrie', warehouse:'industrie', wholesale:'industrie', trade:'industrie', roof:'industrie', bedrijf:'industrie',
+                        office:'kantoor', car:'auto', car_repair:'auto', car_parts:'auto', fuel:'auto', tyres:'auto' };
+    var TYPE_LBL    = { industrial:'Industrie', works:'Fabriek', warehouse:'Magazijn', wholesale:'Groothandel', trade:'Groothandel', roof:'Overdekt', bedrijf:'Bedrijf',
+                        office:'Kantoor', car:'Autogarage / -dealer', car_repair:'Autoherstelling', car_parts:'Auto-onderdelen', fuel:'Tankstation', tyres:'Banden',
+                        commercial:'Handel', retail:'Winkel', supermarket:'Supermarkt', doityourself:'Doe-het-zelf', hardware:'IJzerwaren', clothes:'Kleding',
+                        convenience:'Buurtwinkel', furniture:'Meubels', carpet:'Tapijt', bakery:'Bakkerij', garden_centre:'Tuincentrum', electronics:'Elektronica',
+                        kitchen:'Keukens', shoes:'Schoenen', variety_store:'Discount', mall:'Winkelcentrum', pet:'Dierenwinkel', butcher:'Slagerij',
+                        beverages:'Drankenhandel', bicycle:'Fietsen', bed:'Bedden', hairdresser:'Kapper', sports:'Sport', second_hand:'Tweedehands',
+                        department_store:'Warenhuis', yes:'Bedrijfsparking', no:'Parking' };
+    function typeKleur(t){ return GROEP_KLEUR[TYPE_GROEP[t] || 'handel']; }
+    function typeLbl(t){ return TYPE_LBL[t] || (t ? String(t).replace(/_/g, ' ') : ''); }
 
     var qs   = new URLSearchParams(location.search);
     var SLUG = qs.get('slug') || '';
@@ -294,7 +306,7 @@
     // ------------------------------------------------------------ kaart
     function pinIcon(s){
       var p = s.p || 0, d = Math.max(20, Math.min(46, 14 + Math.sqrt(p) * 2.2));
-      var kl = TYPE_KLEUR[s.t] || '#5C7BB0';
+      var kl = typeKleur(s.t);
       var st = LEADS[s._id];
       var cls = 'gk-pin' + (st && st.status === 'lead' ? ' lead' : '') + (st && st.status === 'geen' ? ' nee' : '');
       return L.divIcon({ className:'', html:'<div class="' + cls + '" style="width:' + d + 'px;height:' + d + 'px;background:' + kl + ';' + (s.o ? 'opacity:.55;' : '') + '">' + (p >= 10 ? p : '') + '</div>', iconSize:[d, d], iconAnchor:[d / 2, d / 2] });
@@ -306,7 +318,7 @@
       var gm = 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng;
       return '<div class="gk-pop" data-id="' + esc(s._id) + '">' +
         '<b class="t">' + esc(s.n || 'Parking') + '</b><br>' +
-        '<span class="m">' + esc(TYPE_LBL[s.t] || s.t || '') + (s.o ? ' · band ±2 km buiten de grens' : '') + '</span>' +
+        '<span class="m">' + esc(typeLbl(s.t)) + (s.o ? ' · band ±2 km buiten de grens' : '') + '</span>' +
         '<div style="margin-top:5px">🅿️ ± <b>' + nf(s.p) + '</b> plaatsen (schatting)</div>' + cab +
         (st ? '<div class="ok">' + (st.status === 'lead' ? '⭐ Genoteerd als lead' : '✕ Gemarkeerd als geen lead') + (st.opm ? ' — ' + esc(st.opm) : '') + '</div>' : '') +
         '<textarea rows="2" placeholder="Opmerking (bedrijf, contact, waarom interessant…)" data-act="opm">' + esc(st && st.opm || '') + '</textarea>' +
@@ -406,7 +418,7 @@
         var st = LEADS[s._id];
         return '<div class="gk-item' + (s.o ? ' band' : '') + '" data-id="' + esc(s._id) + '">' +
           '<span class="st">' + (st ? (st.status === 'lead' ? '⭐' : '✕') : '🅿️') + '</span>' +
-          '<div class="nm">' + esc(s.n || 'Parking') + '<div class="sub">' + esc(TYPE_LBL[s.t] || s.t || '') +
+          '<div class="nm">' + esc(s.n || 'Parking') + '<div class="sub">' + esc(typeLbl(s.t)) +
           (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (s.o ? ' · band' : '') + '</div></div>' +
           '<span class="pl">' + nf(s.p) + '</span></div>';
       }).join('') + (lst.length > 400 ? '<div class="gk-leeg">+' + (lst.length - 400) + ' meer — verfijn de filter.</div>' : '');
@@ -446,7 +458,7 @@
       if (!SLUG){ status('Geen gemeente opgegeven — open de kaart via de Lead Generator.'); return; }
 
       var basis = {
-        'Kaart': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'© OpenStreetMap · CARTO', subdomains:'abcd', maxZoom:20 }),
+        'Kaart': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }),
         'Luchtfoto': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'© Esri', maxZoom:20 })
       };
       map = L.map('gk-map', { zoomControl:true, layers:[basis['Kaart']] }).setView([50.6, 4.6], 9);
@@ -473,7 +485,7 @@
         L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
         var lg = L.control({ position:'bottomright' });
         lg.onAdd = function(){ var d = L.DomUtil.create('div', 'gk-legend');
-          d.innerHTML = '<i style="background:#34568C"></i>Industrie<br><i style="background:#9E480E"></i>Handel<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
+          d.innerHTML = '<i style="background:#34568C"></i>Industrie / magazijn<br><i style="background:#9E480E"></i>Handel / winkel<br><i style="background:#8A6A00"></i>Auto / tankstation<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
           return d; };
         lg.addTo(map);
 
