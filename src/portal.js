@@ -1,4 +1,4 @@
-// portal.js v1.17.0 — 2026-10-15 — manager-portal: niet-actieve tegels (Mijn klanten, EnergieKompas, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne) onderaan onder een lijn «Minder gebruikt», gedempt; Academy niet meer automatisch (per gebruiker toe te kennen); gatedBy-tegels (Energie-Compas, Mijn klanten, Laadplein) ook apart toe te kennen. portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
+// portal.js v1.18.0 — 2026-10-16 — SNELLER INLOGGEN: tegels uit de laatste sessie meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback op de oude checks), render niet opnieuw bij INITIAL_SESSION/TOKEN_REFRESHED (zelfde gebruiker), config + Supabase-lib parallel laden. portal.js v1.17.0 — 2026-10-15 — manager-portal: niet-actieve tegels (Mijn klanten, EnergieKompas, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne) onderaan onder een lijn «Minder gebruikt», gedempt; Academy niet meer automatisch (per gebruiker toe te kennen); gatedBy-tegels (Energie-Compas, Mijn klanten, Laadplein) ook apart toe te kennen. portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
 // v1.11.0 — 2026-09-23 — nieuwe tegel 'ek' (📊 Energie-Compas) → /apps/ek.html?prep=1: de snelle energie-analyse
@@ -129,7 +129,7 @@ function injectSupabase() {
 }
 
 async function initAuth() {
-  await injectSupabase();
+  await injectSupabase();   // v1.18.0: al parallel met loadConfig gestart → hier meestal meteen klaar
   if (!CFG.supabaseUrl || !CFG.supabaseAnonKey) {
     $('login-msg').textContent = 'Supabase nog niet geconfigureerd op de server (.env).';
     return;
@@ -137,7 +137,9 @@ async function initAuth() {
   sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   const { data } = await sb.auth.getSession();
   SESSION = data.session;
-  sb.auth.onAuthStateChange((_e, s) => { SESSION = s; render(); });
+  // v1.18.0: enkel opnieuw renderen als de GEBRUIKER wisselt (login/logout) — niet bij INITIAL_SESSION of
+  //   TOKEN_REFRESHED (dat vuurde de hele tegel-check 2–3× af).
+  sb.auth.onAuthStateChange((_e, s) => { SESSION = s; const uid = (s && s.user && s.user.id) || null; if (uid !== _renderUid) render(); });
   render();
 }
 
@@ -209,7 +211,24 @@ async function toegankelijkeApps(token) {
   const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);   // v1.17.0: ook gatedBy-tegels apart checken (eigen toekenning)
   const verleend = new Set();
   let role = 'seller';
-  await Promise.all(echte.map(async (app) => {
+  // v1.18.0: één bulk-request (proxy ≥ 15.306.0); lukt dat niet → de oude check per tegel.
+  let bulkOk = false;
+  try {
+    const r = await fetch(`${base}/api/app-access/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ app_ids: echte.map((a) => a.id) }),
+    });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.toegang) {
+        bulkOk = true;
+        if (j.user && j.user.role) role = j.user.role;
+        Object.keys(j.toegang).forEach((id) => { if (j.toegang[id]) verleend.add(id); });
+      }
+    }
+  } catch (e) { /* fallback hieronder */ }
+  if (!bulkOk) await Promise.all(echte.map(async (app) => {
     try {
       const r = await fetch(`${base}/api/app-access/check`, {
         method: 'POST',
@@ -349,19 +368,43 @@ function closeVideoModal() {
   if (bg) bg.classList.remove('open');
 }
 
+// v1.18.0: tegel-cache per gebruiker (enkel de app-id's; toegang wordt altijd opnieuw gecontroleerd).
+let _renderUid = null;
+let _renderNr = 0;
+function tegelsUitCache(uid) {
+  try {
+    const ids = JSON.parse(localStorage.getItem('FLX_PORTAL_TEGELS_' + uid) || 'null');
+    if (!Array.isArray(ids)) return null;
+    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter(Boolean);
+  } catch (e) { return null; }
+}
+function tegelsInCache(uid, apps) {
+  try { localStorage.setItem('FLX_PORTAL_TEGELS_' + uid, JSON.stringify(apps.map((a) => a.id))); } catch (e) { /* geen opslag */ }
+}
+
 async function render() {
   const loggedIn = !!SESSION;
   $('gate').classList.toggle('hidden', loggedIn);
   $('app').classList.toggle('hidden', !loggedIn);
   $('portal-logout').classList.toggle('hidden', !loggedIn);
-  if (!loggedIn) { $('portal-user').textContent = ''; return; }
+  if (!loggedIn) { _renderUid = null; _renderNr++; $('portal-user').textContent = ''; return; }
 
   const user = SESSION.user || {};
   $('portal-user').textContent = user.email || '';
   $('hi-naam').textContent = user.email ? (', ' + user.email.split('@')[0]) : '';
 
-  renderLauncher(await toegankelijkeApps(SESSION.access_token));
-  hulpTeller(SESSION.access_token);   // v1.15.0
+  // v1.18.0: tegels van de vorige keer meteen tonen, daarna bijwerken met de echte toegang.
+  const uid = user.id || '';
+  _renderUid = uid;
+  const nr = ++_renderNr;
+  const vorige = tegelsUitCache(uid);
+  if (vorige && vorige.length) { renderLauncher(vorige); hulpTeller(SESSION.access_token); }
+  else $('apps').innerHTML = '<p class="notice">Je apps worden geladen…</p>';
+  const apps = await toegankelijkeApps(SESSION.access_token);
+  if (nr !== _renderNr || !SESSION) return;   // intussen opnieuw gerenderd of uitgelogd
+  const nieuw = apps.map((a) => a.id).join(',');
+  if (!vorige || vorige.map((a) => a.id).join(',') !== nieuw) { renderLauncher(apps); hulpTeller(SESSION.access_token); }
+  tegelsInCache(uid, apps);
   initOfferteUit();  // toon offerte-paneel indien ?aanbod=...
 }
 
@@ -435,6 +478,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Enter in het codeveld = inloggen.
   $('login-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
   $('login-email').addEventListener('keydown', (e) => { if (e.key === 'Enter' && $('stap-code').classList.contains('hidden')) sendCode(); });
-  try { await loadConfig(); await initAuth(); }
+  try { const lib = injectSupabase().catch((e) => e); await loadConfig(); const fout = await lib; if (fout instanceof Error) throw fout; await initAuth(); }   // v1.18.0: parallel
   catch (e) { $('login-msg').textContent = 'Init-fout: ' + e.message; }
 });
