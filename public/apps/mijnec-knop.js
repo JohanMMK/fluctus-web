@@ -1,11 +1,13 @@
-// mijnec-knop.js v1.0.0 — 2026-10-15 (Johan) — één knop «← Naar MijnEC» in de huisstijl van energie-compas.eu
+// mijnec-knop.js v1.0.1 — 2026-10-16 — FIX: op app.energie-compas.eu ging «← Naar MijnEC» naar /login van de app-host = Fluctus-site/portal; nu altijd https://www.energie-compas.eu/login buiten de EC-site. mijnec-knop.js v1.0.0 — 2026-10-15 (Johan) — één knop «← Naar MijnEC» in de huisstijl van energie-compas.eu
 // (Poppins, groene pill #05b050 → hover #048443), rechtsboven in elke app. Vervangt de oude «← Mijn Fluctus»-links.
 //   Gebruik: <a class="mijnec-knop" href="https://www.energie-compas.eu/login">← Naar MijnEC</a> + dit script.
 //   Op energie-compas.eu wordt de link relatief (/login) zodat de sessie op hetzelfde domein blijft.
 //   data-vast="1" op het script-element: zet een vaste knop rechtsboven als de pagina er zelf geen heeft.
 (function(){
   'use strict';
-  var URL_EC = /energie-compas\.eu$/i.test(location.hostname) ? '/login' : 'https://www.energie-compas.eu/login';
+  // v1.0.1 (Johan 16-10): enkel relatief op de EC-site zelf (www./energie-compas.eu). Op app.energie-compas.eu wees '/login' naar
+  //   de Fluctus-flow (site/portal) → daar altijd de absolute MijnEC-URL.
+  var URL_EC = /^(www\.)?energie-compas\.eu$/i.test(location.hostname) ? '/login' : 'https://www.energie-compas.eu/login';
   var me = document.currentScript;
   function css(){
     if (document.getElementById('mijnec-knop-css')) return;
