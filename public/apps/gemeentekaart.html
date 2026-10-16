@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     FLUCTUS LEAD GENERATOR — KAART PER GEMEENTE  v1.1  (16-10-2026, Johan)
+     v1.1: tabblad draagt de gemeentenaam; terminologie «Lead Generator».
+     public/apps/gemeentekaart.html — opent vanuit de Lead Generator in een nieuw tabblad.
+     ?slug=<Kaart-slug>&nis=<niscode>&naam=<gemeentenaam>
+     - Enkel voor ingelogde gebruikers (Supabase-sessie; zelfde gate als gemeenteplan.html).
+     - Data: johanmmk.github.io/gemeenten/Kaart_bedrijfsparkings_<slug>.html (sites, boundary,
+       cabines, chargers) → hier opnieuw getekend zodat we ELKE handeling kunnen loggen.
+       Lukt het uitlezen niet → val terug op de originele kaart in een iframe (enkel openen gelogd).
+     - Bedrijfsparkings (grootte = geschatte plaatsen), MS-cabines (geel, restcapaciteit),
+       bestaande snelladers ≥40 kW (groen). Per parking: dichtste cabine + afstand.
+     - Adviseur kan een parking «⭐ Noteren als lead» (met opmerking) of «✕ Geen lead».
+     - Logging: fluctus-proxy POST /api/app-activity/log, app_id 'gemeenteplan'
+       (opvolgen in /apps/leadgen-log.html, enkel managers).
+     ============================================================ -->
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lead Generator</title>
+  <script>try{var _n=new URLSearchParams(location.search).get('naam');if(_n)document.title=_n;}catch(e){}</script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root{--navy:#1F3864;--groen:#05B050;--groen-d:#048443;--grijs:#5b6b85;--lijn:#E2E8F2;--bg:#F4F7FB;--geel:#FFD400;}
+    html,body{margin:0;padding:0;height:100%;background:var(--bg);font-family:Arial,Helvetica,sans-serif;color:var(--navy);}
+    .gk-top{height:54px;display:flex;align-items:center;gap:12px;padding:0 14px;background:#fff;border-bottom:1px solid var(--lijn);box-sizing:border-box;}
+    .gk-top .brand{display:flex;align-items:center;gap:8px;font-weight:bold;font-size:16px;white-space:nowrap;}
+    .gk-top .brand em{font-style:normal;color:var(--groen);}
+    .gk-top h1{font-size:16px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .gk-top .sp{flex:1;}
+    .gk-top .who{font-size:12px;color:var(--grijs);white-space:nowrap;}
+    .gk-top a.back{color:var(--navy);text-decoration:none;font-size:13px;border:1px solid #C9D6EC;border-radius:8px;padding:6px 11px;background:#fff;white-space:nowrap;}
+    .gk-top a.back:hover{background:#EAF0F8;}
+    .gk-wrap{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;}
+    .gk-side{width:340px;flex:0 0 340px;background:#fff;border-right:1px solid var(--lijn);display:flex;flex-direction:column;min-height:0;}
+    #gk-map{flex:1;min-width:0;background:#e8eef2;}
+    .gk-kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:12px 12px 6px;}
+    .gk-kpi div{background:#EAF0F8;border-radius:8px;padding:7px 8px;font-size:11px;color:var(--grijs);}
+    .gk-kpi b{display:block;font-size:17px;color:var(--navy);}
+    .gk-filt{padding:6px 12px 8px;display:flex;flex-direction:column;gap:7px;border-bottom:1px solid var(--lijn);}
+    .gk-filt input[type=text]{width:100%;box-sizing:border-box;font-size:14px;padding:8px 10px;border:1px solid #C9D6EC;border-radius:8px;color:var(--navy);}
+    .gk-filt input[type=text]:focus{outline:none;border-color:var(--groen);box-shadow:0 0 0 3px rgba(5,176,80,.12);}
+    .gk-filt .r{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+    .gk-filt .r input[type=range]{flex:1;accent-color:var(--groen);}
+    .gk-filt label{cursor:pointer;}
+    .gk-list{flex:1;overflow:auto;min-height:0;}
+    .gk-item{padding:9px 12px;border-bottom:1px solid #F0F4FA;cursor:pointer;font-size:13px;display:flex;gap:8px;align-items:flex-start;}
+    .gk-item:hover,.gk-item.act{background:#EAF0F8;}
+    .gk-item .nm{font-weight:bold;flex:1;}
+    .gk-item .sub{font-size:11.5px;color:var(--grijs);font-weight:normal;margin-top:2px;}
+    .gk-item .pl{font-weight:bold;color:var(--groen-d);white-space:nowrap;}
+    .gk-item .st{font-size:14px;}
+    .gk-item.band{opacity:.6;}
+    .gk-leeg{padding:14px 12px;font-size:13px;color:var(--grijs);}
+    .gk-voet{padding:8px 12px;font-size:11px;color:#8a99b5;border-top:1px solid var(--lijn);}
+    .gk-pin{border-radius:50%;color:#fff;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);font-size:11px;box-sizing:border-box;}
+    .gk-pin.lead{border-color:var(--geel);border-width:3px;}
+    .gk-pin.nee{opacity:.35;}
+    .gk-pop{font-size:13px;line-height:1.45;min-width:220px;}
+    .gk-pop b.t{font-size:14.5px;color:var(--navy);}
+    .gk-pop .m{color:var(--grijs);font-size:12px;}
+    .gk-pop .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .gk-pop button,.gk-pop a.bt{font-size:12.5px;border-radius:7px;padding:6px 9px;cursor:pointer;border:1px solid #C9D6EC;background:#fff;color:var(--navy);text-decoration:none;}
+    .gk-pop button.lead{background:var(--groen);border-color:var(--groen);color:#fff;font-weight:bold;}
+    .gk-pop button.lead:hover{background:var(--groen-d);}
+    .gk-pop textarea{width:100%;box-sizing:border-box;margin-top:7px;font-family:inherit;font-size:12.5px;border:1px solid #C9D6EC;border-radius:7px;padding:6px 8px;resize:vertical;}
+    .gk-pop .ok{color:var(--groen-d);font-weight:bold;margin-top:6px;}
+    .gk-legend{background:#fff;padding:8px 10px;border-radius:8px;border:1px solid var(--lijn);font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+    .gk-legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:1px solid #fff;}
+    #gk-status{position:absolute;z-index:1000;left:50%;top:70px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 14px;border-radius:9px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.25);display:none;max-width:90%;}
+    #gk-frame{flex:1;border:0;display:none;}
+    #gk-gate{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:99999;}
+    #gk-gate .box{background:#fff;border:1px solid var(--lijn);border-radius:14px;padding:30px 34px;max-width:400px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.1);}
+    #gk-gate h2{margin:0 0 8px;font-size:20px;}
+    #gk-gate p{color:var(--grijs);font-size:14px;line-height:1.5;margin:0 0 18px;}
+    #gk-gate a{display:inline-block;background:var(--groen);color:#fff;text-decoration:none;font-weight:bold;font-size:14px;padding:11px 22px;border-radius:8px;}
+    #gk-toggle{display:none;}
+    @media (max-width:760px){
+      .gk-top .who,.gk-top .brand span{display:none;}
+      .gk-wrap{flex-direction:column;}
+      .gk-side{width:auto;flex:0 0 auto;max-height:42%;border-right:none;border-bottom:1px solid var(--lijn);}
+      .gk-side.dicht .gk-filt,.gk-side.dicht .gk-list,.gk-side.dicht .gk-voet{display:none;}
+      #gk-toggle{display:block;width:100%;border:none;background:#EAF0F8;color:var(--navy);font-size:12.5px;padding:6px;cursor:pointer;}
+      #gk-map{min-height:0;}
+    }
+  </style>
+</head>
+<body>
+  <div class="gk-top">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" width="24" height="24"><circle cx="20" cy="20" r="17" fill="none" stroke="#05B050" stroke-width="4.5"></circle><circle cx="20" cy="20" r="6.5" fill="#05B050"></circle></svg>
+      <span>FLUCTUS<em>·NET</em></span>
+    </div>
+    <h1 id="gk-titel">Lead Generator</h1>
+    <div class="sp"></div>
+    <span class="who" id="gk-who"></span>
+    <a class="back" href="/apps/gemeenteplan.html" id="gk-back">← Lead Generator</a>
+  </div>
+
+  <div class="gk-wrap">
+    <div class="gk-side" id="gk-side">
+      <div class="gk-kpi">
+        <div>Parkings<b id="k-park">–</b></div>
+        <div>Plaatsen<b id="k-pl">–</b></div>
+        <div>MS-cabines<b id="k-cab">–</b></div>
+      </div>
+      <button id="gk-toggle" type="button">▾ lijst tonen/verbergen</button>
+      <div class="gk-filt">
+        <input type="text" id="f-zoek" placeholder="Zoek parking / bedrijf…" autocomplete="off" spellcheck="false">
+        <div class="r"><span>Min. plaatsen</span><input type="range" id="f-min" min="0" max="200" step="5" value="0"><b id="f-minv">0</b></div>
+        <div class="r">
+          <label><input type="checkbox" id="f-band"> ook de band ±2 km rond de grens</label>
+        </div>
+        <div class="r">
+          <label><input type="checkbox" id="f-leads"> enkel mijn genoteerde leads</label>
+        </div>
+      </div>
+      <div class="gk-list" id="gk-list"><div class="gk-leeg">Laden…</div></div>
+      <div class="gk-voet">Plaatsen = automatische schatting, te verifiëren. Cabines: restcapaciteit afname/injectie volgens netbeheerder.</div>
+    </div>
+    <div id="gk-map"></div>
+    <iframe id="gk-frame" title="Kaart van de gemeente"></iframe>
+  </div>
+  <div id="gk-status"></div>
+
+  <div id="gk-gate">
+    <div class="box">
+      <h2 id="gk-gate-t">Even aanmelden</h2>
+      <p id="gk-gate-p">Deze kaart is enkel beschikbaar voor ingelogde gebruikers.</p>
+      <a href="https://www.energie-compas.eu/login">Naar MijnEC</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  (function(){
+    'use strict';
+    // ------------------------------------------------------------ configuratie
+    var SUPA_URL   = 'https://haagysosdaorrxkrwkcj.supabase.co';
+    var SUPA_ANON  = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
+    var PROXY_BASE = 'https://lucid-amazement-production.up.railway.app';
+    var APP_ID     = 'gemeenteplan';
+    var REPO_BASE  = 'https://johanmmk.github.io/gemeenten/';
+    var TYPE_KLEUR = { industrial:'#34568C', commercial:'#9E480E', retail:'#9E480E', office:'#05803B' };
+    var TYPE_LBL   = { industrial:'Industrie', commercial:'Handel', retail:'Handel', office:'Kantoor' };
+
+    var qs   = new URLSearchParams(location.search);
+    var SLUG = qs.get('slug') || '';
+    var NIS  = qs.get('nis') || '';
+    var GEM  = qs.get('naam') || SLUG.replace(/_/g, ' ') || 'gemeente';
+    document.getElementById('gk-titel').textContent = GEM + ' — Lead Generator';
+    document.title = GEM;   // tabblad = naam van de gemeente
+
+    var sb = window.supabase.createClient(SUPA_URL, SUPA_ANON);
+    var TOKEN = null, EMAIL = null, UID = null;
+    var T0 = Date.now(), N_BEKEKEN = 0, BEKEKEN = {};
+
+    // ------------------------------------------------------------ helpers
+    function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+    function nf(v){ return (v == null || isNaN(v)) ? '–' : Number(v).toLocaleString('nl-BE'); }
+    function norm(s){ return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+    function rnd(x, d){ var f = Math.pow(10, d || 5); return Math.round(x * f) / f; }
+    function afstandM(a, b, c, d){
+      var R = 6371000, r = Math.PI / 180, dLa = (c - a) * r, dLo = (d - b) * r;
+      var h = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a * r) * Math.cos(c * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+    function status(t, ms){
+      var el = document.getElementById('gk-status');
+      el.textContent = t || ''; el.style.display = t ? 'block' : 'none';
+      if (t && ms) setTimeout(function(){ if (el.textContent === t) el.style.display = 'none'; }, ms);
+    }
+    function showGate(t, p){
+      if (t) document.getElementById('gk-gate-t').textContent = t;
+      if (p) document.getElementById('gk-gate-p').textContent = p;
+      document.getElementById('gk-gate').style.display = 'flex';
+    }
+
+    // ------------------------------------------------------------ logging
+    // Best-effort, blokkeert nooit. Gemeente zit altijd in de details zodat de log per gemeente filtert.
+    function verseToken(){
+      return sb.auth.getSession().then(function(r){
+        var s = r && r.data && r.data.session;
+        if (s && s.access_token) TOKEN = s.access_token;
+        return TOKEN;
+      }).catch(function(){ return TOKEN; });
+    }
+    function post(token, body){
+      if (!token) return;
+      try {
+        fetch(PROXY_BASE + '/api/app-activity/log', {
+          method:'POST', keepalive:true,
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + token },
+          body: body
+        }).catch(function(){});
+      } catch(e){}
+    }
+    function log(actie, details, klantNaam, sync){
+      var d = details || {};
+      d.gemeente = GEM; d.nis = NIS; d.slug = SLUG;
+      var body = JSON.stringify({ app_id: APP_ID, actie: actie, klant_naam: klantNaam || GEM, details: d });
+      if (sync) { post(TOKEN, body); return; }          // pagehide: geen async meer mogelijk
+      verseToken().then(function(t){ post(t, body); });
+    }
+    // debounce per sleutel (kaartbeweging, filters)
+    var _deb = {};
+    function logLater(key, ms, fn){ clearTimeout(_deb[key]); _deb[key] = setTimeout(fn, ms); }
+
+    // ------------------------------------------------------------ eigen leads (lokaal geheugen, per gebruiker)
+    var LEADS = {};
+    function leadKey(){ return 'gk_leads_' + (UID || 'anon'); }
+    function siteId(s){ return rnd(s.lat, 5) + ',' + rnd(s.lng, 5); }
+    function leadsLaden(){ try { LEADS = JSON.parse(localStorage.getItem(leadKey()) || '{}') || {}; } catch(e){ LEADS = {}; } }
+    function leadsBewaar(){ try { localStorage.setItem(leadKey(), JSON.stringify(LEADS)); } catch(e){} }
+
+    // ------------------------------------------------------------ auth-gate
+    function guard(){
+      return sb.auth.getSession().then(function(r){
+        var s = r && r.data && r.data.session;
+        if (!s){ location.replace('/portal.html'); return false; }
+        TOKEN = s.access_token; EMAIL = (s.user && s.user.email) || ''; UID = (s.user && s.user.id) || null;
+        try { sb.auth.onAuthStateChange(function(_e, ss){ if (ss && ss.access_token) TOKEN = ss.access_token; }); } catch(e){}
+        return fetch(PROXY_BASE + '/api/app-access/check', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + TOKEN },
+          body: JSON.stringify({ app_id: APP_ID })
+        }).then(function(res){
+          return res.json().catch(function(){ return {}; }).then(function(j){
+            var isMgr = j && ((j.user && j.user.role === 'manager') || j.role === 'manager' || j.manager === true);
+            if (res.ok && j && j.toegang === false && !isMgr){ showGate('Geen toegang', 'Vraag toegang tot de “Lead Generator” aan uw manager.'); return false; }
+            return true;
+          });
+        }).catch(function(){ return true; });
+      }).catch(function(){ location.replace('/portal.html'); return false; });
+    }
+
+    // ------------------------------------------------------------ data uit de bestaande gemeentekaart halen
+    // Scant een JS-literal ([...] of {...}) vanaf een marker, met respect voor strings.
+    function literalNa(src, marker){
+      var i = src.indexOf(marker); if (i < 0) return null;
+      i += marker.length;
+      while (i < src.length && src[i] !== '[' && src[i] !== '{') i++;
+      var open = src[i], close = open === '[' ? ']' : '}', depth = 0, inStr = false, q = '', start = i;
+      for (; i < src.length; i++){
+        var c = src[i];
+        if (inStr){ if (c === '\\') { i++; continue; } if (c === q) inStr = false; continue; }
+        if (c === '"' || c === "'"){ inStr = true; q = c; continue; }
+        if (c === open) depth++;
+        else if (c === close){ depth--; if (depth === 0) { try { return JSON.parse(src.slice(start, i + 1)); } catch(e){ return null; } } }
+      }
+      return null;
+    }
+
+    var map, SITES = [], CABINES = [], CHARGERS = [], BOUNDARY = null;
+    var siteLayer, cabLayer, chgLayer, MARKERS = {};
+
+    function laadData(){
+      var url = REPO_BASE + 'Kaart_bedrijfsparkings_' + encodeURIComponent(SLUG) + '.html';
+      return fetch(url, { cache:'no-cache' }).then(function(r){
+        if (!r.ok) throw new Error('kaart ' + r.status);
+        return r.text();
+      }).then(function(h){
+        SITES    = literalNa(h, 'var sites=') || [];
+        BOUNDARY = literalNa(h, 'var boundary=');
+        CABINES  = literalNa(h, 'cabines=') || [];
+        CHARGERS = literalNa(h, 'var chargers=') || [];
+        if (!SITES.length && !CABINES.length) throw new Error('geen data in kaart');
+        return true;
+      });
+    }
+
+    function terugvalIframe(reden){
+      document.getElementById('gk-side').style.display = 'none';
+      document.getElementById('gk-map').style.display = 'none';
+      var f = document.getElementById('gk-frame');
+      f.src = REPO_BASE + 'Kaart_bedrijfsparkings_' + encodeURIComponent(SLUG) + '.html';
+      f.style.display = 'block';
+      log('kaart_terugval_iframe', { reden: String(reden || '') });
+    }
+
+    // ------------------------------------------------------------ verrijking: dichtste cabine
+    function verrijk(){
+      SITES.forEach(function(s){
+        s._id = siteId(s);
+        var best = null, bd = Infinity;
+        CABINES.forEach(function(c){ var d = afstandM(s.lat, s.lng, c.la, c.lo); if (d < bd){ bd = d; best = c; } });
+        s._cab = best; s._cabM = best ? Math.round(bd) : null;
+      });
+      SITES.sort(function(a, b){ return (b.p || 0) - (a.p || 0); });
+    }
+
+    // ------------------------------------------------------------ kaart
+    function pinIcon(s){
+      var p = s.p || 0, d = Math.max(20, Math.min(46, 14 + Math.sqrt(p) * 2.2));
+      var kl = TYPE_KLEUR[s.t] || '#5C7BB0';
+      var st = LEADS[s._id];
+      var cls = 'gk-pin' + (st && st.status === 'lead' ? ' lead' : '') + (st && st.status === 'geen' ? ' nee' : '');
+      return L.divIcon({ className:'', html:'<div class="' + cls + '" style="width:' + d + 'px;height:' + d + 'px;background:' + kl + ';' + (s.o ? 'opacity:.55;' : '') + '">' + (p >= 10 ? p : '') + '</div>', iconSize:[d, d], iconAnchor:[d / 2, d / 2] });
+    }
+    function popHtml(s){
+      var st = LEADS[s._id];
+      var cab = s._cab ? ('<div>⚡ Dichtste MS-cabine <b>' + esc(s._cab.n) + '</b> op <b>' + nf(s._cabM) + ' m</b>' +
+                (s._cab.a ? '<br><span class="m">restcap. afname ' + esc(s._cab.a) + (s._cab.i ? ' · injectie ' + esc(s._cab.i) : '') + '</span>' : '') + '</div>') : '';
+      var gm = 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng;
+      return '<div class="gk-pop" data-id="' + esc(s._id) + '">' +
+        '<b class="t">' + esc(s.n || 'Parking') + '</b><br>' +
+        '<span class="m">' + esc(TYPE_LBL[s.t] || s.t || '') + (s.o ? ' · band ±2 km buiten de grens' : '') + '</span>' +
+        '<div style="margin-top:5px">🅿️ ± <b>' + nf(s.p) + '</b> plaatsen (schatting)</div>' + cab +
+        (st ? '<div class="ok">' + (st.status === 'lead' ? '⭐ Genoteerd als lead' : '✕ Gemarkeerd als geen lead') + (st.opm ? ' — ' + esc(st.opm) : '') + '</div>' : '') +
+        '<textarea rows="2" placeholder="Opmerking (bedrijf, contact, waarom interessant…)" data-act="opm">' + esc(st && st.opm || '') + '</textarea>' +
+        '<div class="btns">' +
+          '<button class="lead" data-act="lead">⭐ Noteren als lead</button>' +
+          '<button data-act="geen">✕ Geen lead</button>' +
+          '<a class="bt" data-act="gmaps" href="' + gm + '" target="_blank" rel="noopener">📍 Google Maps</a>' +
+          '<a class="bt" data-act="streetview" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + s.lat + ',' + s.lng + '" target="_blank" rel="noopener">👁 Street View</a>' +
+        '</div></div>';
+    }
+    function siteDetails(s){
+      return { site: s.n || '', plaatsen: s.p || 0, type: s.t || '', band: !!s.o, lat: rnd(s.lat, 5), lng: rnd(s.lng, 5),
+               cabine: s._cab ? s._cab.n : null, cabine_m: s._cabM, cabine_afname: s._cab ? (s._cab.a || null) : null };
+    }
+
+    function tekenSites(){
+      siteLayer.clearLayers(); MARKERS = {};
+      zichtbareSites().forEach(function(s){
+        var m = L.marker([s.lat, s.lng], { icon: pinIcon(s), riseOnHover:true });
+        m.bindTooltip('<b>' + esc(s.n || 'Parking') + '</b><br>± ' + nf(s.p) + ' plaatsen' + (s._cabM != null ? '<br>cabine op ' + nf(s._cabM) + ' m' : ''), { direction:'top', offset:[0, -8] });
+        m.bindPopup(function(){ return popHtml(s); }, { maxWidth:300 });
+        m.on('popupopen', function(){
+          if (!BEKEKEN[s._id]){ BEKEKEN[s._id] = 1; N_BEKEKEN++; }
+          log('parking_bekeken', siteDetails(s), s.n);
+          markeerLijst(s._id);
+        });
+        var hoverT = null;
+        m.on('mouseover', function(){ hoverT = setTimeout(function(){ log('parking_hover', { site: s.n || '', plaatsen: s.p || 0 }, s.n); }, 1500); });
+        m.on('mouseout', function(){ clearTimeout(hoverT); });
+        m._site = s;
+        MARKERS[s._id] = m;
+        siteLayer.addLayer(m);
+      });
+    }
+    function tekenCabines(){
+      cabLayer.clearLayers();
+      CABINES.forEach(function(c){
+        var m = L.circleMarker([c.la, c.lo], { radius:5, color:'#6b5300', weight:1, fillColor:'#FFD400', fillOpacity:.95 });
+        var info = '<b>MS-cabine ' + esc(c.n) + '</b>' + (c.a ? '<br>Restcapaciteit afname: ' + esc(c.a) : '') + (c.i ? '<br>Restcapaciteit injectie: ' + esc(c.i) : '') + (c.v ? '<br>Voeding: ' + esc(c.v) : '');
+        m.bindTooltip(info, { direction:'top', sticky:true });
+        m.bindPopup(info);
+        m.on('popupopen', function(){ log('cabine_bekeken', { cabine: c.n, afname: c.a || null, injectie: c.i || null, lat: rnd(c.la, 5), lng: rnd(c.lo, 5) }); });
+        cabLayer.addLayer(m);
+      });
+    }
+    function tekenChargers(){
+      chgLayer.clearLayers();
+      CHARGERS.forEach(function(c){
+        var ic = L.divIcon({ className:'', html:'<div class="gk-pin" style="width:20px;height:20px;background:#05B050;border-radius:5px;font-size:12px">&#9889;</div>', iconSize:[20, 20], iconAnchor:[10, 10] });
+        var m = L.marker([c.la, c.lo], { icon: ic });
+        var info = '<b>Bestaand snellaadpunt</b>' + (c.n ? '<br>' + esc(c.n) : '') + '<br>≈ ' + nf(c.kw) + ' kW';
+        m.bindTooltip(info, { direction:'top' }); m.bindPopup(info);
+        m.on('popupopen', function(){ log('laadpunt_bekeken', { laadpunt: c.n || '', kw: c.kw || null }); });
+        chgLayer.addLayer(m);
+      });
+    }
+
+    // klikken in de popup (lead / geen lead / Google Maps)
+    function popupActies(e){
+      var el = e.target, act = el && el.getAttribute && el.getAttribute('data-act');
+      if (!act || act === 'opm') return;
+      var pop = el.closest('.gk-pop'); if (!pop) return;
+      var id = pop.getAttribute('data-id');
+      var s = SITES.filter(function(x){ return x._id === id; })[0]; if (!s) return;
+      var ta = pop.querySelector('textarea[data-act=opm]');
+      var opm = ta ? ta.value.trim().slice(0, 500) : '';
+      var d = siteDetails(s);
+      if (act === 'gmaps' || act === 'streetview'){ log(act === 'gmaps' ? 'google_maps_klik' : 'streetview_klik', d, s.n); return; }
+      if (act === 'lead' || act === 'geen'){
+        LEADS[id] = { status: act === 'lead' ? 'lead' : 'geen', opm: opm, ts: new Date().toISOString(), naam: s.n || '' };
+        leadsBewaar();
+        d.opmerking = opm;
+        log(act === 'lead' ? 'lead_genoteerd' : 'geen_lead', d, s.n);
+        var m = MARKERS[id];
+        if (m){ m.setIcon(pinIcon(s)); m.setPopupContent(popHtml(s)); }
+        renderLijst();
+        status(act === 'lead' ? '⭐ ' + (s.n || 'Parking') + ' genoteerd als lead' : '✕ ' + (s.n || 'Parking') + ' gemarkeerd als geen lead', 2500);
+      }
+    }
+
+    // ------------------------------------------------------------ lijst + filters
+    var F = { zoek:'', min:0, band:false, leads:false };
+    function zichtbareSites(){
+      var nq = norm(F.zoek);
+      return SITES.filter(function(s){
+        if (!F.band && s.o) return false;
+        if ((s.p || 0) < F.min) return false;
+        if (F.leads && !(LEADS[s._id] && LEADS[s._id].status === 'lead')) return false;
+        if (nq && norm(s.n).indexOf(nq) < 0) return false;
+        return true;
+      });
+    }
+    function renderLijst(){
+      var lst = zichtbareSites(), el = document.getElementById('gk-list');
+      if (!lst.length){ el.innerHTML = '<div class="gk-leeg">Geen parkings voor deze filter.</div>'; return; }
+      el.innerHTML = lst.slice(0, 400).map(function(s){
+        var st = LEADS[s._id];
+        return '<div class="gk-item' + (s.o ? ' band' : '') + '" data-id="' + esc(s._id) + '">' +
+          '<span class="st">' + (st ? (st.status === 'lead' ? '⭐' : '✕') : '🅿️') + '</span>' +
+          '<div class="nm">' + esc(s.n || 'Parking') + '<div class="sub">' + esc(TYPE_LBL[s.t] || s.t || '') +
+          (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (s.o ? ' · band' : '') + '</div></div>' +
+          '<span class="pl">' + nf(s.p) + '</span></div>';
+      }).join('') + (lst.length > 400 ? '<div class="gk-leeg">+' + (lst.length - 400) + ' meer — verfijn de filter.</div>' : '');
+    }
+    function markeerLijst(id){
+      Array.prototype.forEach.call(document.querySelectorAll('.gk-item'), function(it){ it.classList.toggle('act', it.getAttribute('data-id') === id); });
+    }
+    function filterGewijzigd(bron){
+      tekenSites(); renderLijst();
+      logLater('filter', 1500, function(){ log('filter', { bron: bron, zoek: F.zoek.slice(0, 60), min_plaatsen: F.min, band: F.band, enkel_leads: F.leads, resultaat: zichtbareSites().length }); });
+    }
+
+    function koppelUI(){
+      document.getElementById('f-zoek').addEventListener('input', function(){ F.zoek = this.value; filterGewijzigd('zoek'); });
+      document.getElementById('f-min').addEventListener('input', function(){ F.min = +this.value; document.getElementById('f-minv').textContent = this.value; filterGewijzigd('min_plaatsen'); });
+      document.getElementById('f-band').addEventListener('change', function(){ F.band = this.checked; filterGewijzigd('band'); });
+      document.getElementById('f-leads').addEventListener('change', function(){ F.leads = this.checked; filterGewijzigd('enkel_leads'); });
+      document.getElementById('gk-list').addEventListener('click', function(e){
+        var it = e.target.closest('.gk-item'); if (!it) return;
+        var id = it.getAttribute('data-id'), m = MARKERS[id]; if (!m) return;
+        log('lijst_klik', { site: m._site.n || '', plaatsen: m._site.p || 0 }, m._site.n);
+        map.setView(m.getLatLng(), Math.max(map.getZoom(), 16));
+        m.openPopup();
+      });
+      document.getElementById('gk-toggle').addEventListener('click', function(){
+        var sd = document.getElementById('gk-side'); sd.classList.toggle('dicht');
+        setTimeout(function(){ map.invalidateSize(); }, 50);
+      });
+      document.getElementById('gk-back').addEventListener('click', function(){ log('terug_naar_lead_generator', {}); });
+      document.addEventListener('click', popupActies);
+    }
+
+    // ------------------------------------------------------------ boot
+    function boot(){
+      document.getElementById('gk-who').textContent = EMAIL ? ('Aangemeld als ' + EMAIL) : '';
+      leadsLaden();
+      if (!SLUG){ status('Geen gemeente opgegeven — open de kaart via de Lead Generator.'); return; }
+
+      var basis = {
+        'Kaart': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'© OpenStreetMap · CARTO', subdomains:'abcd', maxZoom:20 }),
+        'Luchtfoto': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'© Esri', maxZoom:20 })
+      };
+      map = L.map('gk-map', { zoomControl:true, layers:[basis['Kaart']] }).setView([50.6, 4.6], 9);
+      siteLayer = L.layerGroup().addTo(map);
+      cabLayer  = L.layerGroup().addTo(map);
+      chgLayer  = L.layerGroup().addTo(map);
+
+      status('Kaart van ' + GEM + ' laden…');
+      laadData().then(function(){
+        status('');
+        verrijk();
+        var binnen = SITES.filter(function(s){ return !s.o; });
+        document.getElementById('k-park').textContent = nf(binnen.length);
+        document.getElementById('k-pl').textContent = nf(binnen.reduce(function(a, s){ return a + (s.p || 0); }, 0));
+        document.getElementById('k-cab').textContent = nf(CABINES.length);
+
+        if (BOUNDARY) L.geoJSON(BOUNDARY, { style:{ color:'#1F3864', weight:2, fill:false, dashArray:'5 4' }, interactive:false }).addTo(map);
+        tekenSites(); tekenCabines(); tekenChargers(); renderLijst();
+
+        var ov = {};
+        ov['🅿️ Bedrijfsparkings'] = siteLayer;
+        if (CABINES.length) ov['● MS-cabines (' + CABINES.length + ')'] = cabLayer;
+        if (CHARGERS.length) ov['⚡ Snelladen ≥40 kW (' + CHARGERS.length + ')'] = chgLayer;
+        L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
+        var lg = L.control({ position:'bottomright' });
+        lg.onAdd = function(){ var d = L.DomUtil.create('div', 'gk-legend');
+          d.innerHTML = '<i style="background:#34568C"></i>Industrie<br><i style="background:#9E480E"></i>Handel<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
+          return d; };
+        lg.addTo(map);
+
+        var pts = SITES.filter(function(s){ return !s.o; }).map(function(s){ return [s.lat, s.lng]; });
+        if (!pts.length) pts = SITES.map(function(s){ return [s.lat, s.lng]; }).concat(CABINES.map(function(c){ return [c.la, c.lo]; }));
+        if (pts.length) map.fitBounds(pts, { padding:[30, 30] });
+
+        // logging van kaartgebruik
+        map.on('baselayerchange', function(e){ log('basislaag', { laag: e.name }); });
+        map.on('overlayadd', function(e){ log('laag_aan', { laag: e.name }); });
+        map.on('overlayremove', function(e){ log('laag_uit', { laag: e.name }); });
+        map.on('moveend', function(){
+          logLater('beweging', 4000, function(){
+            var c = map.getCenter();
+            log('kaart_beweging', { zoom: map.getZoom(), lat: rnd(c.lat, 4), lng: rnd(c.lng, 4) });
+          });
+        });
+
+        log('kaart_geopend', { parkings: binnen.length, parkings_band: SITES.length - binnen.length, cabines: CABINES.length, laadpunten: CHARGERS.length });
+      }).catch(function(err){
+        status('');
+        terugvalIframe(err && err.message);
+      });
+      koppelUI();
+
+      // sessieduur bij verlaten van het tabblad
+      var gesloten = false;
+      function einde(){
+        if (gesloten) return; gesloten = true;
+        log('kaart_gesloten', { duur_s: Math.round((Date.now() - T0) / 1000), parkings_bekeken: N_BEKEKEN }, null, true);
+      }
+      window.addEventListener('pagehide', einde);
+      document.addEventListener('visibilitychange', function(){
+        if (document.visibilityState === 'hidden') log('tab_verborgen', { na_s: Math.round((Date.now() - T0) / 1000) }, null, true);
+        else if (!gesloten) log('tab_terug', { na_s: Math.round((Date.now() - T0) / 1000) });
+      });
+    }
+
+    guard().then(function(ok){ if (ok) boot(); });
+  })();
+  </script>
+</body>
+</html>

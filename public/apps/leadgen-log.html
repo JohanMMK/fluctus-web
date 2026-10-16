@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     FLUCTUS LEAD GENERATOR — OPVOLGING  v1.1 (v1.1: terminologie «Lead Generator»)  (16-10-2026, Johan)
+     public/apps/leadgen-log.html — managers (o.a. oekene) volgen op wie wat doet in de
+     Lead Generator (overzicht + kaart per gemeente).
+     Leest fluctus-proxy GET /api/manager/activity?app=gemeenteplan (manager-only, 403 anders).
+     Read-only. Auto-refresh elke 60 s.
+     ============================================================ -->
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lead Generator — opvolging</title>
+  <style>
+    :root{--navy:#1F3864;--groen:#05B050;--groen-d:#048443;--grijs:#5b6b85;--lijn:#E2E8F2;--bg:#F4F7FB;}
+    html,body{margin:0;background:var(--bg);font-family:Arial,Helvetica,sans-serif;color:var(--navy);}
+    .top{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#fff;border-bottom:1px solid var(--lijn);}
+    .top .brand{display:flex;align-items:center;gap:8px;font-weight:bold;font-size:16px;}
+    .top .brand em{font-style:normal;color:var(--groen);}
+    .top h1{font-size:17px;margin:0;}
+    .top .sp{flex:1;}
+    .top a.back{color:var(--navy);text-decoration:none;font-size:13px;border:1px solid #C9D6EC;border-radius:8px;padding:6px 11px;background:#fff;}
+    main{max-width:1200px;margin:0 auto;padding:14px 16px 40px;}
+    .filt{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:4px 0 14px;font-size:13px;}
+    .filt select,.filt input{font-family:inherit;font-size:13.5px;padding:7px 9px;border:1px solid #C9D6EC;border-radius:8px;color:var(--navy);background:#fff;}
+    .filt button{font-size:13px;padding:7px 12px;border-radius:8px;border:1px solid #C9D6EC;background:#fff;color:var(--navy);cursor:pointer;}
+    .filt .upd{color:var(--grijs);font-size:12px;}
+    h2{font-size:15px;margin:22px 0 8px;}
+    .kaarten{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;}
+    .kaart{background:#fff;border:1px solid var(--lijn);border-radius:10px;padding:12px 13px;cursor:pointer;}
+    .kaart.act{border-color:var(--groen);box-shadow:0 0 0 3px rgba(5,176,80,.12);}
+    .kaart .nm{font-weight:bold;font-size:14px;}
+    .kaart .lt{font-size:12px;color:var(--grijs);margin:2px 0 8px;}
+    .kaart .gr{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;}
+    .kaart .gr div{background:#EAF0F8;border-radius:6px;padding:5px 2px;font-size:10.5px;color:var(--grijs);}
+    .kaart .gr b{display:block;font-size:15px;color:var(--navy);}
+    .kaart .gems{font-size:12px;color:var(--grijs);margin-top:8px;line-height:1.4;}
+    .live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--groen);margin-right:5px;}
+    table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--lijn);border-radius:10px;overflow:hidden;font-size:12.5px;}
+    th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #F0F4FA;vertical-align:top;}
+    th{background:#EAF0F8;font-size:12px;}
+    td.t{white-space:nowrap;color:var(--grijs);}
+    .tag{display:inline-block;padding:2px 7px;border-radius:6px;background:#EAF0F8;font-size:11.5px;white-space:nowrap;}
+    .tag.lead{background:#DDF5E7;color:var(--groen-d);font-weight:bold;}
+    .tag.nee{background:#F3E2D6;color:#9E480E;}
+    .tag.open{background:#E3E9F6;}
+    .m{color:var(--grijs);}
+    a{color:var(--groen-d);}
+    .leeg{padding:16px;color:var(--grijs);font-size:13px;background:#fff;border:1px solid var(--lijn);border-radius:10px;}
+    .tw{overflow-x:auto;}
+    #gate{display:none;margin:60px auto;max-width:420px;text-align:center;background:#fff;border:1px solid var(--lijn);border-radius:14px;padding:28px;}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" width="24" height="24"><circle cx="20" cy="20" r="17" fill="none" stroke="#05B050" stroke-width="4.5"></circle><circle cx="20" cy="20" r="6.5" fill="#05B050"></circle></svg>
+      FLUCTUS<em>·NET</em>
+    </div>
+    <h1>📋 Lead Generator — opvolging adviseurs</h1>
+    <div class="sp"></div>
+    <a class="back" href="/apps/gemeenteplan.html">← Lead Generator</a>
+  </div>
+
+  <div id="gate"><h2 id="gate-t">Enkel voor managers</h2><p class="m" id="gate-p">Deze opvolging is enkel zichtbaar voor managers.</p><a href="https://www.energie-compas.eu/login">Naar MijnEC</a></div>
+
+  <main id="main" style="display:none">
+    <div class="filt">
+      <label>Periode <select id="f-per">
+        <option value="1">vandaag</option>
+        <option value="7" selected>7 dagen</option>
+        <option value="30">30 dagen</option>
+        <option value="90">90 dagen</option>
+      </select></label>
+      <label>Adviseur <select id="f-adv"><option value="">iedereen</option></select></label>
+      <label>Actie <select id="f-act"><option value="">alle</option></select></label>
+      <input type="text" id="f-zoek" placeholder="Gemeente of parking…">
+      <button id="f-ref" type="button">↻ Vernieuwen</button>
+      <span class="upd" id="upd"></span>
+    </div>
+
+    <h2>Per adviseur</h2>
+    <div class="kaarten" id="kaarten"></div>
+
+    <h2>⭐ Genoteerde leads</h2>
+    <div class="tw" id="leads"></div>
+
+    <h2>Tijdlijn</h2>
+    <div class="tw" id="tijdlijn"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+  (function(){
+    'use strict';
+    var SUPA_URL   = 'https://haagysosdaorrxkrwkcj.supabase.co';
+    var SUPA_ANON  = 'sb_publishable_lnpeEjaj960Jjk_jbc-bdw_WFZnORL3';
+    var PROXY_BASE = 'https://lucid-amazement-production.up.railway.app';
+    var APP_ID     = 'gemeenteplan';
+    var sb = window.supabase.createClient(SUPA_URL, SUPA_ANON);
+
+    var ACTIE_LBL = {
+      app_geopend:'Lead Generator geopend', gemeente_gekozen:'Gemeente gekozen', metriek:'Metriek gewijzigd', gewest_filter:'Gewest-filter',
+      kaart_geopend:'Kaart gemeente geopend', kaart_gesloten:'Kaart gesloten', kaart_terugval_iframe:'Kaart (terugval)',
+      parking_bekeken:'Parking bekeken', parking_hover:'Parking gehoverd', cabine_bekeken:'Cabine bekeken', laadpunt_bekeken:'Laadpunt bekeken',
+      lijst_klik:'Lijst-klik', filter:'Filter', kaart_beweging:'Kaart verschoven/gezoomd', basislaag:'Basislaag', laag_aan:'Laag aan', laag_uit:'Laag uit',
+      google_maps_klik:'Google Maps', streetview_klik:'Street View', lead_genoteerd:'⭐ Lead genoteerd', geen_lead:'✕ Geen lead',
+      tab_verborgen:'Tab verlaten', tab_terug:'Tab terug', terug_naar_gemeenteplan:'Terug naar Lead Generator', terug_naar_lead_generator:'Terug naar Lead Generator', laadplan_mail:'Laadplan gemaild (oud)'
+    };
+    var RIJ = [], timer = null;
+
+    function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+    function nf(v){ return (v == null || isNaN(v)) ? '–' : Number(v).toLocaleString('nl-BE'); }
+    function tijd(ts){ var d = new Date(ts); return d.toLocaleDateString('nl-BE', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('nl-BE', { hour:'2-digit', minute:'2-digit' }); }
+    function geleden(ts){
+      var s = (Date.now() - new Date(ts).getTime()) / 1000;
+      if (s < 90) return 'net nu'; if (s < 3600) return Math.round(s / 60) + ' min geleden';
+      if (s < 86400) return Math.round(s / 3600) + ' u geleden'; return Math.round(s / 86400) + ' d geleden';
+    }
+    function duur(s){ s = Math.round(s || 0); if (s < 60) return s + ' s'; if (s < 3600) return Math.round(s / 60) + ' min'; return (s / 3600).toFixed(1).replace('.', ',') + ' u'; }
+    function gem(r){ return (r.details && r.details.gemeente) || ''; }
+    function token(){ return sb.auth.getSession().then(function(r){ var s = r && r.data && r.data.session; return s ? s.access_token : null; }); }
+
+    function laden(){
+      return token().then(function(t){
+        if (!t){ location.replace('/portal.html'); return; }
+        var dagen = +document.getElementById('f-per').value;
+        var van = new Date(); van.setHours(0, 0, 0, 0); van.setDate(van.getDate() - (dagen - 1));
+        var url = PROXY_BASE + '/api/manager/activity?app=' + APP_ID + '&limit=1000&van=' + encodeURIComponent(van.toISOString());
+        return fetch(url, { headers:{ 'Authorization':'Bearer ' + t }, cache:'no-store' }).then(function(res){
+          if (res.status === 403 || res.status === 401){
+            document.getElementById('main').style.display = 'none';
+            document.getElementById('gate').style.display = 'block';
+            if (timer) clearInterval(timer);
+            return null;
+          }
+          return res.json();
+        }).then(function(j){
+          if (!j) return;
+          document.getElementById('gate').style.display = 'none';
+          document.getElementById('main').style.display = 'block';
+          RIJ = j.activiteit || [];
+          vulFilters(); render();
+          document.getElementById('upd').textContent = 'bijgewerkt ' + new Date().toLocaleTimeString('nl-BE', { hour:'2-digit', minute:'2-digit' }) + ' · ' + RIJ.length + ' handelingen' + (RIJ.length >= 1000 ? ' (max. 1000 — kies een kortere periode)' : '');
+        });
+      }).catch(function(e){ document.getElementById('upd').textContent = 'laden mislukt: ' + (e && e.message || e); });
+    }
+
+    function vulFilters(){
+      var adv = document.getElementById('f-adv'), act = document.getElementById('f-act');
+      var va = adv.value, vc = act.value, A = {}, C = {};
+      RIJ.forEach(function(r){ A[r.user_id] = r.verkoper_naam || r.user_id; C[r.actie] = 1; });
+      adv.innerHTML = '<option value="">iedereen</option>' + Object.keys(A).sort(function(a, b){ return String(A[a]).localeCompare(String(A[b])); }).map(function(k){ return '<option value="' + esc(k) + '">' + esc(A[k]) + '</option>'; }).join('');
+      act.innerHTML = '<option value="">alle</option>' + Object.keys(C).sort().map(function(k){ return '<option value="' + esc(k) + '">' + esc(ACTIE_LBL[k] || k) + '</option>'; }).join('');
+      adv.value = va; act.value = vc;
+    }
+
+    function gefilterd(){
+      var a = document.getElementById('f-adv').value, c = document.getElementById('f-act').value;
+      var q = document.getElementById('f-zoek').value.trim().toLowerCase();
+      return RIJ.filter(function(r){
+        if (a && r.user_id !== a) return false;
+        if (c && r.actie !== c) return false;
+        if (q){ var d = r.details || {}; var hay = (gem(r) + ' ' + (d.site || '') + ' ' + (r.klant_naam || '')).toLowerCase(); if (hay.indexOf(q) < 0) return false; }
+        return true;
+      });
+    }
+
+    function render(){
+      var rows = gefilterd();
+      // --- per adviseur
+      var P = {};
+      rows.forEach(function(r){
+        var p = P[r.user_id] || (P[r.user_id] = { id:r.user_id, naam:r.verkoper_naam || r.user_id, laatst:r.ts, laatstActie:r.actie, laatstGem:gem(r), kaarten:0, bekeken:{}, leads:0, nee:0, duur:0, gems:{}, n:0 });
+        p.n++;
+        if (new Date(r.ts) > new Date(p.laatst)){ p.laatst = r.ts; p.laatstActie = r.actie; p.laatstGem = gem(r); }
+        var d = r.details || {};
+        if (r.actie === 'kaart_geopend') p.kaarten++;
+        if (r.actie === 'parking_bekeken') p.bekeken[gem(r) + '|' + (d.lat || '') + ',' + (d.lng || '')] = 1;
+        if (r.actie === 'lead_genoteerd') p.leads++;
+        if (r.actie === 'geen_lead') p.nee++;
+        if (r.actie === 'kaart_gesloten') p.duur += +d.duur_s || 0;
+        if (gem(r)) p.gems[gem(r)] = (p.gems[gem(r)] || 0) + 1;
+      });
+      var lijst = Object.keys(P).map(function(k){ return P[k]; }).sort(function(a, b){ return new Date(b.laatst) - new Date(a.laatst); });
+      var sel = document.getElementById('f-adv').value;
+      document.getElementById('kaarten').innerHTML = lijst.length ? lijst.map(function(p){
+        var actief = (Date.now() - new Date(p.laatst).getTime()) < 10 * 60 * 1000;
+        var g = Object.keys(p.gems).sort(function(a, b){ return p.gems[b] - p.gems[a]; });
+        return '<div class="kaart' + (sel === p.id ? ' act' : '') + '" data-id="' + esc(p.id) + '">' +
+          '<div class="nm">' + (actief ? '<span class="live" title="actief in de laatste 10 min"></span>' : '') + esc(p.naam) + '</div>' +
+          '<div class="lt">' + geleden(p.laatst) + ' · ' + esc(ACTIE_LBL[p.laatstActie] || p.laatstActie) + (p.laatstGem ? ' · ' + esc(p.laatstGem) : '') + '</div>' +
+          '<div class="gr"><div>Kaarten<b>' + p.kaarten + '</b></div><div>Parkings<b>' + Object.keys(p.bekeken).length + '</b></div><div>Leads<b>' + p.leads + '</b></div><div>Tijd<b>' + duur(p.duur) + '</b></div></div>' +
+          '<div class="gems">' + (g.length ? esc(g.slice(0, 8).join(' · ')) + (g.length > 8 ? ' +' + (g.length - 8) : '') : '–') + '</div></div>';
+      }).join('') : '<div class="leeg">Geen activiteit in deze periode.</div>';
+
+      // --- leads (laatste status per adviseur × parking telt)
+      var L = {}, volg = rows.slice().sort(function(a, b){ return new Date(a.ts) - new Date(b.ts); });
+      volg.forEach(function(r){
+        if (r.actie !== 'lead_genoteerd' && r.actie !== 'geen_lead') return;
+        var d = r.details || {}; L[r.user_id + '|' + gem(r) + '|' + d.lat + ',' + d.lng] = r;
+      });
+      var leads = Object.keys(L).map(function(k){ return L[k]; }).sort(function(a, b){ return new Date(b.ts) - new Date(a.ts); });
+      document.getElementById('leads').innerHTML = leads.length ? '<table><thead><tr><th>Wanneer</th><th>Adviseur</th><th>Gemeente</th><th>Parking</th><th>Plaatsen</th><th>Cabine</th><th>Status</th><th>Opmerking</th><th></th></tr></thead><tbody>' +
+        leads.map(function(r){
+          var d = r.details || {}, ok = r.actie === 'lead_genoteerd';
+          return '<tr><td class="t">' + tijd(r.ts) + '</td><td>' + esc(r.verkoper_naam) + '</td><td>' + esc(gem(r)) + '</td><td><b>' + esc(d.site) + '</b></td><td>' + nf(d.plaatsen) + '</td>' +
+            '<td class="m">' + (d.cabine ? esc(d.cabine) + ' · ' + nf(d.cabine_m) + ' m' + (d.cabine_afname ? '<br>' + esc(d.cabine_afname) : '') : '–') + '</td>' +
+            '<td><span class="tag ' + (ok ? 'lead' : 'nee') + '">' + (ok ? '⭐ lead' : '✕ geen lead') + '</span></td><td>' + esc(d.opmerking || '') + '</td>' +
+            '<td>' + (d.lat ? '<a href="https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng + '" target="_blank" rel="noopener">📍</a>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="leeg">Nog geen leads genoteerd in deze periode.</div>';
+
+      // --- tijdlijn
+      var tl = rows.slice(0, 400);
+      document.getElementById('tijdlijn').innerHTML = tl.length ? '<table><thead><tr><th>Tijd</th><th>Adviseur</th><th>Actie</th><th>Gemeente</th><th>Details</th></tr></thead><tbody>' +
+        tl.map(function(r){
+          var d = r.details || {}, x = [];
+          if (d.site) x.push('<b>' + esc(d.site) + '</b>' + (d.plaatsen ? ' (' + nf(d.plaatsen) + ' pl.)' : ''));
+          if (d.cabine && r.actie !== 'parking_bekeken') x.push('cabine ' + esc(d.cabine));
+          if (d.cabine_m != null && r.actie === 'parking_bekeken') x.push('cabine op ' + nf(d.cabine_m) + ' m');
+          if (d.duur_s != null) x.push('duur ' + duur(d.duur_s) + (d.parkings_bekeken != null ? ' · ' + d.parkings_bekeken + ' parkings bekeken' : ''));
+          if (r.actie === 'kaart_geopend') x.push(nf(d.parkings) + ' parkings · ' + nf(d.cabines) + ' cabines');
+          if (r.actie === 'filter') x.push(esc([d.zoek ? '“' + d.zoek + '”' : '', d.min_plaatsen ? '≥' + d.min_plaatsen + ' pl.' : '', d.band ? 'met band' : '', d.enkel_leads ? 'enkel leads' : ''].filter(Boolean).join(' · ')) + ' → ' + nf(d.resultaat));
+          if (r.actie === 'kaart_beweging') x.push('zoom ' + d.zoom);
+          if (d.laag) x.push(esc(d.laag));
+          if (d.bron && r.actie === 'gemeente_gekozen') x.push('via ' + esc(d.bron));
+          if (d.metriek) x.push(esc(d.metriek));
+          if (d.gewest) x.push(esc(d.gewest) + (d.aan ? ' aan' : ' uit'));
+          if (d.opmerking) x.push('“' + esc(d.opmerking) + '”');
+          var cls = r.actie === 'lead_genoteerd' ? 'lead' : (r.actie === 'geen_lead' ? 'nee' : (r.actie === 'kaart_geopend' ? 'open' : ''));
+          return '<tr><td class="t">' + tijd(r.ts) + '</td><td>' + esc(r.verkoper_naam) + '</td><td><span class="tag ' + cls + '">' + esc(ACTIE_LBL[r.actie] || r.actie) + '</span></td><td>' + esc(gem(r)) + '</td><td class="m">' + x.join(' · ') + '</td></tr>';
+        }).join('') + '</tbody></table>' + (rows.length > 400 ? '<div class="m" style="font-size:12px;margin-top:6px">Enkel de laatste 400 getoond — filter verder.</div>' : '') : '<div class="leeg">Geen handelingen voor deze filter.</div>';
+    }
+
+    document.getElementById('f-per').addEventListener('change', laden);
+    document.getElementById('f-ref').addEventListener('click', laden);
+    document.getElementById('f-adv').addEventListener('change', render);
+    document.getElementById('f-act').addEventListener('change', render);
+    document.getElementById('f-zoek').addEventListener('input', render);
+    document.getElementById('kaarten').addEventListener('click', function(e){
+      var k = e.target.closest('.kaart'); if (!k) return;
+      var s = document.getElementById('f-adv'); s.value = (s.value === k.getAttribute('data-id')) ? '' : k.getAttribute('data-id'); render();
+    });
+
+    laden().then(function(){ timer = setInterval(function(){ if (document.visibilityState === 'visible') laden(); }, 60000); });
+  })();
+  </script>
+</body>
+</html>
