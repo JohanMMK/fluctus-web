@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
 <!-- Gebruikersbeheer v1.9 (15-10, Johan): alle kiesbare portal-tegels in de eerste rij — actief links, minder gebruikt rechts (grijs, met scheidingslijn); Academy niet meer automatisch (standaard uit, per gebruiker aan te zetten); tegels met «of via …» (Energie-Compas/Mijn klanten via EnergieKompas, Laadplein via Simulator). -->
+<!-- Gebruikersbeheer v1.10 (16-10, Johan): tegels volgen de MijnEC-regels (server ≥ 15.320.0) — rol-standaard (std) + toekenningen − per gebruiker uitgezet (uit); kolommen Energiemarkt, Projecten, Energie-Compas, Lead Generator, … (Simulator = beheer, niet toe te kennen); rol → klant = tegels weg. -->
 <!-- Gebruikersbeheer v1.9 (16-10, Johan): partnermanager enkel via Contracten (ondertekenaar ziet de projecten van zijn domein, server ≥ 15.318.0) — de rol partnermanager is niet meer te kiezen (bestaande = adviseur) en het bedrijfsveld is enkel info. -->
 <!-- Gebruikersbeheer v1.8 (26-08, Fase 2): rollen partnermanager/klant erbij + bedrijf/EPC-veld per gebruiker (action:'company'). Bedrijf = scopingsleutel: partnermanager ziet alle projecten van dat bedrijf. Vereist server v15.93.0. // v1.7 (09-08): geen mail bij verwijderen (enkel lokale export) + terminologie 'verkoper'→'adviseur' (rol-waarde seller ongewijzigd). // v1.6 (09-08): authHeaders() async → altijd live token (fix 401 "niet ingelogd" op manager-acties na token-expiry). // v1.5 (08-08): "Preview"-knop per rij = dry-run van het verwijderen (server v15.64.0): toont
      hoeveel scenario’s/Kamino zouden herlinken naar oekene, wat er zou verwijderd worden, of GitHub-token + Brevo
@@ -96,16 +97,19 @@
   //   aan te zetten (staat standaard uit). 'via' = de tegel verschijnt ook als de gebruiker die (oudere) app heeft
   //   (portal ≥ v1.17.0: tegel zichtbaar bij eigen toekenning OF toekenning van de via-app). Manager-only tegels
   //   (Gebruikers, Mandaten, Projecten, Profiel-import, Demo, Hulpvragen, EPC-campagne) zijn niet toe te kennen.
+  // v1.10 (Johan 16-10): kolommen volgen de lagen van MijnEC — iedereen (Energiemarkt, Projecten) · adviseurs (Energie-Compas,
+  //   Lead Generator) · minder gebruikt. Simulator = beheer (enkel managers) → niet meer toe te kennen. Een vinkje 'std' = standaard
+  //   via de rol; uitvinken bewaart 'uit' voor die gebruiker (server ≥ 15.320.0), aanvinken heft dat op of kent extra toe.
   var APPS = [
-    { id:'ek',            naam:'Energie-Compas', via:'energiekompas' },
-    { id:'simulator',     naam:'Simulator' },
     { id:'energiemarkt',  naam:'Energiemarkt' },
+    { id:'projecten',     naam:'Projecten' },
+    { id:'ek',            naam:'Energie-Compas' },
     { id:'gemeenteplan',  naam:'Lead Generator' },
     { id:'adviseur',      naam:'Mijn klanten', via:'energiekompas', passief:true },
     { id:'energiekompas', naam:'EnergieKompas', passief:true },
     { id:'academy',       naam:'Academy', passief:true },
     { id:'kamino',        naam:'Kamino', passief:true },
-    { id:'betaalplein',   naam:'Laadplein', via:'simulator', passief:true },
+    { id:'betaalplein',   naam:'Laadplein', passief:true },
     { id:'thuisladen',    naam:'Thuisladen', passief:true },
     { id:'jacops',        naam:'Jacops', passief:true, geenTegel:true },
   ];
@@ -154,11 +158,13 @@
   }
 
   // Heeft gebruiker toegang tot app? Managers = alles; anders eigen grant of grant van de via-app.
-  function heeftToegang(u, appId){
+  function heeftToegang(u, appId){   // v1.10: rol-standaard + toekenning (+ via-app) − uitgezet
     var app = APPS.filter(function(a){ return a.id===appId; })[0];
     if(u.role==='manager') return true;
+    if((u.uit||[]).indexOf(appId)>=0) return false;
+    if((u.standaard||[]).indexOf(appId)>=0) return true;
     if((u.apps||[]).indexOf(appId)>=0) return true;
-    return !!(app && app.via && (u.apps||[]).indexOf(app.via)>=0);
+    return !!(app && app.via && (u.apps||[]).indexOf(app.via)>=0 && (u.uit||[]).indexOf(app.via)<0);
   }
 
   function filtered(){
@@ -183,7 +189,7 @@
           '<div class="veld"><label>Bedrijf</label><input type="text" id="inv-bedrijf" placeholder="Bedrijfsnaam"></div>'+
           '<button id="inv-btn" class="gr">Uitnodigen</button>'+
         '</div>'+
-        '<p class="hint">Nieuwe gebruikers krijgen rol <b>adviseur</b> en een uitnodigingsmail. Tools (ook de <b>Academy</b>) ken je hieronder toe — standaard staat alles uit.</p>'+
+        '<p class="hint">Nieuwe gebruikers krijgen rol <b>adviseur</b> en een uitnodigingsmail. Iedereen krijgt standaard Energiemarkt + Projecten, adviseurs ook Energie-Compas + Lead Generator (<b>std</b>). Per gebruiker zet je elke tegel aan of uit (<b style="color:#B42318">uit</b> = standaardtegel voor die gebruiker uitgezet). Wie geen adviseur meer is, verliest zijn tegels.</p>'+
         '<div class="msg" id="inv-msg"></div>'+
       '</div>'+
       '<div class="kaart">'+
@@ -254,12 +260,15 @@
     var appsCells=APPS.map(function(a){
       var mgr=u.role==='manager';
       var kanNiet=!u.auth_uid;
-      var eigen=(u.apps||[]).indexOf(a.id)>=0, viaV=!!(a.via && (u.apps||[]).indexOf(a.via)>=0 && !eigen);
-      var checked=(mgr || eigen || viaV) ? ' checked' : '';
+      var eigen=(u.apps||[]).indexOf(a.id)>=0, std=(u.standaard||[]).indexOf(a.id)>=0, uit=(u.uit||[]).indexOf(a.id)>=0;
+      var viaV=!!(a.via && heeftToegang(u, a.via) && !eigen && !std);
+      var aan=mgr || (!uit && (std || eigen || viaV));
+      var checked=aan ? ' checked' : '';
       var dis=(mgr || kanNiet || viaV) ? ' disabled' : '';
-      var tip = mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : (viaV ? 'title="Zichtbaar via de toegang tot '+esc(_appNaam(a.via))+' — trek die in om deze tegel apart te beheren"' : ''));
+      var tip = mgr ? 'title="Managers hebben automatisch alle tools"' : (kanNiet ? 'title="Gebruiker moet eerst inloggen"' : (viaV ? 'title="Zichtbaar via de toegang tot '+esc(_appNaam(a.via))+' — zet die uit om deze tegel apart te beheren"' : (uit ? 'title="Standaard via de rol, maar voor deze gebruiker uitgezet"' : (std ? 'title="Standaard via de rol — uitvinken zet hem enkel voor deze gebruiker uit"' : ''))));
+      var tag = mgr ? '' : (uit ? '<div class="noaid" style="color:#B42318">uit</div>' : (std ? '<div class="noaid" style="color:#1E7A42">std</div>' : ''));
       return '<td class="app'+(a.passief?' passief':'')+(_eersteP(a)?' grens':'')+'"><input type="checkbox" class="app-toggle" id="'+rid+'_'+a.id+'" data-app="'+a.id+'"'+checked+dis+' '+tip+'>'+
-        (kanNiet && !mgr ? '<div class="noaid">·</div>' : '')+'</td>';
+        (kanNiet && !mgr ? '<div class="noaid">·</div>' : tag)+'</td>';
     }).join('');
     var deact = st==='active'
       ? '<button class="sec" id="'+rid+'_deact">Deactiveren</button>'
@@ -363,7 +372,10 @@
       var r=await fetch(PROXY+'/api/manager/app-access',{ method:(aan?'POST':'DELETE'), headers:await authHeaders(), body:JSON.stringify({ user_id:u.auth_uid, app_id:appId, app_naam:_naam }) });
       cb.disabled=false;
       if(!r.ok){ cb.checked=!aan; var j=await r.json().catch(function(){return {};}); var _reden=(j.error||('fout '+r.status)); gmsg('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+' ('+_reden+').','err'); alert('Kon toegang niet '+(aan?'toekennen':'intrekken')+' voor '+u.email+':\n\n'+_reden); return; }   // v1.1: fout ook in alert (de #g-msg staat onder de tabel, dus buiten beeld bij een lange lijst)
-      u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan) u.apps.push(appId);
+      var _jr=await r.json().catch(function(){return {};});
+      u.apps=(u.apps||[]).filter(function(x){ return x!==appId; }); if(aan && (u.standaard||[]).indexOf(appId)<0) u.apps.push(appId);
+      u.uit=(u.uit||[]).filter(function(x){ return x!==appId; }); if(!aan && _jr && _jr.uit) u.uit.push(appId);   // v1.10
+      try{ renderTable(); }catch(eR){}
       gmsg((aan?'Toegang tot '+appId+' toegekend aan ':'Toegang tot '+appId+' ingetrokken bij ')+u.email+'.','ok');
       $('tel').textContent='· '+filtered().length+' van '+USERS.length+' gebruikers';
     }catch(e){ cb.disabled=false; cb.checked=!aan; gmsg('Netwerkfout bij toegang wijzigen: '+e.message,'err'); alert('Netwerkfout bij toegang wijzigen voor '+u.email+':\n\n'+e.message); }
@@ -371,7 +383,7 @@
 
   async function zetRol(u, role){
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'role', email:u.email, role:role }) });
-    if(r.ok){ u.role=role; renderTable(); } else { alert('Kon rol niet wijzigen ('+r.status+').'); renderTable(); }
+    if(r.ok){ var _j=await r.json().catch(function(){return {};}); if(_j && _j.tegels_gewist) gmsg(u.email+' is geen adviseur meer — zijn toegekende tegels zijn ingetrokken.','ok'); await laadUsers(); } else { alert('Kon rol niet wijzigen ('+r.status+').'); renderTable(); }   // v1.10: herladen (standaardtegels volgen de rol)
   }
   async function zetBedrijf(u, company){   // v1.8 (Fase 2): bedrijf/EPC-scopingsleutel instellen
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'company', email:u.email, company:company }) });
