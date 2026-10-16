@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.73.0">
+<meta name="ek-build" content="0.73.1">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.73.1 (2026-10-16, Johan): herinterpolatie gebruikt ook de eigen combi's (exact doorgerekend via «Pas aan») als steunpunt. -->
 <!-- ek.html v0.73.0 (2026-10-16, Johan): ROOSTER — EXACT vs GESCHAT ZICHTBAAR + HERINTERPOLEREN. (1) Exact doorgerekende cellen (ankers uit de sweep + cellen die na een klik exact berekend werden) krijgen een groen puntje rechtsboven; geschatte (geïnterpoleerde) cellen staan schuin, grijzer en met een stippelrand. Legende onder de roosters. (2) Knop «↻ Herinterpoleer met N nieuwe exacte cellen» onder de roosters: de exact berekende cellen (niet de eigen combi's met eigen prijs) worden extra steunpunten → per batterij-rij lineair tussen de dichtstbijzijnde exacte cellen links en rechts (PV-as) i.p.v. enkel tussen de sweep-ankers. Geselecteerde geschatte cel + rapport volgen mee. Nieuwe sweep = nieuw rooster (opnieuw enkel ankers). -->
 <!-- ek.html v0.72.1 (2026-10-16, Johan): RESULTATENSCHERM — naast de gekozen configuratie in het kader «Dimensionering» (bij «📄 Toon rapport») staan nu ook de CAPEX en de terugverdientijd van die combinatie (zelfde cijfers als «Totale investering» / «Terugverdientijd» in het investeringsdetail). -->
 <!-- ek.html v0.72.0 (2026-10-16, Johan): PROFIEL UIT DE FACTUURMAIL (server ≥ 15.305.0) — zat er een verbruiksprofiel (csv/txt/tsv/xls/xlsx/xlsm/zip) bij de factuurmail, dan toont EK bij het openen «📈 We vonden een verbruiksprofiel in je mail», leest het bestand in (zip via JSZip, Excel via SheetJS), vraagt welke reeks (of welk bestand) afname en welke injectie is, toont jaarvolume + % gemeten en bewaart het profiel na bevestiging (pagina herlaadt). Niet herkend → adviseur verwerkt het manueel (back-office-mail). Ook «Later» en «Dit is geen verbruiksprofiel». -->
@@ -1682,11 +1683,11 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _subdiv(ax){ var s=ax.slice().sort(function(a,b){return a-b;}),o=[]; for(var i=0;i<s.length;i++){ o.push(s[i]); if(i<s.length-1){ var m=Math.round((s[i]+s[i+1])/2); if(m>s[i]&&m<s[i+1]) o.push(m); } } return o; }
   function _bracket(ax,v){ var s=ax.slice().sort(function(a,b){return a-b;}),lo=s[0],hi=s[s.length-1]; for(var i=0;i<s.length;i++){ if(s[i]<=v) lo=s[i]; } for(var j=s.length-1;j>=0;j--){ if(s[j]>=v) hi=s[j]; } return {lo:lo,hi:hi,t:(hi>lo)?((v-lo)/(hi-lo)):0}; }
   // v0.73.0 (Johan): HERINTERPOLATIE — na «↻ Herinterpoleer» tellen de exact berekende cellen (H.herIp, zonder eigen-prijs-combi's)
-  //   mee als steunpunt: per batterij-rij lineair tussen de dichtstbijzijnde exacte cel links en rechts op de PV-as.
+  //   (ook je eigen combi's uit «Pas aan», v0.73.1) mee als steunpunt: per batterij-rij lineair tussen de dichtstbijzijnde exacte cel links en rechts op de PV-as.
   function _hmHerIpHoeken(H,ry,cx){
     if(!H.herIp || H.realRows.indexOf(ry)<0) return null;
     var P=[]; H.realCols.forEach(function(c){ var r=H.realFind(ry,c); if(r) P.push({x:c,c:r}); });
-    Object.keys(H.herIp).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && !e._custom && e._ry===ry && !P.some(function(q){return q.x===e._cx;})) P.push({x:e._cx,c:e}); });
+    Object.keys(H.herIp).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && e._ry===ry && !P.some(function(q){return q.x===e._cx;})) P.push({x:e._cx,c:e}); });
     if(P.length<2) return null;
     P.sort(function(a,b){return a.x-b.x;});
     var lo=P[0],hi=P[P.length-1]; P.forEach(function(q){ if(q.x<=cx) lo=q; }); for(var i=P.length-1;i>=0;i--){ if(P[i].x>=cx) hi=P[i]; }
@@ -1907,7 +1908,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(card) card.classList.remove('hidden');
   }
   // v0.73.0 (Johan): legende exact/geschat + knop «↻ Herinterpoleer» onder de roosters.
-  function _hmNieuweExact(H){ var n=0; Object.keys(H.computed||{}).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && !e._custom && !(H.herIp&&H.herIp[k])) n++; }); return n; }
+  function _hmNieuweExact(H){ var n=0; Object.keys(H.computed||{}).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && !(H.herIp&&H.herIp[k])) n++; }); return n; }
   function _hmHerIpUI(){
     var el=$('hm-herip'), H=HM; if(!el) return;
     if(!H || !H.interp){ el.innerHTML=''; el.style.display='none'; return; }
@@ -1922,7 +1923,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   function _hmHerinterpoleer(){
     var H=HM; if(!H || !H.interp) return;
-    H.herIp=H.herIp||{}; Object.keys(H.computed||{}).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && !e._custom) H.herIp[k]=true; });
+    H.herIp=H.herIp||{}; Object.keys(H.computed||{}).forEach(function(k){ var e=H.computed[k]; if(e && e._exact) H.herIp[k]=true; });
     // geselecteerde/aanbevolen geschatte cel opnieuw opbouwen met de nieuwe steunpunten
     try{ if(H.sel && H.sel._interp && !H.sel._exact){ var ns=_cellAt(H,H.sel._ry,H.sel._cx); if(ns) H.sel=ns; } }catch(e){}
     try{ if(H.best && H.best._interp && !H.best._exact){ var nb=_cellAt(H,H.best._ry,H.best._cx); if(nb) H.best=nb; } }catch(e){}
