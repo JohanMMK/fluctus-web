@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
+<!-- projecten.html v0.10.0 (2026-10-16, Johan): iedereen die inlogt (server ≥ 15.316.0) — niet-managers zien «Mijn projecten»: enkel hun eigen projecten (adviseur/klant/indiener), enkel «Open» (adviseur → invoerscherm, klant → zijn project), geen filters/archief/beheeracties. -->
 <!-- projecten.html (15-10, Johan): navigatieknoppen enkel voor oekene@gmail.com; iedereen ziet «← Naar MijnEC» (mijnec-knop.js) rechtsboven. -->
 <!-- projecten.html v0.9.0 (2026-10-13, Johan) — mailadres van wie het project indiende (✉, server ≥ 15.290 indiener_mail) onder de klant; zoekbaar.
      projecten.html v0.8.0 (2026-10-10, Johan) — knop "📜 Log" per project (lead) → apps/projectlog.html (server ≥ 15.265).
@@ -97,9 +98,9 @@
   <div class="wrap">
     <div class="bar">
       <input type="search" id="zoek" placeholder="Zoek op naam, klant, adviseur, partner of project-ID…">
-      <label><input type="checkbox" id="fEkBezocht"> 👁 bezocht op EK</label>
-      <label><input type="checkbox" id="fEkInput"> ✍ input op EK</label>
-      <label><input type="checkbox" id="toonArchief"> toon archief</label>
+      <label class="mgr-only"><input type="checkbox" id="fEkBezocht"> 👁 bezocht op EK</label>
+      <label class="mgr-only"><input type="checkbox" id="fEkInput"> ✍ input op EK</label>
+      <label class="mgr-only"><input type="checkbox" id="toonArchief"> toon archief</label>
       <span class="telling" id="telling"></span>
     </div>
     <div class="bulk" id="bulk" hidden>
@@ -115,7 +116,7 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
-    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, EKBEZ=false, EKINP=false, SEL=new Set(), EANMAP={};
+    var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, EKBEZ=false, EKINP=false, SEL=new Set(), EANMAP={}, BEPERKT=false, IS_ADV=false;   // v0.10.0: BEPERKT = geen manager → enkel eigen projecten, geen beheeracties
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
     function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear(); }catch(e){ return '—'; } }
 
@@ -144,10 +145,13 @@
       var r;
       try{ r = await fetch(PROXY+'/api/kamino/projecten-overzicht?_='+Date.now()+(ARCHIEF?'&archief=1':''), { headers: await authHeaders(), cache:'no-store' }); }
       catch(e){ $('root').innerHTML='<div class="fout">Kan de server niet bereiken: '+esc(e.message)+'</div>'; return; }
-      if(r.status===403){ $('root').innerHTML='<div class="fout">Enkel voor managers.<br><a href="https://www.energie-compas.eu/login">← naar MijnEC</a></div>'; return; }
+      if(r.status===403){ $('root').innerHTML='<div class="fout">Geen toegang.<br><a href="https://www.energie-compas.eu/login">← naar MijnEC</a></div>'; return; }
       if(r.status===401){ window.location.href='https://www.energie-compas.eu/login'; return; }
       if(!r.ok){ $('root').innerHTML='<div class="fout">Fout bij ophalen ('+r.status+').</div>'; return; }
       var j = await r.json(); DATA = (j&&j.projecten)||[];
+      BEPERKT=!!(j&&j.beperkt); IS_ADV=!!(j&&j.adviseur);   // v0.10.0 (server ≥ 15.316.0)
+      document.querySelectorAll('.mgr-only').forEach(function(e){ e.style.display=BEPERKT?'none':''; });
+      if(BEPERKT){ var zk=$('zoek'); if(zk) zk.placeholder='Zoek in je projecten…'; var h1=document.querySelector('.top h1'); if(h1) h1.textContent='📁 Mijn projecten'; render(); return; }
       // v0.4.0: EAN's per project ophalen (voor de actie-modal, dezelfde als in fluvius-acties). Los-entries mappen
       // op hun seed_project_id. Niet-blokkerend.
       EANMAP={};
@@ -201,7 +205,17 @@
       var rows = DATA.filter(matchZoek);
       GEFILTERD = rows.map(function(p){ return p.id; });
       $('telling').textContent = rows.length + ' project'+(rows.length===1?'':'en') + (ARCHIEF?' (incl. archief)':'');
-      if(!rows.length){ $('root').innerHTML='<div class="state">Geen projecten gevonden.</div>'; syncSelAll(); updateBulk(); return; }
+      if(!rows.length){ $('root').innerHTML='<div class="state">'+(BEPERKT?'Je hebt nog geen projecten. Stuur je factuur naar dossier@energie-compas.eu om er een te starten.':'Geen projecten gevonden.')+'</div>'; syncSelAll(); updateBulk(); return; }
+      if(BEPERKT){   // v0.10.0: eenvoudige lijst van de eigen projecten — enkel openen, geen beheeracties
+        var hb='<table><thead><tr><th>Project</th><th>'+(IS_ADV?'Klant':'Adviseur')+'</th><th>Bijgewerkt</th><th></th></tr></thead><tbody>';
+        rows.forEach(function(p){
+          var url=p.lead_token?('/apps/ek.html?case='+encodeURIComponent(p.lead_token)+(IS_ADV?'&adv=1&invoer=1':'')):null;
+          hb+='<tr><td><div class="naam">'+esc(p.naam)+'</div>'+(p.adres?('<div class="sub">'+esc(p.adres)+'</div>'):'')+'<div class="id">'+esc(p.id)+'</div></td>'+
+            '<td>'+esc((IS_ADV?p.klant:p.adviseur)||'—')+'</td><td class="sub">'+kort(p.bijgewerkt)+'</td>'+
+            '<td><div class="rowbtns">'+(url?'<a class="btn" href="'+url+'">Open</a>':'<span class="sub">nog niet te openen</span>')+'</div></td></tr>';
+        });
+        $('root').innerHTML=hb+'</tbody></table>'; return;
+      }
       var h='<table><thead><tr>'+
         '<th class="chk"><input type="checkbox" id="selAll" onclick="toggleAlle(this.checked)" title="Selecteer alle (gefilterde)"></th>'+
         '<th>Project</th><th>Klant / indiener / adviseur</th><th>Status</th><th>Volgende actie</th><th>Bijgewerkt</th><th></th></tr></thead><tbody>';
