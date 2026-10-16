@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Contracten · Energie-Compas</title>
+<!-- contracten.html v1.1.0 (2026-10-16, Johan, server ≥ 15.311.0): TOEGANG VIA E-MAILDOMEIN — veld «Toegangsdomein» (website/URL
+     van de partner) i.p.v. een lijst uit te nodigen gebruikers: iedereen met een e-mail op dat domein werkt als adviseur, vanaf
+     het moment dat het contract bestaat. Schakelaar 🔓/🔒 in de lijst en in de editor zet die toegang in één keer aan/uit. -->
 <!-- contracten.html v1.0.0 (2026-10-16, Johan): SAMENWERKINGSOVEREENKOMSTEN (server ≥ 15.307.0) — Brelco-model (Energie-Compas
      No Cure No Pay + optioneel business development). Manueel invullen → live voorbeeld → concept bewaren → ter ondertekening
      mailen (teken-link) → partner tekent digitaal op /apps/contract.html → status «getekend» met ondertekeningsbewijs.
@@ -46,6 +49,9 @@
   .fout{background:#FEF2F2;border:1px solid #F2C7C7;color:#8a1f1f;padding:12px;border-radius:10px} .state{color:var(--muted);padding:20px}
   .modal{position:fixed;inset:0;background:rgba(15,22,40,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
   .modal>div{background:#fff;border-radius:14px;max-width:560px;width:100%;padding:18px}
+  .tg{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;background:#fff;white-space:nowrap}
+  .tg.aan{background:#E6F6EC;border-color:#BFE6CC;color:#0a7d3c} .tg.uit{background:#FEF2F2;border-color:#F2C7C7;color:#8a1f1f}
+  .tgbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -76,27 +82,35 @@
   function renderLijst(){
     VIEW='lijst';
     var h='<div class="bar"><button class="btn p" id="nieuw">＋ Nieuw contract</button><button class="btn" id="ververs">↻ Vernieuwen</button><span class="sub">Sjabloon: '+esc(SJ?SJ.naam:'—')+'</span></div>';
-    h+='<div class="wrap"><table><thead><tr><th>Referentie</th><th>Partner</th><th>Ondertekenaar</th><th>Status</th><th>Laatst gewijzigd</th><th>Verstuurd</th><th>Getekend</th><th></th></tr></thead><tbody>';
-    if(!LIJST.length) h+='<tr><td colspan="8"><div class="state">Nog geen contracten. Klik op «＋ Nieuw contract».</div></td></tr>';
+    h+='<div class="wrap"><table><thead><tr><th>Referentie</th><th>Partner</th><th>Ondertekenaar</th><th>Status</th><th>Toegang</th><th>Laatst gewijzigd</th><th>Verstuurd</th><th>Getekend</th><th></th></tr></thead><tbody>';
+    if(!LIJST.length) h+='<tr><td colspan="9"><div class="state">Nog geen contracten. Klik op «＋ Nieuw contract».</div></td></tr>';
     LIJST.forEach(function(c){
       var verl=(c.status==='verstuurd'&&c.teken_tot&&Date.now()>c.teken_tot);
       h+='<tr class="klik" data-id="'+esc(c.id)+'"><td><b>'+esc(c.referentie)+'</b></td><td>'+esc(c.partner_naam||'—')+'<div class="sub">'+esc(c.partner_mail||'')+'</div></td><td>'+esc(c.ondertekenaar||'—')+'</td>'+
-        '<td><span class="st st-'+esc(c.status)+'">'+esc(ST[c.status]||c.status)+'</span>'+(verl?'<div class="sub warn">link verlopen</div>':'')+'</td><td>'+esc(datum(c.gewijzigd_ts))+'<div class="sub">'+esc(c.door||'')+'</div></td>'+
+        '<td><span class="st st-'+esc(c.status)+'">'+esc(ST[c.status]||c.status)+'</span>'+(verl?'<div class="sub warn">link verlopen</div>':'')+'</td><td>'+toegangCel(c)+'</td><td>'+esc(datum(c.gewijzigd_ts))+'<div class="sub">'+esc(c.door||'')+'</div></td>'+
         '<td>'+esc(datum(c.verstuurd_ts))+'</td><td>'+esc(datum(c.getekend_ts))+'</td><td style="white-space:nowrap"><button class="btn" data-kopie="'+esc(c.id)+'" title="Nieuw contract met dezelfde afspraken">⧉ Kopie</button></td></tr>';
     });
     h+='</tbody></table></div>';
     $('root').innerHTML=h;
     $('nieuw').onclick=function(){ openEditor(null); };
     $('ververs').onclick=async function(){ await laadLijst(); renderLijst(); };
-    Array.prototype.forEach.call(document.querySelectorAll('tr[data-id]'),function(tr){ tr.onclick=function(e){ if(e.target.closest('[data-kopie]')) return; openEditor(tr.getAttribute('data-id')); }; });
-    Array.prototype.forEach.call(document.querySelectorAll('[data-kopie]'),function(b){ b.onclick=async function(e){ e.stopPropagation(); try{ var j=await api('/api/contract/get?id='+encodeURIComponent(b.getAttribute('data-kopie'))); var v=Object.assign({},j.contract.velden); ['partner_naam','partner_adres','partner_btw','partner_vert_naam','partner_vert_functie','partner_mail','contactpersonen','gebruikers','afspraken_ref','nda_datum'].forEach(function(k){ v[k]=''; }); openEditor(null, v); }catch(err){ alert(err.message); } }; });
+    Array.prototype.forEach.call(document.querySelectorAll('tr[data-id]'),function(tr){ tr.onclick=function(e){ if(e.target.closest('[data-kopie]')||e.target.closest('[data-tg]')) return; openEditor(tr.getAttribute('data-id')); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tg]'),function(b){ b.onclick=async function(e){ e.stopPropagation(); var id=b.getAttribute('data-tg'), c=LIJST.filter(function(x){return x.id===id;})[0]; if(!c) return; var aan=c.toegang_aan===false;
+      if(!aan&&!confirm('Toegang voor iedereen met een e-mail op @'+c.domein+' afzetten?')) return;
+      b.disabled=true; try{ await api('/api/contract/toegang',{ id:id, aan:aan }); await laadLijst(); renderLijst(); }catch(err){ b.disabled=false; alert(err.message); } }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-kopie]'),function(b){ b.onclick=async function(e){ e.stopPropagation(); try{ var j=await api('/api/contract/get?id='+encodeURIComponent(b.getAttribute('data-kopie'))); var v=Object.assign({},j.contract.velden); ['partner_naam','partner_adres','partner_btw','partner_vert_naam','partner_vert_functie','partner_mail','contactpersonen','gebruikers','toegang_domein','afspraken_ref','nda_datum'].forEach(function(k){ v[k]=''; }); openEditor(null, v); }catch(err){ alert(err.message); } }; });
   }
 
+  function toegangCel(c){
+    if(!c.domein) return '<span class="sub">op uitnodiging</span>';
+    var aan=c.toegang_aan!==false;
+    return '<button class="tg '+(aan?'aan':'uit')+'" data-tg="'+esc(c.id)+'" title="Klik om de toegang '+(aan?'af':'aan')+' te zetten">'+(aan?'🔓 aan':'🔒 uit')+'</button><div class="sub">@'+esc(c.domein)+'</div>';
+  }
   // ── Editor ──
   var VELDEN=[
     ['Partner (opdrachtgever)',[ ['partner_naam','Naam onderneming','text'], ['partner_adres','Adres (straat, postcode, gemeente)','area2'], ['partner_btw','BTW-nummer','text'] ]],
     ['Ondertekenaar partner',[ ['partner_vert_naam','Naam','text'], ['partner_vert_functie','Functie (bv. CEO, zaakvoerder)','text'], ['partner_mail','E-mail (krijgt de teken-link)','email'] ]],
-    ['Contact & toegang',[ ['contactpersonen','Contactpersonen (één per regel)','area'], ['gebruikers','Uit te nodigen gebruikers Energie-Compas (één per regel)','area'], ['afspraken_ref','Verwijzing naar de afspraken (bv. «de mailwisseling van 9 en 14 oktober 2026»)','text'] ]],
+    ['Contact & toegang',[ ['contactpersonen','Contactpersonen (één per regel)','area'], ['toegang_domein','Toegangsdomein — website of e-maildomein van de partner (bv. brelco.be). Iedereen met een e-mail op dit domein werkt als adviseur, vanaf nu.','text'], ['gebruikers','Uit te nodigen gebruikers (oud — enkel zonder toegangsdomein)','area','alsGevuld'], ['afspraken_ref','Verwijzing naar de afspraken (bv. «de mailwisseling van 9 en 14 oktober 2026»)','text'] ]],
     ['Energie-Compas',[ ['whitelabel','White-label: rapporten op naam en in de huisstijl van de partner','chk'], ['offerte_optie','Optie offerte vanuit het platform (opschortende voorwaarde technische inspectie)','chk'], ['imby','Onboarding bij imby inbegrepen','chk'] ]],
     ['No Cure No Pay',[ ['ncnp_maanden','Termijn na laatste simulatie (maanden)','num'], ['melding_dagen','Melding verkoop binnen (kalenderdagen)','num'], ['betaal_dagen','Betaling binnen (dagen na factuurdatum)','num'] ]],
     ['Vergoeding per site (excl. btw, EUR)',[ ['tarief_part','Particulier','num'], ['tarief_ls','Laagspanning (LS)','num'], ['tarief_ms','Middenspanning (MS)','num'] ]],
@@ -106,6 +120,7 @@
   ];
   function veldHtml(f, v, dis){
     var k=f[0], lab=f[1], t=f[2], val=v[k], d=dis?' disabled':'';
+    if(f[3]==='alsGevuld' && !String(val==null?'':val).trim()) return '';
     if(t==='chk') return '<label class="chk"><input type="checkbox" data-v="'+k+'"'+(val?' checked':'')+d+'> '+esc(lab)+'</label>';
     if(t==='area'||t==='area2') return '<label>'+esc(lab)+'</label><textarea data-v="'+k+'" rows="'+(t==='area2'?2:3)+'"'+d+'>'+esc(val==null?'':val)+'</textarea>';
     return '<label>'+esc(lab)+'</label><input type="'+(t==='num'?'number':(t==='email'?'email':'text'))+'"'+(t==='num'?' step="any" min="0"':'')+' data-v="'+k+'" value="'+esc(val==null?'':val)+'"'+d+'>';
@@ -123,6 +138,11 @@
     h+='<div class="ed"><div class="form">';
     if(c.status==='verstuurd') h+='<div class="info">⏳ Verstuurd naar <b>'+esc(c.verstuurd_naar||'')+'</b> op '+esc(datum(c.verstuurd_ts))+(c.mail?(c.mail.sent?' (mail vertrokken)':' — <span class="err">mail niet vertrokken'+(c.mail.reden&&c.mail.reden!=='niet gevraagd'?': '+esc(c.mail.reden):'')+'</span>'):'')+'. Link geldig tot '+esc(datum(c.teken_tot))+'.<br>Wijzigt u de tekst, dan vervalt de verstuurde link en moet u opnieuw versturen.</div>';
     if(c.status==='getekend'&&c.getekend) h+='<div class="info ok">✔ Getekend door <b>'+esc(c.getekend.naam)+'</b> ('+esc(c.getekend.functie)+', '+esc(c.getekend.mail||'')+') op '+esc(datum(c.getekend.ts))+' · IP '+esc(c.getekend.ip||'?')+'<br>SHA-256 <code>'+esc(c.getekend.hash||'')+'</code>'+(c.getekend.hash===c.hash?' — identiek aan de verzonden tekst':' — <span class="err">AFWIJKEND</span>')+'</div>';
+    if(c.id){
+      if(c.toegang_domein){ var aan=c.toegang_aan!==false;
+        h+='<div class="info tgbox"><span>Toegang als adviseur voor iedereen met een e-mail op <b>@'+esc(c.toegang_domein)+'</b></span><button class="tg '+(aan?'aan':'uit')+'" id="tg">'+(aan?'🔓 aan — klik om af te zetten':'🔒 uit — klik om aan te zetten')+'</button></div>';
+      } else h+='<div class="info">Geen toegangsdomein ingevuld — vul de website van de partner in (bv. brelco.be) en bewaar om iedereen van de partner toegang te geven.</div>';
+    }
     VELDEN.forEach(function(g){ h+='<fieldset><legend>'+esc(g[0])+'</legend>';
       var nums=g[1].filter(function(f){return f[2]==='num';});
       if(nums.length===3 && g[1].length===3) h+='<div class="rij3">'+g[1].map(function(f){ return '<div>'+veldHtml(f,v,dis)+'</div>'; }).join('')+'</div>';
@@ -145,6 +165,7 @@
     if($('kopieer')) $('kopieer').onclick=function(){ kopieer(c.teken_link); };
     if($('print')) $('print').onclick=afdrukken;
     if($('intrek')) $('intrek').onclick=intrekken;
+    if($('tg')) $('tg').onclick=wisselToegang;
     voorbeeld();
   }
   function msg(t,cls){ var m=$('msg'); if(m){ m.className='msg '+(cls||''); m.innerHTML=t; } }
@@ -152,13 +173,14 @@
   async function voorbeeld(){
     try{ var body=(CUR.id&&!DIRTY)?{ id:CUR.id }:{ id:CUR.id||undefined, velden:leesVelden() };
       var j=await api('/api/contract/voorbeeld', body); var f=$('prev'); if(f) f.srcdoc=j.html;
+      if(j.domein_fout&&CUR.status!=='getekend') msg('Toegangsdomein: '+esc(j.domein_fout),'err'); else
       if(j.ontbrekend&&j.ontbrekend.length&&CUR.status!=='getekend') msg('Nog in te vullen vóór verzenden: '+j.ontbrekend.map(lbl).join(', ')+'.','warn'); else if(CUR.status!=='getekend' && $('msg') && /Nog in te vullen/.test($('msg').textContent)) msg('');
     }catch(e){ msg('Voorbeeld lukte niet: '+esc(e.message),'err'); }
   }
   function lbl(k){ var r=k; VELDEN.forEach(function(g){ g[1].forEach(function(f){ if(f[0]===k) r=f[1]; }); }); return r.replace(/ \(.*\)$/,''); }
   async function bewaar(stil){
     try{ var j=await api('/api/contract/opslaan',{ id:CUR.id||undefined, velden:leesVelden() }); var oudStatus=CUR.status; CUR=j.contract; DIRTY=false;
-      renderEditor(); if(!stil) msg(oudStatus==='verstuurd'&&CUR.status==='concept'?'💾 Bewaard. De tekst wijzigde: de eerder verstuurde link is ongeldig — verstuur opnieuw.':'💾 Concept bewaard ('+esc(CUR.referentie)+').', oudStatus==='verstuurd'&&CUR.status==='concept'?'warn':'ok');
+      renderEditor(); if(j.domein_fout){ msg('💾 Bewaard, maar het toegangsdomein werd niet aanvaard: '+esc(j.domein_fout),'err'); return true; } if(!stil) msg(oudStatus==='verstuurd'&&CUR.status==='concept'?'💾 Bewaard. De tekst wijzigde: de eerder verstuurde link is ongeldig — verstuur opnieuw.':'💾 Concept bewaard ('+esc(CUR.referentie)+').', oudStatus==='verstuurd'&&CUR.status==='concept'?'warn':'ok');
       return true;
     }catch(e){ msg('Bewaren lukte niet: '+esc(e.message),'err'); return false; }
   }
@@ -188,6 +210,11 @@
       var html=await r.text(); var w=window.open('','_blank'); if(!w){ msg('Pop-up geblokkeerd — sta pop-ups toe voor deze pagina.','warn'); return; }
       w.document.open(); w.document.write(html); w.document.close(); setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} },700);
     }catch(e){ msg('Afdrukken lukte niet: '+esc(e.message),'err'); }
+  }
+  async function wisselToegang(){
+    var aan=CUR.toegang_aan===false;
+    if(!aan&&!confirm('Toegang voor iedereen met een e-mail op @'+CUR.toegang_domein+' afzetten?')) return;
+    try{ var j=await api('/api/contract/toegang',{ id:CUR.id, aan:aan }); CUR=j.contract; renderEditor(); msg(aan?'🔓 Toegang staat aan voor @'+esc(CUR.toegang_domein)+'.':'🔒 Toegang afgezet voor @'+esc(CUR.toegang_domein)+'.', aan?'ok':'warn'); }catch(e){ msg(esc(e.message),'err'); }
   }
   async function intrekken(){
     if(!confirm(CUR.status==='verstuurd'?'De teken-link ongeldig maken en het contract intrekken?':'Dit concept archiveren (status ingetrokken)?')) return;
