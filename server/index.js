@@ -57,6 +57,24 @@ if (fs.existsSync(DIST)) {
     }
     next();
   });
+  // 2026-10-16 (Johan): MijnEC = het enige portaal. (a) app.energie-compas.eu (apps + klantlinks) toont nooit de Fluctus-site/portal:
+  //   elk extensieloos pad, /index.html en /portal.html → www.energie-compas.eu (zelfde pad; /portal.html → /login).
+  //   (b) Op de EC-hosts zelf: /portal.html → /login en /index.html → / (anders serveerde static de Fluctus-pagina's).
+  app.use((req, res, next) => {
+    const host = String(req.hostname || '').toLowerCase();
+    if (req.path.startsWith('/api/')) return next();
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    if (host === 'app.energie-compas.eu') {
+      if (req.path === '/portal.html') return res.redirect(302, 'https://www.energie-compas.eu/login');
+      if (req.path === '/index.html') return res.redirect(302, 'https://www.energie-compas.eu/' + qs);
+      if (!path.extname(req.path)) return res.redirect(302, 'https://www.energie-compas.eu' + req.path + qs);
+    }
+    if (EC_HOSTS.has(host)) {
+      if (req.path === '/portal.html') return res.redirect(302, '/login');
+      if (req.path === '/index.html') return res.redirect(302, '/' + qs);
+    }
+    next();
+  });
   // Host-routing voor de Energie-Compas-site: clean URLs op de root van energie-compas.eu.
   app.use((req, res, next) => {
     const host = String(req.hostname || '').toLowerCase();
