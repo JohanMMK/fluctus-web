@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Overeenkomst ondertekenen · Energie-Compas</title>
+<link rel="icon" href="/favicon-ec-32.png">
+<!-- contract.html v1.0.0 (2026-10-16, Johan): publieke ondertekenpagina (server ≥ 15.307.0). ?t=<teken-token> → overeenkomst
+     nalezen, naam + functie + getekende handtekening + akkoord → POST /api/contract/teken. Na ondertekening: getekende versie
+     met ondertekeningsbewijs, afdrukken / bewaren als PDF. Geen login nodig (de link zelf is persoonlijk). -->
+<style>
+  :root{--navy:#14203a;--green:#05b050;--line:#d6e0ec;--muted:#54617a;--bg:#f4f7fb}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);font:15px/1.55 Poppins,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy)}
+  .top{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px}
+  .top img{height:30px} .top span{color:var(--muted);font-size:13px}
+  main{max-width:900px;margin:0 auto;padding:16px}
+  .doc{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .doc iframe{width:100%;border:0;display:block;min-height:70vh}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:16px}
+  h2{margin:0 0 6px;font-size:18px}
+  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:6px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit}
+  .rij{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media (max-width:600px){.rij{grid-template-columns:1fr}}
+  .pad{border:1.5px dashed #9fb1c9;border-radius:12px;background:#fbfcfe;position:relative;touch-action:none}
+  .pad canvas{display:block;width:100%;height:170px;cursor:crosshair}
+  .pad .hint{position:absolute;left:12px;bottom:8px;font-size:12px;color:#9aa6b8;pointer-events:none}
+  .chk{display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:14px;color:var(--navy)} .chk input{margin-top:4px;width:18px;height:18px}
+  .btn{display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;color:var(--navy);text-decoration:none}
+  .btn.p{background:var(--green);border-color:var(--green);color:#fff} .btn:disabled{opacity:.5;cursor:default}
+  .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+  .msg{margin-top:10px;font-size:14px} .err{color:#8a1f1f} .ok{color:#0a7d3c}
+  .banner{background:#e6f6ec;border:1px solid #bfe6cd;border-radius:14px;padding:14px 16px;margin-bottom:16px}
+  .banner.warn{background:#fff3d6;border-color:#f1d08a}
+  .state{padding:40px 16px;text-align:center;color:var(--muted)}
+  .small{font-size:12.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><img src="/apps/ec-logo.png" alt="Energie-Compas"><span>Elektronische ondertekening</span></div>
+<main id="root"><div class="state">Overeenkomst laden…</div></main>
+<script>
+  var $=function(id){return document.getElementById(id);};
+  var PROXY='', T=new URLSearchParams(location.search).get('t')||'', INFO=null, GETEKEND_PAD=false;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function tijd(ts){ try{ return new Date(ts).toLocaleString('nl-BE',{ timeZone:'Europe/Brussels' }); }catch(e){ return ''; } }
+  function toonDoc(html){ var f=$('doc'); if(!f) return; f.srcdoc=html; f.onload=function(){ try{ var d=f.contentDocument; f.style.height=Math.max(600,d.documentElement.scrollHeight+20)+'px'; }catch(e){} }; }
+  function render(){
+    var i=INFO, h='';
+    if(i.status==='getekend'){
+      h+='<div class="banner"><div class="eyebrow">Ondertekend</div><b>'+esc(i.partner_naam)+'</b> — referentie '+esc(i.referentie)+'<br>Ondertekend door '+esc(i.getekend.naam)+' ('+esc(i.getekend.functie)+') op '+esc(tijd(i.getekend.ts))+'.'+
+        '<div class="acts"><button class="btn p" id="print">🖨️ Afdrukken / bewaren als PDF</button></div></div>';
+    } else if(i.status!=='verstuurd'){
+      h+='<div class="banner warn">Deze overeenkomst kan niet meer ondertekend worden. Neem contact op met Fluctus (admin@fluctus.net).</div>';
+    } else if(i.verlopen){
+      h+='<div class="banner warn">De termijn om te ondertekenen is verstreken. Vraag een nieuwe link aan Fluctus (admin@fluctus.net).</div>';
+    } else {
+      h+='<div class="banner"><div class="eyebrow">Ter ondertekening</div>Samenwerkingsovereenkomst <b>'+esc(i.referentie)+'</b> tussen Fluctus.net CVSO en <b>'+esc(i.partner_naam)+'</b>. Lees de overeenkomst hieronder na en onderteken onderaan.</div>';
+    }
+    h+='<div class="doc"><iframe id="doc" title="Overeenkomst"></iframe></div>';
+    if(i.status==='verstuurd' && !i.verlopen){
+      h+='<div class="card" id="teken"><div class="eyebrow">Ondertekenen</div><h2>Onderteken namens '+esc(i.partner_naam)+'</h2>'+
+        '<div class="rij"><div><label for="naam">Naam</label><input type="text" id="naam" autocomplete="name" value="'+esc(i.ondertekenaar.naam||'')+'"></div>'+
+        '<div><label for="functie">Functie</label><input type="text" id="functie" value="'+esc(i.ondertekenaar.functie||'')+'"></div></div>'+
+        '<label>Handtekening</label><div class="pad"><canvas id="pad"></canvas><span class="hint" id="hint">Teken hier met muis, vinger of pen</span></div>'+
+        '<div class="acts" style="margin-top:6px"><button class="btn" id="wis" type="button">Wissen</button></div>'+
+        '<label class="chk"><input type="checkbox" id="akk"> <span>Ik heb de overeenkomst gelezen, aanvaard ze en ben gemachtigd om ze namens <b>'+esc(i.partner_naam)+'</b> te ondertekenen.</span></label>'+
+        '<div class="acts"><button class="btn p" id="ok" type="button">✍️ Onderteken</button><span class="small">Bij ondertekening registreren we uw naam, functie, e-mailadres ('+esc(i.ondertekenaar.mail||'')+'), het tijdstip en uw IP-adres.</span></div>'+
+        '<div class="msg" id="msg"></div></div>';
+    }
+    $('root').innerHTML=h; toonDoc(i.html);
+    if($('print')) $('print').onclick=afdrukken;
+    if($('pad')) initPad();
+    if($('ok')) $('ok').onclick=teken;
+  }
+  var PAD={ leeg:true };
+  function initPad(){
+    var c=$('pad'), ctx=null, teken=false, last=null;
+    function maat(){ var r=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1; var oud=PAD.leeg?null:c.toDataURL(); c.width=Math.round(r.width*dpr); c.height=Math.round(r.height*dpr); ctx=c.getContext('2d'); ctx.scale(dpr,dpr); ctx.lineWidth=2.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#14203a';
+      if(oud){ var im=new Image(); im.onload=function(){ ctx.drawImage(im,0,0,r.width,r.height); }; im.src=oud; } }
+    maat(); window.addEventListener('resize',maat);
+    function pos(e){ var r=c.getBoundingClientRect(); return { x:e.clientX-r.left, y:e.clientY-r.top }; }
+    c.addEventListener('pointerdown',function(e){ teken=true; last=pos(e); c.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.arc(last.x,last.y,1,0,7); ctx.fillStyle='#14203a'; ctx.fill(); PAD.leeg=false; PAD.n=(PAD.n||0)+1; $('hint').style.display='none'; e.preventDefault(); });
+    c.addEventListener('pointermove',function(e){ if(!teken) return; var p=pos(e); ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke(); last=p; PAD.n=(PAD.n||0)+1; e.preventDefault(); });
+    ['pointerup','pointercancel','pointerleave'].forEach(function(ev){ c.addEventListener(ev,function(){ teken=false; }); });
+    $('wis').onclick=function(){ var r=c.getBoundingClientRect(); ctx.clearRect(0,0,r.width,r.height); PAD.leeg=true; PAD.n=0; $('hint').style.display=''; };
+  }
+  function padPng(){ // bijsnijden tot de getekende zone, wit vlak → transparant behouden
+    var c=$('pad'), ctx=c.getContext('2d'), w=c.width, h=c.height, d=ctx.getImageData(0,0,w,h).data, x0=w, y0=h, x1=0, y1=0;
+    for(var y=0;y<h;y+=2) for(var x=0;x<w;x+=2){ if(d[(y*w+x)*4+3]>10){ if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; } }
+    if(x1<=x0||y1<=y0) return null;
+    var m=8; x0=Math.max(0,x0-m); y0=Math.max(0,y0-m); x1=Math.min(w,x1+m); y1=Math.min(h,y1+m);
+    var o=document.createElement('canvas'), sc=Math.min(1,600/(x1-x0)); o.width=Math.round((x1-x0)*sc); o.height=Math.round((y1-y0)*sc);
+    o.getContext('2d').drawImage(c,x0,y0,x1-x0,y1-y0,0,0,o.width,o.height); return o.toDataURL('image/png');
+  }
+  async function teken(){
+    var m=$('msg'), naam=$('naam').value.trim(), functie=$('functie').value.trim();
+    m.className='msg err';
+    if(naam.length<3||functie.length<2){ m.textContent='Vul uw naam en functie in.'; return; }
+    if(PAD.leeg||(PAD.n||0)<8){ m.textContent='Plaats uw handtekening in het vak.'; return; }
+    if(!$('akk').checked){ m.textContent='Vink aan dat u de overeenkomst gelezen hebt en aanvaardt.'; return; }
+    var png=padPng(); if(!png){ m.textContent='Plaats uw handtekening in het vak.'; return; }
+    $('ok').disabled=true; m.className='msg'; m.textContent='⏳ Bezig met ondertekenen…';
+    try{ var r=await fetch(PROXY+'/api/contract/teken',{ method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ t:T, naam:naam, functie:functie, akkoord:true, handtekening:png }) });
+      var j=await r.json().catch(function(){ return {}; });
+      if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+      INFO.status='getekend'; INFO.getekend={ naam:naam, functie:functie, ts:j.ts }; INFO.html=j.html; render(); window.scrollTo({ top:0, behavior:'smooth' });
+    }catch(e){ $('ok').disabled=false; m.className='msg err'; m.textContent=e.message; }
+  }
+  function afdrukken(){ var f=$('doc'); try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ window.open(PROXY+'/api/contract/document?t='+encodeURIComponent(T),'_blank'); } }
+  (async function(){
+    try{
+      if(!T){ $('root').innerHTML='<div class="state">Deze link is onvolledig.</div>'; return; }
+      try{ var rc=await fetch('/api/config'); var cfg=await rc.json(); PROXY=(cfg.fluctusProxyUrl||'').replace(/\/+$/,''); }catch(e){}
+      if(!PROXY) PROXY='https://lucid-amazement-production.up.railway.app';
+      var r=await fetch(PROXY+'/api/contract/teken-info?t='+encodeURIComponent(T)+'&cb='+Date.now(),{ cache:'no-store' }); var j=await r.json().catch(function(){ return {}; });
+      if(!r.ok||!j.ok){ $('root').innerHTML='<div class="state">'+esc(j.error||'Deze link is niet (meer) geldig.')+'</div>'; return; }
+      INFO=j; render();
+    }catch(e){ $('root').innerHTML='<div class="state">De overeenkomst kon niet geladen worden. Probeer het later opnieuw.</div>'; }
+  })();
+</script>
+</body>
+</html>
