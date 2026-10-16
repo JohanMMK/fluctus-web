@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.75.0">
+<meta name="ek-build" content="0.76.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.76.0 (2026-10-16, Johan): SCENARIONAAM — leeg veld naast CAPEX/terugverdientijd in «Dimensionering» (adviseursweergave). De naam gaat mee in de rapport-payload (scenario) → klantrapport ≥ v0.50.0 toont hem vetjes rechtsboven op elke pagina en op de cover. Bewaard per dossier in deze browser (localStorage EK_SCENARIO_<dossier>). -->
 <!-- ek.html v0.75.0 (2026-10-16, Johan): (1) VASTE BOVENBALK — de merkbalk staat altijd bovenaan (sticky) op invoer- en resultatenscherm: Energie-Compas-logo, klantnaam, NL/FR/EN, Klantweergave, ← Naar MijnEC; de rest scrolt eronder. (2) De twee KPI-kaders boven de roosters («📊 KPI's voor de nieuwe opstelling» en «Betalend laadplein — opbrengst & dekking») worden niet meer getoond — de roosters zijn het startpunt (de cijfers blijven intern berekend voor rapport/paycards). -->
 <!-- ek.html v0.74.1 (2026-10-16, Johan): FIX — exact doorgerekende cellen (dubbelklik, «volledig rooster exact», eigen combi's, offerte-cellen) namen de betalend-laadplein-cijfers (betalend, per_type) van /api/energiekompas/bedrijf-cel niet over → plaza-marge viel weg in die cellen: rooster-rendement 18 % terwijl het rapport (met marge) 61 % gaf (Fit-Out Destelbergen, 250/522 + 450 kWp). Nu mee overgenomen → rooster = KPI = rapport. -->
 <!-- ek.html v0.74.0 (2026-10-16, Johan): ROOSTER VOLLEDIG EXACT + DUBBELKLIK. (1) De knop «↻ Herinterpoleer» is vervangen door «⚡ Reken het volledige rooster exact (N cellen)»: alle geschatte cellen worden exact doorgerekend (max. 2 tegelijk, voortgang 3/8, cellen worden live groen-gestipt); daarna is het rooster volledig exact. (2) Eén klik op een cel = selecteren (met de schatting); DUBBELKLIK = die cel exact laten herberekenen (touch-action:manipulation zodat dubbeltikken op gsm niet zoomt). Uitleg: «± geschat — dubbelklik voor de exacte berekening». -->
@@ -886,6 +887,7 @@
         <h2 style="color:var(--navy);margin:0">Dimensionering</h2>
         <span id="dim-combo" style="font-size:15px;font-weight:600;color:var(--navy)"></span>
         <span id="dim-kpi" style="display:none;gap:8px;flex-wrap:wrap"></span>   <!-- v0.72.1: CAPEX + terugverdientijd van de gekozen combinatie -->
+        <input type="text" id="dim-scenario" class="hidden" maxlength="80" placeholder="Scenarionaam (rechtsboven in het rapport)" title="Verschijnt vetjes rechtsboven op elke pagina van het rapport" data-i18n-skip="1" style="flex:1 1 220px;min-width:200px;max-width:340px;font:inherit;font-size:13.5px;font-weight:700;padding:5px 12px;border:1px solid var(--greenln);border-radius:999px;background:#fff;color:var(--navy)">   <!-- v0.76.0 -->
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn sm" type="button" onclick="toonKlantrapport()">📄 Toon rapport</button>
@@ -1930,7 +1932,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{ n=(typeof STATE_KLANT!=='undefined'&&STATE_KLANT)?STATE_KLANT:''; }catch(e){}
     if(!n){ var ik=$('i-klant'); if(ik&&ik.value) n=ik.value.trim(); }
     if(el.textContent!==n){ el.textContent=n; el.title=n; } }
-  try{ setInterval(function(){ try{ _ekBarNaam(); }catch(e){} }, 1500); }catch(e){}
+  // v0.76.0 (Johan): scenarionaam per dossier bewaren (deze browser) en terugzetten zodra het dossier gekend is.
+  var _ekScenKey=null;
+  function _ekScenSleutel(){ try{ return 'EK_SCENARIO_'+(STATE_CODE||new URLSearchParams(location.search).get('case')||''); }catch(e){ return null; } }
+  function _ekScenarioLaad(){ var el=$('dim-scenario'); if(!el) return; var k=_ekScenSleutel(); if(!k||k===_ekScenKey) return; _ekScenKey=k;
+    try{ el.value=localStorage.getItem(k)||''; }catch(e){}
+    if(!el._ekBound){ el._ekBound=true; el.addEventListener('input',function(){ try{ var kk=_ekScenSleutel(); if(kk){ if(el.value.trim()) localStorage.setItem(kk,el.value); else localStorage.removeItem(kk); } }catch(e){} }); } }
+  try{ setInterval(function(){ try{ _ekBarNaam(); _ekScenarioLaad(); }catch(e){} }, 1500); }catch(e){}
   function _hmGeschatteCellen(H){ var L=[]; var rows=H.rows.slice(), cols=H.cols.slice();
     rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); if(a && a._interp && !a._exact) L.push([ry,cx]); }); }); return L; }
   // v0.74.0 (Johan): legende + knop «⚡ Reken het volledige rooster exact» (alle geschatte cellen exact doorrekenen).
@@ -3344,7 +3352,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var hb=$('ek-hulpadv-blok'); if(hb) hb.classList.toggle('hidden', !(adviseur && TOKEN && (window._EK_HULP||[]).length));   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
       var evt=$('ev-tab'); if(evt) evt.classList.toggle('ev-klant', !_ekAdvView());   // v0.50.3: betalend/kW/€/kWh enkel in de adviseursweergave
       var cm=$('btn-concept'); if(cm) cm.style.display=adviseur?'inline-block':'none';
-      var mec=$('ek-mijnec'); if(mec) mec.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));   // v0.70.3: «← Naar MijnEC» voor adviseurs/oekene, niet in klantweergave   // v0.70.2: concept-mail met rapport enkel voor oekene
+      var mec=$('ek-mijnec'); if(mec) mec.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));
+      var scn=$('dim-scenario'); if(scn) scn.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));   // v0.76.0: scenarionaam enkel voor adviseurs   // v0.70.3: «← Naar MijnEC» voor adviseurs/oekene, niet in klantweergave   // v0.70.2: concept-mail met rapport enkel voor oekene
       var ov=$('btn-off-volgen'); if(ov) ov.style.display=adviseur?'inline-block':'none';   // v0.37.0 (Johan): offertes volgen enkel voor oekene   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
       var cab=$('ek-cabine-blok'); if(cab){ cab.classList.toggle('hidden', !adviseur); if(adviseur && $('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:''); }   // v0.34 (Johan): kVA bestaande cabine enkel voor oekene
       var sp=$('ek-spanning-ovr-blok'); if(sp) sp.classList.toggle('hidden', !adviseur);   // v0.24.24: LS/MS-override enkel voor oekene
@@ -3862,6 +3871,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       project_id: STATE_CODE||'', datum: datum, ek_link: _ekLink,
       particulier: _ekIsPart(), klanttype: (_ekIsPart()?'particulier':'bedrijf'),   // v0.36 (Johan): klantrapport past het particulier-pad toe (geen recurrente kosten, geen onbalans/windfall, …)
       klant: { naam: STATE_KLANT||'', btw: STATE_BTW||'' },
+      scenario: (function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,80):''; }catch(eS){ return ''; } })(),   // v0.76.0: scenarionaam
       creg_eur_per_mwh: 322,
       huidig_all_in_jaar: Math.round(+C.kostNu||0),   // v0.24.9 (Johan): de ECHTE all-in jaarfactuur (excl btw) → "uw huidige contract" = dit bedrag
       factuur: j.factuur, heat: j.heat, combi: j.combi, battwaarde: battwaarde,
