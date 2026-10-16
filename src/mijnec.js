@@ -1,4 +1,4 @@
-// mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.9.0 — 2026-10-16 — (1) tegel '📝 Contracten' enkel voor oekene@gmail.com (oekeneOnly); (2) SNELLER: tegels van de vorige keer meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback: oude checks), niet opnieuw renderen bij INITIAL_SESSION/TOKEN_REFRESHED, config + Supabase-lib parallel. mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
 // v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
@@ -44,6 +44,7 @@ const APP_CATALOG = [
   { id: 'profiel-import', naam: 'Profiel-import', ico: '📉', beschrijving: 'Verbruiksprofiel (CSV/Excel, elk formaat) omzetten naar een gemeten profiel bij een project.', url: '/apps/profiel-import.html', managerOnly: true },
   { id: 'demo', naam: 'Demo', ico: '🎬', beschrijving: 'Demo klantbeleving: per bezoeker elke stap met tijdstip, interesse- en vlot-score.', url: '/apps/demo.html', managerOnly: true },   // 2026-10-11 (Johan): demo-overzicht
   { id: 'hulp', naam: 'Hulpvragen', ico: '🙋', beschrijving: 'Hulpvragen van klanten en demo-bezoekers: open, beantwoord of gebeld — beantwoorden in het project.', url: '/apps/hulp.html', managerOnly: true },   // 2026-10-11 (Johan): hulpvragen
+  { id: 'contracten', naam: 'Contracten', ico: '📝', beschrijving: 'Samenwerkingsovereenkomsten (Brelco-model) opmaken, ter ondertekening sturen en digitaal laten tekenen.', url: '/apps/contracten.html', oekeneOnly: true },   // v1.9.0 (Johan 16-10): enkel oekene
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
 ];
 
@@ -72,7 +73,8 @@ async function initAuth() {
   sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   const { data } = await sb.auth.getSession();
   SESSION = data.session;
-  sb.auth.onAuthStateChange((_e, s) => { SESSION = s; render(); });
+  // v1.9.0: enkel opnieuw renderen als de gebruiker wisselt (niet bij INITIAL_SESSION/TOKEN_REFRESHED)
+  sb.auth.onAuthStateChange((_e, s) => { SESSION = s; const uid = (s && s.user && s.user.id) || null; if (uid !== _renderUid) render(); });
   render();
 }
 
@@ -143,12 +145,29 @@ async function hulpTeller(token) {
   } catch (e) { /* stil */ }
 }
 
-async function toegankelijkeApps(token) {
+async function toegankelijkeApps(token, email) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly);   // v1.8.0: ook gatedBy-tegels apart checken
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly);   // v1.8.0: ook gatedBy-tegels apart checken
   const verleend = new Set();
   let role = 'seller';
-  await Promise.all(echte.map(async (app) => {
+  // v1.9.0: één bulk-request (proxy ≥ 15.306.0); lukt dat niet → de oude check per tegel.
+  let bulkOk = false;
+  try {
+    const r = await fetch(`${base}/api/app-access/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ app_ids: echte.map((a) => a.id) }),
+    });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.toegang) {
+        bulkOk = true;
+        if (j.user && j.user.role) role = j.user.role;
+        Object.keys(j.toegang).forEach((id) => { if (j.toegang[id]) verleend.add(id); });
+      }
+    }
+  } catch (e) { /* fallback hieronder */ }
+  if (!bulkOk) await Promise.all(echte.map(async (app) => {
     try {
       const r = await fetch(`${base}/api/app-access/check`, {
         method: 'POST',
@@ -162,6 +181,7 @@ async function toegankelijkeApps(token) {
     } catch (e) { /* verborgen bij fout */ }
   }));
   return APP_CATALOG.filter((a) => {
+    if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.9.0
     if (a.altijd) return true;
     if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';
@@ -180,7 +200,7 @@ function renderLauncher(apps) {
     return;
   }
   // v1.8.0 (Johan 15-10): minder gebruikte tegels onderaan onder een lijn, gedempt — enkel in de manager-portal.
-  const isManager = apps.some((a) => a.managerOnly);
+  const isManager = apps.some((a) => a.managerOnly || a.oekeneOnly);
   if (isManager) {
     const actief = apps.filter((a) => !NIET_ACTIEF.has(a.id)), passief = apps.filter((a) => NIET_ACTIEF.has(a.id));
     if (actief.length && passief.length) apps = actief.concat([{ _scheiding: true }], passief);
@@ -203,17 +223,40 @@ function renderLauncher(apps) {
   });
 }
 
+// v1.9.0: tegel-cache per gebruiker (enkel app-id's; toegang wordt altijd opnieuw gecontroleerd).
+let _renderUid = null;
+let _renderNr = 0;
+function tegelsUitCache(uid, email) {
+  try {
+    const ids = JSON.parse(localStorage.getItem('EC_MIJNEC_TEGELS_' + uid) || 'null');
+    if (!Array.isArray(ids)) return null;
+    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter((a) => a && (!a.oekeneOnly || String(email || '').toLowerCase() === 'oekene@gmail.com'));
+  } catch (e) { return null; }
+}
+function tegelsInCache(uid, apps) {
+  try { localStorage.setItem('EC_MIJNEC_TEGELS_' + uid, JSON.stringify(apps.map((a) => a.id))); } catch (e) { /* geen opslag */ }
+}
+
 async function render() {
   const loggedIn = !!SESSION;
   $('gate').classList.toggle('hidden', loggedIn);
   $('app').classList.toggle('hidden', !loggedIn);
   $('portal-logout').classList.toggle('hidden', !loggedIn);
-  if (!loggedIn) { $('portal-user').textContent = ''; return; }
+  if (!loggedIn) { _renderUid = null; _renderNr++; $('portal-user').textContent = ''; return; }
   const user = SESSION.user || {};
   $('portal-user').textContent = user.email || '';
   $('hi-naam').textContent = user.email ? (', ' + user.email.split('@')[0]) : '';
-  renderLauncher(await toegankelijkeApps(SESSION.access_token));
-  hulpTeller(SESSION.access_token);   // v1.6.0
+  // v1.9.0: tegels van de vorige keer meteen tonen, daarna bijwerken met de echte toegang.
+  const uid = user.id || '';
+  _renderUid = uid;
+  const nr = ++_renderNr;
+  const vorige = tegelsUitCache(uid, user.email);
+  if (vorige && vorige.length) { renderLauncher(vorige); hulpTeller(SESSION.access_token); }
+  const apps = await toegankelijkeApps(SESSION.access_token, user.email);
+  if (nr !== _renderNr || !SESSION) return;
+  const nieuw = apps.map((a) => a.id).join(',');
+  if (!vorige || vorige.map((a) => a.id).join(',') !== nieuw) { renderLauncher(apps); hulpTeller(SESSION.access_token); }
+  tegelsInCache(uid, apps);
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -223,6 +266,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('portal-logout').onclick = logout;
   $('login-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
   $('login-email').addEventListener('keydown', (e) => { if (e.key === 'Enter' && $('stap-code').classList.contains('hidden')) sendCode(); });
-  try { await loadConfig(); await initAuth(); }
+  try { const lib = injectSupabase().catch((e) => e); await loadConfig(); const fout = await lib; if (fout instanceof Error) throw fout; await initAuth(); }   // v1.9.0: parallel
   catch (e) { $('login-msg').textContent = T.initFout + e.message; }
 });
