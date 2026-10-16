@@ -1,3 +1,4 @@
+// mijnec.js v1.11.0 — 2026-10-16 — MijnEC in drie lagen: (1) iedereen die inlogt: Energiemarkt + Projecten (eigen projecten); (2) erkende adviseurs: Lead Generator + Energie-Compas; (3) beheer enkel managers (David + Johan): Simulator, Gebruikers, Mandaten, Profiel-import, Demo, Hulpvragen, Lead Generator — opvolging, Contracten (oekene); daaronder «Minder gebruikt». Vereist proxy ≥ 15.316.0.
 // mijnec.js v1.10.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». mijnec.js v1.10.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). mijnec.js v1.9.0 — 2026-10-16 — (1) tegel '📝 Contracten' enkel voor oekene@gmail.com (oekeneOnly); (2) SNELLER: tegels van de vorige keer meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback: oude checks), niet opnieuw renderen bij INITIAL_SESSION/TOKEN_REFRESHED, config + Supabase-lib parallel. mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
 // v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
@@ -35,12 +36,12 @@ const APP_CATALOG = [
   { id: 'energiemarkt', naam: 'Energiemarkt',     ico: '📈', beschrijving: 'Marktdata (spot & onbalans) — werkt de simulatiedata bij.', url: '/apps/energiemarkt.html' },
   { id: 'gemeenteplan', naam: 'Lead Generator',     ico: '🎯', beschrijving: 'Kies een gemeente → kaart met bedrijfsparkings en middenspanningscabines om nieuwe leads te vinden.', url: '/apps/gemeenteplan.html' },
   { id: 'kamino',       naam: 'Kamino',           ico: '🧭', beschrijving: '4 vragen → antwoord + rapport. Je pad naar maximale elektrificatie.', url: '/apps/kamino.html' },
-  { id: 'simulator',    naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html' },
+  { id: 'simulator',    naam: 'Simulator',        ico: '⚡', beschrijving: 'Factuur → ontwerp → offerte + rapport.', url: '/apps/simulator.html', managerOnly: true },   // v1.11.0: beheer (David + Johan)
   { id: 'betaalplein',  naam: 'Laadplein',        ico: '🔌', beschrijving: 'Bestaande aansluiting → laadplein: schat de laadsessies in, zie rendement + klantrapport.', url: '/apps/simulator.html?flow=betaalplein' },
   { id: 'thuisladen',   naam: 'Thuisladen',       ico: '🏠', beschrijving: 'Cafetariaplan-laadpaal: PV/batterij thuis optimaliseren.', url: '/apps/thuisladen.html' },
   { id: 'gebruikers',   naam: 'Gebruikers',       ico: '👥', beschrijving: 'Toegang tot de tools beheren.', url: '/apps/gebruikers.html', managerOnly: true },
   { id: 'mandaten',     naam: 'Mandaten',         ico: '🗂️', beschrijving: 'Mandaatstatus per EAN + adres-bevestigingen om na te kijken.', url: '/apps/mandaten.html', managerOnly: true },
-  { id: 'projecten',    naam: 'Projecten',        ico: '📁', beschrijving: 'Alle projecten: status, volgende actie en archief — voor managers.', url: '/apps/projecten.html', managerOnly: true },
+  { id: 'projecten',    naam: 'Projecten',        ico: '📁', beschrijving: 'Je projecten openen en opvolgen (managers: alle projecten, status, volgende actie en archief).', url: '/apps/projecten.html' },   // v1.11.0: voor iedereen (server toont enkel eigen projecten)
   { id: 'profiel-import', naam: 'Profiel-import', ico: '📉', beschrijving: 'Verbruiksprofiel (CSV/Excel, elk formaat) omzetten naar een gemeten profiel bij een project.', url: '/apps/profiel-import.html', managerOnly: true },
   { id: 'demo', naam: 'Demo', ico: '🎬', beschrijving: 'Demo klantbeleving: per bezoeker elke stap met tijdstip, interesse- en vlot-score.', url: '/apps/demo.html', managerOnly: true },   // 2026-10-11 (Johan): demo-overzicht
   { id: 'hulp', naam: 'Hulpvragen', ico: '🙋', beschrijving: 'Hulpvragen van klanten en demo-bezoekers: open, beantwoord of gebeld — beantwoorden in het project.', url: '/apps/hulp.html', managerOnly: true },   // 2026-10-11 (Johan): hulpvragen
@@ -48,6 +49,15 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
 ];
+
+// v1.11.0 (Johan 16-10): MijnEC in drie lagen boven «Minder gebruikt»:
+//   laag 1 = iedereen die inlogt (geverifieerd mailadres): Energiemarkt, Projecten (server toont enkel eigen projecten);
+//   laag 2 = erkende adviseurs (profiel in Gebruikers / contract-domein) + managers: Lead Generator, Energie-Compas;
+//   laag 3 = beheer, enkel managers (David + Johan): Simulator, Gebruikers, Mandaten, Profiel-import, Demo, Hulpvragen,
+//            Lead Generator — opvolging (+ Contracten enkel oekene). Daaronder ongewijzigd: «Minder gebruikt».
+const LAAG = { energiemarkt: 1, projecten: 1, gemeenteplan: 2, ek: 2, simulator: 3, gebruikers: 3, mandaten: 3, 'profiel-import': 3, demo: 3, hulp: 3, contracten: 3, 'leadgen-log': 3 };
+const LAAG_LABEL = { 2: _t('Adviseurs', 'Conseillers', 'Advisers'), 3: _t('Beheer', 'Gestion', 'Management'), 4: _t('Minder gebruikt', 'Moins utilisé', 'Less used') };
+function laagVan(a) { return LAAG[a.id] || (NIET_ACTIEF.has(a.id) ? 4 : 3); }
 
 function academyUrl() { return (CFG && CFG.academyUrl) || '/apps/academy.html'; }
 
@@ -150,7 +160,7 @@ async function toegankelijkeApps(token, email) {
   const base = CFG.fluctusProxyUrl || '';
   const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly);   // v1.8.0: ook gatedBy-tegels apart checken
   const verleend = new Set();
-  let role = 'seller';
+  let role = 'seller', isAdv = false, isMgr = false;   // v1.11.0: adviseur/manager-vlag uit de bulk-respons (proxy ≥ 15.316.0)
   // v1.9.0: één bulk-request (proxy ≥ 15.306.0); lukt dat niet → de oude check per tegel.
   let bulkOk = false;
   try {
@@ -164,6 +174,7 @@ async function toegankelijkeApps(token, email) {
       if (j && j.toegang) {
         bulkOk = true;
         if (j.user && j.user.role) role = j.user.role;
+        if (j.user) { isAdv = !!j.user.adviseur; isMgr = !!j.user.manager; }
         Object.keys(j.toegang).forEach((id) => { if (j.toegang[id]) verleend.add(id); });
       }
     }
@@ -181,8 +192,13 @@ async function toegankelijkeApps(token, email) {
       if (j && (j.toegang || j.access || j.ok)) verleend.add(app.id);
     } catch (e) { /* verborgen bij fout */ }
   }));
+  if (role === 'manager') isMgr = true;
   return APP_CATALOG.filter((a) => {
     if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.9.0
+    const laag = laagVan(a);   // v1.11.0
+    if (laag === 1) return true;                                  // iedereen die inlogt
+    if (laag === 2) return isMgr || isAdv || verleend.has(a.id);  // erkende adviseurs + managers
+    if (laag === 3) return isMgr;                                 // beheer: enkel managers
     if (a.altijd) return true;
     if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';
@@ -200,17 +216,21 @@ function renderLauncher(apps) {
     host.innerHTML = '<p class="notice">' + T.geenApps + '</p>';
     return;
   }
-  // v1.8.0 (Johan 15-10): minder gebruikte tegels onderaan onder een lijn, gedempt — enkel in de manager-portal.
-  const isManager = apps.some((a) => a.managerOnly || a.oekeneOnly);
-  if (isManager) {
-    const actief = apps.filter((a) => !NIET_ACTIEF.has(a.id)), passief = apps.filter((a) => NIET_ACTIEF.has(a.id));
-    if (actief.length && passief.length) apps = actief.concat([{ _scheiding: true }], passief);
-  }
+  // v1.11.0 (Johan 16-10): tegels per laag (1 iedereen · 2 adviseurs · 3 beheer · 4 minder gebruikt), met een lijn + label
+  //   tussen de lagen (enkel als er erboven al tegels staan). Laag 4 blijft gedempt.
+  const gesorteerd = [];
+  [1, 2, 3, 4].forEach((l) => {
+    const deel = apps.filter((a) => laagVan(a) === l);
+    if (!deel.length) return;
+    if (gesorteerd.length) gesorteerd.push({ _scheiding: true, label: LAAG_LABEL[l] || '' });
+    deel.forEach((a) => gesorteerd.push(a));
+  });
+  apps = gesorteerd;
   apps.forEach((a) => {
     if (a._scheiding) {
       const sep = document.createElement('div');
       sep.style.cssText = 'grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:10px 0 0;color:#8a94a6;font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase';
-      sep.innerHTML = '<span style="flex:1;height:1px;background:#d9dee7"></span><span>' + _t('Minder gebruikt', 'Moins utilisé', 'Less used') + '</span><span style="flex:1;height:1px;background:#d9dee7"></span>';
+      sep.innerHTML = '<span style="flex:1;height:1px;background:#d9dee7"></span><span>' + a.label + '</span><span style="flex:1;height:1px;background:#d9dee7"></span>';
       host.appendChild(sep);
       return;
     }
@@ -219,7 +239,7 @@ function renderLauncher(apps) {
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
     t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p>${a.beschrijving}</p>`;
-    if (isManager && NIET_ACTIEF.has(a.id)) { t.style.opacity = '.6'; t.style.background = '#f7f8fa'; }
+    if (laagVan(a) === 4) { t.style.opacity = '.6'; t.style.background = '#f7f8fa'; }
     host.appendChild(t);
   });
 }
