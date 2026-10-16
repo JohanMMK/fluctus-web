@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hulpvragen · Energie-Compas</title>
+<!-- hulp.html v0.3.0 (2026-10-16, Johan): reden «inkomende mail» (hulpvraag «Controleer dit project» met de mailtekst als eerste bericht, server ≥ 15.311.0) + adviseur van het project; bij een adviseur gaat het antwoord enkel naar de adviseur. -->
 <!-- hulp.html v0.2.0 (2026-10-15, Johan): HULPVRAAG ALS CHAT (server ≥ 15.302.0) — per vraag «💬 Gesprek»: het hele gesprek (klant ↔ EK) + antwoordvak: ✉️ antwoord mailen (verschijnt ook in het gesprek in EK), 📞 gebeld (afsluiten), ✔ afsluiten zonder mail. Kolom «Laatste bericht»; status open = wacht op ons, een nieuw klantbericht heropent een gesprek. Knop «← Naar MijnEC». -->
 <!-- hulp.html (15-10, Johan): toont «gevraagd door adviseur/manager …» als de hulpvraag uit een adviseurssessie kwam (server ≥ 15.299.0). -->
 <!-- hulp.html v0.1.0 (2026-10-11, Johan): overzicht van ALLE hulpvragen (klanten + demo-bezoekers) uit het centrale register (GET /api/ek/hulp-overzicht, server ≥ 15.272.0). Per vraag: datum, klant + contact, project, reden, vraag, terugbellen, beste TVT, status (open / beantwoord / gebeld) met wacht- of antwoordtijd; links naar het project in EK (adviseursweergave, daar beantwoorden) en de projectlog. Filter open / alle + zoeken. Enkel managers. -->
@@ -58,9 +59,9 @@
     rij.forEach(function(v){
       var ek=WEB+'/apps/ek.html?case='+encodeURIComponent(v.token)+'&adv=1', pl=WEB+'/apps/projectlog.html?token='+encodeURIComponent(v.token);
       h+='<tr><td>'+esc(datum(v.ts))+'</td>'+
-        '<td><b>'+esc(v.naam||'—')+'</b><div class="sub">'+[v.mail?esc(v.mail):'', v.gsm?'📞 '+esc(v.gsm):''].filter(Boolean).join('<br>')+'</div>'+(v.terugbellen?'<div style="color:var(--amber);font-weight:700;font-size:12px">📞 wil teruggebeld worden</div>':'')+'</td>'+
+        '<td><b>'+esc(v.naam||'—')+'</b><div class="sub">'+[v.mail?esc(v.mail):'', v.gsm?'📞 '+esc(v.gsm):'', (v.adviseur&&v.adviseur.email)?'<span style="color:#2a44a8">adviseur '+esc(v.adviseur.naam||v.adviseur.email)+' — antwoord gaat enkel naar '+esc(v.adviseur.email)+'</span>':''].filter(Boolean).join('<br>')+'</div>'+(v.terugbellen?'<div style="color:var(--amber);font-weight:700;font-size:12px">📞 wil teruggebeld worden</div>':'')+'</td>'+
         '<td>'+esc(v.project_id||'—')+(v.demo?'<span class="demo">DEMO</span>':'')+(v.gevraagd_door?'<div style="font-size:11px;color:#6B7689;margin-top:2px">gevraagd door '+esc(v.gevraagd_door.rol||'adviseur')+(v.gevraagd_door.naam||v.gevraagd_door.mail?' · '+esc(v.gevraagd_door.naam||v.gevraagd_door.mail):'')+'</div>':'')+'</td>'+
-        '<td>'+(v.reden==='niet_rendabel'?'geen rendabele combinatie':'knop «Hulp vragen»')+'<div class="sub">'+(v.beste_tvt!=null?'beste TVT '+String(v.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j')+'</div></td>'+
+        '<td>'+(v.reden==='niet_rendabel'?'geen rendabele combinatie':(v.reden==='mail'?'inkomende mail'+(v.onderwerp?' «'+esc(String(v.onderwerp).slice(0,80))+'»':''):'knop «Hulp vragen»'))+'<div class="sub">'+(v.beste_tvt!=null?'beste TVT '+String(v.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j')+'</div></td>'+
         '<td class="vraag">'+esc(v.commentaar||'—')+((v.n_berichten||0)>1?'<div class="sub" style="margin-top:4px">💬 '+v.n_berichten+' berichten · laatste van '+(v.laatste_van==='ek'?'ons':'de klant')+' ('+esc(datum(v.laatste_ts))+')'+(v.laatste_tekst?': «'+esc(String(v.laatste_tekst).slice(0,160))+'»':'')+'</div>':'')+'</td>'+
         '<td><span class="st st-'+esc(v.status||'open')+'">'+(v.status==='open'?'wacht op ons':esc(v.status||'open'))+'</span><div class="sub">'+(v.status==='open'?'wacht '+duur(nu-(+(v.laatste_van==='klant'&&v.laatste_ts||v.ts)||nu)):(esc(v.door||'')+' · '+esc(datum(v.beantwoord_ts))))+'</div></td>'+
         '<td style="white-space:nowrap"><button type="button" data-chat="'+esc(v.token+'|'+v.id)+'" style="border:1px solid var(--line);background:'+(OPEN[v.token+'|'+v.id]?'var(--navy);color:#fff':'#fff')+';border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer">💬 Gesprek</button><br><a href="'+esc(ek)+'" target="_blank" rel="noopener">🔧 Open in EK</a><br><a href="'+esc(pl)+'" target="_blank" rel="noopener">📜 Projectlog</a></td></tr>';
@@ -101,7 +102,7 @@
     var k=b.getAttribute('data-k'), act=b.getAttribute('data-act'), p=k.split('|'), ta=document.querySelector('textarea[data-tx="'+k+'"]'), st=document.querySelector('[data-st="'+k+'"]');
     var tx=(ta&&ta.value||'').trim();
     if(act==='mail' && tx.length<3){ st.style.color='var(--amber)'; st.textContent='Schrijf eerst een antwoord.'; return; }
-    if(act==='mail' && !confirm('Dit antwoord nu naar de klant mailen?')) return;
+    var _vv=((DATA&&DATA.vragen)||[]).find(function(x){ return x.token===p[0] && String(x.id)===String(p[1]); }); if(act==='mail' && !confirm((_vv&&_vv.adviseur&&_vv.adviseur.email)?('Dit project heeft een adviseur — het antwoord gaat enkel naar '+_vv.adviseur.email+'. Nu mailen?'):'Dit antwoord nu naar de klant mailen?')) return;   // v0.3.0
     b.disabled=true; st.style.color=''; st.textContent='⏳ Bezig…';
     try{ var hd=await authHeaders(); hd['Content-Type']='application/json';
       var r=await fetch(PROXY+'/api/ek/hulp-antwoord',{ method:'POST', headers:hd, body:JSON.stringify({ token:p[0], id:p[1], actie:act, antwoord:tx }) });
