@@ -1,4 +1,4 @@
-/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.22, 2026-10-16: + "{#} j" / "> {#} j" (terugverdientijd in jaren); v1.0.21, 2026-10-13: + paid plaza / grid-upgrade labels; v1.0.20, 2026-10-13: + kVA text upgrade needed; v1.0.18, 2026-10-13: + appendix charging obligations; v1.0.17, 2026-10-13: + methodology updated; v1.0.16, 2026-10-13: + impact "For your …", home charging cheaper; v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
+/* en-ec-seg.js — Energie-Compas EN-sjablonen per tekstsegment (v1.0.23, 2026-10-16: + legende exact/geschat + herinterpoleren (ek v0.73.0); v1.0.22, 2026-10-16: + "{#} j" / "> {#} j" (terugverdientijd in jaren); v1.0.21, 2026-10-13: + paid plaza / grid-upgrade labels; v1.0.20, 2026-10-13: + kVA text upgrade needed; v1.0.18, 2026-10-13: + appendix charging obligations; v1.0.17, 2026-10-13: + methodology updated; v1.0.16, 2026-10-13: + impact "For your …", home charging cheaper; v1.0.15, 2026-10-13: + two-decisions logic; v1.0.14, 2026-10-13: + miscellaneous, net investment overview; v1.0.13, 2026-10-13: + texts per PV/battery, grid labels incl. charge points; v1.0.12, 2026-10-13: + advice, contents, cover return; v1.0.11, 2026-10-13: + titles without charge points; v1.0.10, 2026-10-13: + financial plan with charge points; v1.0.9, 2026-10-13: + charging sessions to the company; v1.0.8, 2026-10-12: + curtailed explanation v1.16; v1.0.7, 2026-10-12: + curtailed PV energy balance; v1.0.6, 2026-10-12: + battery export note; v1.0.5, 2026-10-12: + KPI frame EK; v1.0.4, 2026-10-12: + calibration texts; v1.0.3, 2026-10-12: + appendix existing PV; v1.0.2, 2026-10-12: + bestaande PV — injectie sturen; v1.0.1, 2026-10-10: + voortgangspaneel simulatie; v1.0.0, Johan: "ook een Engelse versie").
    Zelfde NL-sleutels als fr-ec-seg.js (EC_FR_SEG) → zelfde dekking; gebruikt door i18n-ec.js v0.3.0 als ?lang=en.
    Onderhoudsregel: nieuwe NL-tekst in ek/klantrapport krijgt een entry in fr-ec-seg.js ÉN en-ec-seg.js.
    Controle: EN-render, dan Array.from(EC_MISSING). Terminologie: offtake, injection, grid connection, access power, peak,
@@ -946,6 +946,14 @@ window.EC_EN_SEG = {
 "⏳ opslaan…": "⏳ saving…",
 "✔ bewaard": "✔ saved",
 "✔ exact doorgerekend": "✔ calculated exactly",
+"exact doorgerekend": "calculated exactly",
+"geschat (interpolatie tussen exacte cellen)": "estimated (interpolation between exact cells)",
+"↻ Herinterpoleer met {#} nieuwe exacte cellen": "↻ Re-interpolate with {#} new exact cells",
+"↻ Herinterpoleer met {#} nieuwe exacte cel": "↻ Re-interpolate with {#} new exact cell",
+"↻ Herinterpoleer": "↻ Re-interpolate",
+"Interpolatie gebruikt {#} extra exacte cellen.": "Interpolation uses {#} additional exact cells.",
+"Interpolatie gebruikt {#} extra exacte cel.": "Interpolation uses {#} additional exact cell.",
+"Klik een geschatte cel om ze exact te laten berekenen; daarna kun je opnieuw interpoleren.": "Click an estimated cell to have it calculated exactly; then you can re-interpolate.",
 "± geschat —": "± estimated —",
 "voor de exacte berekening": "for the exact calculation",
 "± geschat — ⏳ exacte berekening…": "± estimated — ⏳ exact calculation…",
