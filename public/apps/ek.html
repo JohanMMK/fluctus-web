@@ -2,10 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.76.1">
+<meta name="ek-build" content="0.76.2">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Energie-Compas — snel</title>
+<!-- ek.html v0.76.2 (2026-10-16, Johan): (1) melding bij een trage simulatie noemt enkel nog «groter wagenpark» als er ≥ 10 voertuigen zijn; anders wachtrij of «alle combinaties … doorgerekend». (2) «Analoge meter gedetecteerd» verdwijnt zodra er een gemeten afnameprofiel op het dossier staat. -->
 <!-- ek.html v0.76.1 (2026-10-16, Johan): FIX — afname-adres uit de ingelezen factuur (leveringsadres) wordt nu ook in het veld «Afname-adres» ingevuld bij het openen via de factuurmail-link (stond enkel in de dossiertitel). -->
 <!-- ek.html v0.76.0 (2026-10-16, Johan): SCENARIONAAM — leeg veld naast CAPEX/terugverdientijd in «Dimensionering» (adviseursweergave). De naam gaat mee in de rapport-payload (scenario) → klantrapport ≥ v0.50.0 toont hem vetjes rechtsboven op elke pagina en op de cover. Bewaard per dossier in deze browser (localStorage EK_SCENARIO_<dossier>). -->
 <!-- ek.html v0.75.0 (2026-10-16, Johan): (1) VASTE BOVENBALK — de merkbalk staat altijd bovenaan (sticky) op invoer- en resultatenscherm: Energie-Compas-logo, klantnaam, NL/FR/EN, Klantweergave, ← Naar MijnEC; de rest scrolt eronder. (2) De twee KPI-kaders boven de roosters («📊 KPI's voor de nieuwe opstelling» en «Betalend laadplein — opbrengst & dekking») worden niet meer getoond — de roosters zijn het startpunt (de cijfers blijven intern berekend voor rapport/paycards). -->
@@ -608,8 +609,8 @@
 <!-- v0.42.0 (Johan): TAAL NL | FR — keuze via ?lang=fr of de schakelaar (onthouden in localStorage EC_LANG). Vertaling = i18n-ec.js v0.2 (segment-sjablonen). -->
 <script>(function(){ try{ var q=new URLSearchParams(location.search).get('lang'); var l=String(q||localStorage.getItem('EC_LANG')||'nl').toLowerCase(); if(q){ try{ localStorage.setItem('EC_LANG',l); }catch(e){} } window.EC_LANG=((l==='fr'||l==='en')?l:'nl'); }catch(e){ window.EC_LANG='nl'; } })();</script>
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.4.7"></script>
-<script src="en-ec-seg.js?v=1.0.24"></script>
+<script src="fr-ec-seg.js?v=1.4.8"></script>
+<script src="en-ec-seg.js?v=1.0.25"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>.lang-sw{margin-left:auto;display:inline-flex;gap:2px;align-items:center;font-size:11.5px;font-weight:700}.lang-sw a{padding:3px 8px;border:1px solid var(--greenln);border-radius:999px;color:var(--green);text-decoration:none;background:#fff}.lang-sw a.on{background:var(--green);color:#fff;border-color:var(--green)}</style>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
@@ -1939,7 +1940,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekScenarioLaad(){ var el=$('dim-scenario'); if(!el) return; var k=_ekScenSleutel(); if(!k||k===_ekScenKey) return; _ekScenKey=k;
     try{ el.value=localStorage.getItem(k)||''; }catch(e){}
     if(!el._ekBound){ el._ekBound=true; el.addEventListener('input',function(){ try{ var kk=_ekScenSleutel(); if(kk){ if(el.value.trim()) localStorage.setItem(kk,el.value); else localStorage.removeItem(kk); } }catch(e){} }); } }
-  try{ setInterval(function(){ try{ _ekBarNaam(); _ekScenarioLaad(); }catch(e){} }, 1500); }catch(e){}
+  // v0.76.2 (Johan): staat er een gemeten afnameprofiel op het dossier, dan is «Analoge meter gedetecteerd» (uit een voorschot-
+  //   of oude factuur) niet meer van toepassing → melding verbergen.
+  function _ekAnaloogCheck(){ try{ var an=$('analoog-note'); if(an && !an.classList.contains('hidden') && STATE_PROFIEL_STATUS && STATE_PROFIEL_STATUS.afname && STATE_PROFIEL_STATUS.afname.aanwezig) an.classList.add('hidden'); }catch(e){} }
+  try{ setInterval(function(){ try{ _ekBarNaam(); _ekScenarioLaad(); _ekAnaloogCheck(); }catch(e){} }, 1500); }catch(e){}
   function _hmGeschatteCellen(H){ var L=[]; var rows=H.rows.slice(), cols=H.cols.slice();
     rows.forEach(function(ry){ cols.forEach(function(cx){ var a=_cellAt(H,ry,cx); if(a && a._interp && !a._exact) L.push([ry,cx]); }); }); return L; }
   // v0.74.0 (Johan): legende + knop «⚡ Reken het volledige rooster exact» (alle geschatte cellen exact doorrekenen).
@@ -4397,7 +4401,11 @@ var _simVoortgang=(function(){
     if(m){ var txt='', kl='#6B4E00';
       if(srvFout>=3){ txt='De verbinding met de rekenserver lijkt even weg — we blijven het proberen.'; kl='#8a1f1f'; }
       else if(s>180){ txt='De berekening loopt nog. Lukt het niet binnen 5 minuten, dan tonen we een melding met de knop Opnieuw proberen.'; }
-      else if(s>75){ txt='Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. Je hoeft niets te doen.'; }
+      else if(s>75){   // v0.76.2 (Johan): reden enkel noemen als ze klopt (geen wagens → niet over een wagenpark praten)
+        var _nW=0; try{ (EV_ROWS||[]).forEach(function(r){ _nW+=(+r.aantal||0); }); }catch(eW){}
+        txt=(wacht>0)?'Dit duurt langer dan gewoonlijk — er worden eerst nog andere berekeningen afgewerkt. Je hoeft niets te doen.'
+          :(_nW>=10?'Dit duurt langer dan gewoonlijk — een groter wagenpark vraagt meer rekenwerk. Je hoeft niets te doen.'
+          :'Dit duurt langer dan gewoonlijk — alle combinaties van zonnepanelen en batterij worden kwartier per kwartier doorgerekend. Je hoeft niets te doen.'); }
       if(m.getAttribute('data-t')!==txt){ m.setAttribute('data-t',txt); m.textContent=txt; m.style.color=kl; } }
     if(s>=150 && !gelogdTraag){ gelogdTraag=true; log('sim_traag',{ sec:s, est:est, wachtrij:wacht }); }
   }
