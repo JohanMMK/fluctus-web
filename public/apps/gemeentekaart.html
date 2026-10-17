@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.5
+     v1.5.1: MOW + SPW + Brussel Mobiliteit tegelijk (band over gewestgrens gedekt, snel); OSM voor Brussel pas achteraf.
      v1.5 (17-10, Johan): laadpalen voor ALLE gewesten uit officiële bronnen —
        Wallonië: SPW geoservices.wallonie.be BORNES_RECHARGE (identify met envelope; query geeft geen geometrie),
        Brussel: data.mobility.brussels WFS bm_equipment:charging_stations + _concession (+ OSM aangevuld, best-effort),
@@ -434,22 +435,37 @@
     }
     function lpLaden(){
       var bb = lpBbox(); if (!bb) return;
-      var key = 'gk_lp3_' + SLUG, cache = null;
+      var key = 'gk_lp4_' + SLUG, cache = null;
       try { cache = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
       var vers = cache && cache.ts && (Date.now() - cache.ts) < 24 * 3600 * 1000 && Array.isArray(cache.lp);
       function osm(){ return lpQuery(bb).then(function(j){ return { lp: (j.elements || []).map(lpVan).filter(Boolean), bron: 'OpenStreetMap' }; }); }
       var gw = gewestNis(NIS);
+      // v1.5.1: de drie officiële bronnen TEGELIJK (elk gewest is disjunct; dekt ook de band over de gewestgrens).
       function officieel(){
-        if (gw === 'VLA') return lpMow(bb).then(function(lp){ if (!lp.length) throw new Error('mow leeg'); return { lp: lp, bron: 'MOW Vlaanderen (Eco-Movement)' }; });
-        if (gw === 'WAL') return lpWal(bb).then(function(lp){ if (!lp.length) throw new Error('spw leeg'); return { lp: lp, bron: 'SPW Wallonie' }; });
-        if (gw === 'BRU') return lpBru(bb).then(function(lp){
-          // Brussel Mobiliteit is beperkt → aanvullen met OSM (best-effort, dubbels ≤25 m weg)
-          return lpQuery(bb).then(function(j){
-            var extra = (j.elements || []).map(lpVan).filter(Boolean).filter(function(x){ return !lp.some(function(y){ return afstandM(x.la, x.lo, y.la, y.lo) < 25; }); });
-            return { lp: lp.concat(extra), bron: 'Brussel Mobiliteit' + (extra.length ? ' + OpenStreetMap' : '') };
-          }).catch(function(){ if (!lp.length) throw new Error('bm leeg'); return { lp: lp, bron: 'Brussel Mobiliteit' }; });
+        function veilig(pr){ return pr.then(function(x){ return x || []; }).catch(function(){ return []; }); }
+        return Promise.all([veilig(lpMow(bb)), veilig(lpWal(bb)), veilig(lpBru(bb))]).then(function(r){
+          var namen = [];
+          if (r[0].length) namen.push('MOW Vlaanderen (Eco-Movement)');
+          if (r[1].length) namen.push('SPW Wallonie');
+          if (r[2].length) namen.push('Brussel Mobiliteit');
+          var lp = r[0].concat(r[1], r[2]);
+          if (!lp.length) throw new Error('geen officiële data');
+          return { lp: lp, bron: namen.join(' + ') };
         });
-        return Promise.reject(new Error('gewest onbekend'));
+      }
+      // Brussel Mobiliteit is beperkt → OSM op de achtergrond aanvullen (blokkeert niets; dubbels ≤25 m weg)
+      function osmAanvullen(){
+        if (gw !== 'BRU') return;
+        lpQuery(bb).then(function(j){
+          var extra = (j.elements || []).map(lpVan).filter(Boolean).filter(function(x){ return !LP.some(function(y){ return afstandM(x.la, x.lo, y.la, y.lo) < 25; }); });
+          if (!extra.length) return;
+          LP = LP.concat(extra); LP_BRON = LP_BRON + ' + OpenStreetMap';
+          try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), lp: LP, bron: LP_BRON })); } catch(e){}
+          lpVerrijk(); tekenLp(); tekenSites(); renderLijst();
+          setLpLabel('🔌 Bestaande laadpalen (' + LP.length + ' locaties)');
+          document.getElementById('k-lp').textContent = nf(LP.length);
+          log('laadpalen_aangevuld', { extra: extra.length, bron: 'OpenStreetMap' });
+        }).catch(function(){});
       }
       var p = vers ? Promise.resolve({ lp: cache.lp, bron: cache.bron || '', cache: true })
                    : officieel().catch(function(){ return osm(); })
@@ -467,6 +483,7 @@
         document.getElementById('k-lp').textContent = nf(LP.length);
         document.getElementById('k-lp').title = nf(nPunt) + ' laadpunten op ' + nf(LP.length) + ' locaties · bron: ' + LP_BRON;
         log('laadpalen_geladen', { aantal: LP.length, laadpunten: nPunt, dc: nDc, ac: LP.length - nDc, bron: LP_BRON, uit_cache: !!r.cache });
+        if (!r.cache && !/OpenStreetMap/.test(LP_BRON)) osmAanvullen();
       }).catch(function(e){
         setLpLabel('🔌 Bestaande laadpalen (niet beschikbaar)');
         var kl = document.getElementById('k-lp');
