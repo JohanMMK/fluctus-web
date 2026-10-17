@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.51.0 (2026-10-17, Johan): LOCATIE onderaan hoofdstuk 1 — satellietfoto van de projectlocatie (server ≥ 15.323.0 /api/ek/kaartfoto: Google Static Maps als de sleutel het toelaat, anders Esri) met pin, 300 m-cirkel, MS-cabines en publieke laadpalen erop (zelfde Web-Mercator-projectie), naast: adres + pinbron, 2 dichtste MS-cabines met restcapaciteit afname/injectie, laadpalen ≤300 m (payload.locatie uit EK ≥ 0.81.0). Om plaats te maken is het blok «Toegangsvermogen / piekvermogen» compacter: de loadfactor staat nu in de kVA-vakken (geen tweede rij vakken) en de uitleg is ingekort. -->
 <!-- klantrapport.html v0.50.0 (2026-10-16, Johan): SCENARIONAAM — staat D.scenario in de payload (EK v0.76.0, veld naast CAPEX/TVT bij Dimensionering), dan verschijnt die vetjes rechtsboven op elke pagina (kop) en op de cover. -->
 <!-- klantrapport.html v0.49.0 (2026-10-16, Johan): VASTE BOVENBALK op het scherm (niet in print/PDF/mail-modus): Energie-Compas-logo, klantnaam, NL/FR/EN (herlaadt het rapport in die taal) en — voor adviseurs (geen klant-gids) — «← Naar MijnEC». De rapportpagina's scrollen eronder. -->
 <!-- klantrapport.html v0.48.3 (2026-10-15, Johan): zwevende knop «💬 Gesprek» linksonder (boven «Uitleg») zodra het dossier een hulpgesprek heeft → chat-modal met de adviseur (ek-chat.js v1.0.0, server ≥ 15.303.0). Enkel met _gids (klant/demo), niet in print. -->
@@ -147,6 +148,20 @@
   .hero .v.win{color:var(--accent-d)}
   .hero .u{font-size:11px;color:var(--grijs);font-weight:600}
   .hero .arr{display:flex;align-items:center;font-size:22px;color:var(--grijs)}
+  .hero .lf{display:block;font-size:10.5px;color:var(--grijs);margin-top:4px;font-weight:600}   /* v0.51.0: loadfactor in het kVA-vak */
+  .hero.kompakt{margin:8px 0 4px} .hero.kompakt .box{padding:9px 10px} .hero.kompakt .l{min-height:0} .hero.kompakt .v{font-size:22px;margin-top:3px}   /* v0.51.0: hoofdstuk 1 compact */
+  table.f.kompakt td,table.f.kompakt th{padding-top:4px;padding-bottom:4px}
+  .loc-grid{display:grid;grid-template-columns:92mm 1fr;gap:5mm;align-items:start;margin-top:4px}
+  .loc-foto{position:relative;width:92mm;height:46mm;border-radius:8px;overflow:hidden;background:#dfe5ec;border:1px solid var(--lijn)}
+  .loc-foto img{width:100%;height:100%;object-fit:cover;display:block}
+  .loc-m{position:absolute;border:1.5px solid #fff;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,.7);transform:translate(-50%,-50%)}
+  .loc-m.pin{width:15px;height:15px;background:#E0322B;border-radius:50% 50% 50% 0;transform:translate(-50%,-115%) rotate(-45deg)}
+  .loc-m.cab{width:11px;height:11px;background:#F1C40F;border-color:#1F3864;border-radius:2px}
+  .loc-m.ac{width:8px;height:8px;background:#2F80ED} .loc-m.dc{width:9px;height:9px;background:#7B3FA0}
+  .loc-ring{position:absolute;border:1.5px dashed rgba(255,255,255,.9);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
+  .loc-attr{position:absolute;right:4px;bottom:3px;font-size:8.5px;color:#fff;text-shadow:0 0 2px #000}
+  .loc-i{font-size:11px;line-height:1.4} .loc-i .r{margin-bottom:5px} .loc-i b{color:var(--navy)} .loc-i .g{color:var(--grijs);font-size:10.5px}
+  .loc-leg{font-size:10px;color:var(--grijs);margin-top:3px} .loc-leg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 3px 0 8px;vertical-align:middle;border:1px solid #fff;box-shadow:0 0 1px #000}
   /* tabel */
   table.f{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
   .adv .card{padding:9px 13px;margin-top:8px!important} .adv .card p{margin:3px 0 0;font-size:12.5px;line-height:1.45} .adv table.f{margin-top:4px;font-size:12px} .adv table.f td{padding:4px 8px} .adv table.f tr.tot td{font-size:12.5px}   /* v0.42.0: advies compact op 1 blad */
@@ -786,6 +801,59 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
   var pg=pagina(h); if(pg) pg.setAttribute('data-toc','1');
 })();
 
+// v0.51.0 (Johan 17-10): LOCATIE — satellietfoto (server /api/ek/kaartfoto, Web Mercator rond de pin) met pin, 300 m-cirkel,
+//   MS-cabines en publieke laadpalen erop; naast de foto: adres, dichtste cabines (restcapaciteit) en laadpalen ≤ 300 m.
+var _LOC=(D.locatie&&isFinite(+D.locatie.lat)&&isFinite(+D.locatie.lng))?D.locatie:null;
+var _KF={ w:348, h:174, z:17 };
+function _kfMerc(lat,lng,z){ var ws=256*Math.pow(2,z), sn=Math.sin(lat*Math.PI/180); return [ (lng+180)/360*ws, (0.5-Math.log((1+sn)/(1-sn))/(4*Math.PI))*ws ]; }
+function _kfZoom(L){
+  var pts=[]; (L.cabines||[]).slice(0,1).forEach(function(c){ if(c.d<=900) pts.push([c.la,c.lo]); }); (L.laadpalen||[]).forEach(function(x){ pts.push([x.la,x.lo]); });
+  for(var z=18; z>=14; z--){ var p0=_kfMerc(+L.lat,+L.lng,z), ok=pts.every(function(p){ var q=_kfMerc(p[0],p[1],z); return Math.abs(q[0]-p0[0])<=_KF.w/2-12 && Math.abs(q[1]-p0[1])<=_KF.h/2-12; }); if(ok && (z<=17||!pts.length)) return Math.min(z,17); }
+  return 14;
+}
+function _locatieBlok(){
+  if(!_LOC) return '';
+  var L=_LOC, z=_kfZoom(L); _KF.z=z;
+  var p0=_kfMerc(+L.lat,+L.lng,z), W=_KF.w, H=_KF.h;
+  function pos(la,lo){ var q=_kfMerc(la,lo,z); var x=q[0]-p0[0]+W/2, y=q[1]-p0[1]+H/2; if(x<0||y<0||x>W||y>H) return null; return 'left:'+(x/W*100).toFixed(2)+'%;top:'+(y/H*100).toFixed(2)+'%'; }
+  var mpp=156543.03392*Math.cos(+L.lat*Math.PI/180)/Math.pow(2,z), rPx=300/mpp;
+  var f='<div class="loc-foto"><img data-kf="1" alt="">';
+  if(rPx*2<W*1.6) f+='<div class="loc-ring" style="left:50%;top:50%;width:'+(rPx*2/W*100).toFixed(2)+'%;height:'+(rPx*2/H*100).toFixed(2)+'%"></div>';
+  (L.laadpalen||[]).forEach(function(x){ var p=pos(x.la,x.lo); if(p) f+='<div class="loc-m '+(x.dc?'dc':'ac')+'" style="'+p+'"></div>'; });
+  (L.cabines||[]).forEach(function(c){ var p=pos(c.la,c.lo); if(p) f+='<div class="loc-m cab" style="'+p+'"></div>'; });
+  f+='<div class="loc-m pin" style="left:50%;top:50%"></div><div class="loc-attr" data-kf-attr="1" data-i18n-skip="1"></div></div>';
+  var i='<div class="loc-i">';
+  i+='<div class="r"><b>'+_L3('Adres','Adresse','Address')+'</b><br>'+esc(L.adres||ADRES||'—')+
+     '<br><span class="g">'+(L.bron==='manueel'||L.bron==='aangepast'
+        ?_L3('Locatie gecontroleerd op de luchtfoto','Emplacement vérifié sur la photo aérienne','Location checked on the aerial photo')
+        :_L3('Locatie op basis van het adres','Emplacement d\u2019après l\u2019adresse','Location based on the address'))+(L.gemeente?' \u00b7 '+esc(L.gemeente):'')+'</span></div>';
+  i+='<div class="r"><b>\u26a1 '+_L3('Dichtste middenspanningscabines','Cabines moyenne tension les plus proches','Nearest medium-voltage substations')+'</b>'+((L.cabines||[]).some(function(c){ return c.a||c.i; })?' <span class="g">('+_L3('restcapaciteit','capacité restante','remaining capacity')+')</span>':'');
+  if(L.cabines&&L.cabines.length){ L.cabines.slice(0,2).forEach(function(c){ i+='<br>'+_num(c.d,0)+' m'+(c.a?' \u00b7 '+_L3('afname','prélèvement','offtake')+' '+esc(c.a):'')+(c.i?' \u00b7 '+_L3('injectie','injection','injection')+' '+esc(c.i):''); }); }
+  else i+='<br><span class="g">'+_L3('Geen netgegevens beschikbaar voor deze zone.','Pas de données réseau pour cette zone.','No grid data for this area.')+'</span>';
+  i+='</div>';
+  i+='<div class="r"><b>\ud83d\udd0c '+_L3('Publieke laadpalen binnen 300 m','Bornes publiques dans un rayon de 300 m','Public chargers within 300 m')+'</b><br>';
+  var LP=L.laadpalen||[];
+  if(!L.laadpalen_geladen && !LP.length) i+='<span class="g">'+_L3('Niet beschikbaar.','Non disponible.','Not available.')+'</span>';
+  else if(!LP.length) i+=_L3('Geen \u2014 er is in de buurt nog geen publiek laadpunt.','Aucune \u2014 pas encore de point de recharge public à proximité.','None \u2014 no public charge point nearby yet.');
+  else { var pt=LP.reduce(function(t,x){ return t+(x.cap||1); },0), dc=LP.filter(function(x){ return x.dc; }).length, b=LP[0];
+    i+=_num(pt,0)+' '+_L3('laadpunt'+(pt===1?'':'en'),'point'+(pt===1?'':'s')+' de recharge','charge point'+(pt===1?'':'s'))+' \u00b7 '+LP.length+' '+_L3('locatie'+(LP.length===1?'':'s'),'emplacement'+(LP.length===1?'':'s'),'location'+(LP.length===1?'':'s'))+(dc?' \u00b7 '+dc+' DC':'')+
+       '<br><span class="g">'+_L3('dichtste op','le plus proche à','nearest at')+' '+_num(b.d,0)+' m'+(b.n?' \u00b7 '+esc(b.n):'')+(b.kw?' \u00b7 \u2248 '+_num(Math.round(b.kw),0)+' kW':'')+'</span>'; }
+  i+='</div>';
+  i+='<div class="loc-leg"><i style="background:#E0322B"></i>'+_L3('locatie','site','site')+'<i style="background:#F1C40F;border-radius:2px"></i>'+_L3('cabine','cabine','substation')+'<i style="background:#2F80ED"></i>AC<i style="background:#7B3FA0"></i>DC'+(rPx*2<W*1.6?' \u00b7 - - 300 m':'')+'</div>';
+  i+='</div>';
+  return '<div class="split-blok split-sectie loc-blok"><h2>'+_L3('Locatie','Emplacement','Location')+'</h2><div class="loc-grid">'+f+i+'</div></div>';
+}
+function _locatieFoto(){
+  if(!_LOC) return;
+  var img=document.querySelector('img[data-kf]'); if(!img) return;
+  var API=D.api||'https://lucid-amazement-production.up.railway.app';
+  var url=API+'/api/ek/kaartfoto?lat='+(+_LOC.lat).toFixed(6)+'&lng='+(+_LOC.lng).toFixed(6)+'&z='+_KF.z+'&w='+_KF.w+'&h='+_KF.h;
+  var at=document.querySelector('[data-kf-attr]');
+  fetch(url).then(function(r){ if(!r.ok) throw new Error('foto '+r.status); var b=r.headers.get('X-Kaart-Bron')||''; if(at) at.textContent=(b==='google'?'Beelden \u00a9 Google':'Luchtfoto \u00a9 Esri, Maxar'); return r.blob(); })
+    .then(function(bl){ img.src=URL.createObjectURL(bl); })
+    .catch(function(){ var f=img.parentNode; if(f){ f.style.background='#eef2f7'; img.remove(); } if(at) at.textContent=''; });
+}
+
 // P2 — samenvatting (de kernvergelijking staat nu op de voorpagina)
 (function(){
   var h='';
@@ -858,25 +926,15 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
       var _vBinnen=(_vBest<=0)||(_vNa<=_vBest*1.02);
       h+='<div class="split-blok split-sectie">';   // v0.31.0: hele sectie verhuist naar een vervolgblad als ze niet meer past (werd weggeknipt)
       h+='<h2>Toegangsvermogen / piekvermogen</h2>';
-      h+='<p class="lead" style="margin-top:0">Om de dagelijkse km\u2019s te laden moet je aansluiting de piek aankunnen. Onbeheerst laden \u2014 alle voertuigen samen op vol vermogen \u2014 zou de aansluiting fors doen stijgen. De installatie vlakt die piek af.</p>';
-      h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
-           (_vBest>0?('<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_vBest,0)+'</div><span class="je">kVA</span></div>'):'')+
-           '<div class="box"><span class="l">Nodig \u00b7 onbeheerst laden</span><div class="v">'+_num(_vOnb,0)+'</div><span class="je">kVA'+((_vOnb>_msG&&_vBest>0&&_vBest<=_msG)?' \u00b7 LS\u2192MS':'')+'</span></div>'+
-           '<div class="box win"><span class="l">Met installatie</span><div class="v win">'+_num(_vNa,0)+'</div><span class="je">kVA'+(_vBinnen?' \u00b7 geen verzwaring':'')+'</span></div>'+
+      h+='<p class="lead" style="margin-top:0">Onbeheerst laden \u2014 alle voertuigen samen op vol vermogen \u2014 duwt de piek op je aansluiting fors omhoog. De installatie vlakt die piek af.</p>';
+      // v0.51.0 (Johan): loadfactor IN de kVA-vakken (geen tweede rij vakken) + ingekorte uitleg → hoofdstuk 1 blijft compact (plaats voor «Locatie»).
+      var _lG=_LF.lf(_LF.vGeb||0,_vBest), _lO=_LF.lf(_LF.vZonder,_vOnb), _lN=_LF.lf(_LF.vMet,_vNa), _lfT=function(v,x){ return (v!=null)?'<span class="lf">loadfactor '+_num(v,0)+' %'+(x||'')+'</span>':''; };
+      h+='<div class="hero kompakt" style="grid-template-columns:1fr 1fr 1fr">'+
+           (_vBest>0?('<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_vBest,0)+'</div><span class="je">kVA</span>'+_lfT(_lG,' \u00b7 gebouw')+'</div>'):'')+
+           '<div class="box"><span class="l">Nodig \u00b7 onbeheerst laden</span><div class="v">'+_num(_vOnb,0)+'</div><span class="je">kVA'+((_vOnb>_msG&&_vBest>0&&_vBest<=_msG)?' \u00b7 LS\u2192MS':'')+'</span>'+_lfT(_lO)+'</div>'+
+           '<div class="box win"><span class="l">Met installatie</span><div class="v win">'+_num(_vNa,0)+'</div><span class="je">kVA'+(_vBinnen?' \u00b7 geen verzwaring':'')+'</span>'+_lfT(_lN)+'</div>'+
          '</div>';
-      // v0.30.0 (Johan): LOADFACTOR hernomen + geduid — zelfde drie situaties als de kVA-vakken hierboven.
-      (function(){
-        var _lG=_LF.lf(_LF.vGeb||0,_vBest), _lO=_LF.lf(_LF.vZonder,_vOnb), _lN=_LF.lf(_LF.vMet,_vNa);
-        if(_lO==null||_lN==null) return;
-        h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">'+
-             (_vBest>0?('<div class="box"><span class="l">Loadfactor \u00b7 vandaag</span><div class="v">'+(_lG!=null?_num(_lG,0):'\u2014')+'</div><span class="je">% \u00b7 gebouw</span></div>'):'')+
-             '<div class="box"><span class="l">Loadfactor \u00b7 onbeheerst laden</span><div class="v">'+_num(_lO,0)+'</div><span class="je">%</span></div>'+
-             '<div class="box win"><span class="l">Loadfactor \u00b7 met installatie</span><div class="v win">'+_num(_lN,0)+'</div><span class="je">%</span></div>'+
-           '</div>';
-        h+='<p class="note"><b>Wat is de loadfactor?</b> Het deel van je piekvermogen dat je gemiddeld over het jaar benut: je jaarverbruik ÷ (piek \u00d7 8.760 uur). '+
-           'Netkosten hangen voor een groot deel af van je piek (capaciteitstarief, aansluiting), niet van je verbruik. Hoe hoger de loadfactor, hoe meer MWh die vaste netkosten dragen \u2014 en hoe lager je netkost per MWh. '+
-           'Onbeheerst laden duwt de piek omhoog en de loadfactor omlaag; de installatie vlakt de piek af, zodat je de extra laad-MWh op dezelfde aansluiting afneemt.</p>';
-      })();
+      if(_lO!=null&&_lN!=null) h+='<p class="note"><b>Loadfactor</b> = jaarverbruik \u00f7 (piek \u00d7 8.760 u). Netkosten hangen grotendeels af van je piek: hoe hoger de loadfactor, hoe meer MWh die vaste netkosten dragen en hoe lager je netkost per MWh. Onbeheerst laden duwt de piek omhoog; de installatie vlakt ze af.</p>';
       h+='<p class="note">De netpiek blijft op \u00b1 '+_num(_vNa,0)+' kVA'+
          (_vBest>0?(_vBinnen?(', binnen je bestaande aansluiting van '+_num(_vBest,0)+' kVA'):(', tegenover '+_num(_vOnb,0)+' kVA bij onbeheerst laden')):'')+
          (_vBinnen||_vBest<=0
@@ -893,19 +951,13 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
       h+='<div class="split-blok split-sectie">';
       h+='<h2>Toegangsvermogen / piekvermogen</h2>';
       h+='<p class="lead" style="margin-top:0">Je netkosten hangen voor een groot deel af van je piek (capaciteitstarief).'+(HAS_BATT?' De batterij vlakt je hoogste kwartierpieken af.':'')+'</p>';
-      h+='<div class="hero" style="grid-template-columns:1fr 1fr 1fr">'+
+      var _lfN=function(v){ return (v!=null)?'<span class="lf">loadfactor '+_num(v,0)+' %</span>':''; };   // v0.51.0: loadfactor in de vakken
+      h+='<div class="hero kompakt" style="grid-template-columns:1fr 1fr 1fr">'+
            (_pB>0?('<div class="box"><span class="l">Bestaande aansluiting</span><div class="v">'+_num(_pB,0)+'</div><span class="je">kVA</span></div>'):'')+
-           '<div class="box"><span class="l">Piek zonder installatie</span><div class="v">'+_num(_pV,0)+'</div><span class="je">kVA</span></div>'+
-           '<div class="box win"><span class="l">Piek met installatie</span><div class="v win">'+_num(_pN,0)+'</div><span class="je">kVA</span></div>'+
+           '<div class="box"><span class="l">Piek zonder installatie</span><div class="v">'+_num(_pV,0)+'</div><span class="je">kVA</span>'+_lfN(_LF.voor)+'</div>'+
+           '<div class="box win"><span class="l">Piek met installatie</span><div class="v win">'+_num(_pN,0)+'</div><span class="je">kVA</span>'+_lfN(_LF.na)+'</div>'+
          '</div>';
-      if(_LF.voor!=null && _LF.na!=null){
-        h+='<div class="hero" style="grid-template-columns:1fr 1fr;margin-top:8px">'+
-             '<div class="box"><span class="l">Loadfactor \u00b7 zonder installatie</span><div class="v">'+_num(_LF.voor,0)+'</div><span class="je">%</span></div>'+
-             '<div class="box win"><span class="l">Loadfactor \u00b7 met installatie</span><div class="v win">'+_num(_LF.na,0)+'</div><span class="je">%</span></div>'+
-           '</div>';
-      }
-      h+='<p class="note"><b>Wat is de loadfactor?</b> Het deel van je piekvermogen dat je gemiddeld over het jaar benut: je jaarverbruik \u00f7 (piek \u00d7 8.760 uur). '+
-         'Hoe hoger de loadfactor, hoe meer MWh je vaste netkosten dragen \u2014 en hoe lager je netkost per MWh.</p>';
+      if(_LF.voor!=null && _LF.na!=null) h+='<p class="note"><b>Loadfactor</b> = jaarverbruik \u00f7 (piek \u00d7 8.760 u). Hoe hoger de loadfactor, hoe meer MWh je vaste netkosten dragen \u2014 en hoe lager je netkost per MWh.</p>';
       if(HAS_BATT && _pr>0 && _pr<1) h+='<p class="note">We rekenen de piekverlaging realistisch: een sturing die de toekomst perfect kent, haalt meer. In de praktijk werkt je energiebeheersysteem met een voorspelde netlimiet; daarom tellen we '+_num(Math.round(_pr*100),0)+' % van de theoretische piekverlaging.</p>';
       h+='</div>';
     }
@@ -923,8 +975,7 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
   h+='<div class="split-blok split-sectie">';   // v0.31.0: zie hierboven
   if(rows.length){
     h+='<h2>Voorgestelde verbetering</h2>';
-    h+='<p class="lead" style="margin-top:0">In dit scenario komt de volgende hardware bij:</p>';
-    h+='<table class="f"><thead><tr><th>Onderdeel</th><th style="text-align:left">Specificatie</th></tr></thead><tbody>';
+    h+='<table class="f kompakt"><thead><tr><th>Onderdeel</th><th style="text-align:left">Specificatie</th></tr></thead><tbody>';
     rows.forEach(function(r){ h+='<tr><td>'+esc(r[0])+'</td><td style="text-align:left">'+esc(r[1])+'</td></tr>'; });
     h+='</tbody></table>';
   }
@@ -932,7 +983,9 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
      '('+(function(){var p=['afname']; if(HAS_INJ)p.push('injectie'); if(HAS_LP)p.push('laden'); if(HAS_BATT)p.push('batterijgebruik'); return p.length>1?p.slice(0,-1).join(', ')+' en '+p[p.length-1]:p[0];})()+').</p>';
   // v0.38.2 (Johan): link naar het dossier staat nu onderaan pagina 1 (voorblad).
   h+='</div>';
+  h+=_locatieBlok();   // v0.51.0 (Johan): locatie (satellietfoto + cabines + laadpalen) onderaan hoofdstuk 1
   pagina(h);
+  _locatieFoto();
 })();
 
 // P2 — factuurvergelijking

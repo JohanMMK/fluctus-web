@@ -2,7 +2,8 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.80.0">
+<meta name="ek-build" content="0.81.0">
+<!-- ek.html v0.81.0 (2026-10-17, Johan): LOCATIE IN HET KLANTRAPPORT — de locatiedata (pin, gemeente, 3 dichtste MS-cabines, laadpalen ≤300 m) wordt bij de resultaten altijd opgezocht (ook in de klantweergave, zonder kaart) en gaat als payload.locatie mee naar het klantrapport (hoofdstuk 1, onderaan). De kaart zelf blijft adviseursweergave. -->
 <!-- ek.html v0.80.0 (2026-10-17, Johan): LOCATIE ONDER HET ADRES in de resultaten (adviseursweergave: oekene + adviseurs) — leveringsadres uit de factuur → geocode (Photon/OSM, fallback Nominatim) → luchtfoto (Esri, te wisselen naar kaart) met versleepbare pin (zoomen + schuiven; scrollwiel na klik in de kaart, ⤢ Groter). Info: dichtste MS-cabines + restcapaciteit en bedrijfsparkings (Lead Generator-gemeentekaart), bestaande laadpalen ≤300 m (MOW/SPW/Brussel Mobiliteit), links Google Maps/Street View/Lead Generator. «💾 Bewaar locatie» → /api/ek/locatie (server ≥ 15.322.0); inbound-case.locatie zet de bewaarde pin terug. -->
 <!-- ek.html v0.79.0 (2026-10-17, Johan): BATTERIJSTAFFELS PER PARTNER — server ≥ 15.321.0 geeft partner_staffels (contract van de partner van het project); de C&I-eenheid van de partner is de standaard voor dit dossier tenzij het project een eigen batterij-override draagt (PROJ_BATT > partner > globale standaard). De rooster-staffels zelf (particulier, klein bedrijf, drempel) zet de server. Oekene ziet onder de adviseur welke partnerstaffels gelden. -->
 <!-- ek.html v0.78.5 (2026-10-17, Johan): knop «Maak FLX-dossier» weg — wordt een factuur of profiel opgeladen zonder dossier, dan maakt EK het FLX-dossier automatisch (klantnaam uit factuur/veld, anders «Nieuw dossier dd-mm-jjjj»). -->
@@ -4024,6 +4025,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _ekLink=''; try{ if(TOKEN){ _ekLink=location.origin+'/apps/ek.html?case='+encodeURIComponent(TOKEN)+((window.EC_LANG==='fr'||window.EC_LANG==='en')?'&lang='+window.EC_LANG:''); } else { _updAdvLink(); _ekLink=($('prep-link')&&$('prep-link').value)||''; } }catch(eL){}   // v0.38.0: dossierlink → p. 2 klantrapport · v0.50.0: klantlink zonder adv=1
     return {
       project_id: STATE_CODE||'', datum: datum, ek_link: _ekLink,
+      locatie: (function(){ try{ return window._ekLocRapport?window._ekLocRapport():null; }catch(eLr){ return null; } })(),   // v0.81.0: hoofdstuk 1 «Locatie» (luchtfoto + cabines + laadpalen)
       particulier: _ekIsPart(), klanttype: (_ekIsPart()?'particulier':'bedrijf'),   // v0.36 (Johan): klantrapport past het particulier-pad toe (geen recurrente kosten, geen onbalans/windfall, …)
       klant: { naam: STATE_KLANT||'', btw: STATE_BTW||'' },
       scenario: (function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,80):''; }catch(eS){ return ''; } })(),   // v0.76.0: scenarionaam
@@ -4583,7 +4585,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   function verplaats(lat,lng,manueel){
     S.cur={lat:lat,lng:lng}; if(S.pin) S.pin.setLatLng([lat,lng]); if(S.ring) S.ring.setLatLng([lat,lng]);
-    if(manueel){ S.dirty=true; knoppen(); st('● Locatie verschoven — nog niet bewaard.'); }
+    if(manueel){ S.dirty=true; knoppen(); st('● Locatie verschoven — nog niet bewaard (het rapport gebruikt al de nieuwe plek).'); }
     var g=gemeenteVan(lat,lng);
     if(g && (!S.gem || g.slug!==S.gem.slug)){ S.gem=g; S.gemData=null; render();
       laadKaart(g.slug).then(function(k){ if(S.gem&&S.gem.slug===g.slug){ S.gemData=k; tekenData(); render(); } }); }
@@ -4631,20 +4633,38 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     h+='<div class="m" style="margin-top:6px;font-size:11px">Bronnen: luchtfoto Esri · cabines en parkings Lead Generator · laadpalen MOW Vlaanderen / SPW Wallonie / Brussel Mobiliteit · adres OSM</div>';
     box.innerHTML=h;
   }
+  // v0.81.0: data (geocode, gemeente, cabines, laadpalen) ook zonder zichtbare kaart → klantrapport hoofdstuk 1 «Locatie».
+  function kaartErbij(){
+    if(S.map||!S.cur||!zichtbaar()) return Promise.resolve();
+    return laadLeaflet().then(function(){ if(S.map||!S.cur) return; bouwKaart(S.cur.lat,S.cur.lng); tekenData(); tekenLp(); knoppen();
+      st(S.saved?'':'Klopt de pin niet? Sleep hem naar de juiste plaats of klik op de foto, en bewaar.'); setTimeout(function(){ if(S.map) S.map.invalidateSize(); },250); })
+      .catch(function(e){ var info=el('ek-loc-info'); if(info) info.insertAdjacentHTML('afterbegin','<div class="m" style="color:#8a1f1f">Kaart niet beschikbaar: '+esc(e.message)+'</div>'); });
+  }
   function start(adres){
-    S.adres=adres; S.geo=null; S.geoFout=null; S.dirty=false; S.cur=null;
+    S.adres=adres; S.geo=null; S.geoFout=null; S.dirty=false; S.cur=null; S.gem=null; S.gemData=null; S.lp=[]; S.lpQ=null;
     var opg=window._EK_LOC_OPG; S.saved=(opg&&isFinite(+opg.lat))?opg:null;
     var info=el('ek-loc-info'); if(info) info.innerHTML='<div class="m">⏳ Locatie opzoeken…</div>';
     var pGeo=adres?geocode(adres).catch(function(e){ S.geoFout=e.message; return null; }):Promise.resolve(null);
-    return Promise.all([laadLeaflet(), pGeo, laadGrenzen().catch(function(){ return null; })]).then(function(r){
-      S.geo=r[1];
+    return Promise.all([pGeo, laadGrenzen().catch(function(){ return null; })]).then(function(r){
+      S.geo=r[0];
       var p=S.saved?{lat:+S.saved.lat,lng:+S.saved.lng}:(S.geo?{lat:S.geo.lat,lng:S.geo.lng}:null);
       if(!p){ if(info) info.innerHTML='<div class="m" style="color:#8a1f1f">'+(adres?'Adres niet gevonden'+(S.geoFout?' ('+esc(S.geoFout)+')':'')+'.':'Geen afname-adres gekend.')+' Zoek hieronder een adres.</div>'; return; }
-      if(!S.map) bouwKaart(p.lat,p.lng); else S.map.setView([p.lat,p.lng],18);
-      verplaats(p.lat,p.lng,false); knoppen(); st(S.saved?'':'Klopt de pin niet? Sleep hem naar de juiste plaats of klik op de foto, en bewaar.');
-      setTimeout(function(){ if(S.map) S.map.invalidateSize(); },250);
-    }).catch(function(e){ if(info) info.innerHTML='<div class="m" style="color:#8a1f1f">Kaart niet beschikbaar: '+esc(e.message)+'</div>'; });
+      if(S.map) S.map.setView([p.lat,p.lng],18);
+      verplaats(p.lat,p.lng,false); knoppen();
+      return kaartErbij();
+    });
   }
+  // v0.81.0: wat het klantrapport (hoofdstuk 1) toont — de pin zoals ze nu staat.
+  window._ekLocRapport=function(){
+    try{
+      if(!S.cur) return null; var c=S.cur, K=S.gemData;
+      var cab=(K&&K.cab||[]).map(function(x){ return { n:x.n, a:x.a||'', i:x.i||'', v:x.v||'', la:x.la, lo:x.lo, d:Math.round(afst(c.lat,c.lng,x.la,x.lo)) }; }).sort(function(a,b){ return a.d-b.d; }).slice(0,3);
+      var lp=(S.lp||[]).map(function(x){ return { n:x.n||'', kw:x.kw||null, dc:!!x.dc, cap:x.cap||1, la:x.la, lo:x.lo, d:Math.round(afst(c.lat,c.lng,x.la,x.lo)) }; }).filter(function(o){ return o.d<=300; }).sort(function(a,b){ return a.d-b.d; }).slice(0,40);
+      return { lat:rnd(c.lat,6), lng:rnd(c.lng,6), adres:S.adres||'', gevonden:(S.geo&&S.geo.label)||'', exact:!!(S.geo&&S.geo.exact),
+        bron:(S.saved&&!S.dirty)?'manueel':(S.dirty?'aangepast':'adres'), gemeente:(S.gem&&S.gem.naam)||'',
+        cabine_data:!!(K&&K.cab&&K.cab.length), cabines:cab, laadpalen_geladen:!S.lpBezig&&!S.lpFout&&!!S.lpQ, laadpalen:lp };
+    }catch(e){ return null; }
+  };
   async function bewaar(){
     if(!S.cur) return;
     if(typeof TOKEN==='undefined'||!TOKEN){ st('Maak eerst een dossier aan om de locatie te bewaren.','err'); return; }
@@ -4674,14 +4694,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   window._ekLocUpdate=function(alleenZicht){
     var card=el('ek-loc-card'); if(!card) return;
-    if(!zichtbaar()){ card.classList.add('hidden'); return; }
-    card.classList.remove('hidden');
+    var zv=zichtbaar(); card.classList.toggle('hidden',!zv);
     var adres=String((typeof STATE_ADRES!=='undefined'&&STATE_ADRES)||(el('i-adres')&&el('i-adres').value)||'').trim();
     var a=el('ek-loc-adr'); if(a) a.textContent=adres?('— '+adres):'';
     if(alleenZicht && S.startAdres==null) return;   // gate: pas opzoeken als de resultaten getoond worden
-    if(S.startAdres===adres && (S.map||S.bezig)){ if(S.map) setTimeout(function(){ S.map.invalidateSize(); },150); return; }
+    if(S.startAdres===adres && (S.cur||S.bezig)){ if(zv){ if(S.map) setTimeout(function(){ S.map.invalidateSize(); },150); else if(!S.bezig) kaartErbij(); } return; }
     if(S.dirty && S.startAdres!=null && S.startAdres!==adres && !confirm('Het adres wijzigde. De verschoven (niet bewaarde) pin loslaten en het nieuwe adres opzoeken?')){ S.startAdres=adres; return; }
-    S.startAdres=adres; S.bezig=true; start(adres).then(function(){ S.bezig=false; });
+    S.startAdres=adres; S.bezig=true; start(adres).then(function(){ S.bezig=false; },function(){ S.bezig=false; });
   };
   function koppel(){
     if(el('ek-loc-bewaar')) el('ek-loc-bewaar').onclick=bewaar;
