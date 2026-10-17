@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.63.0 (2026-10-17, Johan): ZIP PER PROJECT — ?zip=1 in een verborgen iframe: PDF (enkel zichtbare pagina's) + in studie-modus het ingevulde VEKA-sjabloon als blob naar EK (postMessage); _genPdf slaat verborgen pagina's over; _vekaXlsx(…, geenDownload). -->
 <!-- klantrapport.html v0.62.0 (2026-10-17, Johan): ENERGIESTUDIE + TECHNISCHE BIJLAGEN UIT HET KLANTRAPPORT (Bijlage 2…: profielanalyse afname/injectie, zelfconsumptie & zelfvoorziening, werking batterij, afname van het net) achter Bijlage 1 Financieringsplan; bewust zonder kengetallen/onbalans/laadplein/onderhandelingsnota (studie blijft op de voorzichtige basis). -->
 <!-- klantrapport.html v0.61.0 (2026-10-17, Johan): VERHOOGDE INVESTERINGSAFTREK MEEGEREKEND — als de toets gunstig is (bedrijf, status alle/klein) telt het geschatte belastingvoordeel (25 % VenB × 40 % × investering PV+batterij) in jaar 2 mee in het financieel plan → voorblad, advies, financieel plan (met noot), basis- en gunstig scenario van het bankdossier. Niet in het voorzichtig scenario en niet in de VEKA-toets. Rapport-kern: scen.basis = met aftrek, scen.basis_zonder = zonder. -->
 <!-- klantrapport.html v0.60.0 (2026-10-17, Johan): rapport-kern meldt ook de scenario's (basis / gunstig / voorzichtig / basis met investeringsaftrek: rendement, TVT, besparing jaar 1, investering) en de toets investeringsaftrek → rendementen-overzicht (server ≥ 15.333.0). Basis met aftrek = basisscenario + indicatief belastingvoordeel (inv × 40 % × 25 %) in jaar 1. -->
@@ -2659,7 +2660,7 @@ async function _rasterizeForPdf(){
 }
 async function _genPdf(){
   if(!window.jspdf||!window.html2canvas) throw new Error('PDF-bibliotheken niet geladen (internetverbinding?)');
-  var pages=document.querySelectorAll('.a4');
+  var pages=[].filter.call(document.querySelectorAll('.a4'),function(p){ return getComputedStyle(p).display!=='none'; });   // v0.63.0: enkel zichtbare pagina's (bank/studie verbergen de rest)
   var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
   var restore=await _rasterizeForPdf();
   try{
@@ -3205,7 +3206,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
     return xml.slice(0,m.index)+nw+xml.slice(m.index+m[0].length);
   }
   var KOL=['F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB','AC','AD'];
-  async function vekaXlsx(v, R, naam){
+  async function vekaXlsx(v, R, naam, geenDownload){   // v0.63.0: geenDownload → enkel de blob teruggeven (ZIP per project)
     await laadJsZip();
     var r=await fetch(VEKA_TPL,{cache:'no-store'}); if(!r.ok) throw new Error('sjabloon niet gevonden ('+r.status+')');
     var z=await JSZip.loadAsync(await r.arrayBuffer());
@@ -3234,6 +3235,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
     if(wb.indexOf('fullCalcOnLoad')<0) wb=wb.replace(/<calcPr([^>]*?)\/>/,'<calcPr$1 fullCalcOnLoad="1"/>');
     z.file('xl/workbook.xml', wb);
     var blob=await z.generateAsync({type:'blob',compression:'DEFLATE',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    if(geenDownload) return blob;
     var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=naam; document.body.appendChild(a); a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 4000);
     return blob;
@@ -3414,6 +3416,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
         var nm='VEKA_TVT_IRR_'+String(PID||KLANT||'project').replace(/[^A-Za-z0-9_-]+/g,'_')+'.xlsx';
         vekaXlsx(V,RS,nm).then(function(){ bx.textContent='✓ Gedownload'; }).catch(function(e){ alert('Sjabloon invullen mislukt: '+e.message); bx.textContent=t; }).finally(function(){ bx.disabled=false; setTimeout(function(){ bx.textContent=t; },2500); }); };
       try{ document.title='Energiestudie — '+(KLANT||PID||'Energie-Compas'); }catch(e){}
+      window.__KR_VEKA={ V:V, RS:RS };   // v0.63.0: voor de ZIP per project (ingevuld sjabloon zonder download)
       window.__KR_STUDIE={ investering:inv, besparing_jaar1:b1v, besparing_jaar1_simulatie:b1, besparing_per_jaar:V.rij, exploitatiekost:opex, afname_voor_mwh:+EN.afname_mwh||0, afname_na_mwh:+EO.afname_mwh||0, tvt_eenvoudig:tvtE, batt_kw:kw, batt_kwh:kwh, levensduur:par.lev, rows:A.rows||[],
         veka:{ invoer:V, resultaat:{ aftrek:RS.aftrek, tvt_na:RS.tvt1, irr_na:RS.irr1, tvt_voor:RS.tvt0, irr_voor:RS.irr0, conclusie:RS.conclusie, reden:RS.reden, cum3:RS.cum3 } },
         handleiding:{ capbat_kwh:cap, cycli:Nb, evbat_mwh:evb, epv_mwh:epv, cdir:cdir, cbat:cbat, cinj:cinj, geladen_pv_mwh:pvb, geladen_net_mwh:uitNet, eur_per_kwh:wkwh } };
@@ -3421,6 +3424,27 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
     bouw(); window.scrollTo(0,0);
   }
   if(document.readyState==='complete') setTimeout(go,300); else window.addEventListener('load',function(){ setTimeout(go,300); });
+})();
+</script>
+
+<script>
+/* klantrapport.html v0.63.0 (Johan 17-10): ZIP PER PROJECT — ?zip=1 (in een verborgen iframe vanuit EK): na de opbouw de PDF maken
+   (enkel de zichtbare pagina's) en, in ?mode=studie, het ingevulde VEKA-sjabloon; beide als blob naar het EK-venster (postMessage). */
+(function(){
+  var Q=new URLSearchParams(location.search); if(Q.get('zip')!=='1' || window.parent===window) return;
+  function stuur(m){ try{ m.type='ec-zip'; m.rid=Q.get('rid'); window.parent.postMessage(m, location.origin); }catch(e){} }
+  async function doe(){
+    try{
+      if(window._DEMO) throw new Error('geen rapportgegevens');
+      try{ if(document.fonts&&document.fonts.ready) await document.fonts.ready; }catch(eF){}
+      var t0=Date.now(); while(Q.get('mode')==='studie' && !window.__KR_VEKA && Date.now()-t0<15000) await new Promise(function(r){ setTimeout(r,250); });
+      await new Promise(function(r){ setTimeout(r,1200); });
+      var pdf=await _genPdf(), uit={ ok:true, pdf:pdf.output('blob') };
+      if(Q.get('mode')==='studie' && window.__KR_VEKA && window._vekaXlsx) uit.xlsx=await window._vekaXlsx(window.__KR_VEKA.V, window.__KR_VEKA.RS, 'sjabloon.xlsx', true);
+      stuur(uit);
+    }catch(e){ stuur({ ok:false, error:e.message||String(e) }); }
+  }
+  if(document.readyState==='complete') setTimeout(doe,600); else window.addEventListener('load',function(){ setTimeout(doe,600); });
 })();
 </script>
 
