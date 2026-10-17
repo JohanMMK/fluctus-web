@@ -96,7 +96,7 @@
     // Aansluiting
     'Digitale meter (kwartierregistratie)': 'Compteur numérique (enregistrement au quart d’heure)',
     'Standaardprofiel (SLP)': 'Profil standard (SLP)',
-    'Gemeten kwartierdata (Fluvius)': 'Données mesurées au quart d’heure (Fluvius)',
+    'Gemeten kwartierdata (Fluvius)': 'Données mesurées au quart d’heure (gestionnaire de réseau)',
     'niet geregistreerd': 'non enregistré',
     'piek': 'pointe',
     // Investering / specs
@@ -109,9 +109,9 @@
     'Aandachtspunten:': 'Points d’attention :',
     'Databron:': 'Source des données :',
     'standaardprofiel (SLP)': 'profil standard (SLP)',
-    'gemeten kwartierdata (Fluvius)': 'données mesurées au quart d’heure (Fluvius)',
+    'gemeten kwartierdata (Fluvius)': 'données mesurées au quart d’heure (gestionnaire de réseau)',
     'haal de Fluvius-kwartierdata op voor een bedrijfsspecifieke raming':
-      'récupérez les données Fluvius au quart d’heure pour une estimation propre à l’entreprise',
+      'récupérez les données du gestionnaire de réseau au quart d’heure pour une estimation propre à l’entreprise',
     'KPI-betrouwbaarheid': 'Fiabilité des KPI',
     'coherentie': 'cohérence',
     'checks': 'contrôles',
