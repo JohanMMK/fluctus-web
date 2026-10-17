@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.60.0 (2026-10-17, Johan): rapport-kern meldt ook de scenario's (basis / gunstig / voorzichtig / basis met investeringsaftrek: rendement, TVT, besparing jaar 1, investering) en de toets investeringsaftrek → rendementen-overzicht (server ≥ 15.333.0). Basis met aftrek = basisscenario + indicatief belastingvoordeel (inv × 40 % × 25 %) in jaar 1. -->
 <!-- klantrapport.html v0.59.0 (2026-10-17, Johan): BANKDOSSIER MET DRIE SCENARIO'S (Basisscenario = alles uit het rapport zonder onbalans · Gunstig scenario = mét onbalans · Voorzichtig scenario = regels van de investeringsaftrek), vergelijkingstabel + kasstroom per jaar per scenario; het voorzichtig scenario is ook de bijlage bij de energiestudie (p. 5). TOETS VERHOOGDE INVESTERINGSAFTREK (_aftrekToets op de voorzichtige basis): als ze kan → nieuw hoofdstuk «Verhoogde investeringsaftrek» (1 p., na de investering: voordeel, toets, wat nodig is, wij maken studie + sjabloon zodra de bestelling bevestigd is) en een belangrijke opmerking op p. 2 (advies). _vekaReken/_voorzichtigePlan nu globaal in het hoofdscript. -->
 <!-- klantrapport.html v0.58.0 (2026-10-17, Johan): VOORZICHTIGE BASIS voor bankdossier en energiestudie/VEKA-sjabloon — vaste regel voor elk dossier: 85 % van de gesimuleerde bruto-besparing, −2 %/jaar veroudering, geen prijsstijging, geen onbalans, geen besparing t.o.v. elders laden of plaza-marge; exploitatiekost in mindering. Sjabloon: E23 = nee + besparing per jaar in rij 28 (alle G28..AD28 als constante, calcChain verwijderd zodat Excel zelf herbouwt); afschrijving 3 of 5 jaar (?afschrijving= uit de registratie); toets + gevoeligheid ±10 % op p. 4 — buiten de voorwaarden wordt gemeld, niet bijgestuurd. -->
 <!-- klantrapport.html v0.57.0 (2026-10-17, Johan): stappenplan volgt de flow «offerte aanvaard registreren → gratis bankdossier en dossier investeringsaftrek» (geen digitaal tekenen meer); energiestudie: vóór de eerste factuur van de installateur (vanaf 2027 verplicht), max. 4 jaar oud; ?grootte= uit EK (KO / geen KO). -->
@@ -3141,6 +3142,14 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
         var kern={ investering:A.netInv, besparing_jaar1:A.besp1, besparing_totaal:S.besparing_totaal, rendement:A.rendGem, tvt:A.tvt, horizon:(A.rows||[]).length,
           rows:(A.rows||[]).map(function(r){ return { besparing:r.besparing }; }), onbalans:(+((D.factuur||{}).onbalans_extra_jaar)||0), hardware:S.hardware||'',
           pv_kwp:+TB.pv_kwp||+C.pv_kwp||0, batt_kw:+TB.batt_kw||+C.batt_kw||0, batt_kwh:+TB.batt_kwh||+C.batt_kwh||0, particulier:!!IS_PART, scenario:D.scenario||'' };
+        // v0.60.0: scenario's naast elkaar (rendementen-overzicht) — basis / gunstig / voorzichtig / basis met investeringsaftrek
+        try{
+          var _sk=function(inv,rows,extra1){ inv=+inv||0; var som=0, cum=-inv, tvt=null; (rows||[]).forEach(function(r,i){ var b=(+r.besparing||0)+(i===0?(+extra1||0):0); som+=b; var p=cum; cum+=b; if(tvt===null&&cum>=0) tvt=i+(p<0&&b>0?(-p/b):0); });
+            var nn=(rows||[]).length; return { inv:inv, besp1:rows&&rows[0]?(+rows[0].besparing||0):0, rend:(inv>0&&nn)?(som/nn/inv*100):null, tvt:tvt, n:nn }; };
+          var SCN={}; (_bankScenarios()||[]).forEach(function(sc){ SCN[sc.k]=_sk(sc.inv, sc.rows, 0); });
+          if(_AFTREK && (_AFTREK.status==='alle'||_AFTREK.status==='klein') && _PLAN_HOOFD) SCN.basis_aftrek=_sk(+_PLAN_HOOFD.netInv||0, _PLAN_HOOFD.rows||[], +_AFTREK.voordeel||0);
+          kern.scen=SCN; if(_AFTREK) kern.aftrek={ status:_AFTREK.status, irr1:_AFTREK.irr1, voordeel:_AFTREK.voordeel, inv:_AFTREK.inv };
+        }catch(eSc){}
         if(!(+kern.investering>0)) return;
         fetch(API+'/api/ek/rapport-kern',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:D.token, variant:(D.offerte&&D.offerte.id)||'advies', kern:kern }) }).catch(function(){});
       }catch(e){}

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Rendementen · Energie-Compas</title>
+<link rel="icon" href="/favicon-ec-32.png">
+<!-- rendementen.html v1.0.0 (2026-10-17, Johan): RENDEMENTEN NAAST ELKAAR voor alle dossiers (server ≥ 15.333.0, klantrapport ≥ 0.60.0).
+     Per dossier, uit het laatst getoonde rapport (getekende/aanvaarde offerte > bevestigde offerte > advies): investering en per scenario
+     rendement + terugverdientijd — Basisscenario (alles uit het rapport, zonder onbalans) · Gunstig scenario (mét onbalans) · Voorzichtig
+     scenario (regels investeringsaftrek) · Basis met aftrek (basisscenario + indicatief belastingvoordeel van de verhoogde investeringsaftrek
+     in jaar 1) — plus de toets (IRR na belastingen, status). Sorteren per kolom, zoeken, filter, CSV. Dossiers zonder cijfers: rapport één keer
+     openen in EK. Managers zien alles, anderen hun eigen dossiers. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/mijnec-knop.js?v=1.0.1" defer></script>
+<style>
+  :root{--navy:#0A2540;--green:#05B050;--line:#DDE3EA;--muted:#5A6577;--bg:#F4F7FB}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);font:13.5px/1.45 Poppins,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#1A2433}
+  .top{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .top h1{font-size:18px;margin:0;color:var(--navy)} .top .links{margin-left:auto;display:flex;gap:12px;align-items:center} .top a{color:var(--navy);font-weight:600;text-decoration:none;font-size:13px}
+  .wrap{max-width:1400px;margin:0 auto;padding:16px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  input[type=search],select{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff} input[type=search]{min-width:260px}
+  .btn{display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer;color:var(--navy);text-decoration:none;font-size:13px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto}
+  table{width:100%;border-collapse:collapse;min-width:1100px} th{background:#F5F8FC;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;cursor:pointer;white-space:nowrap;position:sticky;top:0}
+  th.grp{text-align:center;cursor:default;border-bottom:0;background:#EAF0F7} th:first-child,td:first-child{text-align:left}
+  td{padding:6px 8px;border-bottom:1px solid #EEF2F7;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums} td.sep,th.sep{border-left:2px solid #E2E8F0}
+  tr:hover td{background:#FAFCFE} .sub{color:var(--muted);font-size:11.5px} .na{color:#B8C2CF}
+  .pill{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;background:#EEF2F8;color:var(--muted)} .pill.ok{background:#E6F6EC;color:#065f46} .pill.ko{background:#FFF3D6;color:#8A5300} .pill.nee{background:#FDE8E8;color:#9B1C1C}
+  .uitleg{font-size:12px;color:var(--muted);margin:10px 2px 0;line-height:1.55} .state{padding:30px;text-align:center;color:var(--muted)} .fout{color:#8a1f1f;padding:16px}
+  .tot td{font-weight:700;color:var(--navy);background:#F7FAFD;border-top:2px solid var(--navy)}
+</style>
+</head>
+<body>
+<div class="top"><h1>📈 Rendementen per dossier</h1><div class="links"><a href="/apps/projecten.html">📁 Projecten</a><a href="/apps/groep.html">👥 Groepen</a><a class="mijnec-knop" href="https://www.energie-compas.eu/login">← Naar MijnEC</a></div></div>
+<div class="wrap">
+  <div class="bar"><input type="search" id="zoek" placeholder="Zoek op dossier, klant of adviseur…"><select id="flt"><option value="cijfers">met cijfers</option><option value="alle">alle dossiers</option><option value="aftrek">aftrek mogelijk</option><option value="bedrijf">enkel bedrijven</option><option value="part">enkel particulieren</option></select><button class="btn" id="csv">⬇ CSV</button><span class="sub" id="tel"></span></div>
+  <div class="card" id="root"><div class="state">Laden…</div></div>
+  <p class="uitleg"><b>Basisscenario</b>: alles uit het rapport (15 jaar, prijsevolutie van het rapport), zonder onbalans-opbrengst. <b>Gunstig</b>: idem mét onbalans-opbrengst (potentieel; enkel bedrijven). <b>Voorzichtig</b>: regels van de verhoogde investeringsaftrek — 85 % van de gesimuleerde besparing, −2 %/jaar veroudering, zonder prijsstijging, onbalans of besparing t.o.v. elders laden, 10 jaar, enkel zonnepanelen + batterij. <b>Basis met aftrek</b>: basisscenario + indicatief belastingvoordeel van de aftrek (investering PV + batterij × 40 % × 25 %) in jaar 1. <b>Toets</b>: IRR na belastingen volgens het VEKA-sjabloon op de voorzichtige basis — ✔ alle ondernemingen, KO = enkel kleine ondernemingen (IRR &gt; 13 %), ✖ niet (TVT &lt; 3 j). Rendement = gemiddelde jaarlijkse besparing ÷ investering. Cijfers van het laatst getoonde rapport per dossier; ontbreken ze, open het rapport één keer in EK.</p>
+</div>
+<script>
+  var $=function(id){ return document.getElementById(id); };
+  var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], SORT={ k:'naam', dir:1 };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function eur(v){ return v==null||!isFinite(+v)?'—':'€ '+Math.round(+v).toLocaleString('nl-BE'); }
+  function num(v,d){ return v==null||!isFinite(+v)?null:(+v).toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+  async function hdr(){ var tok=SESSION&&SESSION.access_token; try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } }catch(e){} return { 'Authorization':'Bearer '+tok }; }
+  var SC=[['basis','Basisscenario'],['gunstig','Gunstig'],['voorzichtig','Voorzichtig'],['basis_aftrek','Basis met aftrek']];
+  function waarde(d,k){
+    var K=d.kern||{}, S=K.scen||{};
+    if(k==='naam') return String(d.naam||d.project_id).toLowerCase();
+    if(k==='inv') return K.investering!=null?+K.investering:null;
+    if(k==='irr') return K.aftrek&&K.aftrek.irr1!=null?+K.aftrek.irr1:null;
+    var m=k.split(':'); if(m.length===2){ var x=S[m[0]]; return x&&x[m[1]]!=null?+x[m[1]]:null; }
+    return null;
+  }
+  function gefilterd(){
+    var z=($('zoek').value||'').toLowerCase().trim(), f=$('flt').value;
+    return DATA.filter(function(d){
+      if(z && (String(d.naam)+' '+d.project_id+' '+d.adviseur).toLowerCase().indexOf(z)<0) return false;
+      if(f==='cijfers' && !d.kern) return false;
+      if(f==='aftrek' && !(d.kern&&d.kern.aftrek&&(d.kern.aftrek.status==='alle'||d.kern.aftrek.status==='klein'))) return false;
+      if(f==='bedrijf' && d.particulier) return false; if(f==='part' && !d.particulier) return false;
+      return true; }).sort(function(a,b){ var x=waarde(a,SORT.k), y=waarde(b,SORT.k); if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1; return (x<y?-1:(x>y?1:0))*SORT.dir; });
+  }
+  function render(){
+    var L=gefilterd(); $('tel').textContent=L.length+' dossier'+(L.length===1?'':'s');
+    var th=function(k,t,cls){ return '<th data-k="'+k+'" class="'+(cls||'')+'">'+t+(SORT.k===k?(SORT.dir>0?' ▲':' ▼'):'')+'</th>'; };
+    var h='<table><thead><tr><th></th><th></th>'+SC.map(function(s){ return '<th class="grp sep" colspan="2">'+s[1]+'</th>'; }).join('')+'<th class="grp sep" colspan="2">Toets aftrek</th></tr><tr>'+
+      th('naam','Dossier')+th('inv','Investering')+SC.map(function(s){ return th(s[0]+':rend','Rendement','sep')+th(s[0]+':tvt','TVT'); }).join('')+th('irr','IRR na bel.','sep')+'<th>Status</th></tr></thead><tbody>';
+    var som={ inv:0 };
+    L.forEach(function(d){ var K=d.kern, S=(K&&K.scen)||{}, A=K&&K.aftrek;
+      if(K&&+K.investering>0) som.inv+=+K.investering;
+      var cel=function(x,k){ if(!x||x[k]==null) return '<span class="na">—</span>'; return k==='rend'?(num(x.rend,1)+' %'):(num(x.tvt,1)+' j'); };
+      var st=!A?'<span class="na">—</span>':(A.status==='alle'?'<span class="pill ok">✔ alle</span>':(A.status==='klein'?'<span class="pill ko">KO</span>':(A.status==='niet'?'<span class="pill nee">✖</span>':'<span class="pill">n.v.t.</span>')));
+      h+='<tr><td><a href="'+esc(d.ek_link)+'" target="_blank" rel="noopener" style="color:var(--navy);font-weight:600;text-decoration:none">'+esc(d.naam||d.project_id)+'</a><div class="sub">'+esc(d.project_id)+(d.particulier?' · particulier':'')+(K?(' · '+(K.bron==='advies'?'advies':(K.bron==='offerte'?'offerte':'getekende offerte'))):' · nog geen rapportcijfers')+(d.adviseur?' · '+esc(d.adviseur):'')+'</div></td>'+
+        '<td>'+(K?eur(K.investering):'<span class="na">—</span>')+'</td>'+
+        SC.map(function(s){ var x=S[s[0]]; if(!x && s[0]==='basis' && K) x={ rend:K.rendement, tvt:K.tvt }; return '<td class="sep">'+cel(x,'rend')+'</td><td>'+cel(x,'tvt')+'</td>'; }).join('')+
+        '<td class="sep">'+(A&&A.irr1!=null?num(A.irr1*100,1)+' %':'<span class="na">—</span>')+'</td><td>'+st+'</td></tr>'; });
+    h+='</tbody></table>';
+    $('root').innerHTML=L.length?h:'<div class="state">Geen dossiers voor deze selectie.</div>';
+    document.querySelectorAll('th[data-k]').forEach(function(t){ t.onclick=function(){ var k=t.getAttribute('data-k'); if(SORT.k===k) SORT.dir=-SORT.dir; else { SORT.k=k; SORT.dir=(k==='naam'?1:-1); } render(); }; });
+  }
+  function csv(){
+    var L=gefilterd(), r=[['dossier','naam','particulier','bron','investering'].concat(SC.reduce(function(a,s){ return a.concat([s[0]+'_rendement_pct',s[0]+'_tvt_j']); },[])).concat(['irr_na_belasting_pct','aftrek_status'])];
+    L.forEach(function(d){ var K=d.kern||{}, S=K.scen||{}, A=K.aftrek||{};
+      r.push([d.project_id,d.naam,d.particulier?'ja':'nee',K.bron||'',K.investering==null?'':K.investering].concat(SC.reduce(function(a,s){ var x=S[s[0]]||(s[0]==='basis'&&d.kern?{rend:K.rendement,tvt:K.tvt}:null); return a.concat([x&&x.rend!=null?x.rend:'', x&&x.tvt!=null?x.tvt:'']); },[])).concat([A.irr1!=null?Math.round(A.irr1*1000)/10:'', A.status||''])); });
+    var t=r.map(function(row){ return row.map(function(v){ v=(typeof v==='number')?String(v).replace('.',','):String(v==null?'':v); return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }).join(';'); }).join('\n');
+    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+t],{type:'text/csv;charset=utf-8'})); a.download='rendementen_'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){ a.remove(); },1000);
+  }
+  (async function(){
+    try{ var rc=await fetch('/api/config'); CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }catch(e){ CFG={}; }
+    if(!PROXY) PROXY='https://lucid-amazement-production.up.railway.app';
+    if(!CFG.supabaseUrl||!CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd.</div>'; return; }
+    sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+    var d=await sb.auth.getSession(); SESSION=d.data.session; if(!SESSION){ location.href='https://www.energie-compas.eu/login'; return; }
+    try{ var r=await fetch(PROXY+'/api/rendementen/overzicht?_='+Date.now(),{ headers:await hdr(), cache:'no-store' }); var j=await r.json();
+      if(r.status===401){ location.href='https://www.energie-compas.eu/login'; return; } if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status)); DATA=j.dossiers||[]; }
+    catch(e){ $('root').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; return; }
+    $('zoek').oninput=render; $('flt').onchange=render; $('csv').onclick=csv; render();
+  })();
+</script>
+</body>
+</html>
