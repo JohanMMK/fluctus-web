@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.92.0 (2026-10-17, Johan): VERHOOGDE INVESTERINGSAFTREK MEEGEREKEND (enkel bedrijven) — als de toets gunstig is, telt het geschatte voordeel (25 % VenB × 40 % × investering PV+batterij) in jaar 2 mee in de cashflow van elke cel (_battValue → TVT, rendement, rooster, KPI's) en in het plan met laadpalen. Particulier: nooit. -->
 <!-- ek.html v0.91.0 (2026-10-17, Johan): TOETS VERHOOGDE INVESTERINGSAFTREK — regel onder de rapportknoppen (#ek-aftrek), in de antwoordkaart en per offerte (✔ alle ondernemingen / enkel KO / ✖), op dezelfde voorzichtige basis als energiestudie en rapport (85 %, −2 %/j, sturingskost, 10 j, afschrijving 5 j, 40 %). Particulier: niets. -->
 <!-- ek.html v0.90.0 (2026-10-17, Johan): registratie aanvaarde offerte vraagt ook de afschrijvingstermijn volgens de boekhouding (3 of 5 jaar, standaard 5) → server 15.332.0 bewaart ze, de energiestudie krijgt &afschrijving= mee (klantrapport ≥ 0.58.0, voorzichtige basis). -->
 <!-- ek.html v0.89.0 (2026-10-17, Johan): OFFERTE AANVAARD → GRATIS DOSSIERS (vervangt «tekenen in EK») — per bevestigde offerte «✅ Aanvaard? Vraag je dossiers aan» (klant én adviseur): datum, naam, functie, optioneel getekende bestelbon, keuze bankdossier en/of verhoogde investeringsaftrek (+ grootte onderneming voor het VEKA-sjabloon) → POST /api/ek/offerte-aanvaard (server ≥ 15.331.0: stap getekend = NCNP-factuurmoment). 🏦/📑 (per offerte, in het rapportkader en de antwoordkaart) openen de dossiers op de aanvaarde offerte; zonder aanvaarding leiden ze naar die registratie (oekene: altijd vrij). Energiestudie krijgt &grootte mee. -->
@@ -1522,6 +1523,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var s=restJ*eF + netJ*nF - (+opexJ||0)*eF; som+=s; cum+=s; rows.push({jaar:jaar,s:s,cum:cum}); }
     return { som:som, rows:rows, N:N };
   }
+  // v0.92.0 (Johan 17-10): geschat voordeel verhoogde investeringsaftrek (25 % VenB × 40 % × investering PV+batterij) in jaar 2 —
+  //   ENKEL voor bedrijven en enkel als de toets op de voorzichtige basis gunstig is (alle / enkel KO). Particulier: nooit.
+  function _ekAftrekV(a, inv){ try{ if(_ekIsPart() || !(inv>0) || typeof window._ekAftrekToets!=='function') return 0; var T=window._ekAftrekToets(a); return (T && (T.status==='alle'||T.status==='klein')) ? Math.round(inv*0.4*0.25) : 0; }catch(x){ return 0; } }
+  function _aftrekBump(cf, v){ if(!(v>0) || !cf || !cf.rows || cf.rows.length<2) return cf; cf.rows[1].s+=v; var c=0; for(var i=0;i<cf.rows.length;i++){ c+=cf.rows[i].s; cf.rows[i].cum=c; } cf.som+=v; return cf; }
   function _battValue(a){
     if(!a) return null;
     var battKw=(+a.battKw||((+a.battKwh||0)/2)||0);
@@ -1565,13 +1570,14 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   De piekshaving telt dus enkel mee voor zover de sim ze in OPT.netkosten verwerkt (zit in NUL−OPT). verzwaring blijft
     //   een aparte EENMALIGE post (in mindering op de investering), niet in de jaarbesparing.
     var cf=_escCashflow(bespRest, bespNet, _opexJaar);   // jaarlijkse exploitatiekost in mindering (geïndexeerd)
+    var _aftV=_ekAftrekV(a, _invPvb); _aftrekBump(cf, _aftV);   // v0.92.0: enkel bedrijven
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;   // gemiddeld rendement/jaar over 15 jaar
     // v0.33 (Johan): capex_laadpalen (elektrificatie) ook meegeven — voor het "twee beslissingen"-hoofdstuk en de gesplitste KPI.
     var _invLp=(a && a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0;
     return { energie:energie, besp_net:bespNet, besp_rest:bespRest, cap:0, cap_info:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
-             invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend };
+             invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend, aftrek:_aftV };
   }
   // v0.61.0 (Johan): LAADSESSIES NAAR HET BEDRIJF — zelfde rekenregel als klantrapport v0.40+: per voertuigtype (eigen vloot) de MWh
   //   die de cel op de parking laadt × (gezonde mix thuis@CREG-gewest Q4 2026 / publiek 400 / snel 550 €/MWh − kost laden op het
@@ -1613,6 +1619,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capL=palen+Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0);   // v0.64.0: + varia naar de laadpalen
     var netInv=Math.max(0,(+BV.netInv||0)+capL);
     var cf=_escCashflow((+BV.besp_rest||0)+_lb+_zr, (+BV.besp_net||0)+_zn, (+BV.opex_jaar||0)+(+BV.sturLp||0));   // v0.67.5: + plaza (omzet & commodity → inflatie, netdeel → netpad)
+    _aftrekBump(cf, +BV.aftrek||0);   // v0.92.0: investeringsaftrek (enkel bedrijven)
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
@@ -6437,6 +6444,7 @@ var _simVoortgang=(function(){
     var lo=-0.99, hi=10, flo=npv(lo), irr=null; if(flo*npv(hi)<=0){ for(var k=0;k<200;k++){ var m=(lo+hi)/2, fm=npv(m); if(flo*fm<0) hi=m; else { lo=m; flo=fm; } } irr=(lo+hi)/2; }
     return { tvt3:c3<0?'meer':(c3>0?'minder':'exact'), irr:irr };
   }
+  var _AC={};
   window._ekAftrekToets=function(cel){
     try{
       if(part()) return { status:'nvt' };
@@ -6445,18 +6453,19 @@ var _simVoortgang=(function(){
       if(!(pv>0||bkwh>0)) return { status:'nvt' };
       var inv=(typeof _invPvbCell==='function'?_invPvbCell(cel):0)||0, bruto=+cel.besparing||0, opex=4*(pv+bkw);
       if(!(inv>0)) return { status:'nvt' };
+      var ck=Math.round(inv)+'|'+Math.round(bruto)+'|'+Math.round(opex); if(_AC[ck]) return _AC[ck];   // memo (rooster roept dit vaak op)
       var rij=[]; for(var t=1;t<=10;t++) rij.push(bruto*0.85*Math.pow(0.98,t-1)-opex);
       var R=veka(inv,rij), st;
       if(!(rij[0]>0) || R.tvt3==='minder') st='niet'; else if(R.irr!=null && R.irr>0.13) st='klein'; else st='alle';
-      return { status:st, irr:R.irr, inv:inv, voordeel:inv*0.4*0.25, besp1:rij[0] };
+      var res={ status:st, irr:R.irr, inv:inv, voordeel:inv*0.4*0.25, besp1:rij[0] }; if(Object.keys(_AC).length>2000) _AC={}; _AC[ck]=res; return res;
     }catch(x){ return null; }
   };
   function eurK(v){ return '€ '+Math.round(+v||0).toLocaleString('nl-BE'); }
   window._ekAftrekTekst=function(T, kort){
     if(!T || T.status==='nvt') return '';
     var irr=(T.irr==null?'':' · IRR '+(Math.round(T.irr*1000)/10).toString().replace('.',',')+' %');
-    if(T.status==='alle') return kort?('📑 '+L3('Aftrek ✔','Déduction ✔','Deduction ✔')):('📑 <b>'+e(L3('Verhoogde investeringsaftrek mogelijk','Déduction pour investissement majorée possible','Increased investment deduction possible'))+'</b> ('+e(L3('alle ondernemingen','toutes les entreprises','all companies'))+irr+') — '+e(L3('indicatief voordeel ± ','avantage indicatif ± ','indicative benefit ± '))+eurK(T.voordeel)+'. '+e(L3('Nodig: energiestudie + VEKA-sjabloon — wij maken die gratis zodra de bestelling bevestigd is.','Requis : étude énergétique + modèle VEKA — gratuits dès la commande confirmée.','Needed: energy study + VEKA template — free once the order is confirmed.')));
-    if(T.status==='klein') return kort?('📑 '+L3('Aftrek: enkel KO','Déduction : petite entr.','Deduction: small only')):('📑 <b>'+e(L3('Verhoogde investeringsaftrek enkel voor kleine ondernemingen','Déduction majorée uniquement pour les petites entreprises','Increased deduction for small companies only'))+'</b>'+irr+' ('+e(L3('boven 13 %','au-dessus de 13 %','above 13 %'))+') — '+e(L3('indicatief voordeel ± ','avantage indicatif ± ','indicative benefit ± '))+eurK(T.voordeel)+'.');
+    if(T.status==='alle') return kort?('📑 '+L3('Aftrek ✔','Déduction ✔','Deduction ✔')):('📑 <b>'+e(L3('Verhoogde investeringsaftrek mogelijk','Déduction pour investissement majorée possible','Increased investment deduction possible'))+'</b> ('+e(L3('alle ondernemingen','toutes les entreprises','all companies'))+irr+') — '+e(L3('geschat voordeel ± ','avantage estimé ± ','estimated benefit ± '))+eurK(T.voordeel)+' (25 % × 40 % × '+eurK(T.inv)+'), '+e(L3('meegerekend in rendement en terugverdientijd (jaar 2). ','inclus dans le rendement (année 2). ','included in return and payback (year 2). '))+e(L3('Nodig: energiestudie + VEKA-sjabloon — wij maken die gratis zodra de bestelling bevestigd is.','Requis : étude énergétique + modèle VEKA — gratuits dès la commande confirmée.','Needed: energy study + VEKA template — free once the order is confirmed.')));
+    if(T.status==='klein') return kort?('📑 '+L3('Aftrek: enkel KO','Déduction : petite entr.','Deduction: small only')):('📑 <b>'+e(L3('Verhoogde investeringsaftrek enkel voor kleine ondernemingen','Déduction majorée uniquement pour les petites entreprises','Increased deduction for small companies only'))+'</b>'+irr+' ('+e(L3('boven 13 %','au-dessus de 13 %','above 13 %'))+') — '+e(L3('geschat voordeel ± ','avantage estimé ± ','estimated benefit ± '))+eurK(T.voordeel)+', '+e(L3('meegerekend (jaar 2).','inclus (année 2).','included (year 2).')));
     return kort?('📑 '+L3('Aftrek ✖','Déduction ✖','Deduction ✖')):('📑 '+e(L3('Verhoogde investeringsaftrek waarschijnlijk niet mogelijk (terugverdientijd na belastingen korter dan 3 jaar of geen besparing op de voorzichtige basis).','Déduction majorée probablement impossible.','Increased deduction probably not possible.')));
   };
   window._ekAftrekRegel=function(){ try{ var c=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; var T=window._ekAftrekToets(c); var t=window._ekAftrekTekst(T,false); return t?('<div class="rg" style="margin-top:6px">'+t+'</div>'):''; }catch(x){ return ''; } };
