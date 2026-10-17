@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.58.0 (2026-10-17, Johan): VOORZICHTIGE BASIS voor bankdossier en energiestudie/VEKA-sjabloon — vaste regel voor elk dossier: 85 % van de gesimuleerde bruto-besparing, −2 %/jaar veroudering, geen prijsstijging, geen onbalans, geen besparing t.o.v. elders laden of plaza-marge; exploitatiekost in mindering. Sjabloon: E23 = nee + besparing per jaar in rij 28 (alle G28..AD28 als constante, calcChain verwijderd zodat Excel zelf herbouwt); afschrijving 3 of 5 jaar (?afschrijving= uit de registratie); toets + gevoeligheid ±10 % op p. 4 — buiten de voorwaarden wordt gemeld, niet bijgestuurd. -->
 <!-- klantrapport.html v0.57.0 (2026-10-17, Johan): stappenplan volgt de flow «offerte aanvaard registreren → gratis bankdossier en dossier investeringsaftrek» (geen digitaal tekenen meer); energiestudie: vóór de eerste factuur van de installateur (vanaf 2027 verplicht), max. 4 jaar oud; ?grootte= uit EK (KO / geen KO). -->
 <!-- klantrapport.html v0.56.0 (2026-10-17, Johan): DRIE LAGEN + STAPPENPLAN — inhoudstafel met leeswijzer en drie lagen (A. Beslissen: voorblad, advies, stappenplan · B. Begrijpen: hoofdstukken · C. Controleren: bijlagen gegroepeerd in «Je verbruik» / «Je installatie aan het werk» / «Overige»), per hoofdstuk één regel «wat je hier leert»; nieuwe pagina «Stappenplan» na het advies (5 stappen met wie/wanneer/nodig, huidige stap uit D.proces; parallel: gemeten data, financiering, verhoogde investeringsaftrek voor ondernemingen; bij een offerterapport «Je offerte naast ons advies» uit D.advies_ref); RAPPORT-KERN naar de server voor het groepsdossier (POST /api/ek/rapport-kern). -->
 <!-- klantrapport.html v0.55.0 (2026-10-17, Johan): ENERGIESTUDIE + INGEVULD VEKA-SJABLOON TVT/IRR — ?mode=studie nu 4 pagina's: + vertaling naar de formule van de VEKA-handleiding (EVbat = Capbat × N, Cdir/Cbat/Cinj, geladen uit PV vs net, €/kWh), + de ingevulde sjabloonwaarden E13–E23 (k€) en het resultaat zoals het sjabloon het berekent (TVT/IRR na belastingen met 40 % thematische aftrek, conclusie), levensduur standaard 10 j (afwijking → verantwoordingsregel); knop «⬇ Ingevuld VEKA-sjabloon (xlsx)» vult het officiële beveiligde sjabloon (/apps/veka/) client-side in (JSZip; enkel gele cellen). -->
@@ -2947,6 +2948,23 @@ function _demo(){
 })();
 </script>
 <script>
+/* klantrapport.html v0.58.0 (Johan 17-10): VOORZICHTIGE BASIS voor bank en verhoogde investeringsaftrek — één vaste rekenregel voor elk
+   dossier (geen bijsturing per dossier): realisatiefactor 85 % op de gesimuleerde bruto-besparing (de simulatie stuurt met kennis van
+   verbruik en zonne-opbrengst; een EMS werkt met voorspellingen), veroudering batterij −2 %/jaar, geen prijsstijging, geen onbalans,
+   geen besparing t.o.v. elders laden (laadsessies naar het bedrijf) en geen marge van een betalend laadplein; exploitatiekost
+   (sturing, onderhoud) jaarlijks in mindering. Levensduur 10 jaar (standaard VEKA-sjabloon). */
+var KR_VOORZICHTIG={ realisatie:0.85, degradatie:0.02, levensduur:10 };
+function _voorzichtigePlan(A, jaren){
+  if(!A) return null;
+  var R=KR_VOORZICHTIG.realisatie, g=KR_VOORZICHTIG.degradatie, n=Math.max(1,Math.round(jaren||KR_VOORZICHTIG.levensduur));
+  var opex=Math.max(0,+A.opex||0), bruto=Math.max(0,(+A.besp1||0)+opex-(+A.laadS0||0)), inv=+A.netInv||0;
+  var rows=[], cum=-inv, tvt=null, som=0;
+  for(var t=1;t<=n;t++){ var b=bruto*R*Math.pow(1-g,t-1)-opex; som+=b; var prev=cum; cum+=b; if(tvt===null&&cum>=0) tvt=(t-1)+(prev<0&&b>0?(-prev/b):0); rows.push({ jaar:t, besparing:b, cumulatief:cum }); }
+  return { rows:rows, besp1:rows[0].besparing, bruto1:bruto, opex:opex, netInv:inv, som:som, tvt:tvt, rendGem:inv>0?(som/n/inv*100):null, n:n, realisatie:R, degradatie:g };
+}
+function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZICHTIG.realisatie*100)+' % van de gesimuleerde besparing, −'+Math.round(KR_VOORZICHTIG.degradatie*100)+' % per jaar door veroudering van de batterij, zonder prijsstijging, zonder onbalans-opbrengst en zonder besparing ten opzichte van elders laden; exploitatiekost jaarlijks in mindering. Dezelfde basis als de energiestudie voor de verhoogde investeringsaftrek.'; }
+</script>
+<script>
 /* klantrapport.html v0.53.0 (Johan 17-10): BANKDOSSIER (financiering) — ?mode=bank of D._bank. Toont enkel de financieringspagina's:
    (1) aanvraag: project, investering, besparing en rendement uit hetzelfde financieel plan als het rapport, lening (bedrag, looptijd, rente;
    aanpasbaar op het scherm, niet in de print) met annuïteit en de kasstroom per jaar (besparing − aflossing), dekkingsgraad;
@@ -2963,16 +2981,18 @@ function _demo(){
     document.head.appendChild(st);
     var inv=Math.round(+A.netInv||0), rows=A.rows||[];
     var par={ pct:+(Q.get('lening')||100), jaren:+(Q.get('jaren')||(IS_PART?10:7)), rente:+(Q.get('rente')||(IS_PART?3.5:4.5)) };
+    var VP=null;   // v0.58.0: voorzichtige basis (zelfde als de energiestudie)
     var BK=[];
     function annu(P,r,n){ if(!(P>0)||!(n>0)) return 0; var i=r/100; return i>0 ? P*i/(1-Math.pow(1+i,-n)) : P/n; }
     function bouw(){
+      VP=_voorzichtigePlan(A, Math.max(KR_VOORZICHTIG.levensduur, par.jaren)); rows=VP.rows;
       var lening=Math.round(inv*Math.min(100,Math.max(0,par.pct))/100), eigen=inv-lening, a=annu(lening,par.rente,par.jaren);
       var cum=-eigen, eerstePositief=null, r1=rows[0]?rows[0].besparing:0;
       var tr=rows.map(function(r){ var afl=(r.jaar<=par.jaren)?a:0, net=r.besparing-afl; cum+=net; if(eerstePositief==null && cum>=0) eerstePositief=r.jaar;
         return '<tr><td>Jaar '+r.jaar+'</td><td>'+eur(r.besparing)+'</td><td>'+(afl?('− '+eur(afl)):'—')+'</td><td class="'+(net<0?'neg':'win')+'">'+eur(net)+'</td><td class="'+(cum<0?'neg':'')+'">'+eur(cum)+'</td></tr>'; }).join('');
       var dekking=a>0?(r1/a*100):null, totRente=Math.max(0,a*par.jaren-lening);
       var h=kop('Financieringsdossier')+
-        '<p class="lead">Samenvatting voor de bank of de leasingmaatschappij: wat de installatie kost, wat ze per jaar bespaart en hoe die besparing zich verhoudt tot de aflossing van een lening. De besparing komt uit hetzelfde financieel plan als het volledige rapport (kwartierbasis over een volledig jaar, netkosten geïndexeerd).</p>'+
+        '<p class="lead">Samenvatting voor de bank of de leasingmaatschappij: wat de installatie kost, wat ze per jaar bespaart en hoe die besparing zich verhoudt tot de aflossing van een lening. De besparing komt uit de simulatie op kwartierbasis over een volledig jaar, op een <b>voorzichtige basis</b> (zie onderaan) — lager dan in het volledige rapport, dat met prijsstijgingen over 15 jaar rekent.</p>'+
         '<table class="f f-compact"><tbody>'+
           '<tr><td>Project</td><td>'+esc(KLANT||'—')+(ADRES?(' · '+esc(ADRES)):'')+'</td></tr>'+
           (BTW?'<tr><td>Btw-nummer</td><td>'+esc(BTW)+'</td></tr>':'')+
@@ -2997,7 +3017,7 @@ function _demo(){
                   :'<tr><td>Ondernemingsgegevens (KBO, btw) en laatste jaarrekening</td><td>klant / boekhouder</td></tr><tr><td>Technische fiches van batterij en omvormer</td><td>installateur</td></tr>')+
         '</tbody></table>'+
         (IS_PART?'':('<h3 style="margin-top:16px;color:var(--navy)">Verhoogde investeringsaftrek</h3><p>Voor ondernemingen kan de thematische investeringsaftrek de netto-investering verlagen. Voor opslag van elektriciteit vraagt dat een <b>energiestudie</b> en een <b>attest van VEKA</b> (aan te vragen binnen de wettelijke termijn na het boekjaar van de investering). Dat loopt als apart dossier; de aftrek is hier niet meegerekend.</p>'))+
-        '<h3 style="margin-top:16px;color:var(--navy)">Wat de besparing onderbouwt</h3><p>De besparing is berekend op '+(D.databron&&/gemeten|kwartier/i.test(JSON.stringify(D.databron))?'de gemeten kwartierdata van de netbeheerder':'een standaardprofiel geschaald op het jaarverbruik')+', met een optimaal dynamisch (spot)contract, kwartier per kwartier over een volledig jaar. De jaarlijkse sturingskost is in mindering gebracht waar van toepassing.</p>';
+        '<h3 style="margin-top:16px;color:var(--navy)">Wat de besparing onderbouwt</h3><p>De besparing is berekend op '+(D.databron&&/gemeten|kwartier/i.test(JSON.stringify(D.databron))?'de gemeten kwartierdata van de netbeheerder':'een standaardprofiel geschaald op het jaarverbruik')+', met een optimaal dynamisch (spot)contract, kwartier per kwartier over een volledig jaar. '+esc(_voorzichtigeTekst())+'</p>';
       BK.forEach(function(x){ try{ x.remove(); }catch(e){} });
       var p1=pagina(h), p2=pagina(h2); BK=[p1,p2];
       [p1,p2].forEach(function(p,i){ var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent='Financieringsdossier · p. '+(i+1); });
@@ -3053,9 +3073,9 @@ function _demo(){
   /* Spiegel van het VEKA-sjabloon (vs. 3.0): kasstromen jaar 0..25, TVT = teken cumulatieve kasstroom na jaar 3,
      IRR na belastingen met de 12,9/13,1 %-afronding van cel C64. Bedragen in k€. */
   function vekaReken(o){
-    var I=+o.inv||0, inst=+o.inst||0, L=Math.max(1,Math.min(25,Math.round(+o.lev||10))), R=+o.rest||0, A=Math.max(1,Math.round(+o.afs||5)), T=(o.venb==null?0.25:+o.venb), S=+o.besp||0;
+    var I=+o.inv||0, inst=+o.inst||0, L=Math.max(1,Math.min(25,Math.round(+o.lev||10))), R=+o.rest||0, A=Math.max(1,Math.round(+o.afs||5)), T=(o.venb==null?0.25:+o.venb), S=(o.rij&&o.rij.length)?+o.rij[0]:(+o.besp||0);
     var ta=(String(o.jaar)==='2025'&&o.grootte==='geen KO')?0.3:0.4;
-    var rij=[]; for(var t=1;t<=25;t++) rij.push(t<=L?S:0);
+    var rij=[]; for(var t=1;t<=25;t++) rij.push(t<=L?((o.rij&&o.rij[t-1]!=null)?+o.rij[t-1]:S):0);   // v0.58.0: besparing per jaar (rij 28)
     var cf0=[-I-inst], cf1=[-I-inst+inst*T+ta*I*T];
     for(t=1;t<=25;t++){ var r=(t===L?R:0); cf0.push(rij[t-1]+r); cf1.push(rij[t-1]+r-rij[t-1]*T+(t<=A?I/A*T:0)); }
     function tvt(cf){ var c=cf[0]+cf[1]+cf[2]+cf[3]; c=Math.round(c*1e9)/1e9; return c<0?'meer dan 3 jaar':(c>0?'minder dan 3 jaar':'exact 3 jaar'); }
@@ -3094,7 +3114,10 @@ function _demo(){
     s1=zetCel(s1,'E13',v.jaar); s1=zetCel(s1,'E14',v.grootte);
     s1=zetCel(s1,'E16',r3(v.inv)); s1=zetCel(s1,'E17',r3(v.inst)); s1=zetCel(s1,'E18',Math.round(v.lev));
     s1=zetCel(s1,'E19',r3(v.rest)); s1=zetCel(s1,'E20',Math.round(v.afs)); s1=zetCel(s1,'E21',v.venb);
-    s1=zetCel(s1,'E22',r3(v.besp)); s1=zetCel(s1,'E23','ja');
+    s1=zetCel(s1,'E22',r3(v.rij&&v.rij.length?v.rij[0]:v.besp));
+    if(v.rij&&v.rij.length){ s1=zetCel(s1,'E23','nee');   // v0.58.0: besparing per jaar (veroudering) → rij 28, alle cellen G..AD als constante (gedeelde formule vervalt)
+      for(var j=1;j<KOL.length;j++){ var jaar=j+1; s1=zetCel(s1,KOL[j]+'28', jaar<=Math.round(v.lev)?r3(+v.rij[jaar-1]||0):0); } }
+    else s1=zetCel(s1,'E23','ja');
     // resultaatwaarden die we al kennen (cache); alle andere formulecellen zonder cache → Excel herberekent bij openen
     var VAL={ E15:R.aftrek, D36:R.tvt1, I36:(R.irr1==null?'':R.irr1), C40:R.conclusie, B41:(R.irr1==null?'':'Reden:'), C41:R.reden };
     KOL.forEach(function(c,i){ VAL[c+'28']=R.rij[i]; });
@@ -3104,6 +3127,9 @@ function _demo(){
       return '<c r="'+ref+'"'+at+'>'+f+'</c>'; }); }
     z.file('xl/worksheets/sheet1.xml', strip(s1,true));
     for(var k=2;k<=3;k++){ var p='xl/worksheets/sheet'+k+'.xml'; z.file(p, strip(await z.file(p).async('string'),false)); }
+    try{ if(z.file('xl/calcChain.xml')){ z.remove('xl/calcChain.xml');   // v0.58.0: Excel bouwt de rekenketen zelf opnieuw op
+        var rl=await z.file('xl/_rels/workbook.xml.rels').async('string'); z.file('xl/_rels/workbook.xml.rels', rl.replace(/<Relationship [^>]*Target="calcChain\.xml"[^>]*\/>/,''));
+        var ct=await z.file('[Content_Types].xml').async('string'); z.file('[Content_Types].xml', ct.replace(/<Override [^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/,'')); } }catch(eCc){}
     var wb=await z.file('xl/workbook.xml').async('string');
     if(wb.indexOf('fullCalcOnLoad')<0) wb=wb.replace(/<calcPr([^>]*?)\/>/,'<calcPr$1 fullCalcOnLoad="1"/>');
     z.file('xl/workbook.xml', wb);
@@ -3126,7 +3152,7 @@ function _demo(){
     var dod=(+BT.dod_pct||90)/100, rte=(+BT.rte_pct||+Z.rte_pct||92)/100, cyc=+FI.batt_cycli_jaar||0;
     var gemeten=!!(D.databron&&D.databron.gemeten), dm=(D.databron&&D.databron.meta)||{};
     var par={ auteur:Q.get('auteur')||'Johan Konings', functie:Q.get('functie')||'bestuurder, Fluctus.net CVSO', datum:Q.get('datum')||new Date().toLocaleDateString('nl-BE'), plaats:Q.get('plaats')||'',
-      grootte:(Q.get('grootte')==='geen KO'?'geen KO':'KO'), lev:Math.max(1,Math.min(25,+Q.get('levensduur')||10)), afs:Math.max(1,+Q.get('afschrijving')||5), inst:Math.max(0,+Q.get('installatie')||0), rest:Math.max(0,+Q.get('restwaarde')||0) };
+      grootte:(Q.get('grootte')==='geen KO'?'geen KO':'KO'), lev:Math.max(1,Math.min(25,+Q.get('levensduur')||10)), afs:(+Q.get('afschrijving')===3?3:5), inst:Math.max(0,+Q.get('installatie')||0), rest:Math.max(0,+Q.get('restwaarde')||0) };
     var ES=[], V=null, RS=null;
     var n1=function(x){ return _num(x,1); }, pct=function(x){ return _num(x*100,0)+' %'; }, k3=function(x){ return _num(x,3); };
     function schema(na){
@@ -3142,9 +3168,11 @@ function _demo(){
     }
     function bouw(){
       var bespE=(+EN.afname_mwh||0)-(+EO.afname_mwh||0), inv=Math.round(+A.netInv||0), b1=Math.round(+A.besp1||0), opex=Math.round(+A.opex||0);
-      var tvtE=b1>0?inv/b1:null;
-      V={ jaar:'2026 of later', grootte:par.grootte, inv:inv/1000, inst:par.inst/1000, lev:par.lev, rest:par.rest/1000, afs:par.afs, venb:0.25, besp:b1/1000 };
+      var VP=_voorzichtigePlan(A, par.lev), b1v=Math.round(VP.besp1);   // v0.58.0: voorzichtige basis (85 %, −2 %/jaar)
+      var tvtE=b1v>0?inv/b1v:null;
+      V={ jaar:'2026 of later', grootte:par.grootte, inv:inv/1000, inst:par.inst/1000, lev:par.lev, rest:par.rest/1000, afs:par.afs, venb:0.25, besp:b1v/1000, rij:VP.rows.map(function(r){ return Math.round(r.besparing)/1000; }) };
       RS=vekaReken(V);
+      var RSp=vekaReken(Object.assign({},V,{ rij:V.rij.map(function(x){ return x*1.1; }) })), RSm=vekaReken(Object.assign({},V,{ rij:V.rij.map(function(x){ return x*0.9; }) }));
       // vertaling naar de handleiding (EVbat = Capbat × N)
       var cap=kwh*dod, evb=cyc*kwh/1000, Nb=cap>0?(cyc*kwh/cap):0, epv=+Z.pv_productie_mwh||0, pvb=+Z.pv_via_batt_mwh||0;
       var cdir=epv>0?(+Z.pv_direct_mwh||0)/epv:0, cbat=epv>0?pvb/epv:0, cinj=epv>0?(+Z.pv_injectie_mwh||0)/epv:0;
@@ -3153,7 +3181,7 @@ function _demo(){
         (par.lev+' jaar — afwijkend van de standaard (10 jaar). Verantwoording: bij ≈ '+_num(Nb,0)+' cycli per jaar komt dat neer op ≈ '+_num(Nb*par.lev,0)+' volledige cycli; de waarborg van de fabrikant (cycli en jaren) wordt als bijlage toegevoegd.');
       var ctl='<div class="es-in"><label>Auteur<input id="es-a" value="'+esc(par.auteur)+'"></label><label>Functie / organisatie<input id="es-f" value="'+esc(par.functie)+'"></label><label>Datum<input id="es-d" value="'+esc(par.datum)+'"></label><label>Plaats<input id="es-p" value="'+esc(par.plaats)+'"></label>'+
         '<label>Grootte onderneming<select id="es-g"><option value="KO"'+(par.grootte==='KO'?' selected':'')+'>KO (kleine onderneming)</option><option value="geen KO"'+(par.grootte==='geen KO'?' selected':'')+'>geen KO</option></select></label>'+
-        '<label>Levensduur (j)<input class="k" id="es-l" type="number" min="1" max="25" value="'+par.lev+'"></label><label>Afschrijving (j)<input class="k" id="es-s" type="number" min="1" max="25" value="'+par.afs+'"></label>'+
+        '<label>Levensduur (j)<input class="k" id="es-l" type="number" min="1" max="25" value="'+par.lev+'"></label><label>Afschrijving<select id="es-s"><option value="3"'+(par.afs===3?' selected':'')+'>3 jaar</option><option value="5"'+(par.afs===5?' selected':'')+'>5 jaar</option></select></label>'+
         '<label>Installatiekosten (€)<input class="k" id="es-i" type="number" min="0" step="100" value="'+par.inst+'"></label><label>Restwaarde (€)<input class="k" id="es-r" type="number" min="0" step="100" value="'+par.rest+'"></label>'+
         '<button type="button" id="es-x">⬇ Ingevuld VEKA-sjabloon (xlsx)</button>'+
         '<p class="w">Dit kader verschijnt niet in de PDF. De energiestudie mag maximaal vier jaar oud zijn en dateert best van vóór de eerste factuur van de installateur (vanaf 2027 verplicht); enkel het officiële sjabloon TVT/IRR is aanvaardbaar.</p></div>';
@@ -3198,9 +3226,10 @@ function _demo(){
           '<tr><td>Heffingen en bijdragen</td><td>'+eur(N.heffingen)+'</td><td>'+eur(O.heffingen)+'</td><td>'+eur((+N.heffingen||0)-(+O.heffingen||0))+'</td></tr>'+
           '<tr class="tot"><td>Jaarfactuur (saldo)</td><td>'+eur(N.saldo)+'</td><td>'+eur(O.saldo)+'</td><td>'+eur((+N.saldo||0)-(+O.saldo||0))+'</td></tr>'+
           '<tr><td>Jaarlijkse exploitatiekost (sturing, onderhoud)</td><td></td><td>'+eur(opex)+'</td><td>− '+eur(opex)+'</td></tr>'+
-          '<tr class="tot"><td>Netto besparing jaar 1</td><td></td><td></td><td>'+eur(b1)+'</td></tr>'+
+          '<tr><td>Netto besparing jaar 1 volgens de simulatie</td><td></td><td></td><td>'+eur(b1)+'</td></tr>'+
+          '<tr class="tot"><td>Netto besparing jaar 1 — voorzichtige basis</td><td></td><td></td><td>'+eur(b1v)+'</td></tr>'+
         '</tbody></table>'+
-        '<p class="note">De besparing is berekend zonder bijkomende opbrengst uit onbalans-sturing en zonder energieprijsinflatie; ze wordt elk jaar van de levensduur identiek genomen (cel E23 = ja).</p>'+
+        '<p class="note"><b>Voorzichtige basis</b> (vaste regel, voor elk dossier dezelfde): '+Math.round(VP.realisatie*100)+' % van de gesimuleerde bruto-besparing — de simulatie stuurt met kennis van verbruik en zonne-opbrengst, een energiebeheersysteem werkt met voorspellingen —, daarna −'+Math.round(VP.degradatie*100)+' % per jaar door veroudering van de batterij; exploitatiekost jaarlijks in mindering. Zonder prijsstijging, zonder opbrengst uit onbalans-sturing'+(D.heeftLaden||D.heeftLaadplein?', zonder besparing ten opzichte van elders laden en zonder marge van een betalend laadplein':'')+'. Deze besparing per jaar staat in rij 28 van het sjabloon (E23 = nee).</p>'+
         '</div>';
       var irrT=RS.irr1==null?'—':_num(RS.irr1*100,1)+' %', irr0T=RS.irr0==null?'—':_num(RS.irr0*100,1)+' %';
       var h3=kop('Energiestudie — besparing en sjabloon TVT/IRR')+'<div class="es">'+
@@ -3228,12 +3257,17 @@ function _demo(){
           '<tr><td>E20</td><td>Afschrijvingstermijn (lineair)</td><td>'+par.afs+' jaar</td></tr>'+
           '<tr><td>E21</td><td>Vennootschapsbelasting</td><td>25 %</td></tr>'+
           '<tr><td>E22</td><td>Netto besparing jaar 1</td><td>'+k3(V.besp)+' k€</td></tr>'+
-          '<tr><td>E23</td><td>Netto besparingen elk jaar identiek</td><td>ja</td></tr>'+
+          '<tr><td>E23</td><td>Netto besparingen elk jaar identiek</td><td>nee → rij 28</td></tr>'+
         '</tbody></table></div>'+
+        '<table class="f f-compact es-t" style="margin-top:6px"><thead><tr><th>Rij 28 · jaar</th>'+V.rij.map(function(x,i){ return '<th>'+(i+1)+'</th>'; }).join('')+'</tr></thead><tbody><tr><td>k€</td>'+V.rij.map(function(x){ return '<td>'+_num(x,2)+'</td>'; }).join('')+'</tr></tbody></table>'+
         '<p class="es-f"><b>Levensduur:</b> '+levTxt+'<br><b>Restwaarde:</b> '+(par.rest>0?eur(par.rest)+' (te staven met tweedehandsprijzen of een % van de nieuwwaarde).':'nihil (voorzichtigheidshalve).')+' <b>Afschrijving:</b> lineair over '+par.afs+' jaar.'+(par.inst>0?' <b>Installatiekosten:</b> '+eur(par.inst)+' niet geactiveerd.':'')+'</p>'+
         '<div class="es-res"><b>Resultaat van het sjabloon</b> (na belastingen, met thematische aftrek van '+pct(RS.aftrek)+' in het jaar van de investering): TVT <b>'+esc(RS.tvt1)+'</b> · IRR <b>'+irrT+'</b>.<br>Conclusie: <b>'+esc(RS.conclusie)+'</b>'+(RS.reden?(' — '+esc(RS.reden)):'')+'.<br><span style="font-size:11px;color:#5A6577">Vóór belastingen: TVT '+esc(RS.tvt0)+' · IRR '+irr0T+'. Eenvoudige terugverdientijd (investering ÷ netto besparing jaar 1): '+(tvtE?_num(tvtE,1)+' jaar':'—')+'.</span></div>'+
         '</div>';
+      var fT=function(R){ return esc(R.tvt1)+' · IRR '+(R.irr1==null?'—':_num(R.irr1*100,1)+' %'); };
+      var okA=!RS.reden, klem=(par.grootte==='geen KO' && RS.irr1!=null && RS.irr1>0.11 && RS.irr1<=0.13) || (RSm.tvt1!==RS.tvt1) || (RSp.reden && !RS.reden);
       var h4=kop('Energiestudie — verklaring')+'<div class="es">'+
+        '<div class="es-res" style="'+(okA?'':'border-color:#C0392B;background:#FDF2F2')+'"><b>Toets aan de voorwaarden:</b> '+(okA?'✔ '+esc(RS.conclusie)+'.':'✖ '+esc(RS.conclusie)+' — '+esc(RS.reden)+'. We passen de cijfers niet aan om de voorwaarden te halen.')+
+          '<br><span style="font-size:11.5px">Gevoeligheid van de netto besparing: −10 % → '+fT(RSm)+' · +10 % → '+fT(RSp)+'.'+(klem?' <b>Let op:</b> het resultaat ligt dicht bij een grens.':'')+'</span></div>'+
         '<p class="note">Voorwaarden van de thematische aftrek: terugverdientijd na belastingen minstens 3 jaar; voor ondernemingen die niet klein zijn bovendien een interne rentevoet na belastingen van hoogstens 13 %. De berekening gebeurt in het verplichte TVT/IRR-sjabloon van het VEKA, met de waarden uit punt 7; het ingevulde sjabloon gaat als bijlage mee.</p>'+
         '<h3>8. Verklaring op eer</h3>'+
         '<p>Ondergetekende verklaart dat deze studie naar waarheid is opgesteld op basis van de beschikbare meet- en factuurgegevens, dat de gebruikte aannames en berekeningen in deze studie zijn toegelicht, en dat de investering gebeurt om energetische redenen: het verlagen van de afname van het net, het afvlakken van verbruikspieken en het beter benutten van eigen zonnestroom.</p>'+
@@ -3247,14 +3281,14 @@ function _demo(){
       ES=[pagina(h), pagina(h2), pagina(h3), pagina(h4)];
       ES.forEach(function(p,i){ var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent='Energiestudie · p. '+(i+1)+' / '+ES.length; });
       function lees(){ par.auteur=document.getElementById('es-a').value; par.functie=document.getElementById('es-f').value; par.datum=document.getElementById('es-d').value; par.plaats=document.getElementById('es-p').value;
-        par.grootte=document.getElementById('es-g').value; par.lev=Math.max(1,Math.min(25,Math.round(+document.getElementById('es-l').value||10))); par.afs=Math.max(1,Math.min(25,Math.round(+document.getElementById('es-s').value||5)));
+        par.grootte=document.getElementById('es-g').value; par.lev=Math.max(1,Math.min(25,Math.round(+document.getElementById('es-l').value||10))); par.afs=(+document.getElementById('es-s').value===3?3:5);
         par.inst=Math.max(0,+document.getElementById('es-i').value||0); par.rest=Math.max(0,+document.getElementById('es-r').value||0); bouw(); }
       ['es-a','es-f','es-d','es-p','es-g','es-l','es-s','es-i','es-r'].forEach(function(id){ var x=document.getElementById(id); if(x) x.onchange=lees; });
       var bx=document.getElementById('es-x'); if(bx) bx.onclick=function(){ var t=bx.textContent; bx.disabled=true; bx.textContent='Bezig…';
         var nm='VEKA_TVT_IRR_'+String(PID||KLANT||'project').replace(/[^A-Za-z0-9_-]+/g,'_')+'.xlsx';
         vekaXlsx(V,RS,nm).then(function(){ bx.textContent='✓ Gedownload'; }).catch(function(e){ alert('Sjabloon invullen mislukt: '+e.message); bx.textContent=t; }).finally(function(){ bx.disabled=false; setTimeout(function(){ bx.textContent=t; },2500); }); };
       try{ document.title='Energiestudie — '+(KLANT||PID||'Energie-Compas'); }catch(e){}
-      window.__KR_STUDIE={ investering:inv, besparing_jaar1:b1, exploitatiekost:opex, afname_voor_mwh:+EN.afname_mwh||0, afname_na_mwh:+EO.afname_mwh||0, tvt_eenvoudig:tvtE, batt_kw:kw, batt_kwh:kwh, levensduur:par.lev, rows:A.rows||[],
+      window.__KR_STUDIE={ investering:inv, besparing_jaar1:b1v, besparing_jaar1_simulatie:b1, besparing_per_jaar:V.rij, exploitatiekost:opex, afname_voor_mwh:+EN.afname_mwh||0, afname_na_mwh:+EO.afname_mwh||0, tvt_eenvoudig:tvtE, batt_kw:kw, batt_kwh:kwh, levensduur:par.lev, rows:A.rows||[],
         veka:{ invoer:V, resultaat:{ aftrek:RS.aftrek, tvt_na:RS.tvt1, irr_na:RS.irr1, tvt_voor:RS.tvt0, irr_voor:RS.irr0, conclusie:RS.conclusie, reden:RS.reden, cum3:RS.cum3 } },
         handleiding:{ capbat_kwh:cap, cycli:Nb, evbat_mwh:evb, epv_mwh:epv, cdir:cdir, cbat:cbat, cinj:cinj, geladen_pv_mwh:pvb, geladen_net_mwh:uitNet, eur_per_kwh:wkwh } };
     }
