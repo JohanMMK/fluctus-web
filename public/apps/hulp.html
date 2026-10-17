@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hulpvragen · Energie-Compas</title>
+<!-- hulp.html v0.4.0 (2026-10-17, Johan): reden «🙋 adviseur gevraagd» (klant vraagt in EK een adviseur, server ≥ 15.324.0): in het gesprek een keuzelijst met de erkende adviseurs per partner (+ aantal lopende projecten) → «Aanduiden» zet de adviseur op het project, zet een bericht in het gesprek met de klant en mailt (optioneel) de adviseur met de klantgegevens en de projectlink. -->
 <!-- hulp.html v0.3.0 (2026-10-16, Johan): reden «inkomende mail» (hulpvraag «Controleer dit project» met de mailtekst als eerste bericht, server ≥ 15.311.0) + adviseur van het project; bij een adviseur gaat het antwoord enkel naar de adviseur. -->
 <!-- hulp.html v0.2.0 (2026-10-15, Johan): HULPVRAAG ALS CHAT (server ≥ 15.302.0) — per vraag «💬 Gesprek»: het hele gesprek (klant ↔ EK) + antwoordvak: ✉️ antwoord mailen (verschijnt ook in het gesprek in EK), 📞 gebeld (afsluiten), ✔ afsluiten zonder mail. Kolom «Laatste bericht»; status open = wacht op ons, een nieuw klantbericht heropent een gesprek. Knop «← Naar MijnEC». -->
 <!-- hulp.html (15-10, Johan): toont «gevraagd door adviseur/manager …» als de hulpvraag uit een adviseurssessie kwam (server ≥ 15.299.0). -->
@@ -61,7 +62,7 @@
       h+='<tr><td>'+esc(datum(v.ts))+'</td>'+
         '<td><b>'+esc(v.naam||'—')+'</b><div class="sub">'+[v.mail?esc(v.mail):'', v.gsm?'📞 '+esc(v.gsm):'', (v.adviseur&&v.adviseur.email)?'<span style="color:#2a44a8">adviseur '+esc(v.adviseur.naam||v.adviseur.email)+' — antwoord gaat enkel naar '+esc(v.adviseur.email)+'</span>':''].filter(Boolean).join('<br>')+'</div>'+(v.terugbellen?'<div style="color:var(--amber);font-weight:700;font-size:12px">📞 wil teruggebeld worden</div>':'')+'</td>'+
         '<td>'+esc(v.project_id||'—')+(v.demo?'<span class="demo">DEMO</span>':'')+(v.gevraagd_door?'<div style="font-size:11px;color:#6B7689;margin-top:2px">gevraagd door '+esc(v.gevraagd_door.rol||'adviseur')+(v.gevraagd_door.naam||v.gevraagd_door.mail?' · '+esc(v.gevraagd_door.naam||v.gevraagd_door.mail):'')+'</div>':'')+'</td>'+
-        '<td>'+(v.reden==='niet_rendabel'?'geen rendabele combinatie':(v.reden==='mail'?'inkomende mail'+(v.onderwerp?' «'+esc(String(v.onderwerp).slice(0,80))+'»':''):'knop «Hulp vragen»'))+'<div class="sub">'+(v.beste_tvt!=null?'beste TVT '+String(v.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j')+'</div></td>'+
+        '<td>'+(v.reden==='adviseur'?'<b style="color:#9E480E">🙋 adviseur gevraagd</b>'+((v.adviseur&&v.adviseur.email)?'<div class="sub">aangeduid: '+esc(v.adviseur.naam||v.adviseur.email)+'</div>':''):v.reden==='niet_rendabel'?'geen rendabele combinatie':(v.reden==='mail'?'inkomende mail'+(v.onderwerp?' «'+esc(String(v.onderwerp).slice(0,80))+'»':''):'knop «Hulp vragen»'))+(v.reden==='adviseur'?'':'<div class="sub">'+(v.beste_tvt!=null?'beste TVT '+String(v.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j')+'</div>')+'</td>'+
         '<td class="vraag">'+esc(v.commentaar||'—')+((v.n_berichten||0)>1?'<div class="sub" style="margin-top:4px">💬 '+v.n_berichten+' berichten · laatste van '+(v.laatste_van==='ek'?'ons':'de klant')+' ('+esc(datum(v.laatste_ts))+')'+(v.laatste_tekst?': «'+esc(String(v.laatste_tekst).slice(0,160))+'»':'')+'</div>':'')+'</td>'+
         '<td><span class="st st-'+esc(v.status||'open')+'">'+(v.status==='open'?'wacht op ons':esc(v.status||'open'))+'</span><div class="sub">'+(v.status==='open'?'wacht '+duur(nu-(+(v.laatste_van==='klant'&&v.laatste_ts||v.ts)||nu)):(esc(v.door||'')+' · '+esc(datum(v.beantwoord_ts))))+'</div></td>'+
         '<td style="white-space:nowrap"><button type="button" data-chat="'+esc(v.token+'|'+v.id)+'" style="border:1px solid var(--line);background:'+(OPEN[v.token+'|'+v.id]?'var(--navy);color:#fff':'#fff')+';border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer">💬 Gesprek</button><br><a href="'+esc(ek)+'" target="_blank" rel="noopener">🔧 Open in EK</a><br><a href="'+esc(pl)+'" target="_blank" rel="noopener">📜 Projectlog</a></td></tr>';
@@ -74,6 +75,7 @@
     $('ververs').onclick=laad;
     Array.prototype.forEach.call(document.querySelectorAll('[data-chat]'),function(b){ b.onclick=function(){ var k=b.getAttribute('data-chat'); if(OPEN[k]){ delete OPEN[k]; render(); return; } OPEN[k]=1; render(); haalChat(k.split('|')[0]); }; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-act]'),function(b){ b.onclick=function(){ antwoord(b); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-advzet]'),function(b){ b.onclick=function(){ advZet(b); }; });   // v0.4.0
   }
   // v0.2.0: gesprek per hulpvraag
   function gesprekHtml(v){
@@ -83,13 +85,45 @@
     var h='<div class="chat">'+B.map(function(m){
       if(m.van==='ek' && m.soort==='gesloten') return '<div class="sys">✔ afgesloten'+(m.naam?' door '+esc(m.naam):'')+' · '+esc(datum(m.ts))+'</div>';
       var cls=m.van==='ek'?(m.soort==='gebeld'?'g':'e'):'k';
-      var wie=m.van==='ek'?((m.naam||'EK')+(m.soort==='gebeld'?' · 📞 gebeld (notitie)':' · ✉️ gemaild')):((m.wie&&m.wie.naam&&m.wie.rol&&m.wie.rol!=='klant')?(m.wie.rol+' '+m.wie.naam):(v.naam||'klant'));
+      var wie=m.van==='ek'?((m.naam||'EK')+(m.soort==='gebeld'?' · 📞 gebeld (notitie)':(m.soort==='adviseur'?' · 🙋 adviseur aangeduid':' · ✉️ gemaild'))):((m.wie&&m.wie.naam&&m.wie.rol&&m.wie.rol!=='klant')?(m.wie.rol+' '+m.wie.naam):(v.naam||'klant'));
       return '<div class="bub '+cls+'"><div class="w">'+esc(wie)+' · '+esc(datum(m.ts))+(m.bel?' · <b style="color:var(--amber)">📞 wil teruggebeld worden</b>':'')+'</div>'+(m.tekst?'<div style="white-space:pre-wrap">'+esc(m.tekst)+'</div>':'')+'</div>';
     }).join('')+'</div>';
+    if(x.reden==='adviseur') h=advKeuzeHtml(v,k)+h;   // v0.4.0
     h+='<textarea rows="3" data-tx="'+esc(k)+'" placeholder="Je antwoord (wordt gemaild in de taal van de klant en verschijnt in het gesprek in EK) — of een notitie bij terugbellen"></textarea>'+
       '<div class="acts"><button type="button" class="p" data-act="mail" data-k="'+esc(k)+'">✉️ Verstuur antwoord</button>'+(open?'<button type="button" data-act="gebeld" data-k="'+esc(k)+'">📞 Gebeld (afsluiten)</button>':'')+
       ((x.status!=='gesloten'&&x.status!=='gebeld')?'<button type="button" data-act="sluiten" data-k="'+esc(k)+'">✔ Afsluiten zonder mail</button>':'')+'<span class="sub" data-st="'+esc(k)+'"></span></div>';
     return h;
+  }
+  // v0.4.0 (Johan 17-10): adviseur aanduiden voor een klant die er één vroeg — keuzelijst per partner, met het aantal lopende projecten.
+  var ADV=null, ADV_BEZIG=false;
+  async function laadAdv(){ if(ADV||ADV_BEZIG) return; ADV_BEZIG=true;
+    try{ var r=await fetch(PROXY+'/api/ek/adviseurs?cb='+Date.now(),{ headers:await authHeaders(), cache:'no-store' }); var j=await r.json(); ADV=(r.ok&&j.ok)?(j.adviseurs||[]):[]; }catch(e){ ADV=[]; }
+    ADV_BEZIG=false; var bew=bewaarTekst(); render(); herstelTekst(bew); }
+  function bewaarTekst(){ var o={}; Array.prototype.forEach.call(document.querySelectorAll('textarea[data-tx]'),function(t){ o[t.getAttribute('data-tx')]=t.value; }); return o; }
+  function herstelTekst(o){ Object.keys(o||{}).forEach(function(k){ var t=document.querySelector('textarea[data-tx="'+k+'"]'); if(t) t.value=o[k]; }); }
+  function advKeuzeHtml(v,k){
+    if(v.adviseur&&v.adviseur.email) return '<div class="sub" style="margin-bottom:6px;color:#0a7d3c">✔ Adviseur aangeduid: <b>'+esc(v.adviseur.naam||v.adviseur.email)+'</b> ('+esc(v.adviseur.email)+')</div>';
+    if(!ADV){ laadAdv(); return '<div class="sub" style="margin-bottom:6px">Adviseurs laden…</div>'; }
+    if(!ADV.length) return '<div class="fout" style="margin-bottom:6px">Geen erkende adviseurs gevonden (app Gebruikers, rol adviseur).</div>';
+    var groep={}; ADV.forEach(function(a){ var p=a.partner||a.bedrijf||'Zonder partner'; (groep[p]=groep[p]||[]).push(a); });
+    var opts='<option value="">— kies de adviseur —</option>'+Object.keys(groep).sort(function(a,b){ return (a==='Zonder partner')-(b==='Zonder partner')||a.localeCompare(b); }).map(function(p){
+      return '<optgroup label="'+esc(p)+'">'+groep[p].sort(function(a,b){ return (a.projecten||0)-(b.projecten||0); }).map(function(a){ return '<option value="'+esc(a.email)+'">'+esc(a.naam||a.email)+' — '+esc(a.email)+' · '+(a.projecten||0)+((a.projecten||0)===1?' lopend project':' lopende projecten')+'</option>'; }).join('')+'</optgroup>'; }).join('');
+    return '<div style="margin-bottom:8px;padding:8px 10px;border:1px solid #F0D9B5;background:#FFF8EC;border-radius:10px"><b>🙋 De klant vraagt een adviseur</b>'+(v.gsm?' · 📞 '+esc(v.gsm):'')+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><select data-adv="'+esc(k)+'" style="min-width:320px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font:inherit">'+opts+'</select>'+
+      '<label class="sub" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-advmail="'+esc(k)+'" checked> adviseur verwittigen per mail</label>'+
+      '<button type="button" data-advzet="'+esc(k)+'" style="border:1px solid var(--green);background:var(--green);color:#fff;font-weight:700;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer">Aanduiden</button><span class="sub" data-advst="'+esc(k)+'"></span></div>'+
+      '<div class="sub" style="margin-top:4px">De klant krijgt in het gesprek te zien wie zijn adviseur is; vanaf dan gaat alle communicatie naar de adviseur.</div></div>';
+  }
+  async function advZet(b){
+    var k=b.getAttribute('data-advzet'), p=k.split('|'), sel=document.querySelector('select[data-adv="'+k+'"]'), st=document.querySelector('[data-advst="'+k+'"]'), ml=document.querySelector('input[data-advmail="'+k+'"]');
+    var em=sel&&sel.value; if(!em){ st.style.color='var(--amber)'; st.textContent='Kies eerst een adviseur.'; return; }
+    b.disabled=true; st.style.color=''; st.textContent='⏳ Bezig…';
+    try{ var hd=await authHeaders(); hd['Content-Type']='application/json';
+      var r=await fetch(PROXY+'/api/ek/adviseur-zet',{ method:'POST', headers:hd, body:JSON.stringify({ token:p[0], email:em, hulp_id:p[1], melden:!!(ml&&ml.checked) }) });
+      var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+      if(j.hulp) CHAT[p[0]]={ hulp:j.hulp }; ADV=null; await laad();
+      if(j.adviseur_gemaild===false) alert('Adviseur aangeduid, maar de mail aan de adviseur vertrok niet.');
+    }catch(e){ b.disabled=false; st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; }
   }
   async function haalChat(token){
     try{ var r=await fetch(PROXY+'/api/ek/hulp-chat?token='+encodeURIComponent(token)+'&cb='+Date.now(),{ cache:'no-store' }); var j=await r.json();
