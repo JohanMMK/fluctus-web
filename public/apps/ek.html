@@ -2,7 +2,8 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.78.5">
+<meta name="ek-build" content="0.79.0">
+<!-- ek.html v0.79.0 (2026-10-17, Johan): BATTERIJSTAFFELS PER PARTNER — server ≥ 15.321.0 geeft partner_staffels (contract van de partner van het project); de C&I-eenheid van de partner is de standaard voor dit dossier tenzij het project een eigen batterij-override draagt (PROJ_BATT > partner > globale standaard). De rooster-staffels zelf (particulier, klein bedrijf, drempel) zet de server. Oekene ziet onder de adviseur welke partnerstaffels gelden. -->
 <!-- ek.html v0.78.5 (2026-10-17, Johan): knop «Maak FLX-dossier» weg — wordt een factuur of profiel opgeladen zonder dossier, dan maakt EK het FLX-dossier automatisch (klantnaam uit factuur/veld, anders «Nieuw dossier dd-mm-jjjj»). -->
 <!-- ek.html v0.78.4 (2026-10-16, Johan): «E-mail adviseur» even breed als «E-mail (voor je update)»; ernaast (onder Telefoon) «Adviseur op dit project sinds» dd-mm-jjjj + aantal dagen (server ≥ 15.319.0: adviseur.sinds). -->
 <!-- ek.html v0.78.3 (2026-10-16, Johan): «E-mail adviseur» (dropdown) ook zichtbaar vóór er een dossier is; de keuze gaat mee bij «Maak FLX-dossier» (server ≥ 15.318.1: ek-intake adviseur_email). -->
@@ -766,7 +767,8 @@
           <select id="i-adviseur" style="width:100%"><option value="">— geen adviseur (we communiceren met de klant) —</option></select>
           <div class="sub" id="i-adviseur-st" style="margin-top:2px">Met een adviseur gaan antwoorden op hulpvragen en de concept-mail met het rapport enkel naar de adviseur.</div></div>
         <div><label class="fld">Adviseur op dit project sinds</label>
-          <div id="i-adviseur-sinds" style="box-sizing:border-box;min-height:42px;display:flex;align-items:center;padding:8px 12px;border:1px dashed #D5DBE3;border-radius:10px;background:#F7F9FC;color:#1F3864;font-weight:600">—</div></div>
+          <div id="i-adviseur-sinds" style="box-sizing:border-box;min-height:42px;display:flex;align-items:center;padding:8px 12px;border:1px dashed #D5DBE3;border-radius:10px;background:#F7F9FC;color:#1F3864;font-weight:600">—</div>
+          <div class="sub hidden" id="i-partner-stf" style="margin-top:2px"></div></div>
       </div>
     </div>
 
@@ -1047,6 +1049,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.34 (Johan): batterij-EENHEID (kW/kWh) + RTE/DoD zijn nu PER PROJECT (met de globale standaard als startwaarde).
   //   BATT_DEF = globale standaard (uit /api/ek-config). BATT_* = de effectieve waarden voor dit dossier (default óf project-override).
   var BATT_DEF={ eenheid_kw:125, eenheid_kwh:250, rte_pct:92, dod_pct:90 };   // v0.78.0 (Johan): standaard C&I 125/250 (was 261)
+  var PARTNER_STF=null;   // v0.79.0: batterijstaffels van de partner (inbound-case.partner_staffels) of null = standaard
   var PROJ_BATT=null;   // per-project batterij-override {eenheid_kw,eenheid_kwh,rte_pct,dod_pct} of null → val terug op BATT_DEF
   var BATT_RTE=92, BATT_DOD=90;             // effectief (per dossier) — gaat mee in de sweep/rapport-body
   var BATT_EENHEID_KW=125, BATT_EENHEID_KWH=250;   // effectief (per dossier) — rooster-staffel = veelvouden hiervan tot T_acc
@@ -1175,7 +1178,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       _applyProjEvCfg();      // v0.34 (Johan): EV_TYPES_DEF = globale baseline + per-project overlay
     }catch(e){} }
   // v0.34 (Johan): zet de effectieve batterij-waarden (per dossier). PROJ_BATT = per-project override; anders de globale standaard.
-  function _applyBattDefaults(){ var s=PROJ_BATT||BATT_DEF;
+  function _partnerBatt(){ var c=PARTNER_STF&&PARTNER_STF.ci_eenheid; return (c&&+c[0]>0&&+c[1]>0)?{eenheid_kw:Math.round(+c[0]),eenheid_kwh:Math.round(+c[1]),rte_pct:BATT_DEF.rte_pct,dod_pct:BATT_DEF.dod_pct}:null; }   // v0.79.0
+  function _applyBattDefaults(){ var s=PROJ_BATT||_partnerBatt()||BATT_DEF;   // v0.79.0: project-override > partner (contract) > globale standaard
     BATT_EENHEID_KW=Math.max(1,Math.round(+s.eenheid_kw||BATT_DEF.eenheid_kw)); BATT_EENHEID_KWH=Math.max(1,Math.round(+s.eenheid_kwh||BATT_DEF.eenheid_kwh));
     BATT_RTE=Math.max(50,Math.min(100,Math.round(+s.rte_pct||BATT_DEF.rte_pct))); BATT_DOD=Math.max(10,Math.min(100,Math.round(+s.dod_pct||BATT_DEF.dod_pct))); }
   // v0.34 (Johan): EV_TYPES_DEF = EV_TYPES_GLOBAL met de per-PROJECT voertuigdefaults (PROJ_EV_CFG) eroverheen. Geen override → globaal.
@@ -3053,6 +3057,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         try{ window._EK_DNB=j.netbeheerder||(j.baseCase&&j.baseCase.dnb)||''; }catch(eDnb){}   // v0.50.0: netbeheerder → uitleg profieldata
         try{ window._EK_IS_DEMO=!!j.demo; window._EK_KLANT_PROF=Array.isArray(j.klant_profielen)?j.klant_profielen:[]; if(window._ekPuRender) window._ekPuRender(); }catch(ePu){}   // v0.54.0
         try{ window._EK_HULP=Array.isArray(j.hulp)?j.hulp:[]; if(window._ekHulpAdvRender) window._ekHulpAdvRender(); if(window._ekDemo && window._ekDemo.hulpAntw) window._ekDemo.hulpAntw(); }catch(eH){}   // v0.52.0: hulpvragen + antwoorden   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
+        try{ PARTNER_STF=j.partner_staffels||null; _applyBattDefaults(); }catch(ePs){}   // v0.79.0: staffels van de partner
         try{ window._EK_ADV=j.adviseur||null; if(window._ekAdvRender) window._ekAdvRender(); }catch(eAdv){}   // v0.77.0: adviseur van het project
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
@@ -3380,6 +3385,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       return '<option value="'+e(a.email)+'"'+(a.email===cur?' selected':'')+'>'+e(a.email)+(a.naam?' — '+e(a.naam):'')+(a.bedrijf?' ('+e(a.bedrijf)+')':'')+(a.extra?' · niet (meer) erkend':'')+'</option>';
     }).join('');
     sel.disabled=(_EK_ADV_LIJST===false);
+    try{ var ps=$('i-partner-stf'); if(ps){ var P=PARTNER_STF, f=function(L){ return (L||[]).map(function(p){ return p[0]+'/'+p[1]; }).join(', '); };   // v0.79.0: enkel oekene (contracten)
+      if(!EK_IS_OEKENE||!P){ ps.classList.add('hidden'); ps.textContent=''; }
+      else { var b=[]; if(P.ci_eenheid) b.push('C&I '+P.ci_eenheid[0]+'/'+P.ci_eenheid[1]); if(P.bedrijf_klein) b.push('klein '+f(P.bedrijf_klein)); if(P.bedrijf_klein_tot_kva!=null) b.push('klein tot '+P.bedrijf_klein_tot_kva+' kVA'); if(P.particulier) b.push('particulier '+f(P.particulier));
+        ps.textContent='🔋 Staffels partner '+(P.partner||'')+(P.referentie?' ('+P.referentie+')':'')+': '+(b.join(' · ')||'standaard')+(PROJ_BATT?' — eigen batterij-eenheid op het project gaat voor':''); ps.classList.remove('hidden'); } } }catch(ePs){}
     try{ var sd=$('i-adviseur-sinds'); if(sd){ var A=window._EK_ADV;   // v0.78.4: sinds + aantal dagen
       if(!A||!A.email) sd.textContent='—';
       else if(!(+A.sinds>0)) sd.textContent=TOKEN?'onbekend':'vanaf het aanmaken van het dossier';
@@ -3404,6 +3413,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       try{ var hd2=await _ekAuthHeaders(); var r2=await fetch(API+'/api/ek/adviseur-zet',{ method:'POST', headers:hd2, body:JSON.stringify({ token:TOKEN, email:v }) });
         var j2=await r2.json().catch(function(){return{};}); if(!r2.ok||!j2.ok) throw new Error(j2.error||('status '+r2.status));
         window._EK_ADV=j2.adviseur||null;
+        try{ PARTNER_STF=j2.partner_staffels||null; _applyBattDefaults(); }catch(ePs){}   // v0.79.0: andere adviseur → mogelijk andere partner
         if($('i-mail') && v && String($('i-mail').value||'').trim().toLowerCase()===v) $('i-mail').value=(j2.mail||'');   // adviseurmail is geen klantmail
         if(st){ st.style.color='var(--green)'; st.textContent=v?('✔ Bewaard — hulpantwoorden en de rapport-concept-mail gaan nu enkel naar '+v+'.'):'✔ Bewaard — geen adviseur: we communiceren met de klant.'; }
       }catch(e){ sel.value=oud; if(st){ st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; } }

@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Contracten · Energie-Compas</title>
+<!-- contracten.html v1.2.0 (2026-10-17, Johan, server ≥ 15.321.0): REKENINSTELLINGEN — BATTERIJSTAFFELS PER PARTNER. Blok onder de
+     contractvelden: particulier-paren (kW/kWh), klein-bedrijf-paren + drempel (kVA), C&I-eenheid. Vooringevuld met de huidige
+     standaard; afwijkingen gelden voor alle projecten van adviseurs/indieners op het contract-domein. Buiten de getekende tekst
+     (geen invloed op de hash) → ook na ondertekening aanpasbaar (POST /api/contract/staffels). -->
 <!-- contracten.html v1.1.0 (2026-10-16, Johan, server ≥ 15.311.0): TOEGANG VIA E-MAILDOMEIN — veld «Toegangsdomein» (website/URL
      van de partner) i.p.v. een lijst uit te nodigen gebruikers: iedereen met een e-mail op dat domein werkt als adviseur, vanaf
      het moment dat het contract bestaat. Schakelaar 🔓/🔒 in de lijst en in de editor zet die toegang in één keer aan/uit. -->
@@ -104,7 +108,7 @@
   function toegangCel(c){
     if(!c.domein) return '<span class="sub">op uitnodiging</span>';
     var aan=c.toegang_aan!==false;
-    return '<button class="tg '+(aan?'aan':'uit')+'" data-tg="'+esc(c.id)+'" title="Klik om de toegang '+(aan?'af':'aan')+' te zetten">'+(aan?'🔓 aan':'🔒 uit')+'</button><div class="sub">@'+esc(c.domein)+'</div>';
+    return '<button class="tg '+(aan?'aan':'uit')+'" data-tg="'+esc(c.id)+'" title="Klik om de toegang '+(aan?'af':'aan')+' te zetten">'+(aan?'🔓 aan':'🔒 uit')+'</button>'+(c.staffels?'<div class="sub" title="Eigen batterijstaffels">🔋 eigen staffels</div>':'')+'<div class="sub">@'+esc(c.domein)+'</div>';
   }
   // ── Editor ──
   var VELDEN=[
@@ -148,6 +152,7 @@
       if(nums.length===3 && g[1].length===3) h+='<div class="rij3">'+g[1].map(function(f){ return '<div>'+veldHtml(f,v,dis)+'</div>'; }).join('')+'</div>';
       else h+=g[1].map(function(f){ return veldHtml(f,v,dis); }).join('');
       h+='</fieldset>'; });
+    h+=staffelHtml(c);   // v1.2.0
     h+='<div class="acts">';
     if(!dis){ h+='<button class="btn n" id="bewaar">💾 Bewaar concept</button><button class="btn p" id="verstuur">✉️ Verstuur ter ondertekening</button>'; }
     if(c.status==='verstuurd'&&c.teken_link) h+='<button class="btn" id="kopieer">🔗 Kopieer teken-link</button>';
@@ -166,7 +171,33 @@
     if($('print')) $('print').onclick=afdrukken;
     if($('intrek')) $('intrek').onclick=intrekken;
     if($('tg')) $('tg').onclick=wisselToegang;
+    if($('stf-bewaar')) $('stf-bewaar').onclick=function(){ bewaarStaffels(false); };
+    if($('stf-std')) $('stf-std').onclick=function(){ bewaarStaffels(true); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-stf]'),function(el){ el.addEventListener('input',function(){ var m=$('stf-msg'); if(m){ m.className='msg warn'; m.textContent='● staffels niet bewaard'; } }); });
     voorbeeld();
+  }
+  // v1.2.0 (Johan 17-10): batterijstaffels per partner (rooster in het resultatenscherm van Energie-Compas).
+  var STF_STD={ particulier:[[5,5],[5,10],[5,15],[10,10],[10,15],[10,20],[10,25]], bedrijf_klein:[[30,60],[50,100]], bedrijf_klein_tot_kva:150, ci_eenheid:[125,250] };
+  function stfTxt(L){ return (L||[]).map(function(p){ return p[0]+'/'+p[1]; }).join(', '); }
+  function staffelHtml(c){
+    var std=c.staffels_std||STF_STD, eig=c.staffels||{}, e=function(k){ return eig[k]!=null; };
+    var veld=function(k,lab,val,hint){ return '<label>'+esc(lab)+(e(k)?' <span class="st st-verstuurd" style="font-size:10.5px">eigen</span>':' <span class="sub">(standaard)</span>')+'</label><input type="text" data-stf="'+k+'" value="'+esc(val)+'"'+(c.id?'':' disabled')+'>'+(hint?'<div class="sub">'+esc(hint)+'</div>':''); };
+    var h='<fieldset><legend>Rekeninstellingen — batterijstaffels (rooster Energie-Compas)</legend>';
+    h+='<div class="sub" style="margin-bottom:6px">Geldt voor alle projecten waarvan de adviseur of de indiener een e-mail op het contract-domein heeft. Paren als kW/kWh, gescheiden door komma\'s. Een veld gelijk aan de standaard volgt de standaard. Staat buiten de contracttekst: ook na ondertekening aan te passen.</div>';
+    h+=veld('particulier','Particulier — batterijen (kW/kWh)', stfTxt(eig.particulier||std.particulier), 'max. 10 paren');
+    h+='<div class="rij"><div>'+veld('bedrijf_klein','Klein bedrijf — extra batterijen (kW/kWh)', stfTxt(eig.bedrijf_klein||std.bedrijf_klein), 'max. 4 paren, onder de drempel')+'</div>';
+    h+='<div>'+veld('bedrijf_klein_tot_kva','Klein bedrijf tot toegangsvermogen (kVA)', String(e('bedrijf_klein_tot_kva')?eig.bedrijf_klein_tot_kva:std.bedrijf_klein_tot_kva), '0 = nooit')+'</div></div>';
+    h+=veld('ci_eenheid','C&I-eenheid (kW/kWh) — rooster = veelvouden tot aansluiting/cabine/piek', (eig.ci_eenheid||std.ci_eenheid).join('/'), 'eigen batterij-eenheid op een project gaat voor');
+    if(c.id) h+='<div class="acts" style="position:static;margin-top:8px"><button class="btn n" id="stf-bewaar">🔋 Bewaar staffels</button>'+(c.staffels?'<button class="btn" id="stf-std">↺ Terug naar standaard</button>':'')+'</div><div class="msg" id="stf-msg"></div>';
+    else h+='<div class="sub">Bewaar eerst het contract om eigen staffels in te stellen.</div>';
+    return h+'</fieldset>';
+  }
+  async function bewaarStaffels(reset){
+    if(reset&&!confirm('Alle staffels van deze partner terug op de standaard zetten?')) return;
+    var st={}; if(!reset) Array.prototype.forEach.call(document.querySelectorAll('[data-stf]'),function(el){ st[el.getAttribute('data-stf')]=el.value; });
+    try{ var j=await api('/api/contract/staffels',{ id:CUR.id, staffels:reset?null:st }); var d=DIRTY, vv=d?leesVelden():null; CUR=j.contract; if(d){ CUR.velden=Object.assign({},CUR.velden,vv); } renderEditor(); if(d){ DIRTY=true; $('dirty').textContent='● niet bewaard'; }
+      var m=$('stf-msg'); if(m){ m.className='msg ok'; m.textContent=CUR.staffels?'🔋 Eigen staffels bewaard — nieuwe simulaties van deze partner rekenen ermee.':'🔋 Standaardstaffels.'; }
+    }catch(e){ var m2=$('stf-msg'); if(m2){ m2.className='msg err'; m2.textContent='Bewaren lukte niet: '+e.message; } }
   }
   function msg(t,cls){ var m=$('msg'); if(m){ m.className='msg '+(cls||''); m.innerHTML=t; } }
   function voorbeeldLater(){ clearTimeout(PREV_T); PREV_T=setTimeout(voorbeeld,600); }
