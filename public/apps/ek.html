@@ -2,7 +2,8 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.83.0">
+<meta name="ek-build" content="0.84.0">
+<!-- ek.html v0.84.0 (2026-10-17, Johan): KLANT MAG WAT DE ADVISEUR MAG — een klant met een dossier (token) krijgt in EK dezelfde mogelijkheden als een adviseur in de adviseursweergave: blok dossier/factuur/profiel (profielimport via het token, server ≥ 15.326.0), voertuigparameters, LS/MS, DNB/Elia, cabine, klant/BTW/adres, scenarionaam en de locatiekaart (pin verslepen + bewaren). Niet: de adviseur kiezen (daarvoor «Vraag een adviseur»), projectlog en oekene-functies. -->
 <!-- ek.html v0.83.0 (2026-10-17, Johan): OFFERTES OPLADEN IN DE RESULTATEN — klant, adviseur, oekene en David laden één of meer offertes op (PDF/foto, server ≥ 15.325.0 leest installateur, PV, batterij kW/kWh/RTE/DoD, laadpalen en prijzen); nakijken + bevestigen → elke offerte wordt doorgerekend met haar eigen PV/batterij en prijs (KPI-tabel naast de gekozen combinatie) en krijgt een eigen rapport: met de naam van de installateur, de prijzen van de offerte en zonder roosterbijlage. -->
 <!-- ek.html v0.82.0 (2026-10-17, Johan): ADVISEUR VRAGEN — in het invoerscherm (klantweergave, enkel zolang het project geen adviseur heeft) kan de klant «Ik wil graag een adviseur» aanvinken; telefoonnummer verplicht → hulpvraag «adviseur gevraagd» (server ≥ 15.324.0, reden adviseur) bij oekene, die in hulp.html de meest geschikte adviseur van een partner aanduidt. -->
 <!-- ek.html v0.81.1 (2026-10-17, Johan): GEEN LEGE FOTO — de kaart (en «⤢ Groter», «Bewaar locatie») verschijnt pas als er een locatie is; adres niet gevonden → enkel de melding + het zoekveld. -->
@@ -1411,7 +1412,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     add(+(($('ev-p-nacht')||{}).value)||0,19,7,'Thuisladen nacht'); add(+(($('ev-p-dag')||{}).value)||0,7,19,'Thuisladen dag'); add(+(($('ev-p-24')||{}).value)||0,0,24,'Thuisladen 24u');
     return out; }
   // Voertuig-defaults-modal (enkel oekene@gmail.com)
-  function _evDefModal(){ if(!(EK_IS_OEKENE||EK_IS_ADV)) return; var _alleenEv=!EK_IS_OEKENE;   // v0.78.0: adviseurs → enkel voertuigparameters van dit dossier
+  function _evDefModal(){ if(!(EK_IS_OEKENE||EK_IS_ADV||_ekKlantDossier())) return; var _alleenEv=!EK_IS_OEKENE;   // v0.84.0: ook de klant (enkel voertuigparameters)   // v0.78.0: adviseurs → enkel voertuigparameters van dit dossier
     var bg=document.createElement('div'); bg.className='ekmodal-bg';
     var heeftProject=!!(STATE_CODE||TOKEN);
     // v0.34 (Johan): voertuig-defaults = PER PROJECT (val terug op de globale standaard). We tonen de huidige (globaal + evt. project).
@@ -3431,6 +3432,11 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' };
     }catch(e){ throw e; }
   }
+  // v0.84.0 (Johan 17-10): KLANT = ADVISEUR IN EK. Een klant met een dossier (TOKEN, geen ingelogde adviseur/oekene) mag alles wat een adviseur mag.
+  function _ekKlantDossier(){ return !!TOKEN && !EK_IS_OEKENE && !EK_IS_ADV; }
+  function _ekAdvOk(){ return ((EK_IS_OEKENE||EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW) || _ekKlantDossier() || (EK_KLANTVIEW && !!TOKEN); }
+  async function _ekHdrOpt(){ try{ return await _ekAuthHeaders(); }catch(e){ return { 'Content-Type':'application/json' }; } }   // zonder login: het dossier-token in de body
+  window._ekAdvOk=_ekAdvOk;
   // v0.15: login-gate. Leest de portal-Supabase-sessie (same-origin) en zet EK_IS_OEKENE als oekene@gmail.com ingelogd is.
   //   Enkel dan zijn de nieuwe features zichtbaar (Pas aan-investeringsblok, profiel-upload, kengetallen-bijlage).
   // v0.77.0 (Johan 16-10): ADVISEUR-DROPDOWN — erkende adviseurs (rol adviseur in Gebruikers) via /api/ek/adviseurs (manager);
@@ -3489,25 +3495,25 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var prepAdv  = EK_PREPADV  && !EK_KLANTVIEW;    // adviseur/prep-invoervelden
       var advCtx   = EK_PREPADV  || EK_IS_OEKENE;     // is dit überhaupt een adviseur-sessie?
       var t=document.querySelector('.inv-tools'); if(t) t.style.display=adviseur?'flex':'none';
-      var advOk = (EK_IS_OEKENE || EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW;   // v0.78.0: ingelogde adviseur of oekene in de adviseursweergave
+      var advOk = _ekAdvOk();   // v0.84.0: + klant met dossier · v0.78.0: ingelogde adviseur of oekene in de adviseursweergave
       var pu=$('prof-upl-blok'); if(pu){ if(advOk){ pu.classList.remove('hidden'); try{ _ekOekeneSamenvatting(); }catch(e){} try{ _ekPartnerLaad(); }catch(e){} } else pu.classList.add('hidden'); }
       var lgb=$('ek-log-btn'); if(lgb) lgb.style.display=adviseur?'':'none';   // v0.78.2: projectlog enkel oekene (v0.78.1 teruggedraaid)
       var opr=$('ek-oekene-partner'); if(opr) opr.style.display=adviseur?'':'none';   // partner enkel oekene
       try{ _ekDossierStap(); }catch(eDs){}
-      var kb=$('adv-klant-blok'); if(kb){ kb.classList.toggle('hidden', !prepAdv); }
+      var kb=$('adv-klant-blok'); if(kb){ kb.classList.toggle('hidden', !(prepAdv || _ekKlantDossier())); }   // v0.84.0: ook de klant
       try{ if(window._ekLocUpdate) window._ekLocUpdate(true); }catch(eLoc){}   // v0.80.0: locatiekaart enkel in de adviseursweergave
       try{ if(window._ekVraagAdvRender) window._ekVraagAdvRender(); }catch(eVa){}   // v0.82.0
       var abk=$('adv-adviseur-blok'); if(abk){ var _abToon=!!prepAdv; abk.classList.toggle('hidden', !_abToon); if(_abToon){ try{ _ekAdvLaad(); }catch(eAb){} } }   // v0.78.3: ook zonder dossier (keuze gaat mee bij «Maak FLX-dossier»)   // v0.77.0   // v0.30.0: klant-/BTW-invoervelden zijn adviseur-only
-      var eb=$('ev-def-btn'); if(eb) eb.style.display=((EK_IS_OEKENE||EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW)?'inline-flex':'none';   // v0.78.0: ook adviseurs (enkel voertuigparameters van dit dossier)
+      var eb=$('ev-def-btn'); if(eb) eb.style.display=_ekAdvOk()?'inline-flex':'none';   // v0.84.0: ook de klant   // v0.78.0: ook adviseurs (enkel voertuigparameters van dit dossier)
       var vw=$('ek-verwittig-blok'); if(vw) vw.classList.toggle('hidden', !(adviseur && TOKEN));
       try{ if(window._ekPuRender) window._ekPuRender(); }catch(ePu){}   // v0.54.0
       var hb=$('ek-hulpadv-blok'); if(hb) hb.classList.toggle('hidden', !(adviseur && TOKEN && (window._EK_HULP||[]).length));   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
       var evt=$('ev-tab'); if(evt) evt.classList.toggle('ev-klant', !_ekAdvView());   // v0.50.3: betalend/kW/€/kWh enkel in de adviseursweergave
       var cm=$('btn-concept'); if(cm) cm.style.display=adviseur?'inline-block':'none';
       var mec=$('ek-mijnec'); if(mec) mec.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));
-      var scn=$('dim-scenario'); if(scn) scn.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));   // v0.76.0: scenarionaam enkel voor adviseurs   // v0.70.3: «← Naar MijnEC» voor adviseurs/oekene, niet in klantweergave   // v0.70.2: concept-mail met rapport enkel voor oekene
+      var scn=$('dim-scenario'); if(scn) scn.classList.toggle('hidden', !((advCtx && !EK_KLANTVIEW) || _ekKlantDossier()));   // v0.84.0: ook de klant   // v0.76.0: scenarionaam enkel voor adviseurs   // v0.70.3: «← Naar MijnEC» voor adviseurs/oekene, niet in klantweergave   // v0.70.2: concept-mail met rapport enkel voor oekene
       var ov=$('btn-off-volgen'); if(ov) ov.style.display=adviseur?'inline-block':'none';   // v0.37.0 (Johan): offertes volgen enkel voor oekene   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
-      var _ao=(EK_IS_OEKENE||EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW;   // v0.78.0: cabine / LS-MS / DNB-Elia ook voor adviseurs
+      var _ao=_ekAdvOk();   // v0.84.0: + klant · v0.78.0: cabine / LS-MS / DNB-Elia ook voor adviseurs
       var cab=$('ek-cabine-blok'); if(cab){ cab.classList.toggle('hidden', !_ao); if(_ao && $('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:''); }   // v0.34 (Johan): kVA bestaande cabine enkel voor oekene
       var sp=$('ek-spanning-ovr-blok'); if(sp) sp.classList.toggle('hidden', !_ao);   // v0.24.24: LS/MS-override enkel voor oekene
       var ep=$('ek-elia-ovr-blok'); if(ep){ ep.classList.toggle('hidden', !_ao); var es=$('ek-elia-ovr'); if(es) es.value=STATE_ELIA||''; }   // v0.24.41: Elia/DNB-override enkel voor oekene
@@ -3653,9 +3659,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(st){ st.style.color='var(--muted)'; st.textContent='⏳ '+_ekEsc(f.name)+' inlezen…'; }
     try{
       var bestand=await _ekLeesBestand(f); _EK_PROF_BESTAND=bestand;
-      var hdr=await _ekAuthHeaders();
+      var hdr=await _ekHdrOpt();
       if(st) st.textContent='⏳ Formaat herkennen + reeksen identificeren…';
-      var r=await fetch(API+'/api/profiel/detect',{ method:'POST', headers:hdr, body:JSON.stringify({ bestand:bestand }) });
+      var r=await fetch(API+'/api/profiel/detect',{ method:'POST', headers:hdr, body:JSON.stringify({ bestand:bestand, token:TOKEN||undefined }) });
       var j=await r.json().catch(function(){return{};});
       if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('detect faalde ('+r.status+')'));
       if(st) st.textContent='';
@@ -3715,8 +3721,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var body={ project_id:res.flx, afname:res.afname };
       if(res.injectie) body.injectie=res.injectie;
       var prof=($('i-profiel')&&$('i-profiel').value)||''; if(prof) body.slp_profiel=prof;
-      var hdr=await _ekAuthHeaders();
-      var r=await fetch(API+'/api/profiel/analyse',{ method:'POST', headers:hdr, body:JSON.stringify(body) });
+      var hdr=await _ekHdrOpt();
+      var r=await fetch(API+'/api/profiel/analyse',{ method:'POST', headers:hdr, body:JSON.stringify(Object.assign({ token:TOKEN||undefined }, body)) });
       var j=await r.json().catch(function(){return{};});
       if(!r.ok||!j||!j.ok){
         var em=(j&&j.error)||('analyse faalde ('+r.status+')');
@@ -3796,8 +3802,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         spec.long_format=null;
         body.specs={ afname: spec };
       }
-      var hdr=await _ekAuthHeaders();
-      var r=await fetch(API+'/api/profiel/analyse',{ method:'POST', headers:hdr, body:JSON.stringify(body) });
+      var hdr=await _ekHdrOpt();
+      var r=await fetch(API+'/api/profiel/analyse',{ method:'POST', headers:hdr, body:JSON.stringify(Object.assign({ token:TOKEN||undefined }, body)) });
       var j=await r.json().catch(function(){return{};});
       if(!r.ok||!j||!j.ok){
         var em=(j&&j.error)||('analyse faalde ('+r.status+')');
@@ -3834,8 +3840,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   async function _ekProfielBevestig(cid, forceer){
     var b=$('prof-bevestig'); if(b){ b.disabled=true; b.textContent='⏳ Bewaren…'; }
     try{
-      var hdr=await _ekAuthHeaders();
-      var r=await fetch(API+'/api/profiel/bevestig',{ method:'POST', headers:hdr, body:JSON.stringify({ concept_id:cid, forceer:!!forceer }) });
+      var hdr=await _ekHdrOpt();
+      var r=await fetch(API+'/api/profiel/bevestig',{ method:'POST', headers:hdr, body:JSON.stringify({ concept_id:cid, forceer:!!forceer, token:TOKEN||undefined }) });
       var j=await r.json().catch(function(){return{};});
       if(r.status===409 && j && j.conflict){
         if(b){ b.disabled=false; b.textContent='⚠ Toch overschrijven'; b.onclick=function(){ _ekProfielBevestig(cid, true); }; }
@@ -3897,8 +3903,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var pid=STATE_CODE||(_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.project_id)||'';
     if(!pid){ alert('Geen dossier (FLX-id) gekend.'); return; }
     try{
-      var hdr=await _ekAuthHeaders();
-      var r=await fetch(API+'/api/profiel/overzicht?project_id='+encodeURIComponent(pid)+'&_='+Date.now(),{ headers:hdr, cache:'no-store' });
+      var hdr=await _ekHdrOpt();
+      var r=await fetch(API+'/api/profiel/overzicht?project_id='+encodeURIComponent(pid)+(TOKEN?'&token='+encodeURIComponent(TOKEN):'')+'&_='+Date.now(),{ headers:hdr, cache:'no-store' });
       var j=await r.json().catch(function(){ return {}; });
       if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status));
       _ekProfielModal(j);
@@ -4639,7 +4645,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function afst(a,b,c,d){ var R=6371000,r=Math.PI/180,dl=(c-a)*r,dn=(d-b)*r,x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a*r)*Math.cos(c*r)*Math.sin(dn/2)*Math.sin(dn/2); return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); }
   function norm(x){ return String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
   function tmo(ms){ var c=('AbortController' in window)?new AbortController():null; if(c) setTimeout(function(){ c.abort(); },ms); return c?c.signal:undefined; }
-  function zichtbaar(){ try{ return (EK_IS_OEKENE||EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW; }catch(e){ return false; } }
+  function zichtbaar(){ try{ return window._ekAdvOk?window._ekAdvOk():((EK_IS_OEKENE||EK_IS_ADV) && EK_PREPADV && !EK_KLANTVIEW); }catch(e){ return false; } }   // v0.84.0: ook de klant
   function st(t,kl){ var s=el('ek-loc-st'); if(s){ s.textContent=t||''; s.style.color=kl==='ok'?'var(--green)':(kl==='err'?'#8a1f1f':'var(--muted)'); } }
 
   function laadLeaflet(){
@@ -4870,7 +4876,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!S.cur) return;
     if(typeof TOKEN==='undefined'||!TOKEN){ st('Maak eerst een dossier aan om de locatie te bewaren.','err'); return; }
     var b=el('ek-loc-bewaar'); if(b) b.disabled=true; st('⏳ Bewaren…');
-    try{ var hd=await _ekAuthHeaders(); var r=await fetch(API+'/api/ek/locatie',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN, lat:S.cur.lat, lng:S.cur.lng, adres:S.adres, verschoven_m:S.geo?Math.round(afst(S.geo.lat,S.geo.lng,S.cur.lat,S.cur.lng)):null }) });
+    try{ var hd=await _ekHdrOpt(); var r=await fetch(API+'/api/ek/locatie',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN, lat:S.cur.lat, lng:S.cur.lng, adres:S.adres, verschoven_m:S.geo?Math.round(afst(S.geo.lat,S.geo.lng,S.cur.lat,S.cur.lng)):null }) });
       var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
       S.saved=j.locatie; window._EK_LOC_OPG=j.locatie; S.dirty=false; knoppen(); render(); st('✔ Locatie bewaard op het dossier.','ok');
     }catch(e){ if(b) b.disabled=false; st('Bewaren lukte niet: '+e.message,'err'); }
@@ -4879,7 +4885,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!S.geo) return;
     if(S.saved && typeof TOKEN!=='undefined' && TOKEN){
       st('⏳ Terugzetten…');
-      try{ var hd=await _ekAuthHeaders(); var r=await fetch(API+'/api/ek/locatie',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN, wis:true }) });
+      try{ var hd=await _ekHdrOpt(); var r=await fetch(API+'/api/ek/locatie',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN, wis:true }) });
         var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status)); }
       catch(e){ st('Terugzetten lukte niet: '+e.message,'err'); return; }
     }
