@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.3
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.4
+     v1.4 (17-10, Johan): ALLE BESTAANDE LAADPALEN (AC + DC). Vlaanderen: MOW-WFS beleid:laadpunten_public (Eco-Movement,
+       alle publieke + semi-publieke laadpunten, per connector → gegroepeerd per locatie). Brussel/Wallonië of MOW faalt:
+       OpenStreetMap via Overpass (gratis, geen key, CORS; overpass-api.de faalt soms → kumi.systems). Binnen de kaartzone; laag «🔌 Bestaande laadpalen». Per parking: aantal laadpalen ≤150 m (popup + lijst),
+       filter «verberg parkings met laadpalen». Cache per gemeente 24 u (localStorage). Logt laadpalen_geladen / laadpaal_bekeken.
      v1.3: Energie-Compas-logo linksboven + EC-favicon; geen Fluctus-merk zichtbaar.  (16-10-2026, Johan)
      v1.1: tabblad draagt de gemeentenaam; terminologie «Lead Generator».
      v1.2: basiskaart OpenStreetMap (CARTO voyager vroeg een API-key); leesbare parkingtypes + groep auto/tankstation.
@@ -39,7 +43,7 @@
     .gk-wrap{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;}
     .gk-side{width:340px;flex:0 0 340px;background:#fff;border-right:1px solid var(--lijn);display:flex;flex-direction:column;min-height:0;}
     #gk-map{flex:1;min-width:0;background:#e8eef2;}
-    .gk-kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:12px 12px 6px;}
+    .gk-kpi{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;padding:12px 12px 6px;}
     .gk-kpi div{background:#EAF0F8;border-radius:8px;padding:7px 8px;font-size:11px;color:var(--grijs);}
     .gk-kpi b{display:block;font-size:17px;color:var(--navy);}
     .gk-filt{padding:6px 12px 8px;display:flex;flex-direction:column;gap:7px;border-bottom:1px solid var(--lijn);}
@@ -107,6 +111,7 @@
         <div>Parkings<b id="k-park">–</b></div>
         <div>Plaatsen<b id="k-pl">–</b></div>
         <div>MS-cabines<b id="k-cab">–</b></div>
+        <div>Laadpalen<b id="k-lp">…</b></div>
       </div>
       <button id="gk-toggle" type="button">▾ lijst tonen/verbergen</button>
       <div class="gk-filt">
@@ -117,6 +122,9 @@
         </div>
         <div class="r">
           <label><input type="checkbox" id="f-leads"> enkel mijn genoteerde leads</label>
+        </div>
+        <div class="r">
+          <label><input type="checkbox" id="f-zonderlp"> verberg parkings met bestaande laadpalen (≤150 m)</label>
         </div>
       </div>
       <div class="gk-list" id="gk-list"><div class="gk-leeg">Laden…</div></div>
@@ -295,6 +303,150 @@
     }
 
     // ------------------------------------------------------------ verrijking: dichtste cabine
+    // ------------------------------------------------------------ v1.4: bestaande laadpalen (OpenStreetMap / Overpass)
+    var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+    var MOW_WFS = 'https://geoserver.gis.cloud.mow.vlaanderen.be/geoserver/beleid/wfs';
+    var LP_BRON = '';
+    function gewestNis(nis){
+      var n = String(nis || ''); while (n.length < 5) n = '0' + n; var p2 = n.slice(0, 2), d = n.charAt(0);
+      if (p2 === '21') return 'BRU'; if (p2 === '25') return 'WAL'; if (p2 === '23' || p2 === '24') return 'VLA';
+      if ('1347'.indexOf(d) >= 0) return 'VLA'; if ('5689'.indexOf(d) >= 0) return 'WAL'; return '?';
+    }
+    function metTimeout(ms){ var c = ('AbortController' in window) ? new AbortController() : null; if (c) setTimeout(function(){ c.abort(); }, ms); return c ? c.signal : undefined; }
+    // MOW: één feature per connector → groeperen per locatie (adres + coördinaat op ~1 m)
+    function lpMow(bb){
+      var url = MOW_WFS + '?service=WFS&version=2.0.0&request=GetFeature&typeNames=beleid:laadpunten_public&outputFormat=application/json'
+              + '&srsName=EPSG:4326&count=30000&bbox=' + bb.join(',') + ',urn:ogc:def:crs:EPSG::4326';
+      return fetch(url, { signal: metTimeout(30000) }).then(function(r){ if (!r.ok) throw new Error('mow http ' + r.status); return r.json(); }).then(function(j){
+        var G = {};
+        (j.features || []).forEach(function(f){
+          var pr = f.properties || {}, la = pr.latitude, lo = pr.longitude;
+          if ((la == null || lo == null) && f.geometry && f.geometry.coordinates){ lo = f.geometry.coordinates[0]; la = f.geometry.coordinates[1]; }
+          if (la == null || lo == null) return;
+          var k = rnd(la, 5) + ',' + rnd(lo, 5);
+          var g = G[k] || (G[k] = { la: la, lo: lo, kw: 0, dc: false, cap: 0, n: pr.uitbater || '', op: pr.uitbater || '', acc: pr.toegankelijkheid || '', fee: '', st: {}, adres: pr.adres || '', id: 'mow/' + k });
+          g.cap++;
+          var kw = parseFloat(pr.maximaal_vermogen_kw); if (!isNaN(kw) && kw > g.kw) g.kw = kw;
+          if (/dc/i.test(pr.stroomtype || '') || (kw >= 40) || /snel/i.test(pr.snelheid || '')) g.dc = true;
+          if (pr.connector) g.st[String(pr.connector).replace(/_/g, ' ')] = 1;
+        });
+        return Object.keys(G).map(function(k){ var g = G[k]; g.stek = Object.keys(g.st).slice(0, 4).join(', '); delete g.st; g.kw = g.kw || null; g.bron = 'MOW Vlaanderen (Eco-Movement)'; return g; });
+      });
+    }
+    var LP = [], LP_GELADEN = false, LP_STRAAL = 150, lpLayer = null, LAYERCTL = null;
+    function kwUit(v){
+      if (v == null) return null;
+      var m = String(v).replace(',', '.').match(/([\d.]+)\s*(kw|w|kva)?/i); if (!m) return null;
+      var x = parseFloat(m[1]); if (isNaN(x)) return null;
+      if (m[2] && m[2].toLowerCase() === 'w') x = x / 1000;
+      if (!m[2] && x > 1000) x = x / 1000;              // "22000" = W
+      return x;
+    }
+    function lpVan(el){
+      var tg = el.tags || {}, la = el.lat != null ? el.lat : (el.center && el.center.lat), lo = el.lon != null ? el.lon : (el.center && el.center.lon);
+      if (la == null || lo == null) return null;
+      var kw = 0, dc = false, stek = [];
+      Object.keys(tg).forEach(function(k){
+        var m = k.match(/^socket:([^:]+)(?::(output))?$/); if (!m) return;
+        if (m[2] === 'output'){ var x = kwUit(tg[k]); if (x && x > kw) kw = x; }
+        else if (tg[k] && tg[k] !== 'no'){
+          stek.push(m[1].replace(/_/g, ' '));
+          if (/combo|ccs|chademo|tesla_supercharger/i.test(m[1])) dc = true;
+        }
+      });
+      ['charging_station:output', 'maxpower', 'output'].forEach(function(k){ var x = kwUit(tg[k]); if (x && x > kw) kw = x; });
+      if (kw >= 40) dc = true;
+      var cap = parseInt(tg.capacity, 10);
+      return { la: la, lo: lo, kw: kw || null, dc: dc, cap: isNaN(cap) ? null : cap, n: tg.name || tg.operator || tg.network || tg.brand || '',
+               op: tg.operator || tg.network || '', acc: tg.access || '', fee: tg.fee || '', stek: stek.slice(0, 4).join(', '), id: el.type + '/' + el.id, bron: 'OpenStreetMap' };
+    }
+    function lpBbox(){
+      var la1 = 90, la2 = -90, lo1 = 180, lo2 = -180;
+      function u(a, b){ if (a < la1) la1 = a; if (a > la2) la2 = a; if (b < lo1) lo1 = b; if (b > lo2) lo2 = b; }
+      SITES.forEach(function(s){ u(s.lat, s.lng); });
+      if (BOUNDARY && BOUNDARY.coordinates){ JSON.stringify(BOUNDARY.coordinates).replace(/\[(-?[\d.]+),(-?[\d.]+)\]/g, function(_, x, y){ u(+y, +x); return ''; }); }
+      if (la1 > la2) return null;
+      var pad = 0.01;
+      return [rnd(la1 - pad, 4), rnd(lo1 - pad, 4), rnd(la2 + pad, 4), rnd(lo2 + pad, 4)];
+    }
+    function lpQuery(bb){
+      var q = '[out:json][timeout:40];nwr["amenity"="charging_station"](' + bb.join(',') + ');out center tags;';
+      var i = 0;
+      function poging(){
+        if (i >= OVERPASS.length) return Promise.reject(new Error('overpass onbereikbaar'));
+        var url = OVERPASS[i++];
+        return fetch(url, { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q), signal: metTimeout(25000) })
+          .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+          .catch(function(){ return poging(); });
+      }
+      return poging();
+    }
+    function lpLaden(){
+      var bb = lpBbox(); if (!bb) return;
+      var key = 'gk_lp2_' + SLUG, cache = null;
+      try { cache = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
+      var vers = cache && cache.ts && (Date.now() - cache.ts) < 24 * 3600 * 1000 && Array.isArray(cache.lp);
+      function osm(){ return lpQuery(bb).then(function(j){ return { lp: (j.elements || []).map(lpVan).filter(Boolean), bron: 'OpenStreetMap' }; }); }
+      var p = vers ? Promise.resolve({ lp: cache.lp, bron: cache.bron || '', cache: true })
+                   : (gewestNis(NIS) === 'VLA'
+                        ? lpMow(bb).then(function(lp){ if (!lp.length) throw new Error('mow leeg'); return { lp: lp, bron: 'MOW Vlaanderen (Eco-Movement)' }; }).catch(function(){ return osm(); })
+                        : osm())
+                     .then(function(r){
+                       try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), lp: r.lp, bron: r.bron })); } catch(e){}
+                       r.cache = false; return r;
+                     });
+      setLpLabel('🔌 Bestaande laadpalen (laden…)');
+      p.then(function(r){
+        LP = r.lp; LP_GELADEN = true; LP_BRON = r.bron || '';
+        lpVerrijk(); tekenLp(); tekenSites(); renderLijst();
+        var nDc = LP.filter(function(x){ return x.dc; }).length;
+        var nPunt = LP.reduce(function(a, x){ return a + (x.cap || 1); }, 0);
+        setLpLabel('🔌 Bestaande laadpalen (' + LP.length + ' locaties)');
+        document.getElementById('k-lp').textContent = nf(LP.length);
+        document.getElementById('k-lp').title = nf(nPunt) + ' laadpunten op ' + nf(LP.length) + ' locaties · bron: ' + LP_BRON;
+        log('laadpalen_geladen', { aantal: LP.length, laadpunten: nPunt, dc: nDc, ac: LP.length - nDc, bron: LP_BRON, uit_cache: !!r.cache });
+      }).catch(function(e){
+        setLpLabel('🔌 Bestaande laadpalen (niet beschikbaar)');
+        document.getElementById('k-lp').textContent = '–';
+        log('laadpalen_fout', { reden: String(e && e.message || e) });
+      });
+    }
+    function setLpLabel(t){
+      if (!LAYERCTL || !lpLayer) return;
+      LAYERCTL.removeLayer(lpLayer); LAYERCTL.addOverlay(lpLayer, t);
+    }
+    function lpVerrijk(){
+      SITES.forEach(function(s){
+        var n = 0, nDc = 0, nPt = 0, best = null, bd = Infinity;
+        LP.forEach(function(x){
+          if (Math.abs(x.la - s.lat) > 0.003 || Math.abs(x.lo - s.lng) > 0.005) return;
+          var d = afstandM(s.lat, s.lng, x.la, x.lo);
+          if (d <= LP_STRAAL){ n++; nPt += (x.cap || 1); if (x.dc) nDc++; if (d < bd){ bd = d; best = x; } }
+        });
+        s._lp = n; s._lpPt = nPt; s._lpDc = nDc; s._lpBest = best; s._lpM = best ? Math.round(bd) : null;
+      });
+    }
+    function lpInfo(x){
+      return '<b>' + (x.dc ? 'DC-snellader' : 'Laadpaal (AC)') + '</b>' + (x.n ? '<br>' + esc(x.n) : '') +
+        (x.op && x.op !== x.n ? '<br><span style="color:#5b6b85">' + esc(x.op) + '</span>' : '') +
+        (x.adres ? '<br>' + esc(x.adres) : '') +
+        (x.kw ? '<br>≈ ' + nf(Math.round(x.kw)) + ' kW' : '') + (x.cap ? ' · ' + x.cap + ' laadpunt' + (x.cap === 1 ? '' : 'en') : '') +
+        (x.stek ? '<br><span style="color:#5b6b85">' + esc(x.stek) + '</span>' : '') +
+        (x.acc && x.acc !== 'yes' ? '<br><span style="color:#9E480E">toegang: ' + esc(x.acc) + '</span>' : '') +
+        '<br><span style="font-size:11px;color:#8a99b5">bron: ' + esc(x.bron || 'OpenStreetMap') + '</span>';
+    }
+    function tekenLp(){
+      if (!lpLayer) return;
+      lpLayer.clearLayers();
+      LP.forEach(function(x){
+        var m = L.circleMarker([x.la, x.lo], { radius: x.dc ? 6 : 4.5, color:'#fff', weight:1.5, fillColor: x.dc ? '#7B3FA0' : '#2F80ED', fillOpacity:.95 });
+        m.bindTooltip(lpInfo(x), { direction:'top', sticky:true });
+        m.bindPopup(lpInfo(x));
+        m.on('popupopen', function(){ log('laadpaal_bekeken', { laadpaal: x.n || '', dc: x.dc, kw: x.kw, laadpunten: x.cap || null, id: x.id }); });
+        lpLayer.addLayer(m);
+      });
+    }
+
     function verrijk(){
       SITES.forEach(function(s){
         s._id = siteId(s);
@@ -322,6 +474,8 @@
         '<b class="t">' + esc(s.n || 'Parking') + '</b><br>' +
         '<span class="m">' + esc(typeLbl(s.t)) + (s.o ? ' · band ±2 km buiten de grens' : '') + '</span>' +
         '<div style="margin-top:5px">🅿️ ± <b>' + nf(s.p) + '</b> plaatsen (schatting)</div>' + cab +
+        (LP_GELADEN ? (s._lp ? '<div>🔌 <b>' + s._lpPt + '</b> bestaande laadpunt' + (s._lpPt === 1 ? '' : 'en') + ' op ' + s._lp + ' locatie' + (s._lp === 1 ? '' : 's') + ' ≤' + LP_STRAAL + ' m' + (s._lpDc ? ' (waarvan ' + s._lpDc + ' DC)' : '') + ' — dichtste op ' + nf(s._lpM) + ' m</div>'
+                                : '<div>🔌 Geen bestaande laadpalen ≤' + LP_STRAAL + ' m</div>') : '') +
         (st ? '<div class="ok">' + (st.status === 'lead' ? '⭐ Genoteerd als lead' : '✕ Gemarkeerd als geen lead') + (st.opm ? ' — ' + esc(st.opm) : '') + '</div>' : '') +
         '<textarea rows="2" placeholder="Opmerking (bedrijf, contact, waarom interessant…)" data-act="opm">' + esc(st && st.opm || '') + '</textarea>' +
         '<div class="btns">' +
@@ -333,7 +487,8 @@
     }
     function siteDetails(s){
       return { site: s.n || '', plaatsen: s.p || 0, type: s.t || '', band: !!s.o, lat: rnd(s.lat, 5), lng: rnd(s.lng, 5),
-               cabine: s._cab ? s._cab.n : null, cabine_m: s._cabM, cabine_afname: s._cab ? (s._cab.a || null) : null };
+               cabine: s._cab ? s._cab.n : null, cabine_m: s._cabM, cabine_afname: s._cab ? (s._cab.a || null) : null,
+               laadpalen_150m: LP_GELADEN ? (s._lpPt || 0) : null };
     }
 
     function tekenSites(){
@@ -402,13 +557,14 @@
     }
 
     // ------------------------------------------------------------ lijst + filters
-    var F = { zoek:'', min:0, band:false, leads:false };
+    var F = { zoek:'', min:0, band:false, leads:false, zonderlp:false };
     function zichtbareSites(){
       var nq = norm(F.zoek);
       return SITES.filter(function(s){
         if (!F.band && s.o) return false;
         if ((s.p || 0) < F.min) return false;
         if (F.leads && !(LEADS[s._id] && LEADS[s._id].status === 'lead')) return false;
+        if (F.zonderlp && LP_GELADEN && s._lp) return false;
         if (nq && norm(s.n).indexOf(nq) < 0) return false;
         return true;
       });
@@ -421,7 +577,7 @@
         return '<div class="gk-item' + (s.o ? ' band' : '') + '" data-id="' + esc(s._id) + '">' +
           '<span class="st">' + (st ? (st.status === 'lead' ? '⭐' : '✕') : '🅿️') + '</span>' +
           '<div class="nm">' + esc(s.n || 'Parking') + '<div class="sub">' + esc(typeLbl(s.t)) +
-          (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (s.o ? ' · band' : '') + '</div></div>' +
+          (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (LP_GELADEN && s._lp ? ' · 🔌 ' + s._lpPt : '') + (s.o ? ' · band' : '') + '</div></div>' +
           '<span class="pl">' + nf(s.p) + '</span></div>';
       }).join('') + (lst.length > 400 ? '<div class="gk-leeg">+' + (lst.length - 400) + ' meer — verfijn de filter.</div>' : '');
     }
@@ -430,7 +586,7 @@
     }
     function filterGewijzigd(bron){
       tekenSites(); renderLijst();
-      logLater('filter', 1500, function(){ log('filter', { bron: bron, zoek: F.zoek.slice(0, 60), min_plaatsen: F.min, band: F.band, enkel_leads: F.leads, resultaat: zichtbareSites().length }); });
+      logLater('filter', 1500, function(){ log('filter', { bron: bron, zoek: F.zoek.slice(0, 60), min_plaatsen: F.min, band: F.band, enkel_leads: F.leads, zonder_laadpalen: F.zonderlp, resultaat: zichtbareSites().length }); });
     }
 
     function koppelUI(){
@@ -438,6 +594,7 @@
       document.getElementById('f-min').addEventListener('input', function(){ F.min = +this.value; document.getElementById('f-minv').textContent = this.value; filterGewijzigd('min_plaatsen'); });
       document.getElementById('f-band').addEventListener('change', function(){ F.band = this.checked; filterGewijzigd('band'); });
       document.getElementById('f-leads').addEventListener('change', function(){ F.leads = this.checked; filterGewijzigd('enkel_leads'); });
+      document.getElementById('f-zonderlp').addEventListener('change', function(){ F.zonderlp = this.checked; filterGewijzigd('zonder_laadpalen'); });
       document.getElementById('gk-list').addEventListener('click', function(e){
         var it = e.target.closest('.gk-item'); if (!it) return;
         var id = it.getAttribute('data-id'), m = MARKERS[id]; if (!m) return;
@@ -467,6 +624,7 @@
       siteLayer = L.layerGroup().addTo(map);
       cabLayer  = L.layerGroup().addTo(map);
       chgLayer  = L.layerGroup().addTo(map);
+      lpLayer   = L.layerGroup().addTo(map);
 
       status('Kaart van ' + GEM + ' laden…');
       laadData().then(function(){
@@ -484,10 +642,11 @@
         ov['🅿️ Bedrijfsparkings'] = siteLayer;
         if (CABINES.length) ov['● MS-cabines (' + CABINES.length + ')'] = cabLayer;
         if (CHARGERS.length) ov['⚡ Snelladen ≥40 kW (' + CHARGERS.length + ')'] = chgLayer;
-        L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
+        ov['🔌 Bestaande laadpalen'] = lpLayer;
+        LAYERCTL = L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
         var lg = L.control({ position:'bottomright' });
         lg.onAdd = function(){ var d = L.DomUtil.create('div', 'gk-legend');
-          d.innerHTML = '<i style="background:#34568C"></i>Industrie / magazijn<br><i style="background:#9E480E"></i>Handel / winkel<br><i style="background:#8A6A00"></i>Auto / tankstation<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
+          d.innerHTML = '<i style="background:#34568C"></i>Industrie / magazijn<br><i style="background:#9E480E"></i>Handel / winkel<br><i style="background:#8A6A00"></i>Auto / tankstation<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><i style="background:#2F80ED"></i>Laadpaal AC<br><i style="background:#7B3FA0"></i>Laadpaal DC / snel<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
           return d; };
         lg.addTo(map);
 
@@ -506,6 +665,7 @@
           });
         });
 
+        lpLaden();
         log('kaart_geopend', { parkings: binnen.length, parkings_band: SITES.length - binnen.length, cabines: CABINES.length, laadpunten: CHARGERS.length });
       }).catch(function(err){
         status('');
