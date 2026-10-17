@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex,nofollow">
 <title>Rendementen · Energie-Compas</title>
 <link rel="icon" href="/favicon-ec-32.png">
+<!-- rendementen.html v1.1.1 (2026-10-17, Johan): oude rapportcijfers (basis_aftrek) omgezet → Basisscenario incl. aftrek, «Basis zonder aftrek» gevuld; ° bij gunstig zonder aftrek. -->
 <!-- rendementen.html v1.1.0 (2026-10-17, Johan): basis/gunstig incl. geschatte investeringsaftrek (enkel bedrijven, klantrapport ≥ 0.61.0); 4e kolom = «Basis zonder aftrek». -->
 <!-- rendementen.html v1.0.0 (2026-10-17, Johan): RENDEMENTEN NAAST ELKAAR voor alle dossiers (server ≥ 15.333.0, klantrapport ≥ 0.60.0).
      Per dossier, uit het laatst getoonde rapport (getekende/aanvaarde offerte > bevestigde offerte > advies): investering en per scenario
@@ -39,7 +40,7 @@
 <div class="wrap">
   <div class="bar"><input type="search" id="zoek" placeholder="Zoek op dossier, klant of adviseur…"><select id="flt"><option value="cijfers">met cijfers</option><option value="alle">alle dossiers</option><option value="aftrek">aftrek mogelijk</option><option value="bedrijf">enkel bedrijven</option><option value="part">enkel particulieren</option></select><button class="btn" id="csv">⬇ CSV</button><span class="sub" id="tel"></span></div>
   <div class="card" id="root"><div class="state">Laden…</div></div>
-  <p class="uitleg"><b>Basisscenario</b>: alles uit het rapport (15 jaar, prijsevolutie van het rapport), zonder onbalans-opbrengst. <b>Gunstig</b>: idem mét onbalans-opbrengst (potentieel; enkel bedrijven). <b>Voorzichtig</b>: regels van de verhoogde investeringsaftrek — 85 % van de gesimuleerde besparing, −2 %/jaar veroudering, zonder prijsstijging, onbalans of besparing t.o.v. elders laden, 10 jaar, enkel zonnepanelen + batterij. Bij bedrijven waar de toets gunstig is, rekenen basis- en gunstig scenario het <b>geschatte voordeel van de verhoogde investeringsaftrek</b> mee (25 % vennootschapsbelasting × 40 % × investering PV + batterij, in jaar 2); <b>Basis zonder aftrek</b> toont het basisscenario zonder dat voordeel. Particulieren: nooit aftrek. <b>Toets</b>: IRR na belastingen volgens het VEKA-sjabloon op de voorzichtige basis — ✔ alle ondernemingen, KO = enkel kleine ondernemingen (IRR &gt; 13 %), ✖ niet (TVT &lt; 3 j). Rendement = gemiddelde jaarlijkse besparing ÷ investering. Cijfers van het laatst getoonde rapport per dossier; ontbreken ze, open het rapport één keer in EK.</p>
+  <p class="uitleg"><b>Basisscenario</b>: alles uit het rapport (15 jaar, prijsevolutie van het rapport), zonder onbalans-opbrengst. <b>Gunstig</b>: idem mét onbalans-opbrengst (potentieel; enkel bedrijven). <b>Voorzichtig</b>: regels van de verhoogde investeringsaftrek — 85 % van de gesimuleerde besparing, −2 %/jaar veroudering, zonder prijsstijging, onbalans of besparing t.o.v. elders laden, 10 jaar, enkel zonnepanelen + batterij. Bij bedrijven waar de toets gunstig is, rekenen basis- en gunstig scenario het <b>geschatte voordeel van de verhoogde investeringsaftrek</b> mee (25 % vennootschapsbelasting × 40 % × investering PV + batterij, in jaar 2); <b>Basis zonder aftrek</b> toont het basisscenario zonder dat voordeel. Particulieren: nooit aftrek. <b>Toets</b>: IRR na belastingen volgens het VEKA-sjabloon op de voorzichtige basis — ✔ alle ondernemingen, KO = enkel kleine ondernemingen (IRR &gt; 13 %), ✖ niet (TVT &lt; 3 j). Die IRR rekent over 10 jaar mét belasting op de besparing, afschrijving én de aftrek zelf; <b>negatief</b> = op die voorzichtige basis binnen 10 jaar niet terugverdiend — dat belet de aftrek niet (enkel IRR &gt; 13 % of TVT &lt; 3 j sluit uit). ° = oude rapportcijfers: gunstig nog zonder aftrek. Rendement = gemiddelde jaarlijkse besparing ÷ investering. Cijfers van het laatst getoonde rapport per dossier; ontbreken ze, open het rapport één keer in EK.</p>
 </div>
 <script>
   var $=function(id){ return document.getElementById(id); };
@@ -49,6 +50,9 @@
   function num(v,d){ return v==null||!isFinite(+v)?null:(+v).toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
   async function hdr(){ var tok=SESSION&&SESSION.access_token; try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } }catch(e){} return { 'Authorization':'Bearer '+tok }; }
   var SC=[['basis','Basisscenario'],['gunstig','Gunstig'],['voorzichtig','Voorzichtig'],['basis_zonder','Basis zonder aftrek']];
+  // v1.1.1: rapportcijfers van vóór klantrapport 0.61.0 hadden «basis» ZONDER aftrek + aparte «basis_aftrek» → omzetten naar het nieuwe schema
+  //   (basis = met aftrek, basis_zonder = zonder). «gunstig» bevat bij die oude cijfers nog géén aftrek → gemarkeerd (°) tot het rapport opnieuw geopend is.
+  function _norm(d){ var K=d&&d.kern, S=K&&K.scen; if(S && S.basis_aftrek && !S.basis_zonder){ S.basis_zonder=S.basis; S.basis=S.basis_aftrek; delete S.basis_aftrek; K._oud=true; } return d; }
   function waarde(d,k){
     var K=d.kern||{}, S=K.scen||{};
     if(k==='naam') return String(d.naam||d.project_id).toLowerCase();
@@ -78,7 +82,7 @@
       var st=!A?'<span class="na">—</span>':(A.status==='alle'?'<span class="pill ok">✔ alle</span>':(A.status==='klein'?'<span class="pill ko">KO</span>':(A.status==='niet'?'<span class="pill nee">✖</span>':'<span class="pill">n.v.t.</span>')));
       h+='<tr><td><a href="'+esc(d.ek_link)+'" target="_blank" rel="noopener" style="color:var(--navy);font-weight:600;text-decoration:none">'+esc(d.naam||d.project_id)+'</a><div class="sub">'+esc(d.project_id)+(d.particulier?' · particulier':'')+(K?(' · '+(K.bron==='advies'?'advies':(K.bron==='offerte'?'offerte':'getekende offerte'))):' · nog geen rapportcijfers')+(d.adviseur?' · '+esc(d.adviseur):'')+'</div></td>'+
         '<td>'+(K?eur(K.investering):'<span class="na">—</span>')+'</td>'+
-        SC.map(function(s){ var x=S[s[0]]; if(!x && s[0]==='basis' && K) x={ rend:K.rendement, tvt:K.tvt }; return '<td class="sep">'+cel(x,'rend')+'</td><td>'+cel(x,'tvt')+'</td>'; }).join('')+
+        SC.map(function(s){ var x=S[s[0]]; if(!x && s[0]==='basis' && K) x={ rend:K.rendement, tvt:K.tvt }; var o=(K&&K._oud&&s[0]==='gunstig'&&x)?'<span title="oude rapportcijfers: nog zonder aftrek — open het rapport één keer opnieuw in EK" style="color:#B26A00"> °</span>':''; return '<td class="sep">'+cel(x,'rend')+o+'</td><td>'+cel(x,'tvt')+'</td>'; }).join('')+
         '<td class="sep">'+(A&&A.irr1!=null?num(A.irr1*100,1)+' %':'<span class="na">—</span>')+'</td><td>'+st+'</td></tr>'; });
     h+='</tbody></table>';
     $('root').innerHTML=L.length?h:'<div class="state">Geen dossiers voor deze selectie.</div>';
@@ -98,7 +102,7 @@
     sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
     var d=await sb.auth.getSession(); SESSION=d.data.session; if(!SESSION){ location.href='https://www.energie-compas.eu/login'; return; }
     try{ var r=await fetch(PROXY+'/api/rendementen/overzicht?_='+Date.now(),{ headers:await hdr(), cache:'no-store' }); var j=await r.json();
-      if(r.status===401){ location.href='https://www.energie-compas.eu/login'; return; } if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status)); DATA=j.dossiers||[]; }
+      if(r.status===401){ location.href='https://www.energie-compas.eu/login'; return; } if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status)); DATA=(j.dossiers||[]).map(_norm); }
     catch(e){ $('root').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; return; }
     $('zoek').oninput=render; $('flt').onchange=render; $('csv').onclick=csv; render();
   })();
