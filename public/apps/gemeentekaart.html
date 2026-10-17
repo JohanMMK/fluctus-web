@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.4.1
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.5
+     v1.5 (17-10, Johan): laadpalen voor ALLE gewesten uit officiële bronnen —
+       Wallonië: SPW geoservices.wallonie.be BORNES_RECHARGE (identify met envelope; query geeft geen geometrie),
+       Brussel: data.mobility.brussels WFS bm_equipment:charging_stations + _concession (+ OSM aangevuld, best-effort),
+       Vlaanderen: MOW-WFS (ongewijzigd). OSM blijft enkel als reserve.
      v1.4.1: Overpass robuuster (mail.ru eerst, 9 s/server, 2 rondes, ↻ opnieuw-knop) — overpass-api.de hing 25 s live.
      v1.4 (17-10, Johan): ALLE BESTAANDE LAADPALEN (AC + DC). Vlaanderen: MOW-WFS beleid:laadpunten_public (Eco-Movement,
        alle publieke + semi-publieke laadpunten, per connector → gegroepeerd per locatie). Brussel/Wallonië of MOW faalt:
@@ -308,6 +312,47 @@
     // v1.4.1: publieke Overpass-servers zijn wisselvallig (rate-limit/hangen) → korte timeout per server + 2 rondes
     var OVERPASS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
     var MOW_WFS = 'https://geoserver.gis.cloud.mow.vlaanderen.be/geoserver/beleid/wfs';
+    var SPW_MS  = 'https://geoservices.wallonie.be/arcgis/rest/services/INDUSTRIES_SERVICES/BORNES_RECHARGE/MapServer';
+    var BM_WFS  = 'https://data.mobility.brussels/geoserver/ows';
+    // Wallonië (SPW): één resultaat per connector → groeperen per EMPLACEMENT_ID
+    function lpWal(bb){
+      var env = [bb[1], bb[0], bb[3], bb[2]].join(',');   // lon/lat-volgorde
+      var url = SPW_MS + '/identify?geometry=' + env + '&geometryType=esriGeometryEnvelope&sr=4326&layers=all:1,2,4,5,7,8&tolerance=0'
+              + '&mapExtent=' + env + '&imageDisplay=1000,800,96&returnGeometry=true&returnFieldName=true&f=json';
+      return fetch(url, { signal: metTimeout(30000) }).then(function(r){ if (!r.ok) throw new Error('spw http ' + r.status); return r.json(); }).then(function(j){
+        var G = {};
+        (j.results || []).forEach(function(x){
+          var a = x.attributes || {}, g = x.geometry; if (!g || g.x == null) return;
+          var k = a.EMPLACEMENT_ID || (rnd(g.y, 5) + ',' + rnd(g.x, 5));
+          var o = G[k] || (G[k] = { la: g.y, lo: g.x, kw: 0, dc: false, cap: 0, n: a.OPERATEUR || '', op: a.OPERATEUR || '', acc: a.TYPE_ACCES || '',
+                                     fee: '', adres: [a.ADRESSE, a.CODE_POSTAL, a.VILLE].filter(function(v){ return v && v !== 'Null'; }).join(' '), id: 'spw/' + k, bron: 'SPW Wallonie' });
+          o.cap++;
+          var kw = parseFloat(a.PUISSANCE_KW); if (!isNaN(kw) && kw > o.kw) o.kw = kw;
+          if (/rapide/i.test(a.TYPE_RECHARGE || '') || kw >= 40) o.dc = true;
+        });
+        return Object.keys(G).map(function(k){ var o = G[k]; o.kw = o.kw || null; o.stek = ''; return o; });
+      });
+    }
+    // Brussel (Brussel Mobiliteit): twee lagen, per locatie
+    function lpBru(bb){
+      function laag(tn){
+        var url = BM_WFS + '?service=WFS&version=2.0.0&request=GetFeature&typeNames=' + tn + '&outputFormat=application/json&srsName=EPSG:4326&count=10000'
+                + '&bbox=' + bb.join(',') + ',urn:ogc:def:crs:EPSG::4326';
+        return fetch(url, { signal: metTimeout(20000) }).then(function(r){ if (!r.ok) throw new Error('bm http ' + r.status); return r.json(); })
+          .then(function(j){ return j.features || []; }).catch(function(){ return []; });
+      }
+      return Promise.all([laag('bm_equipment:charging_stations'), laag('bm_equipment:charging_stations_concession')]).then(function(res){
+        var uit = [];
+        res[0].concat(res[1]).forEach(function(f){
+          var pr = f.properties || {}, c = f.geometry && f.geometry.coordinates; if (!c) return;
+          var kw = kwUit(pr.power) || (/snel|rapide|fast/i.test(pr.charging || '') ? 50 : null);
+          uit.push({ la: c[1], lo: c[0], kw: kw, dc: (kw || 0) >= 40, cap: parseInt(pr.number, 10) || null, n: pr.owner || pr.type || (pr.pp_ref ? 'Concessie Brussel' : ''),
+                     op: pr.owner || '', acc: '', fee: '', stek: pr.plug || '', adres: [pr.road_nl || pr.straat, pr.housenr, pr.pccp || pr.postcode].filter(Boolean).join(' '),
+                     id: 'bm/' + (pr.id || pr.pp_ref || (c[1] + ',' + c[0])), bron: 'Brussel Mobiliteit' });
+        });
+        return uit;
+      });
+    }
     var LP_BRON = '';
     function gewestNis(nis){
       var n = String(nis || ''); while (n.length < 5) n = '0' + n; var p2 = n.slice(0, 2), d = n.charAt(0);
@@ -338,7 +383,7 @@
     var LP = [], LP_GELADEN = false, LP_STRAAL = 150, lpLayer = null, LAYERCTL = null;
     function kwUit(v){
       if (v == null) return null;
-      var m = String(v).replace(',', '.').match(/([\d.]+)\s*(kw|w|kva)?/i); if (!m) return null;
+      var sv = String(v).replace(',', '.'), m = sv.match(/([\d.]+)\s*(kw|kva)\b/i) || sv.match(/([\d.]+)\s*(w)?\b/i); if (!m) return null;
       var x = parseFloat(m[1]); if (isNaN(x)) return null;
       if (m[2] && m[2].toLowerCase() === 'w') x = x / 1000;
       if (!m[2] && x > 1000) x = x / 1000;              // "22000" = W
@@ -389,14 +434,25 @@
     }
     function lpLaden(){
       var bb = lpBbox(); if (!bb) return;
-      var key = 'gk_lp2_' + SLUG, cache = null;
+      var key = 'gk_lp3_' + SLUG, cache = null;
       try { cache = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
       var vers = cache && cache.ts && (Date.now() - cache.ts) < 24 * 3600 * 1000 && Array.isArray(cache.lp);
       function osm(){ return lpQuery(bb).then(function(j){ return { lp: (j.elements || []).map(lpVan).filter(Boolean), bron: 'OpenStreetMap' }; }); }
+      var gw = gewestNis(NIS);
+      function officieel(){
+        if (gw === 'VLA') return lpMow(bb).then(function(lp){ if (!lp.length) throw new Error('mow leeg'); return { lp: lp, bron: 'MOW Vlaanderen (Eco-Movement)' }; });
+        if (gw === 'WAL') return lpWal(bb).then(function(lp){ if (!lp.length) throw new Error('spw leeg'); return { lp: lp, bron: 'SPW Wallonie' }; });
+        if (gw === 'BRU') return lpBru(bb).then(function(lp){
+          // Brussel Mobiliteit is beperkt → aanvullen met OSM (best-effort, dubbels ≤25 m weg)
+          return lpQuery(bb).then(function(j){
+            var extra = (j.elements || []).map(lpVan).filter(Boolean).filter(function(x){ return !lp.some(function(y){ return afstandM(x.la, x.lo, y.la, y.lo) < 25; }); });
+            return { lp: lp.concat(extra), bron: 'Brussel Mobiliteit' + (extra.length ? ' + OpenStreetMap' : '') };
+          }).catch(function(){ if (!lp.length) throw new Error('bm leeg'); return { lp: lp, bron: 'Brussel Mobiliteit' }; });
+        });
+        return Promise.reject(new Error('gewest onbekend'));
+      }
       var p = vers ? Promise.resolve({ lp: cache.lp, bron: cache.bron || '', cache: true })
-                   : (gewestNis(NIS) === 'VLA'
-                        ? lpMow(bb).then(function(lp){ if (!lp.length) throw new Error('mow leeg'); return { lp: lp, bron: 'MOW Vlaanderen (Eco-Movement)' }; }).catch(function(){ return osm(); })
-                        : osm())
+                   : officieel().catch(function(){ return osm(); })
                      .then(function(r){
                        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), lp: r.lp, bron: r.bron })); } catch(e){}
                        r.cache = false; return r;
