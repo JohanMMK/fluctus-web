@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.5
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.6
+     v1.6 (17-10, Johan): ADRES — &lat&lng&adres in de URL (vanuit de Lead Generator) of «📍 Zoek een adres» in de zijbalk →
+       rode pin + cirkel 300 m + kader «Wat is hier?»: parkings ≤300 m (klikbaar), dichtste MS-cabine (+restcapaciteit),
+       laadpunten ≤300 m. Adres buiten deze gemeente → doorsturen naar de Lead Generator (?adres=…). Logt adres_bekeken.
      v1.5.1: MOW + SPW + Brussel Mobiliteit tegelijk (band over gewestgrens gedekt, snel); OSM voor Brussel pas achteraf.
      v1.5 (17-10, Johan): laadpalen voor ALLE gewesten uit officiële bronnen —
        Wallonië: SPW geoservices.wallonie.be BORNES_RECHARGE (identify met envelope; query geeft geen geometrie),
@@ -100,6 +103,21 @@
     }
       .ec-logo{height:30px;width:auto;display:block;}
     @media (max-width:760px){.ec-logo{height:24px;}}
+    /* ---- adres zoeken ---- */
+    .adr-wrap{position:relative;}
+    .adr-lijst{position:absolute;z-index:1300;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #C9D6EC;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);max-height:300px;overflow:auto;display:none;}
+    .adr-lijst.open{display:block;}
+    .adr-item{padding:9px 12px;font-size:13.5px;cursor:pointer;border-bottom:1px solid #F0F4FA;color:#1F3864;}
+    .adr-item:last-child{border-bottom:none;}
+    .adr-item.active,.adr-item:hover{background:#EAF0F8;}
+    .adr-leeg{padding:10px 12px;font-size:13px;color:#8a99b5;}
+    .gk-adr{font-size:13px;line-height:1.45;min-width:240px;}
+    .gk-adr b.t{font-size:14px;color:var(--navy);}
+    .gk-adr .h{font-weight:bold;margin-top:7px;color:var(--navy);}
+    .gk-adr .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed #E2E8F2;cursor:pointer;}
+    .gk-adr .row:hover{background:#EAF0F8;}
+    .gk-adr .m{color:var(--grijs);font-size:12px;}
+    .gk-adrpin{font-size:30px;line-height:30px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35));}
   </style>
 </head>
 <body>
@@ -121,6 +139,10 @@
       </div>
       <button id="gk-toggle" type="button">▾ lijst tonen/verbergen</button>
       <div class="gk-filt">
+        <div class="adr-wrap">
+          <input type="text" id="f-adres" placeholder="📍 Zoek een adres…" autocomplete="off" spellcheck="false">
+          <div id="f-adres-lijst" class="adr-lijst"></div>
+        </div>
         <input type="text" id="f-zoek" placeholder="Zoek parking / bedrijf…" autocomplete="off" spellcheck="false">
         <div class="r"><span>Min. plaatsen</span><input type="range" id="f-min" min="0" max="200" step="5" value="0"><b id="f-minv">0</b></div>
         <div class="r">
@@ -180,6 +202,8 @@
     var GEM  = qs.get('naam') || SLUG.replace(/_/g, ' ') || 'gemeente';
     document.getElementById('gk-titel').textContent = GEM + ' — Lead Generator';
     document.title = GEM;   // tabblad = naam van de gemeente
+    var ADR = (qs.get('lat') && qs.get('lng')) ? { lat: +qs.get('lat'), lng: +qs.get('lng'), label: qs.get('adres') || '' } : null;
+    if (ADR && (isNaN(ADR.lat) || isNaN(ADR.lng))) ADR = null;
 
     var sb = window.supabase.createClient(SUPA_URL, SUPA_ANON);
     var TOKEN = null, EMAIL = null, UID = null;
@@ -461,7 +485,7 @@
           if (!extra.length) return;
           LP = LP.concat(extra); LP_BRON = LP_BRON + ' + OpenStreetMap';
           try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), lp: LP, bron: LP_BRON })); } catch(e){}
-          lpVerrijk(); tekenLp(); tekenSites(); renderLijst();
+          lpVerrijk(); tekenLp(); tekenSites(); renderLijst(); adresVernieuw();
           setLpLabel('🔌 Bestaande laadpalen (' + LP.length + ' locaties)');
           document.getElementById('k-lp').textContent = nf(LP.length);
           log('laadpalen_aangevuld', { extra: extra.length, bron: 'OpenStreetMap' });
@@ -476,7 +500,7 @@
       setLpLabel('🔌 Bestaande laadpalen (laden…)');
       p.then(function(r){
         LP = r.lp; LP_GELADEN = true; LP_BRON = r.bron || '';
-        lpVerrijk(); tekenLp(); tekenSites(); renderLijst();
+        lpVerrijk(); tekenLp(); tekenSites(); renderLijst(); adresVernieuw();
         var nDc = LP.filter(function(x){ return x.dc; }).length;
         var nPunt = LP.reduce(function(a, x){ return a + (x.cap || 1); }, 0);
         setLpLabel('🔌 Bestaande laadpalen (' + LP.length + ' locaties)');
@@ -615,6 +639,122 @@
       });
     }
 
+    // ------------------------------------------------------------ v1.5/1.6: ADRES ZOEKEN (Photon/OSM, fallback Nominatim) — gratis, geen key, CORS
+    var ADR_BBOX = '2.5,49.45,6.45,51.55';
+    function adresLabel(p){
+      var straat = [p.street || (p.type === 'street' ? p.name : ''), p.housenumber].filter(Boolean).join(' ');
+      var naam = (p.name && p.name !== p.street && p.type !== 'street') ? p.name : '';
+      var plaats = [p.postcode, p.city || p.town || p.village || p.district || p.county].filter(Boolean).join(' ');
+      return [naam, straat, plaats].filter(Boolean).join(', ');
+    }
+    function zoekAdres(q){
+      var url = 'https://photon.komoot.io/api/?limit=6&lang=nl&bbox=' + ADR_BBOX + '&q=' + encodeURIComponent(q);
+      return fetch(url).then(function(r){ if (!r.ok) throw new Error('photon ' + r.status); return r.json(); }).then(function(j){
+        var uit = (j.features || []).filter(function(f){ return (f.properties || {}).countrycode === 'BE'; }).map(function(f){
+          var c = f.geometry.coordinates; return { lat: c[1], lng: c[0], label: adresLabel(f.properties || {}) || q };
+        });
+        if (!uit.length) throw new Error('photon leeg');
+        return uit;
+      }).catch(function(){
+        return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=be&limit=6&q=' + encodeURIComponent(q))
+          .then(function(r){ return r.json(); })
+          .then(function(a){ return (a || []).map(function(x){ return { lat: +x.lat, lng: +x.lon, label: String(x.display_name || q).replace(/, (België \/ Belgique \/ Belgien|Belgium)$/, '') }; }); });
+      });
+    }
+    // typeahead op een input + lijst; kies(adres) wordt synchroon in de klik/Enter aangeroepen (popup-blocker-vriendelijk)
+    function adresTypeahead(inp, lijst, kies){
+      var hits = [], act = -1, timer = null, volg = 0;
+      function sluit(){ lijst.classList.remove('open'); lijst.innerHTML = ''; act = -1; }
+      function teken(){
+        if (!hits.length){ lijst.innerHTML = '<div class="adr-leeg">Geen adres gevonden.</div>'; lijst.classList.add('open'); return; }
+        lijst.innerHTML = hits.map(function(h, i){ return '<div class="adr-item' + (i === act ? ' active' : '') + '" data-i="' + i + '">📍 ' + esc(h.label) + '</div>'; }).join('');
+        lijst.classList.add('open');
+      }
+      function zoek(q, direct){
+        var n = ++volg;
+        lijst.innerHTML = '<div class="adr-leeg">Zoeken…</div>'; lijst.classList.add('open');
+        return zoekAdres(q).then(function(r){ if (n !== volg) return; hits = r; act = -1; teken(); if (direct && hits[0]){ sluit(); kies(hits[0]); } })
+          .catch(function(){ if (n !== volg) return; hits = []; teken(); });
+      }
+      inp.addEventListener('input', function(){
+        var q = this.value.trim(); clearTimeout(timer);
+        if (q.length < 4){ sluit(); return; }
+        timer = setTimeout(function(){ zoek(q); }, 350);
+      });
+      inp.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowDown' && hits.length){ e.preventDefault(); act = Math.min(act + 1, hits.length - 1); teken(); }
+        else if (e.key === 'ArrowUp' && hits.length){ e.preventDefault(); act = Math.max(act - 1, 0); teken(); }
+        else if (e.key === 'Enter'){
+          e.preventDefault();
+          if (hits.length && lijst.classList.contains('open')){ var h = hits[act >= 0 ? act : 0]; sluit(); inp.value = h.label; kies(h); }
+          else if (inp.value.trim().length >= 4){ clearTimeout(timer); zoek(inp.value.trim(), true); }
+        }
+        else if (e.key === 'Escape') sluit();
+      });
+      lijst.addEventListener('click', function(e){
+        var it = e.target.closest('.adr-item'); if (!it) return;
+        var h = hits[+it.getAttribute('data-i')]; sluit(); inp.value = h.label; kies(h);
+      });
+      document.addEventListener('click', function(e){ if (!e.target.closest || (e.target !== inp && !e.target.closest('.adr-wrap'))) sluit(); });
+    }
+
+    var ADR_STRAAL = 300, adrMarker = null, adrCirkel = null, ADR_NU = null;
+    function binnenGebied(a){
+      var bb = lpBbox(); if (!bb) return false;
+      return a.lat >= bb[0] && a.lat <= bb[2] && a.lng >= bb[1] && a.lng <= bb[3];
+    }
+    function adresAnalyse(a){
+      var park = SITES.map(function(s){ return { s: s, d: afstandM(a.lat, a.lng, s.lat, s.lng) }; })
+                      .filter(function(x){ return x.d <= ADR_STRAAL; }).sort(function(x, y){ return x.d - y.d; });
+      var cab = null, cd = Infinity;
+      CABINES.forEach(function(c){ var d = afstandM(a.lat, a.lng, c.la, c.lo); if (d < cd){ cd = d; cab = c; } });
+      var lpN = 0, lpPt = 0, lpDc = 0, lpBest = null, lbd = Infinity;
+      if (LP_GELADEN) LP.forEach(function(x){ var d = afstandM(a.lat, a.lng, x.la, x.lo); if (d <= ADR_STRAAL){ lpN++; lpPt += (x.cap || 1); if (x.dc) lpDc++; if (d < lbd){ lbd = d; lpBest = x; } } });
+      return { park: park, cab: cab, cabM: cab ? Math.round(cd) : null, lpN: lpN, lpPt: lpPt, lpDc: lpDc, lpBest: lpBest, lpM: lpBest ? Math.round(lbd) : null };
+    }
+    function adresHtml(a){
+      var r = adresAnalyse(a);
+      var h = '<div class="gk-adr"><b class="t">📍 ' + esc(a.label || 'Gekozen adres') + '</b>';
+      h += '<div class="h">🅿️ Bedrijfsparkings ≤' + ADR_STRAAL + ' m: ' + r.park.length + '</div>';
+      if (r.park.length) h += r.park.slice(0, 6).map(function(x){
+        return '<div class="row" data-adr-site="' + esc(x.s._id) + '"><span>' + esc(x.s.n || 'Parking') + ' <span class="m">· ' + esc(typeLbl(x.s.t)) + '</span></span><span><b>' + nf(x.s.p) + '</b> pl. · ' + nf(Math.round(x.d)) + ' m</span></div>';
+      }).join('') + (r.park.length > 6 ? '<div class="m">+' + (r.park.length - 6) + ' meer</div>' : '');
+      else h += '<div class="m">Geen bedrijfsparking in de dataset binnen ' + ADR_STRAAL + ' m.</div>';
+      h += '<div class="h">⚡ Dichtste MS-cabine</div>' + (r.cab ? '<div>' + esc(r.cab.n) + ' op <b>' + nf(r.cabM) + ' m</b>' + (r.cab.a ? '<br><span class="m">restcap. afname ' + esc(r.cab.a) + (r.cab.i ? ' · injectie ' + esc(r.cab.i) : '') + '</span>' : '') + '</div>'
+                                                               : '<div class="m">Geen cabinedata voor deze zone.</div>');
+      h += '<div class="h">🔌 Bestaande laadpalen ≤' + ADR_STRAAL + ' m</div>' + (!LP_GELADEN ? '<div class="m">laden…</div>'
+           : (r.lpN ? '<div><b>' + r.lpPt + '</b> laadpunt' + (r.lpPt === 1 ? '' : 'en') + ' op ' + r.lpN + ' locatie' + (r.lpN === 1 ? '' : 's') + (r.lpDc ? ' (waarvan ' + r.lpDc + ' DC)' : '') + ' — dichtste op ' + nf(r.lpM) + ' m' + (r.lpBest && r.lpBest.n ? ' (' + esc(r.lpBest.n) + ')' : '') + '</div>'
+                    : '<div>Geen bestaande laadpalen — <b style="color:#048443">kans</b></div>'));
+      h += '<div style="margin-top:7px"><a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + a.lat + ',' + a.lng + '" target="_blank" rel="noopener">👁 Street View</a> · <a href="https://www.google.com/maps/search/?api=1&query=' + a.lat + ',' + a.lng + '" target="_blank" rel="noopener">📍 Google Maps</a></div></div>';
+      return h;
+    }
+    function toonAdres(a, bron){
+      if (!binnenGebied(a)){
+        status('📍 Dit adres ligt buiten ' + GEM + ' — de juiste gemeentekaart wordt geopend…');
+        log('adres_buiten_gemeente', { adres: a.label, lat: rnd(a.lat, 5), lng: rnd(a.lng, 5) }, a.label);
+        setTimeout(function(){ location.assign('/apps/gemeenteplan.html?adres=' + encodeURIComponent(a.label || (a.lat + ',' + a.lng)) + '&lat=' + (+a.lat).toFixed(6) + '&lng=' + (+a.lng).toFixed(6)); }, 900);
+        return;
+      }
+      ADR_NU = a;
+      if (adrMarker){ map.removeLayer(adrMarker); map.removeLayer(adrCirkel); }
+      adrCirkel = L.circle([a.lat, a.lng], { radius: ADR_STRAAL, color:'#D7263D', weight:1.5, dashArray:'5 4', fillOpacity:.05, interactive:false }).addTo(map);
+      adrMarker = L.marker([a.lat, a.lng], { zIndexOffset: 2000, icon: L.divIcon({ className:'', html:'<div class="gk-adrpin">📍</div>', iconSize:[30, 30], iconAnchor:[15, 28] }) }).addTo(map);
+      adrMarker.bindPopup(function(){ return adresHtml(ADR_NU); }, { maxWidth: 340 });
+      map.setView([a.lat, a.lng], 17);
+      setTimeout(function(){ adrMarker.openPopup(); }, 250);
+      var r = adresAnalyse(a);
+      log('adres_bekeken', { adres: a.label, bron: bron || '', lat: rnd(a.lat, 5), lng: rnd(a.lng, 5), parkings_300m: r.park.length,
+                             plaatsen_300m: r.park.reduce(function(t, x){ return t + (x.s.p || 0); }, 0), cabine: r.cab ? r.cab.n : null, cabine_m: r.cabM,
+                             laadpunten_300m: LP_GELADEN ? r.lpPt : null }, a.label);
+    }
+    function adresVernieuw(){ if (adrMarker && ADR_NU){ adrMarker.setPopupContent(adresHtml(ADR_NU)); } }
+    document.addEventListener('click', function(e){
+      var row = e.target.closest && e.target.closest('[data-adr-site]'); if (!row) return;
+      var m = MARKERS[row.getAttribute('data-adr-site')];
+      if (!m){ F.band = true; document.getElementById('f-band').checked = true; tekenSites(); renderLijst(); m = MARKERS[row.getAttribute('data-adr-site')]; }
+      if (m){ map.setView(m.getLatLng(), Math.max(map.getZoom(), 17)); m.openPopup(); }
+    });
+
     // klikken in de popup (lead / geen lead / Google Maps)
     function popupActies(e){
       var el = e.target, act = el && el.getAttribute && el.getAttribute('data-act');
@@ -672,6 +812,7 @@
     }
 
     function koppelUI(){
+      adresTypeahead(document.getElementById('f-adres'), document.getElementById('f-adres-lijst'), function(a){ toonAdres(a, 'zijbalk'); });
       document.getElementById('f-zoek').addEventListener('input', function(){ F.zoek = this.value; filterGewijzigd('zoek'); });
       document.getElementById('f-min').addEventListener('input', function(){ F.min = +this.value; document.getElementById('f-minv').textContent = this.value; filterGewijzigd('min_plaatsen'); });
       document.getElementById('f-band').addEventListener('change', function(){ F.band = this.checked; filterGewijzigd('band'); });
@@ -735,6 +876,7 @@
         var pts = SITES.filter(function(s){ return !s.o; }).map(function(s){ return [s.lat, s.lng]; });
         if (!pts.length) pts = SITES.map(function(s){ return [s.lat, s.lng]; }).concat(CABINES.map(function(c){ return [c.la, c.lo]; }));
         if (pts.length) map.fitBounds(pts, { padding:[30, 30] });
+        if (ADR){ document.getElementById('f-adres').value = ADR.label; toonAdres(ADR, 'lead_generator'); }
 
         // logging van kaartgebruik
         map.on('baselayerchange', function(e){ log('basislaag', { laag: e.name }); });

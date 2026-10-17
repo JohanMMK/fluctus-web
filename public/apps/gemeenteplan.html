@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR  v1.4
+     ENERGIE-COMPAS LEAD GENERATOR  v1.5
+     v1.5 (17-10, Johan): ADRES ZOEKEN — «📍 zoek een adres» (Photon/OSM-typeahead, fallback Nominatim) → gemeente via punt-in-polygoon →
+       kaart van die gemeente opent op dat adres (&lat&lng&adres). ?adres=… in de URL opent meteen de juiste kaart. Logt adres_gezocht.
      v1.4 (16-10, Johan): Energie-Compas-logo linksboven + EC-favicon; geen Fluctus-merk meer zichtbaar.
      v1.4.1: basiskaart Esri Light Gray (CARTO light_nolabels vroeg live een API-key).
      (vroeger: v1.3)  (bestand/app_id blijven 'gemeenteplan' voor toegangsrechten en bookmarks)
@@ -88,6 +90,14 @@
     #fk-toast b{color:#7BE0A8;}
       .ec-logo{height:34px;width:auto;display:block;}
     @media (max-width:760px){.ec-logo{height:24px;}}
+    /* ---- adres zoeken ---- */
+    .adr-wrap{position:relative;}
+    .adr-lijst{position:absolute;z-index:1300;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #C9D6EC;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);max-height:300px;overflow:auto;display:none;}
+    .adr-lijst.open{display:block;}
+    .adr-item{padding:9px 12px;font-size:13.5px;cursor:pointer;border-bottom:1px solid #F0F4FA;color:#1F3864;}
+    .adr-item:last-child{border-bottom:none;}
+    .adr-item.active,.adr-item:hover{background:#EAF0F8;}
+    .adr-leeg{padding:10px 12px;font-size:13px;color:#8a99b5;}
   </style>
 <script src="/apps/mijnec-knop.js?v=1.0.1" defer></script>
 </head>
@@ -110,6 +120,10 @@
         <input id="fk-gem-input" type="text" placeholder="Typ een gemeentenaam…" autocomplete="off" spellcheck="false">
         <div id="fk-gem-list" class="fk-gem-list"></div>
       </div>
+      <div class="fk-search adr-wrap">
+        <input id="fk-adr-input" type="text" placeholder="📍 Of zoek een adres (straat nr, gemeente)…" autocomplete="off" spellcheck="false">
+        <div id="fk-adr-list" class="adr-lijst"></div>
+      </div>
       <label for="fk-metric" style="margin-left:4px">Toon per gemeente:</label>
       <select id="fk-metric">
         <option value="parkings">Aantal parkings per gemeente</option>
@@ -117,7 +131,7 @@
         <option value="energiePct">Extra energie via het bestaande net</option>
       </select>
     </div>
-    <div class="fk-bar"><span class="fk-hint">Kies een gemeente in de zoekbalk of klik op de kaart → de kaart van die gemeente opent in een nieuw tabblad. <a id="fk-loglink" href="/apps/leadgen-log.html" target="_blank" style="display:none;color:#05803B;font-weight:bold;margin-left:8px">📋 Opvolging adviseurs</a></span></div>
+    <div class="fk-bar"><span class="fk-hint">Kies een gemeente of een adres, of klik op de kaart → de kaart van die gemeente opent in een nieuw tabblad (bij een adres meteen op die plek). <a id="fk-loglink" href="/apps/leadgen-log.html" target="_blank" style="display:none;color:#05803B;font-weight:bold;margin-left:8px">📋 Opvolging adviseurs</a></span></div>
 
     <div class="fk-bar" id="fk-regiobar">
       <label style="font-weight:bold;font-size:14px">Gewesten:</label>
@@ -437,6 +451,94 @@
       if (!e.target.closest('.fk-search')) closeSearch();
     });
 
+    function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+    function pointInRing(x, y, ring){
+      var inside = false;
+      for (var i = 0, j = ring.length - 1; i < ring.length; j = i++){
+        var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+        if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+      }
+      return inside;
+    }
+    function gemeenteVoorPunt(lat, lng){
+      for (var i = 0; i < GEOFEATS.length; i++){
+        var f = GEOFEATS[i], bb = f._bb;
+        if (lng < bb[0] || lng > bb[2] || lat < bb[1] || lat > bb[3]) continue;
+        var g = f.geometry, polys = g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates];
+        for (var p = 0; p < polys.length; p++){
+          if (!pointInRing(lng, lat, polys[p][0])) continue;
+          var gat = false; for (var h = 1; h < polys[p].length; h++){ if (pointInRing(lng, lat, polys[p][h])){ gat = true; break; } }
+          if (!gat) return f;
+        }
+      }
+      return null;
+    }
+    // ------------------------------------------------------------ v1.5/1.6: ADRES ZOEKEN (Photon/OSM, fallback Nominatim) — gratis, geen key, CORS
+    var ADR_BBOX = '2.5,49.45,6.45,51.55';
+    function adresLabel(p){
+      var straat = [p.street || (p.type === 'street' ? p.name : ''), p.housenumber].filter(Boolean).join(' ');
+      var naam = (p.name && p.name !== p.street && p.type !== 'street') ? p.name : '';
+      var plaats = [p.postcode, p.city || p.town || p.village || p.district || p.county].filter(Boolean).join(' ');
+      return [naam, straat, plaats].filter(Boolean).join(', ');
+    }
+    function zoekAdres(q){
+      var url = 'https://photon.komoot.io/api/?limit=6&lang=nl&bbox=' + ADR_BBOX + '&q=' + encodeURIComponent(q);
+      return fetch(url).then(function(r){ if (!r.ok) throw new Error('photon ' + r.status); return r.json(); }).then(function(j){
+        var uit = (j.features || []).filter(function(f){ return (f.properties || {}).countrycode === 'BE'; }).map(function(f){
+          var c = f.geometry.coordinates; return { lat: c[1], lng: c[0], label: adresLabel(f.properties || {}) || q };
+        });
+        if (!uit.length) throw new Error('photon leeg');
+        return uit;
+      }).catch(function(){
+        return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=be&limit=6&q=' + encodeURIComponent(q))
+          .then(function(r){ return r.json(); })
+          .then(function(a){ return (a || []).map(function(x){ return { lat: +x.lat, lng: +x.lon, label: String(x.display_name || q).replace(/, (België \/ Belgique \/ Belgien|Belgium)$/, '') }; }); });
+      });
+    }
+    // typeahead op een input + lijst; kies(adres) wordt synchroon in de klik/Enter aangeroepen (popup-blocker-vriendelijk)
+    function adresTypeahead(inp, lijst, kies){
+      var hits = [], act = -1, timer = null, volg = 0;
+      function sluit(){ lijst.classList.remove('open'); lijst.innerHTML = ''; act = -1; }
+      function teken(){
+        if (!hits.length){ lijst.innerHTML = '<div class="adr-leeg">Geen adres gevonden.</div>'; lijst.classList.add('open'); return; }
+        lijst.innerHTML = hits.map(function(h, i){ return '<div class="adr-item' + (i === act ? ' active' : '') + '" data-i="' + i + '">📍 ' + esc(h.label) + '</div>'; }).join('');
+        lijst.classList.add('open');
+      }
+      function zoek(q, direct){
+        var n = ++volg;
+        lijst.innerHTML = '<div class="adr-leeg">Zoeken…</div>'; lijst.classList.add('open');
+        return zoekAdres(q).then(function(r){ if (n !== volg) return; hits = r; act = -1; teken(); if (direct && hits[0]){ sluit(); kies(hits[0]); } })
+          .catch(function(){ if (n !== volg) return; hits = []; teken(); });
+      }
+      inp.addEventListener('input', function(){
+        var q = this.value.trim(); clearTimeout(timer);
+        if (q.length < 4){ sluit(); return; }
+        timer = setTimeout(function(){ zoek(q); }, 350);
+      });
+      inp.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowDown' && hits.length){ e.preventDefault(); act = Math.min(act + 1, hits.length - 1); teken(); }
+        else if (e.key === 'ArrowUp' && hits.length){ e.preventDefault(); act = Math.max(act - 1, 0); teken(); }
+        else if (e.key === 'Enter'){
+          e.preventDefault();
+          if (hits.length && lijst.classList.contains('open')){ var h = hits[act >= 0 ? act : 0]; sluit(); inp.value = h.label; kies(h); }
+          else if (inp.value.trim().length >= 4){ clearTimeout(timer); zoek(inp.value.trim(), true); }
+        }
+        else if (e.key === 'Escape') sluit();
+      });
+      lijst.addEventListener('click', function(e){
+        var it = e.target.closest('.adr-item'); if (!it) return;
+        var h = hits[+it.getAttribute('data-i')]; sluit(); inp.value = h.label; kies(h);
+      });
+      document.addEventListener('click', function(e){ if (!e.target.closest || (e.target !== inp && !e.target.closest('.adr-wrap'))) sluit(); });
+    }
+
+    function kiesAdres(a, bron){
+      var f = gemeenteVoorPunt(a.lat, a.lng);
+      if (!f){ showToast('Dit adres ligt niet in een Belgische gemeente op de kaart.'); logActie('adres_gezocht', { adres: a.label, lat: a.lat, lng: a.lng, gevonden: false }); return; }
+      try { map.setView([a.lat, a.lng], 13); } catch(e){}
+      openGemeenteKaart(f.properties.niscode, f, bron || 'adres', a);
+    }
+
     // =====================================================================
     //  LEADGENERATOR — gemeente openen in een nieuw tabblad + logging
     // =====================================================================
@@ -456,18 +558,25 @@
       }catch(e){}
     }
 
-    function openGemeenteKaart(nis, feat, bron){
+    function kaartUrl(nis, feat, adr){
+      var s = STATS[nis] || {};
+      var gem = s.naam || (feat && feat.properties.namedut) || String(nis);
+      var url = '/apps/gemeentekaart.html?slug=' + encodeURIComponent(slugVan(nis, feat)) + '&nis=' + encodeURIComponent(nis) + '&naam=' + encodeURIComponent(gem);
+      if (adr) url += '&lat=' + (+adr.lat).toFixed(6) + '&lng=' + (+adr.lng).toFixed(6) + '&adres=' + encodeURIComponent(adr.label || '');
+      return url;
+    }
+    function openGemeenteKaart(nis, feat, bron, adr){
       if (!feat) feat = NIS_FEAT[nis];
       var s = STATS[nis] || {};
       var gem = s.naam || (feat && feat.properties.namedut) || String(nis);
       var slug = slugVan(nis, feat);
-      var url = '/apps/gemeentekaart.html?slug=' + encodeURIComponent(slug)
-              + '&nis=' + encodeURIComponent(nis) + '&naam=' + encodeURIComponent(gem);
+      var url = kaartUrl(nis, feat, adr);
       // window.open MOET synchroon in de klik blijven (popup-blocker)
       var w = window.open(url, '_blank');
-      logActie('gemeente_gekozen', { gemeente: gem, nis: String(nis), slug: slug, bron: bron || '', parkings: s.parkings == null ? null : s.parkings, popup_geblokkeerd: !w }, gem);
+      if (adr) logActie('adres_gezocht', { adres: adr.label, lat: +(+adr.lat).toFixed(5), lng: +(+adr.lng).toFixed(5), gevonden: true, gemeente: gem, nis: String(nis), slug: slug, popup_geblokkeerd: !w }, adr.label);
+      else logActie('gemeente_gekozen', { gemeente: gem, nis: String(nis), slug: slug, bron: bron || '', parkings: s.parkings == null ? null : s.parkings, popup_geblokkeerd: !w }, gem);
       if (!w) showToast('Uw browser blokkeerde het nieuwe tabblad. <a href="' + url + '" target="_blank" style="color:#7BE0A8">Open de kaart van <b>' + gem + '</b></a>');
-      else showToast('Kaart van <b>' + gem + '</b> geopend in een nieuw tabblad.');
+      else showToast((adr ? '📍 ' + esc(adr.label) + ' — k' : 'K') + 'aart van <b>' + gem + '</b> geopend in een nieuw tabblad.');
     }
 
     // =====================================================================
@@ -519,6 +628,20 @@
         updateInView();
         var n = Object.keys(STATS).length;
         setStatus(n ? '' : 'Geometrie geladen, maar geen cijfers gevonden (gemeenten_stats.json ontbreekt nog).');
+        adresTypeahead(document.getElementById('fk-adr-input'), document.getElementById('fk-adr-list'), function(a){ kiesAdres(a, 'adreszoek'); });
+        // ?adres=… (bv. vanuit de kaart per gemeente) → meteen de juiste kaart in DIT tabblad openen
+        var qAdr = new URLSearchParams(location.search).get('adres');
+        if (qAdr){
+          document.getElementById('fk-adr-input').value = qAdr;
+          setStatus('📍 Adres zoeken: ' + qAdr + '…');
+          var qp = new URLSearchParams(location.search), qLat = parseFloat(qp.get('lat')), qLng = parseFloat(qp.get('lng'));
+          (isNaN(qLat) || isNaN(qLng) ? zoekAdres(qAdr) : Promise.resolve([{ lat: qLat, lng: qLng, label: qAdr }])).then(function(r){
+            var a = r && r[0]; var f = a && gemeenteVoorPunt(a.lat, a.lng);
+            if (!f){ setStatus('Adres niet gevonden in België: ' + qAdr); return; }
+            logActie('adres_gezocht', { adres: a.label, lat: +a.lat.toFixed(5), lng: +a.lng.toFixed(5), gevonden: true, gemeente: (STATS[f.properties.niscode] || {}).naam || '', bron: 'url' }, a.label);
+            location.assign(kaartUrl(f.properties.niscode, f, a));
+          }).catch(function(){ setStatus('Adres zoeken mislukt — probeer opnieuw.'); });
+        }
       }).catch(function(err){
         setStatus('Kon de kaartdata niet laden: '+err.message+'. Staat gemeenten_be.geojson al in de repo?');
       });
