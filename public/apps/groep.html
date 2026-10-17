@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Groepsdossiers · Energie-Compas</title>
+<link rel="icon" href="/favicon-ec-32.png">
+<!-- groep.html v1.0.0 (2026-10-17, Johan): GROEPSDOSSIER (server ≥ 15.330.0) — meerdere aansluitingen van één klant (VME, bedrijf met
+     meerdere EAN's) als één geheel. Lijst van groepen + suggesties (zelfde klantnaam/indiener), groep aanmaken of aanpassen, en per groep
+     het overzicht per aansluiting met correcte totalen (terugverdientijd op de opgetelde kasstromen) + een afdrukbare samenvatting
+     (A4, B2B u-vorm) voor de klant. Cijfers per dossier = laatst getoonde rapport (getekende offerte > bevestigde offerte > advies).
+     ?id=<groep> opent meteen de groep. Managers zien alles; adviseurs enkel groepen met hun eigen dossiers. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/mijnec-knop.js?v=1.0.1" defer></script>
+<style>
+  :root{--navy:#0A2540;--green:#05B050;--line:#DDE3EA;--muted:#5A6577;--bg:#F4F7FB}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);font:14px/1.5 Poppins,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#1A2433}
+  .top{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .top h1{font-size:18px;margin:0;color:var(--navy)} .top .links{margin-left:auto;display:flex;gap:12px;align-items:center} .top a{color:var(--navy);font-weight:600;text-decoration:none;font-size:13px}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  h2{font-size:16px;margin:0 0 8px;color:var(--navy)} .sub{color:var(--muted);font-size:12.5px}
+  table{width:100%;border-collapse:collapse} th{background:#F5F8FC;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left} td{padding:7px 8px;border-bottom:1px solid #EEF2F7;text-align:right;vertical-align:top;font-variant-numeric:tabular-nums}
+  tr.tot td{font-weight:700;color:var(--navy);border-top:2px solid var(--navy);background:#F7FAFD}
+  .btn{display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer;color:var(--navy);text-decoration:none;font-size:13px}
+  .btn.p{background:var(--green);border-color:var(--green);color:#fff} .btn.sm{padding:4px 10px;font-size:12px}
+  .rij{display:flex;gap:8px;flex-wrap:wrap;align-items:center} .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  .kpis div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-align:center} .kpis b{display:block;font-size:20px;color:var(--navy)} .kpis small{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .pill{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;background:#EEF2F8;color:var(--muted)} .pill.rood{background:#FDE8E8;color:#9B1C1C} .pill.oranje{background:#FFF3D6;color:#8A5300}
+  .state{padding:30px;text-align:center;color:var(--muted)} .fout{color:#8a1f1f;padding:16px}
+  input[type=text]{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;min-width:260px}
+  @media (max-width:700px){ .kpis{grid-template-columns:1fr 1fr} table{font-size:12px} }
+  /* afdruk-samenvatting */
+  #druk{display:none}
+  @media print{ @page{size:A4;margin:0} body{background:#fff} .top,.wrap{display:none!important} #druk{display:block} }
+  .a4{width:210mm;min-height:297mm;padding:11mm 13mm 9mm;display:flex;flex-direction:column;font-family:Poppins,Helvetica,Arial,sans-serif;color:#1A2433;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .a4 .kop{display:flex;justify-content:space-between;align-items:center;border-bottom:2.5px solid var(--navy);padding-bottom:4mm} .a4 .kop img{height:13mm} .a4 .kop .m{text-align:right;font-size:8.5pt;color:var(--muted);line-height:1.45}
+  .a4 .eb{margin-top:4.5mm;font-size:8pt;letter-spacing:.14em;text-transform:uppercase;color:var(--green);font-weight:700} .a4 h1{margin:1.5mm 0 0;font-size:17pt;line-height:1.15;color:var(--navy)}
+  .a4 .lead{margin:3mm 0 0;font-size:9.6pt;line-height:1.5} .a4 .kp{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin-top:4mm}
+  .a4 .kp div{border:1px solid var(--line);border-radius:3mm;padding:2.6mm 2.5mm;text-align:center} .a4 .kp div.hl{background:var(--navy);border-color:var(--navy);color:#fff}
+  .a4 .kp small{display:block;font-size:7pt;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700} .a4 .kp div.hl small{color:#BFD3E0}
+  .a4 .kp b{display:block;font-size:17pt;color:var(--navy);margin-top:1.2mm} .a4 .kp div.hl b{color:#fff} .a4 .kp i{display:block;font-style:normal;font-size:7.5pt;color:var(--muted)} .a4 .kp div.hl i{color:#BFD3E0}
+  .a4 h2{margin:4.5mm 0 2mm;font-size:11pt} .a4 table{font-size:8.6pt} .a4 th{background:var(--navy);color:#fff;font-size:7.6pt;padding:2.2mm 2mm} .a4 td{padding:1.5mm 2mm}
+  .a4 td .s{display:block;font-size:6.8pt;color:var(--muted)} .a4 .nt{font-size:7.4pt;color:var(--muted);margin-top:1.6mm;line-height:1.45}
+  .a4 .vt{margin-top:auto;border-top:1px solid var(--line);padding-top:2.5mm;display:flex;justify-content:space-between;font-size:7pt;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><h1>👥 Groepsdossiers</h1><div class="links"><a href="/apps/projecten.html">📁 Projecten</a><a class="mijnec-knop" href="https://www.energie-compas.eu/login">← Naar MijnEC</a></div></div>
+<div class="wrap" id="root"><div class="state">Laden…</div></div>
+<div id="druk"></div>
+<script>
+  var $=function(id){ return document.getElementById(id); };
+  var CFG=null, sb=null, SESSION=null, PROXY='', GRP=null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function eur(v){ return v==null||!isFinite(+v)?'—':'€ '+Math.round(+v).toLocaleString('nl-BE'); }
+  function num(v,d){ return v==null||!isFinite(+v)?'—':(+v).toLocaleString('nl-BE',{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+  async function hdr(){ var tok=SESSION&&SESSION.access_token; try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } }catch(e){} return { 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' }; }
+  async function get(p){ var r=await fetch(PROXY+p+(p.indexOf('?')<0?'?':'&')+'_='+Date.now(),{ headers:await hdr(), cache:'no-store' }); var j=await r.json().catch(function(){ return {}; }); if(r.status===401){ location.href='https://www.energie-compas.eu/login'; throw new Error('login'); } if(!r.ok||j.ok===false) throw new Error(j.error||('fout '+r.status)); return j; }
+  async function post(p,b){ var r=await fetch(PROXY+p,{ method:'POST', headers:await hdr(), body:JSON.stringify(b) }); var j=await r.json().catch(function(){ return {}; }); if(!r.ok||j.ok===false) throw new Error(j.error||('fout '+r.status)); return j; }
+  async function lijst(){
+    $('root').innerHTML='<div class="state">Groepen laden…</div>';
+    var L, S; try{ L=await get('/api/groep/lijst'); S=await get('/api/groep/suggesties'); }catch(e){ $('root').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; return; }
+    var h='<div class="card"><h2>Groepen</h2>';
+    if(!L.groepen.length) h+='<div class="sub">Nog geen groepen. Maak er een uit een suggestie hieronder, of selecteer dossiers in Projecten («Selecteren» → «👥 Groepeer»).</div>';
+    else h+='<table><thead><tr><th>Groep</th><th>Dossiers</th><th>Investering</th><th>Besparing jaar 1</th><th>Terugverdientijd</th><th></th></tr></thead><tbody>'+L.groepen.map(function(g){
+      return '<tr><td><b>'+esc(g.naam)+'</b>'+(g.klant?'<div class="sub">'+esc(g.klant)+'</div>':'')+'</td><td>'+g.n+(g.n_met_cijfers<g.n?' <span class="pill oranje" title="dossiers zonder rapportcijfers">'+(g.n-g.n_met_cijfers)+' zonder cijfers</span>':'')+'</td><td>'+eur(g.investering)+'</td><td>'+eur(g.besparing_jaar1)+'</td><td>'+(g.tvt!=null?num(g.tvt,1)+' j':'—')+'</td><td><button class="btn sm p" data-open="'+esc(g.id)+'">Openen</button></td></tr>'; }).join('')+'</tbody></table>';
+    h+='</div>';
+    if(S.suggesties.length){ h+='<div class="card"><h2>Suggesties</h2><div class="sub" style="margin-bottom:6px">Dossiers met dezelfde klantnaam of indiener die nog in geen groep zitten.</div><table><thead><tr><th>Klant</th><th>Dossiers</th><th></th></tr></thead><tbody>'+
+      S.suggesties.map(function(s,i){ return '<tr><td><b>'+esc(s.naam)+'</b><div class="sub">'+s.leden.map(function(l){ return esc(l.naam||l.project_id); }).join(' · ')+'</div></td><td>'+s.leden.length+'</td><td><button class="btn sm" data-sug="'+i+'">👥 Maak groep</button></td></tr>'; }).join('')+'</tbody></table></div>'; }
+    $('root').innerHTML=h;
+    document.querySelectorAll('[data-open]').forEach(function(b){ b.onclick=function(){ openGroep(b.getAttribute('data-open')); }; });
+    document.querySelectorAll('[data-sug]').forEach(function(b){ b.onclick=async function(){ var s=S.suggesties[+b.getAttribute('data-sug')]; var nm=prompt('Naam van de groep',s.naam); if(!nm) return; b.disabled=true;
+      try{ var j=await post('/api/groep/zet',{ naam:nm, klant:s.naam, tokens:s.leden.map(function(l){ return l.token; }) }); openGroep(j.groep.id); }catch(e){ alert(e.message); b.disabled=false; } }; });
+  }
+  async function openGroep(id){
+    history.replaceState(null,'','?id='+encodeURIComponent(id));
+    $('root').innerHTML='<div class="state">Groep laden…</div>';
+    try{ GRP=await get('/api/groep/info?id='+encodeURIComponent(id)); }catch(e){ $('root').innerHTML='<div class="fout">'+esc(e.message)+'</div><p><a class="btn" href="/apps/groep.html">← Alle groepen</a></p>'; return; }
+    var G=GRP.groep, T=GRP.totaal, h='<div class="rij" style="margin-bottom:10px"><a class="btn" href="/apps/groep.html">← Alle groepen</a><button class="btn p" id="bDruk">🖨 Samenvatting voor de klant (PDF)</button><button class="btn" id="bNaam">✎ Naam</button><button class="btn" id="bWeg">🗑 Groep opheffen</button></div>';
+    h+='<div class="card"><h2>'+esc(G.naam)+'</h2><div class="sub">'+esc(G.klant||'')+' · '+T.n+' aansluitingen'+(T.n_met_cijfers<T.n?' · <b style="color:#8A5300">'+(T.n-T.n_met_cijfers)+' zonder rapportcijfers — open het rapport van die dossiers één keer in EK</b>':'')+'</div>'+
+      '<div class="kpis"><div><small>Investering</small><b>'+eur(T.investering)+'</b></div><div><small>Besparing jaar 1</small><b>'+eur(T.besparing_jaar1)+'</b></div><div><small>Rendement</small><b>'+(T.rendement!=null?num(T.rendement,1)+' %':'—')+'</b></div><div><small>Terugverdientijd</small><b>'+(T.tvt!=null?num(T.tvt,1)+' j':'—')+'</b></div></div>'+
+      '<table><thead><tr><th>Aansluiting</th><th>Installatie</th><th>Investering</th><th>Besparing j1</th><th>Rendement</th><th>TVT</th><th>Fase</th><th></th></tr></thead><tbody>'+
+      GRP.leden.map(function(l){ var k=l.kern||{}; var hw=[(+k.pv_kwp>0?num(k.pv_kwp,1)+' kWp':''),(+k.batt_kwh>0?num(k.batt_kw,0)+' kW / '+num(k.batt_kwh,0)+' kWh':'')].filter(Boolean).join(' + ')||'—';
+        return '<tr><td><b>'+esc(l.naam||l.project_id)+'</b><div class="sub">'+esc(l.adres||'')+(l.project_id?' · '+esc(l.project_id):'')+(k.bron&&k.bron!=='advies'?' · '+(k.bron==='offerte_getekend'?'getekende offerte':'offerte'):'')+'</div></td><td>'+hw+'</td><td>'+eur(k.investering)+'</td><td>'+eur(k.besparing_jaar1)+'</td><td>'+(k.rendement!=null?num(k.rendement,1)+' %':'—')+'</td><td>'+(k.tvt!=null?num(k.tvt,1)+' j':'—')+'</td><td>'+(l.fase?'<span class="pill '+(l.fase.kleur||'')+'">'+esc(l.fase.naam)+'</span>':'—')+'</td><td><a class="btn sm" target="_blank" rel="noopener" href="'+esc(l.ek_link)+'">EK</a></td></tr>'; }).join('')+
+      '<tr class="tot"><td>Totaal</td><td>'+[(T.pv_kwp>0?num(T.pv_kwp,1)+' kWp':''),(T.batt_kwh>0?num(T.batt_kw,0)+' kW / '+num(T.batt_kwh,0)+' kWh':'')].filter(Boolean).join(' + ')+'</td><td>'+eur(T.investering)+'</td><td>'+eur(T.besparing_jaar1)+'</td><td>'+(T.rendement!=null?num(T.rendement,1)+' %':'—')+'</td><td>'+(T.tvt!=null?num(T.tvt,1)+' j':'—')+'</td><td></td><td></td></tr></tbody></table>'+
+      '<p class="sub" style="margin-top:8px">Totale terugverdientijd = jaar waarin de <b>opgetelde</b> kasstromen van alle aansluitingen de totale investering terugverdienen (geen gemiddelde van de afzonderlijke terugverdientijden). Rendement = gemiddelde jaarlijkse besparing over '+T.horizon+' jaar ÷ totale investering.</p></div>';
+    $('root').innerHTML=h;
+    $('bDruk').onclick=druk;
+    $('bNaam').onclick=async function(){ var nm=prompt('Naam van de groep',G.naam); if(!nm) return; try{ await post('/api/groep/zet',{ id:G.id, naam:nm, klant:G.klant, tokens:GRP.leden.map(function(l){ return l.token; }) }); openGroep(G.id); }catch(e){ alert(e.message); } };
+    $('bWeg').onclick=async function(){ if(!confirm('Groep «'+G.naam+'» opheffen? De dossiers zelf blijven bestaan.')) return; try{ await post('/api/groep/zet',{ id:G.id, verwijder:true }); location.href='/apps/groep.html'; }catch(e){ alert(e.message); } };
+  }
+  function druk(){
+    var G=GRP.groep, T=GRP.totaal, maand=new Date().toLocaleDateString('nl-BE',{ month:'long', year:'numeric' });
+    var rows=GRP.leden.map(function(l){ var k=l.kern||{}; var hw=[(+k.pv_kwp>0?num(k.pv_kwp,1)+' kWp':''),(+k.batt_kwh>0?num(k.batt_kw,0)+' kW / '+num(k.batt_kwh,0)+' kWh':'')].filter(Boolean).join(' + ')||'—';
+      return '<tr><td><b>'+esc(l.naam||l.project_id)+'</b><span class="s">'+esc(l.adres||'')+(l.project_id?' · '+esc(l.project_id):'')+'</span></td><td>'+hw+'</td><td>'+eur(k.investering)+'</td><td>'+eur(k.besparing_jaar1)+'</td></tr>'; }).join('');
+    var h='<div class="a4"><div class="kop"><img src="/apps/ec-logo.png" alt="Energie-Compas"><div class="m">Samenvatting groepsdossier<br>'+esc(G.klant||G.naam)+'<br>'+esc(maand)+'</div></div>'+
+      '<div class="eb">Onafhankelijke energie-analyse · '+T.n+' aansluitingen</div><h1>'+esc(G.naam)+': '+(T.tvt!=null?'terugverdiend in ± '+num(T.tvt,1)+' jaar':'overzicht')+'</h1>'+
+      '<p class="lead">Voor elk van uw '+T.n+' aansluitingen berekenden wij wat de voorgestelde installatie oplevert, op basis van uw verbruik per kwartier. Hieronder vindt u de cijfers per aansluiting en het totaal; de volledige rapporten per aansluiting zitten in bijlage.</p>'+
+      '<div class="kp"><div><small>Investering</small><b>'+eur(T.investering)+'</b><i>excl. btw</i></div><div class="hl"><small>Besparing</small><b>'+eur(T.besparing_jaar1)+'</b><i>per jaar (jaar 1)</i></div><div><small>Rendement</small><b>'+(T.rendement!=null?num(T.rendement,1)+' %':'—')+'</b><i>gemiddeld per jaar</i></div><div><small>Terugverdientijd</small><b>'+(T.tvt!=null?num(T.tvt,1)+' j':'—')+'</b><i>op de opgetelde kasstromen</i></div></div>'+
+      '<h2>Overzicht per aansluiting</h2><table><thead><tr><th>Aansluiting</th><th>Installatie</th><th>Investering</th><th>Besparing / jaar</th></tr></thead><tbody>'+rows+
+      '<tr class="tot"><td>Totaal</td><td>'+[(T.pv_kwp>0?num(T.pv_kwp,1)+' kWp':''),(T.batt_kwh>0?num(T.batt_kw,0)+' kW / '+num(T.batt_kwh,0)+' kWh':'')].filter(Boolean).join(' + ')+'</td><td>'+eur(T.investering)+'</td><td>'+eur(T.besparing_jaar1)+'</td></tr></tbody></table>'+
+      '<div class="nt">Rendement = gemiddelde jaarlijkse besparing over '+T.horizon+' jaar ten opzichte van de totale investering. Terugverdientijd = het jaar waarin de opgetelde besparingen van alle aansluitingen de totale investering terugverdienen. Investering incl. installatie, excl. btw. Besparing berekend op een optimaal dynamisch (spot)contract, kwartier per kwartier over een volledig jaar.</div>'+
+      '<div class="vt"><span>Energie-Compas · een dienst van Fluctus.net CVSO</span><span>Indicatieve raming op basis van gemeten of geraamd verbruik — geen offerte. Bedragen excl. btw.</span></div></div>';
+    $('druk').innerHTML=h; document.title='Samenvatting — '+G.naam; setTimeout(function(){ window.print(); },300);
+  }
+  (async function(){
+    try{ var rc=await fetch('/api/config'); CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }catch(e){ CFG={}; }
+    if(!PROXY) PROXY='https://lucid-amazement-production.up.railway.app';
+    if(!CFG.supabaseUrl||!CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd.</div>'; return; }
+    sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+    var d=await sb.auth.getSession(); SESSION=d.data.session; if(!SESSION){ location.href='https://www.energie-compas.eu/login'; return; }
+    var id=new URLSearchParams(location.search).get('id'); if(id) openGroep(id); else lijst();
+  })();
+</script>
+</body>
+</html>

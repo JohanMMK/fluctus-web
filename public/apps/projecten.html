@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
+<!-- projecten.html v1.1.0 (2026-10-17, Johan): GROEPSDOSSIER — «👥 Groepeer selectie» in de bulkbalk en link «👥 Groepen» (voor iedereen) → groep.html (server ≥ 15.330.0). -->
 <!-- projecten.html v1.0.0 (2026-10-17, Johan): PROJECTPROCES (server ≥ 15.328.0) — fase per project (1–8: Binnen … Getekend, + Besproken / Gefactureerd, eindstatus Verloren / On hold), «Bal bij», tijd in fase t.o.v. de norm, volgende stap met vervaldag, 💬 vragen die op ons wachten, scope, twee timers (sinds contact / sinds laatste actie), laatste activiteit. Trechter + «te factureren» + prognose (NCNP-vergoeding uit het partnercontract × kans per fase) bovenaan. «Mijn werk», filterchips, sorteren per kolom, kolommen aan/uit en breedte slepen — onthouden per gebruiker (server). Menu «⋯» per rij: open, log, mandaat-acties, stappen (offerte gevraagd · besproken · getekend · verloren · on hold · heropen · gefactureerd), archiveer. Adviseurs/partnermanagers: dezelfde lijst, enkel hun projecten, stappen op hun eigen projecten. -->
 <!-- projecten.html v0.11.0 (2026-10-16, Johan): partnermanager via contract (ondertekenaar, server ≥ 15.317.0) — titel met het bedrijf + kolom Adviseur. -->
 <!-- projecten.html v0.10.0 (2026-10-16, Johan): iedereen die inlogt (server ≥ 15.316.0) — niet-managers zien «Mijn projecten»: enkel hun eigen projecten (adviseur/klant/indiener), enkel «Open» (adviseur → invoerscherm, klant → zijn project), geen filters/archief/beheeracties. -->
@@ -124,6 +125,7 @@
     <h1>📁 Projecten</h1>
     <div class="links">
       <span class="who" id="who"></span>
+      <a href="/apps/groep.html" class="grp-link">👥 Groepen</a>
       <a href="/apps/fluvius-acties.html">⚡ Acties</a>
       <a href="/apps/inbound-stats.html">📧 Factuurmails</a>
       <a href="/apps/mandaten.html">Mandaten</a>
@@ -151,6 +153,7 @@
       <b id="bulkN">0 geselecteerd</b>
       <button class="btn warn" onclick="bulkArchiveer(true)">📦 Archiveer selectie</button>
       <button class="btn ghost" onclick="bulkArchiveer(false)">↩ Herstel selectie</button>
+      <button class="btn ghost" onclick="bulkGroep()">👥 Groepeer selectie</button>
       <button class="btn ghost" onclick="selWis()">Selectie wissen</button>
       <span class="sub" id="bulkMsg"></span>
     </div>
@@ -174,7 +177,7 @@
       // v15-10 (Johan): de navigatieknoppen (Acties, Factuurmails, Mandaten, Partners, Mails, Kamino) enkel voor oekene;
       //   anderen zien enkel «← Naar MijnEC».
       try{ var _oek=String((SESSION.user && SESSION.user.email)||'').toLowerCase()==='oekene@gmail.com';
-        document.querySelectorAll('.top .links a').forEach(function(a){ if(!a.classList.contains('mijnec-knop')) a.style.display=_oek?'inline':'none'; }); }catch(eNav){}
+        document.querySelectorAll('.top .links a').forEach(function(a){ if(!a.classList.contains('mijnec-knop') && !a.classList.contains('grp-link')) a.style.display=_oek?'inline':'none'; }); }catch(eNav){}
       await laad();
     }
     async function authHeaders(){
@@ -449,6 +452,17 @@
     function updateBulk(){
       var n=SEL.size, bar=$('bulk'); if(bar) bar.hidden = (n===0);
       var l=$('bulkN'); if(l) l.textContent = n+' geselecteerd';
+    }
+    // v1.1.0 (Johan 17-10): GROEPSDOSSIER — geselecteerde projecten als één groep (server ≥ 15.330.0) → groep.html
+    async function bulkGroep(){
+      var ids=GEFILTERD.filter(function(id){ return SEL.has(id); }), tok=[], eerste='';
+      ids.forEach(function(id){ var p=projById(id); if(p&&p.lead_token){ tok.push(p.lead_token); if(!eerste) eerste=(p.klant||p.naam||''); } });
+      if(tok.length<2){ $('bulkMsg').textContent='Kies minstens twee projecten met een dossier.'; return; }
+      var nm=prompt('Naam van de groep ('+tok.length+' dossiers)', String(eerste).replace(/[_\s-]*\d+\w*$/,'').trim()); if(!nm) return;
+      $('bulkMsg').textContent='⏳ Groep maken…';
+      try{ var r=await fetch(PROXY+'/api/groep/zet',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ naam:nm, klant:eerste, tokens:tok }) }); var j=await r.json().catch(function(){ return {}; });
+        if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status)); location.href='/apps/groep.html?id='+encodeURIComponent(j.groep.id); }
+      catch(e){ $('bulkMsg').textContent='⚠ '+e.message; }
     }
     async function bulkArchiveer(archived){
       var ids = Array.from(SEL); if(!ids.length) return;
