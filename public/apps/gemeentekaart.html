@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.6
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.6.1
+     v1.6.1: adres-rangschikking — resultaten in de genoemde gemeente/postcode eerst.
      v1.6 (17-10, Johan): ADRES — &lat&lng&adres in de URL (vanuit de Lead Generator) of «📍 Zoek een adres» in de zijbalk →
        rode pin + cirkel 300 m + kader «Wat is hier?»: parkings ≤300 m (klikbaar), dichtste MS-cabine (+restcapaciteit),
        laadpunten ≤300 m. Adres buiten deze gemeente → doorsturen naar de Lead Generator (?adres=…). Logt adres_bekeken.
@@ -641,6 +642,7 @@
 
     // ------------------------------------------------------------ v1.5/1.6: ADRES ZOEKEN (Photon/OSM, fallback Nominatim) — gratis, geen key, CORS
     var ADR_BBOX = '2.5,49.45,6.45,51.55';
+    function adrNorm(x){ return String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
     function adresLabel(p){
       var straat = [p.street || (p.type === 'street' ? p.name : ''), p.housenumber].filter(Boolean).join(' ');
       var naam = (p.name && p.name !== p.street && p.type !== 'street') ? p.name : '';
@@ -648,17 +650,30 @@
       return [naam, straat, plaats].filter(Boolean).join(', ');
     }
     function zoekAdres(q){
-      var url = 'https://photon.komoot.io/api/?limit=6&lang=nl&bbox=' + ADR_BBOX + '&q=' + encodeURIComponent(q);
+      var url = 'https://photon.komoot.io/api/?limit=8&lang=default&bbox=' + ADR_BBOX + '&q=' + encodeURIComponent(q);
       return fetch(url).then(function(r){ if (!r.ok) throw new Error('photon ' + r.status); return r.json(); }).then(function(j){
-        var uit = (j.features || []).filter(function(f){ return (f.properties || {}).countrycode === 'BE'; }).map(function(f){
-          var c = f.geometry.coordinates; return { lat: c[1], lng: c[0], label: adresLabel(f.properties || {}) || q };
-        });
+        // v1.5.1: resultaten waarvan gemeente/postcode in de zoekopdracht staat eerst (Photon rangschikt soms een andere gemeente hoger)
+        var nq = ' ' + adrNorm(q) + ' ';
+        var uit = (j.features || []).filter(function(f){ return (f.properties || {}).countrycode === 'BE'; }).map(function(f, i){
+          var pr = f.properties || {}, c = f.geometry.coordinates;
+          var pl = [pr.city, pr.town, pr.village, pr.district, pr.locality, pr.county].filter(Boolean).map(adrNorm);
+          var treffer = pl.some(function(x){ return x && nq.indexOf(' ' + x + ' ') >= 0; }) || (pr.postcode && nq.indexOf(' ' + pr.postcode + ' ') >= 0);
+          var hnr = pr.housenumber && nq.indexOf(' ' + adrNorm(pr.housenumber) + ' ') >= 0;
+          var str = pr.street && nq.indexOf(' ' + adrNorm(pr.street) + ' ') >= 0;
+          return { lat: c[1], lng: c[0], label: adresLabel(pr) || q, _s: (treffer ? 10 : 0) + (str ? 5 : 0) + (hnr ? 2 : 0) - i * 0.01 };
+        }).sort(function(a, b){ return b._s - a._s; });
         if (!uit.length) throw new Error('photon leeg');
         return uit;
       }).catch(function(){
-        return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=be&limit=6&q=' + encodeURIComponent(q))
+        var nq2 = ' ' + adrNorm(q) + ' ';
+        return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=be&addressdetails=1&limit=8&q=' + encodeURIComponent(q))
           .then(function(r){ return r.json(); })
-          .then(function(a){ return (a || []).map(function(x){ return { lat: +x.lat, lng: +x.lon, label: String(x.display_name || q).replace(/, (België \/ Belgique \/ Belgien|Belgium)$/, '') }; }); });
+          .then(function(a){ return (a || []).map(function(x, i){
+            var ad = x.address || {}, pl = [ad.city, ad.town, ad.village, ad.municipality, ad.suburb, ad.city_district].filter(Boolean).map(adrNorm);
+            var treffer = pl.some(function(y){ return y && nq2.indexOf(' ' + y + ' ') >= 0; }) || (ad.postcode && nq2.indexOf(' ' + ad.postcode + ' ') >= 0);
+            var lbl = [[ad.road, ad.house_number].filter(Boolean).join(' '), [ad.postcode, ad.city || ad.town || ad.village || ad.municipality].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+            return { lat: +x.lat, lng: +x.lon, label: lbl || String(x.display_name || q), _s: (treffer ? 10 : 0) - i * 0.01 };
+          }).sort(function(p1, p2){ return p2._s - p1._s; }); });
       });
     }
     // typeahead op een input + lijst; kies(adres) wordt synchroon in de klik/Enter aangeroepen (popup-blocker-vriendelijk)
