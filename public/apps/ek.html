@@ -2,7 +2,8 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="ek-build" content="0.81.0">
+<meta name="ek-build" content="0.81.1">
+<!-- ek.html v0.81.1 (2026-10-17, Johan): GEEN LEGE FOTO — de kaart (en «⤢ Groter», «Bewaar locatie») verschijnt pas als er een locatie is; adres niet gevonden → enkel de melding + het zoekveld. -->
 <!-- ek.html v0.81.0 (2026-10-17, Johan): LOCATIE IN HET KLANTRAPPORT — de locatiedata (pin, gemeente, 3 dichtste MS-cabines, laadpalen ≤300 m) wordt bij de resultaten altijd opgezocht (ook in de klantweergave, zonder kaart) en gaat als payload.locatie mee naar het klantrapport (hoofdstuk 1, onderaan). De kaart zelf blijft adviseursweergave. -->
 <!-- ek.html v0.80.0 (2026-10-17, Johan): LOCATIE ONDER HET ADRES in de resultaten (adviseursweergave: oekene + adviseurs) — leveringsadres uit de factuur → geocode (Photon/OSM, fallback Nominatim) → luchtfoto (Esri, te wisselen naar kaart) met versleepbare pin (zoomen + schuiven; scrollwiel na klik in de kaart, ⤢ Groter). Info: dichtste MS-cabines + restcapaciteit en bedrijfsparkings (Lead Generator-gemeentekaart), bestaande laadpalen ≤300 m (MOW/SPW/Brussel Mobiliteit), links Google Maps/Street View/Lead Generator. «💾 Bewaar locatie» → /api/ek/locatie (server ≥ 15.322.0); inbound-case.locatie zet de bewaarde pin terug. -->
 <!-- ek.html v0.79.0 (2026-10-17, Johan): BATTERIJSTAFFELS PER PARTNER — server ≥ 15.321.0 geeft partner_staffels (contract van de partner van het project); de C&I-eenheid van de partner is de standaard voor dit dossier tenzij het project een eigen batterij-override draagt (PROJ_BATT > partner > globale standaard). De rooster-staffels zelf (particulier, klein bedrijf, drempel) zet de server. Oekene ziet onder de adviseur welke partnerstaffels gelden. -->
@@ -811,14 +812,16 @@
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <h2 style="margin:0;font-size:16px">📍 Locatie</h2><span class="sub" id="ek-loc-adr" style="margin:0"></span>
         <span style="flex:1"></span>
-        <button class="btn sm" type="button" id="ek-loc-groot">⤢ Groter</button>
+        <button class="btn sm" type="button" id="ek-loc-groot" style="display:none">⤢ Groter</button>
         <button class="btn sm" type="button" id="ek-loc-toggle">Verberg kaart</button>
       </div>
       <div id="ek-loc-body">
         <div class="ek-loc-grid">
           <div style="min-width:0">
+            <div id="ek-loc-kaartwrap" style="display:none">   <!-- v0.81.1: enkel zichtbaar als er een locatie is (geen lege foto) -->
             <div id="ek-loc-map" style="height:400px;border-radius:10px;border:1px solid #D5DBE3;background:#E8EDF3"></div>
             <div class="sub" style="margin-top:4px">Zoom met + / − (of het scrollwiel na een klik in de kaart) en schuif door te slepen. Klopt de locatie niet? Sleep de rode pin of klik op de juiste plek.</div>
+            </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">
               <button class="btn sm" type="button" id="ek-loc-bewaar" disabled>💾 Bewaar locatie</button>
               <button class="btn sm" type="button" id="ek-loc-terug" style="display:none">↺ Terug naar het adres</button>
@@ -4545,7 +4548,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   // ── kaart ──
   var PIN_HTML='<div style="width:26px;height:26px;border-radius:50% 50% 50% 0;background:#E0322B;border:2px solid #fff;transform:rotate(-45deg);box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>';
+  function toonKaart(aan){ var w=el('ek-loc-kaartwrap'), g=el('ek-loc-groot'); if(w) w.style.display=aan?'':'none'; if(g) g.style.display=aan?'':'none'; if(!aan){ var b=el('ek-loc-bewaar'), t=el('ek-loc-terug'); if(b) b.style.display='none'; if(t) t.style.display='none'; } if(aan&&S.map) setTimeout(function(){ S.map.invalidateSize(); },100); }   // v0.81.1: geen lege foto
   function bouwKaart(lat,lng){
+    toonKaart(true);
     var Lf=window.L;
     S.map=Lf.map('ek-loc-map',{ zoomControl:true, scrollWheelZoom:false, maxZoom:21 }).setView([lat,lng],18);
     var foto=Lf.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'Luchtfoto © Esri, Maxar, Earthstar Geographics', maxNativeZoom:19, maxZoom:21 });
@@ -4595,7 +4600,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   function knoppen(){
     var b=el('ek-loc-bewaar'), t=el('ek-loc-terug');
-    if(b){ b.disabled=!S.dirty; b.style.display=''; }
+    if(b){ b.disabled=!S.dirty; b.style.display=S.map?'':'none'; }
     if(t){ t.style.display=(S.saved||S.dirty)&&S.geo?'':'none'; }
   }
   function render(){
@@ -4648,8 +4653,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return Promise.all([pGeo, laadGrenzen().catch(function(){ return null; })]).then(function(r){
       S.geo=r[0];
       var p=S.saved?{lat:+S.saved.lat,lng:+S.saved.lng}:(S.geo?{lat:S.geo.lat,lng:S.geo.lng}:null);
-      if(!p){ if(info) info.innerHTML='<div class="m" style="color:#8a1f1f">'+(adres?'Adres niet gevonden'+(S.geoFout?' ('+esc(S.geoFout)+')':'')+'.':'Geen afname-adres gekend.')+' Zoek hieronder een adres.</div>'; return; }
-      if(S.map) S.map.setView([p.lat,p.lng],18);
+      if(!p){ toonKaart(false); if(info) info.innerHTML='<div class="m" style="color:#8a1f1f">'+(adres?'Adres niet gevonden'+(S.geoFout?' ('+esc(S.geoFout)+')':'')+'.':'Geen afname-adres gekend.')+' Zoek hieronder een adres.</div>'; return; }
+      if(S.map){ toonKaart(true); S.map.setView([p.lat,p.lng],18); }
       verplaats(p.lat,p.lng,false); knoppen();
       return kaartErbij();
     });
@@ -4687,7 +4692,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function zoekAnder(){
     var q=(el('ek-loc-q')&&el('ek-loc-q').value||'').trim(); if(!q) return; st('⏳ Zoeken…');
     Promise.all([laadLeaflet(),geocode(q),laadGrenzen().catch(function(){ return null; })]).then(function(r){ var g=r[1];
-      if(!S.map) bouwKaart(g.lat,g.lng); else S.map.setView([g.lat,g.lng],18);
+      if(!S.map) bouwKaart(g.lat,g.lng); else { toonKaart(true); S.map.setView([g.lat,g.lng],18); }
       if(!S.geo) S.geo=g;
       verplaats(g.lat,g.lng,true); st('● Pin op «'+(g.label||q)+'» — nog niet bewaard.');
     }).catch(function(e){ st('Niet gevonden: '+e.message,'err'); });
