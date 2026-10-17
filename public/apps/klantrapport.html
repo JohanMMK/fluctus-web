@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.59.0 (2026-10-17, Johan): BANKDOSSIER MET DRIE SCENARIO'S (Basisscenario = alles uit het rapport zonder onbalans · Gunstig scenario = mét onbalans · Voorzichtig scenario = regels van de investeringsaftrek), vergelijkingstabel + kasstroom per jaar per scenario; het voorzichtig scenario is ook de bijlage bij de energiestudie (p. 5). TOETS VERHOOGDE INVESTERINGSAFTREK (_aftrekToets op de voorzichtige basis): als ze kan → nieuw hoofdstuk «Verhoogde investeringsaftrek» (1 p., na de investering: voordeel, toets, wat nodig is, wij maken studie + sjabloon zodra de bestelling bevestigd is) en een belangrijke opmerking op p. 2 (advies). _vekaReken/_voorzichtigePlan nu globaal in het hoofdscript. -->
 <!-- klantrapport.html v0.58.0 (2026-10-17, Johan): VOORZICHTIGE BASIS voor bankdossier en energiestudie/VEKA-sjabloon — vaste regel voor elk dossier: 85 % van de gesimuleerde bruto-besparing, −2 %/jaar veroudering, geen prijsstijging, geen onbalans, geen besparing t.o.v. elders laden of plaza-marge; exploitatiekost in mindering. Sjabloon: E23 = nee + besparing per jaar in rij 28 (alle G28..AD28 als constante, calcChain verwijderd zodat Excel zelf herbouwt); afschrijving 3 of 5 jaar (?afschrijving= uit de registratie); toets + gevoeligheid ±10 % op p. 4 — buiten de voorwaarden wordt gemeld, niet bijgestuurd. -->
 <!-- klantrapport.html v0.57.0 (2026-10-17, Johan): stappenplan volgt de flow «offerte aanvaard registreren → gratis bankdossier en dossier investeringsaftrek» (geen digitaal tekenen meer); energiestudie: vóór de eerste factuur van de installateur (vanaf 2027 verplicht), max. 4 jaar oud; ?grootte= uit EK (KO / geen KO). -->
 <!-- klantrapport.html v0.56.0 (2026-10-17, Johan): DRIE LAGEN + STAPPENPLAN — inhoudstafel met leeswijzer en drie lagen (A. Beslissen: voorblad, advies, stappenplan · B. Begrijpen: hoofdstukken · C. Controleren: bijlagen gegroepeerd in «Je verbruik» / «Je installatie aan het werk» / «Overige»), per hoofdstuk één regel «wat je hier leert»; nieuwe pagina «Stappenplan» na het advies (5 stappen met wie/wanneer/nodig, huidige stap uit D.proces; parallel: gemeten data, financiering, verhoogde investeringsaftrek voor ondernemingen; bij een offerterapport «Je offerte naast ons advies» uit D.advies_ref); RAPPORT-KERN naar de server voor het groepsdossier (POST /api/ek/rapport-kern). -->
@@ -623,6 +624,58 @@ try{ _PLAN_B=financieelPagina(null,null,null,null,true)||null; }catch(e){ _PLAN_
 function _optLadenPlan(){ if(IS_PART) return null; var bL=(_LAADSES&&+_LAADSES.besparing>0)?+_LAADSES.besparing:0; if(!(bL>0) && !_BZK) return null; return { capex:_capLaden(), besparing:bL, plaza:!!_BZK }; }
 try{ var _oL0=_optLadenPlan(); if(_oL0) _PLAN_L=financieelPagina(null,null,null,_oL0,true)||null; }catch(e){ _PLAN_L=null; }
 var _PLAN_HOOFD=_PLAN_L||_PLAN_B;   // het plan dat voorblad + advies tonen
+/* klantrapport.html v0.58.0 (Johan 17-10): VOORZICHTIGE BASIS voor bank en verhoogde investeringsaftrek — één vaste rekenregel voor elk
+   dossier (geen bijsturing per dossier): realisatiefactor 85 % op de gesimuleerde bruto-besparing (de simulatie stuurt met kennis van
+   verbruik en zonne-opbrengst; een EMS werkt met voorspellingen), veroudering batterij −2 %/jaar, geen prijsstijging, geen onbalans,
+   geen besparing t.o.v. elders laden (laadsessies naar het bedrijf) en geen marge van een betalend laadplein; exploitatiekost
+   (sturing, onderhoud) jaarlijks in mindering. Levensduur 10 jaar (standaard VEKA-sjabloon). */
+var KR_VOORZICHTIG={ realisatie:0.85, degradatie:0.02, levensduur:10 };
+function _voorzichtigePlan(A, jaren){
+  if(!A) return null;
+  var R=KR_VOORZICHTIG.realisatie, g=KR_VOORZICHTIG.degradatie, n=Math.max(1,Math.round(jaren||KR_VOORZICHTIG.levensduur));
+  var opex=Math.max(0,+A.opex||0), bruto=Math.max(0,(+A.besp1||0)+opex-(+A.laadS0||0)), inv=+A.netInv||0;
+  var rows=[], cum=-inv, tvt=null, som=0;
+  for(var t=1;t<=n;t++){ var b=bruto*R*Math.pow(1-g,t-1)-opex; som+=b; var prev=cum; cum+=b; if(tvt===null&&cum>=0) tvt=(t-1)+(prev<0&&b>0?(-prev/b):0); rows.push({ jaar:t, besparing:b, cumulatief:cum }); }
+  return { rows:rows, besp1:rows[0].besparing, bruto1:bruto, opex:opex, netInv:inv, som:som, tvt:tvt, rendGem:inv>0?(som/n/inv*100):null, n:n, realisatie:R, degradatie:g };
+}
+function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZICHTIG.realisatie*100)+' % van de gesimuleerde besparing, −'+Math.round(KR_VOORZICHTIG.degradatie*100)+' % per jaar door veroudering van de batterij, zonder prijsstijging, zonder onbalans-opbrengst en zonder besparing ten opzichte van elders laden; exploitatiekost jaarlijks in mindering. Dezelfde basis als de energiestudie voor de verhoogde investeringsaftrek.'; }
+
+// v0.59.0: spiegel van het VEKA-sjabloon (vs. 3.0) — globaal
+function _vekaReken(o){
+  var I=+o.inv||0, inst=+o.inst||0, L=Math.max(1,Math.min(25,Math.round(+o.lev||10))), R=+o.rest||0, A=Math.max(1,Math.round(+o.afs||5)), T=(o.venb==null?0.25:+o.venb), S=(o.rij&&o.rij.length)?+o.rij[0]:(+o.besp||0);
+  var ta=(String(o.jaar)==='2025'&&o.grootte==='geen KO')?0.3:0.4;
+  var rij=[]; for(var t=1;t<=25;t++) rij.push(t<=L?((o.rij&&o.rij[t-1]!=null)?+o.rij[t-1]:S):0);   // v0.58.0: besparing per jaar (rij 28)
+  var cf0=[-I-inst], cf1=[-I-inst+inst*T+ta*I*T];
+  for(t=1;t<=25;t++){ var r=(t===L?R:0); cf0.push(rij[t-1]+r); cf1.push(rij[t-1]+r-rij[t-1]*T+(t<=A?I/A*T:0)); }
+  function tvt(cf){ var c=cf[0]+cf[1]+cf[2]+cf[3]; c=Math.round(c*1e9)/1e9; return c<0?'meer dan 3 jaar':(c>0?'minder dan 3 jaar':'exact 3 jaar'); }
+  function npv(cf,r){ var s=0; for(var i=0;i<cf.length;i++) s+=cf[i]/Math.pow(1+r,i); return s; }
+  function irr(cf){ var lo=-0.99, hi=10, flo=npv(cf,lo), fhi=npv(cf,hi); if(flo*fhi>0) return null;
+    for(var k=0;k<200;k++){ var m=(lo+hi)/2, fm=npv(cf,m); if(Math.abs(fm)<1e-12) return m; if(flo*fm<0){ hi=m; fhi=fm; } else { lo=m; flo=fm; } } return (lo+hi)/2; }
+  var irr0=irr(cf0), irr1=irr(cf1);
+  if(irr1!=null && irr1>=0.129 && irr1<=0.131) irr1=(irr1<0.13?0.129:0.131);
+  var T1=tvt(cf1), concl, reden='';
+  if(S<=0) concl='Vul de besparingen correct in ! Besparingen moeten groter zijn dan 0 !';
+  else if(T1==='minder dan 3 jaar'){ concl='Geen verhoogde thematische aftrek van toepassing'; reden='De TVT moet minstens 3 jaar zijn'; }
+  else if(irr1!=null && irr1>0.13){ concl='Verhoogde thematische aftrek enkel van toepassing voor kleine ondernemingen'; reden='De IRR mag maximaal 13% zijn voor ondernemingen die niet klein zijn'; }
+  else concl='Verhoogde thematische aftrek van toepassing voor alle ondernemingen';
+  return { aftrek:ta, rij:rij, cf0:cf0, cf1:cf1, tvt0:tvt(cf0), tvt1:T1, irr0:irr0, irr1:irr1, conclusie:concl, reden:reden, cum3:cf1[0]+cf1[1]+cf1[2]+cf1[3], L:L };
+}
+// v0.59.0 (Johan 17-10): TOETS VERHOOGDE INVESTERINGSAFTREK — op de voorzichtige basis (zelfde regels als de energiestudie):
+//   PV + batterij (categorie 8/9), levensduur 10 j, afschrijving 5 j, VenB 25 %, 40 % aftrek (2026). status: 'alle' (TVT ≥ 3 j en IRR ≤ 13 %),
+//   'klein' (enkel kleine ondernemingen: IRR > 13 %), 'niet' (TVT < 3 j of geen besparing), 'nvt' (particulier of geen PV/batterij).
+function _aftrekToets(){
+  try{
+    if(IS_PART) return { status:'nvt', reden:'particulier' };
+    if(!(HAS_PV||HAS_BATT) || !_PLAN_B) return { status:'nvt', reden:'geen PV of batterij' };
+    var VP=_voorzichtigePlan(_PLAN_B, KR_VOORZICHTIG.levensduur); if(!VP || !(VP.netInv>0)) return { status:'nvt', reden:'geen investering' };
+    var o={ jaar:'2026 of later', grootte:'geen KO', inv:VP.netInv/1000, inst:0, lev:KR_VOORZICHTIG.levensduur, rest:0, afs:5, venb:0.25, rij:VP.rows.map(function(r){ return r.besparing/1000; }) };
+    var R=_vekaReken(o), st;
+    if(!(VP.besp1>0) || R.tvt1==='minder dan 3 jaar') st='niet'; else if(R.irr1!=null && R.irr1>0.13) st='klein'; else st='alle';
+    return { status:st, reden:R.reden||(VP.besp1>0?'':'geen besparing'), tvt1:R.tvt1, irr1:R.irr1, inv:VP.netInv, besp1:VP.besp1, aftrek:R.aftrek, voordeel:VP.netInv*R.aftrek*0.25 };
+  }catch(e){ return { status:'nvt', reden:'fout' }; }
+}
+var _AFTREK=null; try{ _AFTREK=_aftrekToets(); }catch(e){ _AFTREK=null; }
+
 // v0.42.0 (Johan): hoofdstuknummering — main chapters krijgen een volgnummer (kop(titel, nr)); bijlagen blijven 'Bijlage N'.
 var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
 
@@ -778,6 +831,8 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
        (onb>0?(' — met deze installatie kan dat oplopen tot ± <b>'+eur(onb)+' per jaar</b>, een bedrag waar de leverancier ook zijn deel van zal willen.'):'.')+
        '</p></div>';
   }
+  // v0.59.0 (Johan 17-10): belangrijke opmerking — verhoogde investeringsaftrek mogelijk (toets op de voorzichtige basis)
+  if(_AFTREK && (_AFTREK.status==='alle'||_AFTREK.status==='klein')) h+='<div class="card" style="margin-top:10px;border-left:4px solid #05B050;background:#F2FBF5"><div class="t">Belangrijk · verhoogde investeringsaftrek mogelijk</div><p>Als onderneming trek je '+Math.round(_AFTREK.aftrek*100)+' % van de investering extra af (indicatief belastingvoordeel ± '+eur(_AFTREK.voordeel)+')'+(_AFTREK.status==='klein'?', als kleine onderneming':'')+'. Daarvoor zijn een energiestudie en het VEKA-sjabloon nodig: wij maken ze gratis zodra je bestelling bevestigd is en je de aanvaarde offerte in je dossier registreert. Zie het hoofdstuk «Verhoogde investeringsaftrek».</p></div>';
   h+='</div>';
   // v0.48.2 (Johan 15-10): kerncijfers voor de CONCEPT-MAIL (server 15.298 leest window.__KR_SAMENVATTING na de headless render).
   try {
@@ -1413,6 +1468,34 @@ function _locatieFoto(){
        'evenveel als een zwaardere netaansluiting, maar levert daarna jaar na jaar besparing op in plaats van oplopende kosten.</p></div>'+
      '</div>';
   h+='<p class="note">Bedragen indicatief, exclusief btw. De opsplitsing dient enkel ter duiding van de totale investering.</p>';
+  pagina(h);
+})();
+
+// v0.59.0 (Johan 17-10): HOOFDSTUK «VERHOOGDE INVESTERINGSAFTREK» (1 p., na de investering) — enkel als de toets op de voorzichtige
+//   basis gunstig is (_AFTREK.status 'alle' of 'klein'): wat de aftrek is, het indicatieve voordeel, de toets, wat er nodig is
+//   (energiestudie + VEKA-sjabloon TVT/IRR, attest, aangifte) en dat wij studie en sjabloon maken zodra de bestelling bevestigd is.
+(function(){
+  var T=_AFTREK; if(!T || (T.status!=='alle' && T.status!=='klein')) return;
+  var h=hoofdstuk('Verhoogde investeringsaftrek');
+  h+='<p class="lead">Als onderneming kan je voor deze investering de <b>verhoogde (thematische) investeringsaftrek</b> aanvragen: voor investeringen in 2026 trek je <b>40 %</b> van het investeringsbedrag extra af van je belastbare winst.</p>';
+  h+='<div class="card" style="margin-top:10px;border-left:4px solid #05B050;background:#F2FBF5"><div class="t">'+(T.status==='alle'?'✔ Je project komt in aanmerking — voor alle ondernemingen':'✔ Je project komt in aanmerking als kleine onderneming')+'</div><p>'+
+     (T.status==='alle'?'De terugverdientijd na belastingen is minstens 3 jaar en de interne rentevoet na belastingen blijft onder 13 %.'
+       :'De terugverdientijd na belastingen is minstens 3 jaar. De interne rentevoet na belastingen ligt boven 13 %: ondernemingen die niet klein zijn, krijgen de aftrek daardoor niet.')+
+     ' We toetsten dat op een <b>voorzichtige basis</b>, dezelfde als in de energiestudie: '+Math.round(KR_VOORZICHTIG.realisatie*100)+' % van de gesimuleerde besparing, −'+Math.round(KR_VOORZICHTIG.degradatie*100)+' % per jaar veroudering, zonder prijsstijging en zonder onbalans-opbrengst.</p></div>';
+  h+='<table class="f f-compact" style="margin-top:10px"><tbody>'+
+     '<tr><td>Investering in aanmerking ('+(HAS_PV&&HAS_BATT?'zonnepanelen en batterij':(HAS_BATT?'batterij':'zonnepanelen'))+', excl. btw)</td><td style="text-align:right">'+eur(T.inv)+'</td></tr>'+
+     '<tr><td>Extra aftrek van de belastbare winst ('+Math.round(T.aftrek*100)+' %)</td><td style="text-align:right">'+eur(T.inv*T.aftrek)+'</td></tr>'+
+     '<tr class="tot"><td>Indicatief belastingvoordeel bij 25 % vennootschapsbelasting</td><td style="text-align:right" class="win">'+eur(T.voordeel)+'</td></tr>'+
+     '<tr><td>Toets: terugverdientijd na belastingen</td><td style="text-align:right">'+esc(T.tvt1||'—')+' (minstens 3 jaar)</td></tr>'+
+     '<tr><td>Toets: interne rentevoet na belastingen</td><td style="text-align:right">'+(T.irr1==null?'—':_num(T.irr1*100,1)+' %')+' (hoogstens 13 % voor niet-kleine ondernemingen)</td></tr>'+
+     '</tbody></table>';
+  h+='<h2 style="margin-top:14px">Wat er nodig is om de aftrek aan te vragen</h2><ol style="margin:4px 0 0 18px;padding:0;line-height:1.55">'+
+     '<li>Een <b>energiestudie</b> door een energiedeskundige, met de berekening van de besparing (maximaal 4 jaar oud; maak ze vóór de eerste factuur van de installateur).</li>'+
+     '<li>Het officiële <b>VEKA-sjabloon TVT/IRR</b>, ingevuld met de cijfers van die studie.</li>'+
+     '<li>De aanvraag van het <b>attest bij het VEKA</b> (webtoepassing), met de offerte en de factuur — '+(HAS_PV&&HAS_BATT?'batterij (categorie 8) en zonnepanelen (categorie 9) als twee aanvragen met hetzelfde sjabloon':(HAS_BATT?'batterij = categorie 8, tijdelijke opslag van elektriciteit':'zonnepanelen = categorie 9'))+'.</li>'+
+     '<li>Het attest bij je <b>belastingaangifte</b> (formulier 275U of 276U), via je boekhouder.</li></ol>';
+  h+='<div class="card" style="margin-top:12px"><div class="t">Wat wij doen</div><p>Zodra je bestelling bevestigd is en we de aanvaarde offerte ontvangen hebben — registreer ze in je dossier met <b>«✅ Aanvaard? Vraag je dossiers aan»</b> — maken wij <b>gratis</b> de energiestudie en het ingevulde VEKA-sjabloon, getoetst aan de voorwaarden. Je bankdossier maken we op hetzelfde moment.</p></div>';
+  h+='<p class="note" style="margin-top:10px">Indicatief: het werkelijke voordeel hangt af van je fiscale situatie (tarief, winst, boekjaar) — je boekhouder bevestigt het. De cijfers van de offerte kunnen de toets nog wijzigen; de energiestudie rekent op de aanvaarde offerte.</p>';
   pagina(h);
 })();
 
@@ -2687,6 +2770,7 @@ async function _genPdf(){
       [/locatie|emplacement|location/i, _T3('Waar je aansluiting zit en wat het net in de buurt aankan.','Où se trouve votre raccordement.','Where your connection is.')],
       [/energiefactuur|factuurvergelijking|facture|invoice/i, _T3('Waar je besparing vandaan komt, post per post.','D’où vient votre économie.','Where your saving comes from.')],
       [/laadsessies|laadplein|recharge|charging/i, _T3('Wat laden op je eigen terrein oplevert.','Ce que rapporte la recharge sur site.','What on-site charging brings.')],
+      [/investeringsaftrek|déduction|deduction/i, _T3('Hoeveel je extra kan aftrekken en wat er nodig is om het aan te vragen.','Ce que vous pouvez déduire et comment.','What you can deduct and how to apply.')],
       [/twee beslissingen|investering|investissement|investment/i, _T3('Wat de installatie kost en waaruit ze bestaat.','Ce que coûte l’installation.','What the installation costs.')],
       [/onbalans|déséquilibre|imbalance|EMS/i, _T3('Extra opbrengst als je batterij op het onbalanssignaal reageert.','Revenu supplémentaire grâce au déséquilibre.','Extra revenue from imbalance.')],
       [/financieel plan|plan financier|financial plan/i, _T3('Hoe de investering zich jaar na jaar terugverdient.','Comment l’investissement se rembourse.','How the investment pays back.')],
@@ -2948,66 +3032,77 @@ function _demo(){
 })();
 </script>
 <script>
-/* klantrapport.html v0.58.0 (Johan 17-10): VOORZICHTIGE BASIS voor bank en verhoogde investeringsaftrek — één vaste rekenregel voor elk
-   dossier (geen bijsturing per dossier): realisatiefactor 85 % op de gesimuleerde bruto-besparing (de simulatie stuurt met kennis van
-   verbruik en zonne-opbrengst; een EMS werkt met voorspellingen), veroudering batterij −2 %/jaar, geen prijsstijging, geen onbalans,
-   geen besparing t.o.v. elders laden (laadsessies naar het bedrijf) en geen marge van een betalend laadplein; exploitatiekost
-   (sturing, onderhoud) jaarlijks in mindering. Levensduur 10 jaar (standaard VEKA-sjabloon). */
-var KR_VOORZICHTIG={ realisatie:0.85, degradatie:0.02, levensduur:10 };
-function _voorzichtigePlan(A, jaren){
-  if(!A) return null;
-  var R=KR_VOORZICHTIG.realisatie, g=KR_VOORZICHTIG.degradatie, n=Math.max(1,Math.round(jaren||KR_VOORZICHTIG.levensduur));
-  var opex=Math.max(0,+A.opex||0), bruto=Math.max(0,(+A.besp1||0)+opex-(+A.laadS0||0)), inv=+A.netInv||0;
-  var rows=[], cum=-inv, tvt=null, som=0;
-  for(var t=1;t<=n;t++){ var b=bruto*R*Math.pow(1-g,t-1)-opex; som+=b; var prev=cum; cum+=b; if(tvt===null&&cum>=0) tvt=(t-1)+(prev<0&&b>0?(-prev/b):0); rows.push({ jaar:t, besparing:b, cumulatief:cum }); }
-  return { rows:rows, besp1:rows[0].besparing, bruto1:bruto, opex:opex, netInv:inv, som:som, tvt:tvt, rendGem:inv>0?(som/n/inv*100):null, n:n, realisatie:R, degradatie:g };
+/* klantrapport.html v0.59.0 (Johan 17-10): BANKDOSSIER MET DRIE SCENARIO'S — ?mode=bank of D._bank.
+   · Basisscenario — alles uit het klantrapport (hoofdplan: met laadpalen en laadsessies indien van toepassing), zonder onbalans.
+   · Gunstig scenario — hetzelfde mét de onbalans-opbrengst (potentieel; enkel bedrijven met een berekend onbalans-potentieel).
+   · Voorzichtig scenario — de rekenregels van de verhoogde investeringsaftrek (85 %, −2 %/jaar, zonder prijsstijging, onbalans,
+     besparing t.o.v. elders laden of plaza-marge; investering = zonnepanelen + batterij). Dit scenario is ook de bijlage bij de energiestudie.
+   Lening (%, looptijd, rente) aanpasbaar op het scherm (niet in de print), annuïteit per scenario op de eigen investering.
+   Indicatief, geen financieel advies. */
+function _bankAnnu(P,r,n){ if(!(P>0)||!(n>0)) return 0; var i=r/100; return i>0 ? P*i/(1-Math.pow(1+i,-n)) : P/n; }
+function _bankScenarios(){
+  var S=[], F2=D.factuur||{};
+  if(_PLAN_HOOFD) S.push({ k:'basis', naam:'Basisscenario', sub:'alles uit het rapport, zonder onbalans-opbrengst', inv:+_PLAN_HOOFD.netInv||0, rows:_PLAN_HOOFD.rows||[] });
+  var onb=(+F2.onbalans_extra_jaar)||0, bespOnb=(+F2.besparing_onbalans_jaar)||0;
+  if(!IS_PART && onb>0 && bespOnb>0){ try{ var G=financieelPagina(bespOnb,null,null,_optLadenPlan(),true); if(G) S.push({ k:'gunstig', naam:'Gunstig scenario', sub:'basisscenario mét onbalans-opbrengst (potentieel, in samenspraak met je leverancier)', inv:+G.netInv||0, rows:G.rows||[] }); }catch(e){} }
+  var V=_voorzichtigePlan(_PLAN_B, KR_VOORZICHTIG.levensduur);
+  if(V) S.push({ k:'voorzichtig', naam:'Voorzichtig scenario', sub:'rekenregels van de verhoogde investeringsaftrek', inv:+V.netInv||0, rows:V.rows||[] });
+  return S;
 }
-function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZICHTIG.realisatie*100)+' % van de gesimuleerde besparing, −'+Math.round(KR_VOORZICHTIG.degradatie*100)+' % per jaar door veroudering van de batterij, zonder prijsstijging, zonder onbalans-opbrengst en zonder besparing ten opzichte van elders laden; exploitatiekost jaarlijks in mindering. Dezelfde basis als de energiestudie voor de verhoogde investeringsaftrek.'; }
-</script>
-<script>
-/* klantrapport.html v0.53.0 (Johan 17-10): BANKDOSSIER (financiering) — ?mode=bank of D._bank. Toont enkel de financieringspagina's:
-   (1) aanvraag: project, investering, besparing en rendement uit hetzelfde financieel plan als het rapport, lening (bedrag, looptijd, rente;
-   aanpasbaar op het scherm, niet in de print) met annuïteit en de kasstroom per jaar (besparing − aflossing), dekkingsgraad;
-   (2) documenten voor de bank + fiscale aandachtspunten (investeringsaftrek: aparte energiestudie, VEKA-attest). Indicatief, geen financieel advies. */
+function _bankReken(sc, par){
+  var inv=Math.round(sc.inv||0), lening=Math.round(inv*Math.min(100,Math.max(0,par.pct))/100), eigen=inv-lening, a=_bankAnnu(lening,par.rente,par.jaren);
+  var cum=-eigen, eerstePos=null, cumLoop=null, tab=[];
+  sc.rows.forEach(function(r){ var afl=(r.jaar<=par.jaren)?a:0, net=r.besparing-afl; cum+=net; if(eerstePos==null && cum>=0) eerstePos=r.jaar; if(r.jaar===par.jaren) cumLoop=cum; tab.push({ jaar:r.jaar, besparing:r.besparing, afl:afl, net:net, cum:cum }); });
+  var r1=sc.rows[0]?sc.rows[0].besparing:0;
+  return { inv:inv, lening:lening, eigen:eigen, a:a, r1:r1, dekking:a>0?(r1/a*100):null, eerstePos:eerstePos, cumLoop:cumLoop, cumEind:cum, n:sc.rows.length, tab:tab, rente:Math.max(0,a*par.jaren-lening) };
+}
+function _bankJaartabel(R){
+  return '<table class="f f-compact jpj"><thead><tr><th>Jaar</th><th>Besparing</th><th>Aflossing</th><th>Netto kasstroom</th><th>Cumulatief</th></tr></thead><tbody>'+
+    R.tab.map(function(t){ return '<tr><td>Jaar '+t.jaar+'</td><td>'+eur(t.besparing)+'</td><td>'+(t.afl?('− '+eur(t.afl)):'—')+'</td><td class="'+(t.net<0?'neg':'win')+'">'+eur(t.net)+'</td><td class="'+(t.cum<0?'neg':'')+'">'+eur(t.cum)+'</td></tr>'; }).join('')+'</tbody></table>';
+}
+var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#F4F7FB;border:1px dashed #c9d4e3;border-radius:10px;padding:10px 12px;margin:10px 0} .bk-in label{display:flex;flex-direction:column;font-size:11px;color:#5A6577;gap:3px} .bk-in input{width:110px;padding:6px 8px;border:1px solid #c9d4e3;border-radius:7px;font-size:13px} .bk-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0} .bk-kpi div{border:1px solid var(--lijn,#dde3ea);border-radius:10px;padding:8px 10px} .bk-kpi b{display:block;font-size:17px;color:var(--navy,#1F3864)} .bk-kpi small{font-size:10.5px;color:#5A6577;text-transform:uppercase;letter-spacing:.04em} .bk-sc th,.bk-sc td{text-align:right} .bk-sc th:first-child,.bk-sc td:first-child{text-align:left} .bk-sc td.best{font-weight:700} .bk-dl{margin:8px 0 0;padding:0;list-style:none} .bk-dl li{margin:4px 0;font-size:12.5px} .bk-dl b{color:var(--navy,#1F3864)} table.jpj td,table.jpj th{padding:4px 8px} @media print{.bk-in{display:none!important}}';
 (function(){
   var Q=new URLSearchParams(location.search);
   if(!(Q.get('mode')==='bank' || (window.D && D._bank))) return;
   function go(){
     var pages=[].slice.call(document.querySelectorAll('.a4'));
-    var A=null; try{ A=financieelPagina(null,null,null,null,true); }catch(e){ A=null; }
-    if(!A){ return; }
+    var SC=_bankScenarios(); if(!SC.length) return;
     pages.forEach(function(p){ p.style.display='none'; p.classList.add('kr-niet-bank'); });
-    var st=document.createElement('style'); st.textContent='@media print{.kr-niet-bank{display:none!important}.bk-in{display:none!important}} .bk-in{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#F4F7FB;border:1px dashed #c9d4e3;border-radius:10px;padding:10px 12px;margin:10px 0} .bk-in label{display:flex;flex-direction:column;font-size:11px;color:#5A6577;gap:3px} .bk-in input{width:110px;padding:6px 8px;border:1px solid #c9d4e3;border-radius:7px;font-size:13px} table.f td.neg{color:#b91c1c} .bk-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0} .bk-kpi div{border:1px solid var(--lijn,#dde3ea);border-radius:10px;padding:8px 10px} .bk-kpi b{display:block;font-size:17px;color:var(--navy,#1F3864)} .bk-kpi small{font-size:10.5px;color:#5A6577;text-transform:uppercase;letter-spacing:.04em}';
-    document.head.appendChild(st);
-    var inv=Math.round(+A.netInv||0), rows=A.rows||[];
+    var st=document.createElement('style'); st.textContent='@media print{.kr-niet-bank{display:none!important}} '+_BANK_CSS; document.head.appendChild(st);
     var par={ pct:+(Q.get('lening')||100), jaren:+(Q.get('jaren')||(IS_PART?10:7)), rente:+(Q.get('rente')||(IS_PART?3.5:4.5)) };
-    var VP=null;   // v0.58.0: voorzichtige basis (zelfde als de energiestudie)
     var BK=[];
-    function annu(P,r,n){ if(!(P>0)||!(n>0)) return 0; var i=r/100; return i>0 ? P*i/(1-Math.pow(1+i,-n)) : P/n; }
     function bouw(){
-      VP=_voorzichtigePlan(A, Math.max(KR_VOORZICHTIG.levensduur, par.jaren)); rows=VP.rows;
-      var lening=Math.round(inv*Math.min(100,Math.max(0,par.pct))/100), eigen=inv-lening, a=annu(lening,par.rente,par.jaren);
-      var cum=-eigen, eerstePositief=null, r1=rows[0]?rows[0].besparing:0;
-      var tr=rows.map(function(r){ var afl=(r.jaar<=par.jaren)?a:0, net=r.besparing-afl; cum+=net; if(eerstePositief==null && cum>=0) eerstePositief=r.jaar;
-        return '<tr><td>Jaar '+r.jaar+'</td><td>'+eur(r.besparing)+'</td><td>'+(afl?('− '+eur(afl)):'—')+'</td><td class="'+(net<0?'neg':'win')+'">'+eur(net)+'</td><td class="'+(cum<0?'neg':'')+'">'+eur(cum)+'</td></tr>'; }).join('');
-      var dekking=a>0?(r1/a*100):null, totRente=Math.max(0,a*par.jaren-lening);
+      var RR=SC.map(function(sc){ return _bankReken(sc, par); });
+      var kol=function(f){ return SC.map(function(sc,i){ return '<td>'+f(RR[i],sc)+'</td>'; }).join(''); };
+      var tvtS=function(R){ var c=-R.inv, t=null; R.tab.forEach(function(x){ var p=c; c+=x.besparing; if(t==null&&c>=0) t=(x.jaar-1)+(p<0&&x.besparing>0?(-p/x.besparing):0); }); return t==null?('> '+R.n+' j'):(_num(t,1)+' j'); };
       var h=kop('Financieringsdossier')+
-        '<p class="lead">Samenvatting voor de bank of de leasingmaatschappij: wat de installatie kost, wat ze per jaar bespaart en hoe die besparing zich verhoudt tot de aflossing van een lening. De besparing komt uit de simulatie op kwartierbasis over een volledig jaar, op een <b>voorzichtige basis</b> (zie onderaan) — lager dan in het volledige rapport, dat met prijsstijgingen over 15 jaar rekent.</p>'+
+        '<p class="lead">Samenvatting voor de bank of de leasingmaatschappij: wat de installatie kost, wat ze per jaar bespaart en hoe die besparing zich verhoudt tot de aflossing van een lening — in drie scenario’s.</p>'+
         '<table class="f f-compact"><tbody>'+
           '<tr><td>Project</td><td>'+esc(KLANT||'—')+(ADRES?(' · '+esc(ADRES)):'')+'</td></tr>'+
-          (BTW?'<tr><td>Btw-nummer</td><td>'+esc(BTW)+'</td></tr>':'')+
-          (PID?'<tr><td>Dossier</td><td>'+esc(PID)+'</td></tr>':'')+
+          (BTW?'<tr><td>Btw-nummer</td><td>'+esc(BTW)+'</td></tr>':'')+(PID?'<tr><td>Dossier</td><td>'+esc(PID)+'</td></tr>':'')+
           '<tr><td>Installatie</td><td>'+esc(_combiSub())+'</td></tr>'+
           (D.offerte&&D.offerte.installateur?'<tr><td>Offerte</td><td>'+esc(D.offerte.installateur)+(D.offerte.datum?(' · '+esc(D.offerte.datum)):'')+(D.offerte.referentie?(' · '+esc(D.offerte.referentie)):'')+'</td></tr>':'')+
-          '<tr><td>Investering (excl. btw)</td><td><b>'+eur(inv)+'</b></td></tr>'+
         '</tbody></table>'+
-        '<div class="bk-in"><label>Lening (% van de investering)<input id="bk-pct" type="number" min="0" max="100" step="5" value="'+par.pct+'"></label><label>Looptijd (jaar)<input id="bk-j" type="number" min="1" max="20" step="1" value="'+par.jaren+'"></label><label>Rente (% per jaar)<input id="bk-r" type="number" min="0" max="15" step="0.1" value="'+par.rente+'"></label><span style="font-size:11px;color:#5A6577">Pas aan en de tabel volgt; dit kader verschijnt niet in de PDF.</span></div>'+
-        '<div class="bk-kpi"><div><small>Lening</small><b>'+eur(lening)+'</b>'+(eigen>0?('<span style="font-size:11px;color:#5A6577">eigen inbreng '+eur(eigen)+'</span>'):'')+'</div><div><small>Aflossing per jaar</small><b>'+eur(a)+'</b><span style="font-size:11px;color:#5A6577">'+par.jaren+' j aan '+_num(par.rente,1)+' %</span></div><div><small>Besparing jaar 1</small><b>'+eur(r1)+'</b></div><div><small>Dekking aflossing</small><b>'+(dekking==null?'—':pct(dekking,0))+'</b><span style="font-size:11px;color:#5A6577">besparing jaar 1 ÷ aflossing</span></div></div>'+
-        '<table class="f f-compact jpj"><thead><tr><th>Jaar</th><th>Besparing</th><th>Aflossing</th><th>Netto kasstroom</th><th>Cumulatief</th></tr></thead><tbody>'+tr+'</tbody></table>'+
-        '<p class="note" style="margin-top:8px">Annuïteitenlening op het geleende bedrag; cumulatief start bij de eigen inbreng. Totale interest over de looptijd ± '+eur(totRente)+'. '+
-        (eerstePositief?('De cumulatieve kasstroom wordt positief in jaar '+eerstePositief+'. '):'')+
-        'Bedragen excl. btw, indicatief; geen persoonlijk financieel advies. De bank beoordeelt zelf de kredietwaardigheid.</p>';
-      var h2=kop('Documenten en aandachtspunten')+
+        '<div class="bk-in"><label>Lening (% van de investering)<input id="bk-pct" type="number" min="0" max="100" step="5" value="'+par.pct+'"></label><label>Looptijd (jaar)<input id="bk-j" type="number" min="1" max="20" step="1" value="'+par.jaren+'"></label><label>Rente (% per jaar)<input id="bk-r" type="number" min="0" max="15" step="0.1" value="'+par.rente+'"></label><span style="font-size:11px;color:#5A6577">Pas aan en alle scenario’s volgen; dit kader verschijnt niet in de PDF.</span></div>'+
+        '<table class="f f-compact bk-sc"><thead><tr><th></th>'+SC.map(function(sc){ return '<th>'+esc(sc.naam)+'</th>'; }).join('')+'</tr></thead><tbody>'+
+          '<tr><td>Investering (excl. btw)</td>'+kol(function(R){ return eur(R.inv); })+'</tr>'+
+          '<tr><td>Lening ('+_num(par.pct,0)+' %)</td>'+kol(function(R){ return eur(R.lening); })+'</tr>'+
+          '<tr><td>Aflossing per jaar ('+par.jaren+' j aan '+_num(par.rente,1)+' %)</td>'+kol(function(R){ return eur(R.a); })+'</tr>'+
+          '<tr><td>Besparing jaar 1</td>'+kol(function(R){ return eur(R.r1); })+'</tr>'+
+          '<tr><td>Dekking aflossing (besparing jaar 1 ÷ aflossing)</td>'+kol(function(R){ return R.dekking==null?'—':pct(R.dekking,0); })+'</tr>'+
+          '<tr><td>Cumulatieve kasstroom na de looptijd</td>'+kol(function(R){ return R.cumLoop==null?'—':'<span class="'+(R.cumLoop<0?'neg':'')+'">'+eur(R.cumLoop)+'</span>'; })+'</tr>'+
+          '<tr><td>Cumulatief positief vanaf</td>'+kol(function(R){ return R.eerstePos?('jaar '+R.eerstePos):('niet binnen '+R.n+' jaar'); })+'</tr>'+
+          '<tr><td>Terugverdientijd (zonder lening)</td>'+kol(function(R){ return tvtS(R); })+'</tr>'+
+          '<tr><td>Horizon</td>'+kol(function(R){ return R.n+' jaar'; })+'</tr>'+
+        '</tbody></table>'+
+        '<ul class="bk-dl">'+SC.map(function(sc){ return '<li><b>'+esc(sc.naam)+'</b> — '+esc(sc.sub)+'.</li>'; }).join('')+'</ul>'+
+        '<p class="note" style="margin-top:8px">Annuïteitenlening op het geleende bedrag; de cumulatieve kasstroom start bij de eigen inbreng. Basis- en gunstig scenario: 15 jaar met de prijsevolutie van het rapport. Voorzichtig scenario: '+esc(_voorzichtigeTekst().replace(/^Voorzichtige basis: /,''))+' Bedragen excl. btw, indicatief; geen persoonlijk financieel advies.</p>';
+      var h2=kop('Kasstroom per jaar')+'<p class="lead">Besparing min aflossing, jaar per jaar, per scenario. De cumulatieve kasstroom start bij de eigen inbreng.</p>'+
+        '<table class="f f-compact jpj"><thead><tr><th>Jaar</th>'+SC.map(function(sc){ return '<th colspan="2" style="text-align:center">'+esc(sc.naam)+'</th>'; }).join('')+'</tr><tr><th></th>'+SC.map(function(){ return '<th>Netto</th><th>Cumulatief</th>'; }).join('')+'</tr></thead><tbody>';
+      var N=Math.max.apply(null, RR.map(function(R){ return R.tab.length; }));
+      for(var j=0;j<N;j++){ h2+='<tr><td>Jaar '+(j+1)+'</td>'+RR.map(function(R){ var t=R.tab[j]; return t?('<td class="'+(t.net<0?'neg':'win')+'">'+eur(t.net)+'</td><td class="'+(t.cum<0?'neg':'')+'">'+eur(t.cum)+'</td>'):'<td>—</td><td>—</td>'; }).join('')+'</tr>'; }
+      h2+='</tbody></table>';
+      var h3=kop('Documenten en aandachtspunten')+
         '<p class="lead">Wat de bank doorgaans vraagt bij een investeringskrediet voor energie, en wat er nog loopt.</p>'+
         '<table class="f f-compact"><thead><tr><th>Document</th><th>Bron</th></tr></thead><tbody>'+
           '<tr><td>Getekende offerte van de installateur</td><td>installateur / adviseur</td></tr>'+
@@ -3016,16 +3111,17 @@ function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZ
           (IS_PART?'<tr><td>Identiteitskaart en loonfiches of aanslagbiljet</td><td>klant</td></tr><tr><td>Eigendomsbewijs of akkoord van de eigenaar/VME</td><td>klant</td></tr>'
                   :'<tr><td>Ondernemingsgegevens (KBO, btw) en laatste jaarrekening</td><td>klant / boekhouder</td></tr><tr><td>Technische fiches van batterij en omvormer</td><td>installateur</td></tr>')+
         '</tbody></table>'+
-        (IS_PART?'':('<h3 style="margin-top:16px;color:var(--navy)">Verhoogde investeringsaftrek</h3><p>Voor ondernemingen kan de thematische investeringsaftrek de netto-investering verlagen. Voor opslag van elektriciteit vraagt dat een <b>energiestudie</b> en een <b>attest van VEKA</b> (aan te vragen binnen de wettelijke termijn na het boekjaar van de investering). Dat loopt als apart dossier; de aftrek is hier niet meegerekend.</p>'))+
-        '<h3 style="margin-top:16px;color:var(--navy)">Wat de besparing onderbouwt</h3><p>De besparing is berekend op '+(D.databron&&/gemeten|kwartier/i.test(JSON.stringify(D.databron))?'de gemeten kwartierdata van de netbeheerder':'een standaardprofiel geschaald op het jaarverbruik')+', met een optimaal dynamisch (spot)contract, kwartier per kwartier over een volledig jaar. '+esc(_voorzichtigeTekst())+'</p>';
+        (IS_PART?'':('<h3 style="margin-top:16px;color:var(--navy)">Verhoogde investeringsaftrek</h3><p>'+(_AFTREK&&(_AFTREK.status==='alle'||_AFTREK.status==='klein')
+          ?('Dit project komt in aanmerking'+(_AFTREK.status==='klein'?' als kleine onderneming':'')+': '+Math.round(_AFTREK.aftrek*100)+' % extra aftrek op de investering in zonnepanelen en batterij (indicatief belastingvoordeel ± '+eur(_AFTREK.voordeel)+' bij 25 % vennootschapsbelasting). Daarvoor zijn een <b>energiestudie</b> en het <b>VEKA-sjabloon</b> nodig; het voorzichtig scenario is de bijlage bij die studie. De aftrek is in de scenario’s niet meegerekend.')
+          :'Op de voorzichtige basis komt dit project niet in aanmerking'+(_AFTREK&&_AFTREK.reden?(' ('+esc(_AFTREK.reden)+')'):'')+'.')+'</p>'))+
+        '<h3 style="margin-top:16px;color:var(--navy)">Wat de besparing onderbouwt</h3><p>De besparing is berekend op '+(D.databron&&/gemeten|kwartier/i.test(JSON.stringify(D.databron))?'de gemeten kwartierdata van de netbeheerder':'een standaardprofiel geschaald op het jaarverbruik')+', met een optimaal dynamisch (spot)contract, kwartier per kwartier over een volledig jaar. De jaarlijkse sturingskost is in mindering gebracht.</p>';
       BK.forEach(function(x){ try{ x.remove(); }catch(e){} });
-      var p1=pagina(h), p2=pagina(h2); BK=[p1,p2];
-      [p1,p2].forEach(function(p,i){ var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent='Financieringsdossier · p. '+(i+1); });
+      BK=[pagina(h), pagina(h2), pagina(h3)];
+      BK.forEach(function(p,i){ var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent='Financieringsdossier · p. '+(i+1)+' / '+BK.length; });
       ['bk-pct','bk-j','bk-r'].forEach(function(id){ var x=document.getElementById(id); if(x) x.onchange=function(){ par.pct=+document.getElementById('bk-pct').value||0; par.jaren=Math.max(1,Math.round(+document.getElementById('bk-j').value||1)); par.rente=+document.getElementById('bk-r').value||0; bouw(); }; });
       try{ document.title='Financieringsdossier — '+(KLANT||PID||'Energie-Compas'); }catch(e){}
     }
-    bouw();
-    window.scrollTo(0,0);
+    bouw(); window.scrollTo(0,0);
   }
   if(document.readyState==='complete') setTimeout(go,300); else window.addEventListener('load',function(){ setTimeout(go,300); });
 })();
@@ -3072,26 +3168,7 @@ function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZ
 
   /* Spiegel van het VEKA-sjabloon (vs. 3.0): kasstromen jaar 0..25, TVT = teken cumulatieve kasstroom na jaar 3,
      IRR na belastingen met de 12,9/13,1 %-afronding van cel C64. Bedragen in k€. */
-  function vekaReken(o){
-    var I=+o.inv||0, inst=+o.inst||0, L=Math.max(1,Math.min(25,Math.round(+o.lev||10))), R=+o.rest||0, A=Math.max(1,Math.round(+o.afs||5)), T=(o.venb==null?0.25:+o.venb), S=(o.rij&&o.rij.length)?+o.rij[0]:(+o.besp||0);
-    var ta=(String(o.jaar)==='2025'&&o.grootte==='geen KO')?0.3:0.4;
-    var rij=[]; for(var t=1;t<=25;t++) rij.push(t<=L?((o.rij&&o.rij[t-1]!=null)?+o.rij[t-1]:S):0);   // v0.58.0: besparing per jaar (rij 28)
-    var cf0=[-I-inst], cf1=[-I-inst+inst*T+ta*I*T];
-    for(t=1;t<=25;t++){ var r=(t===L?R:0); cf0.push(rij[t-1]+r); cf1.push(rij[t-1]+r-rij[t-1]*T+(t<=A?I/A*T:0)); }
-    function tvt(cf){ var c=cf[0]+cf[1]+cf[2]+cf[3]; c=Math.round(c*1e9)/1e9; return c<0?'meer dan 3 jaar':(c>0?'minder dan 3 jaar':'exact 3 jaar'); }
-    function npv(cf,r){ var s=0; for(var i=0;i<cf.length;i++) s+=cf[i]/Math.pow(1+r,i); return s; }
-    function irr(cf){ var lo=-0.99, hi=10, flo=npv(cf,lo), fhi=npv(cf,hi); if(flo*fhi>0) return null;
-      for(var k=0;k<200;k++){ var m=(lo+hi)/2, fm=npv(cf,m); if(Math.abs(fm)<1e-12) return m; if(flo*fm<0){ hi=m; fhi=fm; } else { lo=m; flo=fm; } } return (lo+hi)/2; }
-    var irr0=irr(cf0), irr1=irr(cf1);
-    if(irr1!=null && irr1>=0.129 && irr1<=0.131) irr1=(irr1<0.13?0.129:0.131);
-    var T1=tvt(cf1), concl, reden='';
-    if(S<=0) concl='Vul de besparingen correct in ! Besparingen moeten groter zijn dan 0 !';
-    else if(T1==='minder dan 3 jaar'){ concl='Geen verhoogde thematische aftrek van toepassing'; reden='De TVT moet minstens 3 jaar zijn'; }
-    else if(irr1!=null && irr1>0.13){ concl='Verhoogde thematische aftrek enkel van toepassing voor kleine ondernemingen'; reden='De IRR mag maximaal 13% zijn voor ondernemingen die niet klein zijn'; }
-    else concl='Verhoogde thematische aftrek van toepassing voor alle ondernemingen';
-    return { aftrek:ta, rij:rij, cf0:cf0, cf1:cf1, tvt0:tvt(cf0), tvt1:T1, irr0:irr0, irr1:irr1, conclusie:concl, reden:reden, cum3:cf1[0]+cf1[1]+cf1[2]+cf1[3], L:L };
-  }
-  window._vekaReken=vekaReken;
+  var vekaReken=_vekaReken;   // v0.59.0: globaal (ook voor de toets in het rapport en het bankdossier)
 
   /* Vult het officiële sjabloon in (JSZip, client-side). v = {jaar, grootte, inv, inst, lev, rest, afs, venb, besp} in k€. */
   function laadJsZip(){ return new Promise(function(res,rej){ if(window.JSZip) return res(); var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; s.onload=function(){ res(); }; s.onerror=function(){ rej(new Error('JSZip niet geladen')); }; document.head.appendChild(s); }); }
@@ -3145,7 +3222,7 @@ function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZ
     var A=null; try{ A=financieelPagina(null,null,null,null,true); }catch(e){ A=null; }
     if(!A) return;
     pages.forEach(function(p){ p.style.display='none'; p.classList.add('kr-niet-studie'); });
-    var st=document.createElement('style'); st.textContent='@media print{.kr-niet-studie{display:none!important}.es-in{display:none!important}} .es-in{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#F4F7FB;border:1px dashed #c9d4e3;border-radius:10px;padding:10px 12px;margin:10px 0} .es-in label{display:flex;flex-direction:column;font-size:11px;color:#5A6577;gap:3px} .es-in input,.es-in select{width:170px;padding:6px 8px;border:1px solid #c9d4e3;border-radius:7px;font-size:13px;background:#fff} .es-in input.k{width:80px} .es-in button{padding:8px 12px;border-radius:8px;border:0;background:#1F3864;color:#fff;font-weight:600;cursor:pointer;font-size:13px} .es-in .w{flex-basis:100%;font-size:11px;color:#5A6577;margin:0} .es h3{color:var(--navy,#1F3864);margin:14px 0 4px;font-size:15px} .es p{margin:4px 0 6px} .es-sig{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:18px} .es-sig div{border-top:1px solid #9aa7b8;padding-top:6px;font-size:12px;color:#5A6577} .es-res{border:2px solid #05B050;border-radius:10px;padding:8px 12px;margin:8px 0;background:#F2FBF5} .es-res b{color:#1F3864} .es-f{font-family:inherit;font-size:11.5px;color:#1A2433;background:#F7F9FC;border-left:3px solid #1F3864;padding:6px 10px;margin:6px 0} .es table.es-t td,.es table.es-t th{padding:3px 8px;font-size:11.5px;line-height:1.35} .es table.es-c td:nth-child(2),.es table.es-c th:nth-child(2){text-align:left;color:#5A6577} .es table.es-h td:first-child{width:56%} .es-2k{display:grid;grid-template-columns:1fr 1fr;gap:12px} .es .note{font-size:11px}';
+    var st=document.createElement('style'); st.textContent=_BANK_CSS+' @media print{.kr-niet-studie{display:none!important}.es-in{display:none!important}} .es-in{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#F4F7FB;border:1px dashed #c9d4e3;border-radius:10px;padding:10px 12px;margin:10px 0} .es-in label{display:flex;flex-direction:column;font-size:11px;color:#5A6577;gap:3px} .es-in input,.es-in select{width:170px;padding:6px 8px;border:1px solid #c9d4e3;border-radius:7px;font-size:13px;background:#fff} .es-in input.k{width:80px} .es-in button{padding:8px 12px;border-radius:8px;border:0;background:#1F3864;color:#fff;font-weight:600;cursor:pointer;font-size:13px} .es-in .w{flex-basis:100%;font-size:11px;color:#5A6577;margin:0} .es h3{color:var(--navy,#1F3864);margin:14px 0 4px;font-size:15px} .es p{margin:4px 0 6px} .es-sig{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:18px} .es-sig div{border-top:1px solid #9aa7b8;padding-top:6px;font-size:12px;color:#5A6577} .es-res{border:2px solid #05B050;border-radius:10px;padding:8px 12px;margin:8px 0;background:#F2FBF5} .es-res b{color:#1F3864} .es-f{font-family:inherit;font-size:11.5px;color:#1A2433;background:#F7F9FC;border-left:3px solid #1F3864;padding:6px 10px;margin:6px 0} .es table.es-t td,.es table.es-t th{padding:3px 8px;font-size:11.5px;line-height:1.35} .es table.es-c td:nth-child(2),.es table.es-c th:nth-child(2){text-align:left;color:#5A6577} .es table.es-h td:first-child{width:56%} .es-2k{display:grid;grid-template-columns:1fr 1fr;gap:12px} .es .note{font-size:11px}';
     document.head.appendChild(st);
     var F2=D.factuur||{}, N=F2.nul||{}, O=F2.opt||{}, E=D.energie_mwh||{}, EN=E.nul||{}, EO=E.opt||{}, P=D.piek||{}, Z=D.zelfconsumptie||{}, FI=D.financieel||{}, TB=(FI.twee_beslissingen&&FI.twee_beslissingen.pvbatterij)||{}, AA=D.aansluiting||{}, BT=D.batt_techniek||{};
     var kw=+TB.batt_kw||+((D.combi||{}).batt_kw)||0, kwh=+TB.batt_kwh||+((D.combi||{}).batt_kwh)||0, pv=+((D.bestaande_pv||{}).kwp)||+TB.pv_kwp||0;
@@ -3278,7 +3355,14 @@ function _voorzichtigeTekst(){ return 'Voorzichtige basis: '+Math.round(KR_VOORZ
         '<p>Ingevuld TVT/IRR-sjabloon van het VEKA · offerte en factuur van de installateur · recente energiefactuur · kwartierdata van de netbeheerder · technische fiches en waarborg van batterij en omvormer. Aanvraag via de webtoepassing van het VEKA (categorie 8 — tijdelijke opslag van elektrische energie); het attest wordt bij de belastingaangifte gevoegd (formulier 275U of 276U). Wordt in hetzelfde belastbaar tijdperk ook in zonnepanelen geïnvesteerd (categorie 9), dan worden beide als één geheel in hetzelfde sjabloon berekend en in twee aanvragen ingediend.</p>'+
         '</div>';
       ES.forEach(function(x){ try{ x.remove(); }catch(e){} });
-      ES=[pagina(h), pagina(h2), pagina(h3), pagina(h4)];
+      // v0.59.0: bijlage = voorzichtig scenario van het bankdossier (zelfde rekenbasis als de studie)
+      var pB={ pct:+(Q.get('lening')||100), jaren:+(Q.get('jaren')||7), rente:+(Q.get('rente')||4.5) }, RB=_bankReken({ inv:inv, rows:VP.rows }, pB);
+      var h5=kop('Bijlage — Financieringsplan (voorzichtig scenario)')+'<div class="es">'+
+        '<p class="lead">Kasstroom van de investering op de voorzichtige basis van deze studie, met een indicatieve lening van '+_num(pB.pct,0)+' % over '+pB.jaren+' jaar aan '+_num(pB.rente,1)+' %. Dit is het voorzichtig scenario uit het bankdossier.</p>'+
+        '<div class="bk-kpi"><div><small>Investering</small><b>'+eur(RB.inv)+'</b></div><div><small>Aflossing per jaar</small><b>'+eur(RB.a)+'</b></div><div><small>Besparing jaar 1</small><b>'+eur(RB.r1)+'</b></div><div><small>Dekking aflossing</small><b>'+(RB.dekking==null?'—':_num(RB.dekking,0)+' %')+'</b></div></div>'+
+        _bankJaartabel(RB)+
+        '<p class="note" style="margin-top:8px">'+esc(_voorzichtigeTekst())+' De verhoogde investeringsaftrek zelf is niet meegerekend. Indicatief; geen financieel advies.</p></div>';
+      ES=[pagina(h), pagina(h2), pagina(h3), pagina(h4), pagina(h5)];
       ES.forEach(function(p,i){ var nr=p.querySelector('.a4-nr'); if(nr) nr.textContent='Energiestudie · p. '+(i+1)+' / '+ES.length; });
       function lees(){ par.auteur=document.getElementById('es-a').value; par.functie=document.getElementById('es-f').value; par.datum=document.getElementById('es-d').value; par.plaats=document.getElementById('es-p').value;
         par.grootte=document.getElementById('es-g').value; par.lev=Math.max(1,Math.min(25,Math.round(+document.getElementById('es-l').value||10))); par.afs=(+document.getElementById('es-s').value===3?3:5);
