@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.99.3 (2026-10-18, Johan): bank- en aftrekblok meteen zichtbaar voor de klant met de cijfers die tonen dat het kan (bank: investering, aflossing per jaar, besparing, dekking %; aftrek: voordeel + IRR-toets) — de dossiers zelf op slot tot de aanvaarde offerte; geen BTW-veld bij particulier; dossierbeheer opnieuw open bij terugkeer naar de adviseursweergave. -->
 <!-- ek.html v0.99.2 (2026-10-18, Johan): fixes uit de screenshot-ronde 2 — particulier: «Je bankdossier» i.p.v. bank én belastingen (teaser, kompas fase 5, staptitel), geen losse energiestudie-knop (race tussen twee timers); sturing: tekst voor zonnepanelen zonder batterij, batterijveld enkel met batterij, contractknop weg als de sturing actief is, «Zet sturing actief» niet in de klantweergave. -->
 <!-- ek.html v0.99.1 (2026-10-18, Johan): fixes uit de screenshot-ronde — dossier-teaser volgt «pas vanaf de offertefase» ook na een wijziging (handtekening), losse bank/energiestudie-knoppen ook niet in de klantweergave, «Je gegevens» toont de ingevulde waarden als er geen factuur is. -->
 <!-- ek.html v0.99.0 (2026-10-18, Johan): HET KOMPAS — 6 fases (Je data · Advies · Exact · Offertes · Bevestigd · Sturing aan) als fasebalk op invoer en resultaat; kompaskaart voor iedereen met «Het kompas wijst» (één primaire actie + één secundaire) en vertrouwensregel (wat we al weten · Indicatief/Exact · wie helpt je); stappen in Dimensionering genummerd zoals het kompas en just in time (exact met de profieldata-knop, offertes na het advies, dossiers vanaf de offertefase, sturing na bevestiging); fase 6 checklist opstart sturing (server ≥ 15.337.0); «Meer detail» onder de stappen; enkel profiel: injectie uit het injectieprofiel, geen fictieve kost, naam vragen; invoer: dossierbeheer dicht voor de klant met data, samenvatting in de luikkop, adaptieve startknop, adviseur-vakje weg (hulpknop). -->
@@ -5028,6 +5029,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(bs.textContent!==t){ bs.textContent=t; bs.setAttribute('data-i18n-skip','1'); } }
     var kl=true; try{ kl=window._ekIsKlantView?window._ekIsKlantView():true; }catch(e){}
     if(kl && K.st.data && window._ekLuikAuto) window._ekLuikAuto('dossier', false);
+    // v0.99.3: terug in de adviseursweergave → automatisch dichtgeklapt dossierbeheer weer open (eigen keuze blijft gerespecteerd)
+    if(!kl){ var dl=document.querySelector('.luik[data-luik="dossier"]'); var eigen=null; try{ eigen=localStorage.getItem('EK_LUIK_dossier'); }catch(e){} if(dl && dl.dataset.auto && !eigen){ dl.classList.remove('dicht'); delete dl.dataset.auto; } }
+    // v0.99.3 (Johan): geen BTW-nummer bij een particulier
+    var btw=el('i-btw'), bc=btw&&btw.closest('div'); var isPart=((document.querySelector('input[name=ktype]:checked')||{}).value==='particulier'); if(bc && bc.parentNode && bc.parentNode.id==='klant-btw-blok'){ bc.style.display=isPart?'none':''; }
     var mr=el('ek-meer'); if(mr){ var t2=L3('Meer detail','Plus de détails','More detail'); if(mr.textContent!==t2) mr.textContent=t2; }
   }
   setInterval(function(){ try{ invoerKompas(); }catch(e){} }, 1000);
@@ -6814,7 +6819,7 @@ var _simVoortgang=(function(){
     var zet=function(id, aan){ var x=el(id); if(x) x.style.display=aan?'':'none'; };
     zet('nx-stap3x', !!(el('pd-blok') && !el('pd-blok').classList.contains('hidden')));
     var s2=kl?K.st.advies:true; zet('nx-stap2', s2); var r2=el('btn-off-opvragen'); if(r2&&r2.parentNode) r2.parentNode.style.display=s2?'':'none'; zet('offerte-status', s2);
-    window._EK_TOON_DOSSIERS=!!(K.st.advies || !kl);
+    window._EK_TOON_DOSSIERS=true;   // v0.99.3 (Johan 18-10): de klant ziet het bank- en aftrekblok meteen (cijfers die tonen dat het kan); de dossiers zelf blijven op slot tot de aanvaarde offerte
     var s6=!!K.st.bevestigd; zet('nx-stap6', s6); zet('ek-sturing', s6); if(s6 && window._ekSturingRender) window._ekSturingRender();
     if(K.st.bevestigd && r2 && r2.parentNode){ r2.parentNode.style.display='none'; }   // offertefase voorbij → geen opvraag-knoppen meer
     // afgeronde stappen: nummer wordt een groen vinkje
@@ -6906,14 +6911,22 @@ var _simVoortgang=(function(){
   window._ekNaarOfferte=function(){ window._ekOffToon(); };
   // v0.98.0 (Johan 18-10): geen vervaagde cijfers meer — enkel wat het dossier is, of het kan, en een slot op het rapport zelf
   //   tot een offerte bevestigd is als verkocht (aanvaard/getekend). Staat als stap ③ onderaan het kader «Dimensionering».
-  function teaser(T){
+  function teaser(T, cel){
+    // v0.99.3: cijfers die aantonen dat het kan — bank: aflossing vs besparing (zelfde leningsparameters als het bankdossier: 100 %, bedrijf 7 j aan 4,5 %, particulier 10 j aan 3,5 %)
+    var invB=0, bespB=0; try{ invB=(typeof _invPvbCell==='function'&&cel)?(+_invPvbCell(cel)||0):0; bespB=cel?(+cel.besparing||0):0; }catch(x){}
+    var pj=part()?10:7, pr=part()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0, dek=ann>0?Math.round(bespB/ann*100):null;
     var offs=window._EK_OFF||[], open=offs.some(function(o){ return o&&(o.aanvaard||o.getekend); }), bev=offs.some(function(o){ return o&&o.bevestigd; });
     var aftOk=!!(T && (T.status==='alle'||T.status==='klein'));
     var slotR='<div style="margin-top:6px;font-size:12.5px;color:#5A6577">🔒 '+e(L3('Beschikbaar na je bevestigde offerte','Disponible après votre offre confirmée','Available after your confirmed quote'))+'</div>';
     var tile=function(tit,body){ return '<div style="flex:1 1 240px;background:#fff;border:1px solid #DCE6F0;border-radius:10px;padding:10px 12px">'+
       '<div style="font-weight:700;color:var(--navy);margin-bottom:3px">'+tit+'</div>'+body+'</div>'; };
+    var rijB=function(a,b,kl){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:2px 0;border-bottom:1px dashed #E6ECF3"><span>'+a+'</span><b style="color:'+(kl||'var(--navy)')+'">'+b+'</b></div>'; };
+    var bankCijfers=(invB>0&&bespB>0)?(rijB(e(L3('Investering','Investissement','Investment')),eurK(invB))+
+      rijB(e(L3('Aflossing per jaar','Remboursement par an','Repayment per year'))+' <span style="color:#8A94A6">('+pj+' j · '+String(pr).replace('.',',')+' %)</span>','± '+eurK(ann))+
+      rijB(e(L3('Besparing per jaar','Économie par an','Savings per year')),'± '+eurK(bespB))+
+      rijB(e(L3('Besparing dekt de aflossing','L’économie couvre le remboursement','Savings cover the repayment')),(dek>=100?'✔ ':'')+dek+' %',dek>=100?'#05803C':'#B45309')):'';
     var bank=tile('🏦 '+e(L3('Bankdossier','Dossier bancaire','Bank file')),
-      '<div style="font-size:12.5px;color:#5A6577">'+e(L3('Lening, aflossing en kasstroom per jaar — in drie scenario\'s.','Prêt, remboursement et flux de trésorerie par an — trois scénarios.','Loan, repayment and cash flow per year — three scenarios.'))+'</div>'+
+      '<div style="font-size:12.5px;color:#5A6577;margin-bottom:4px">'+e(L3('Lening, aflossing en kasstroom per jaar — in drie scenario\'s.','Prêt, remboursement et flux de trésorerie par an — trois scénarios.','Loan, repayment and cash flow per year — three scenarios.'))+'</div>'+bankCijfers+
       (open?'<button class="btn sm" type="button" style="margin-top:8px" onclick="toonBankdossier()">'+e(L3('Open je bankdossier','Ouvrir le dossier bancaire','Open bank file'))+'</button>':slotR));
     var aft='';
     if(T && T.status && T.status!=='nvt'){
@@ -6922,6 +6935,7 @@ var _simVoortgang=(function(){
       aft=tile('📑 '+e(L3('Dossier verhoogde investeringsaftrek','Dossier déduction majorée','Increased deduction file')),
         '<div style="font-weight:600;color:'+(aftOk?'#05803C':'#8A94A6')+';font-size:13px">'+e(stT)+'</div>'+
         (aftOk?'<div style="font-size:12.5px;margin-top:2px">'+e(L3('Indicatief belastingvoordeel','Avantage fiscal indicatif','Indicative tax benefit'))+': <b>± '+eurK(T.voordeel)+'</b></div>'+
+          (T.irr!=null?'<div style="font-size:12px;color:#5A6577;margin-top:2px">'+e(L3('Toets: interne rentevoet na belastingen ','Test : TRI après impôts ','Test: IRR after tax '))+(Math.round(T.irr*1000)/10).toString().replace('.',',')+' % '+e(T.status==='alle'?L3('(≤ 13 % → alle ondernemingen)','(≤ 13 % → toutes les entreprises)','(≤ 13 % → all companies)'):L3('(> 13 % → enkel kleine ondernemingen)','(> 13 % → petites entreprises)','(> 13 % → small companies only)'))+'</div>':'')+
           (open?'<button class="btn sm" type="button" style="margin-top:8px" onclick="toonEnergiestudie()">'+e(L3('Open je energiestudie','Ouvrir l\'étude énergétique','Open energy study'))+'</button>':slotR)
           :'<div style="font-size:12px;color:#5A6577;margin-top:2px">'+e(L3('Terugverdientijd na belastingen korter dan 3 jaar of geen besparing op de voorzichtige basis.','Temps de retour après impôts inférieur à 3 ans ou pas d\'économie sur la base prudente.','Payback after tax under 3 years or no saving on the prudent basis.'))+'</div>'));
     }
@@ -6952,14 +6966,14 @@ var _simVoortgang=(function(){
       var kv=false; try{ kv=!!EK_KLANTVIEW; }catch(x){} var bb=document.getElementById('btn-bank'), bs=document.getElementById('btn-studie'); if(bb) bb.style.display=(oek&&!kv)?'':'none'; if(bs) bs.style.display=(oek&&!kv&&!part())?'':'none';   // v0.99.2: particulier nooit (botste met studieKnoppen)   // v0.99.1: ook niet in de klantweergave
       var c=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null, T=c?window._ekAftrekToets(c):null;
       var offs=(window._EK_OFF||[]).map(function(o){ return o?((o.aanvaard||o.getekend)?'a':(o.bevestigd?'b':'o')):''; }).join('');
-      var sig=JSON.stringify(T)+'|'+(c?1:0)+'|'+offs+'|'+(window.EC_LANG||'')+'|'+window._EK_TOON_DOSSIERS;   // v0.99.1: zichtbaarheid mee in de handtekening
+      var sig=JSON.stringify(T)+'|'+(c?(Math.round(+c.besparing||0)+'-'+Math.round(+c.battKwh||0)+'-'+Math.round(+c.pvKwp||0)):0)+'|'+offs+'|'+(window.EC_LANG||'')+'|'+window._EK_TOON_DOSSIERS+'|'+part();   // v0.99.1: zichtbaarheid mee in de handtekening
       if(sig===_sig) return; _sig=sig;
       try{ stappen(); }catch(xs){}
       var s3=document.getElementById('nx-stap3');
       if(!c || window._EK_TOON_DOSSIERS===false){ box.style.display='none'; box.innerHTML=''; if(s3) s3.style.display='none'; _sig=''; return; }   // v0.99.0: pas vanaf de offertefase
       if(s3) s3.style.display='';
       box.style.cssText='font-size:13px;line-height:1.45';
-      box.innerHTML=teaser(T);
+      box.innerHTML=teaser(T, c);
     }catch(x){}
   }
   setInterval(tick, 1200);
