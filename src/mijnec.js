@@ -1,3 +1,4 @@
+// mijnec.js v1.13.0 — 2026-10-18 — /login?naar=/apps/… : na het aanmelden (of al aangemeld) meteen door naar het dossier (mailknop via de adviseur).
 // mijnec.js v1.12.0 — 2026-10-16 — laag 1 en 2 volgen de server-toegang (rol-standaard + toekenning − per gebruiker uitgezet in Gebruikers; proxy ≥ 15.320.0).
 // mijnec.js v1.11.0 — 2026-10-16 — MijnEC in drie lagen: (1) iedereen die inlogt: Energiemarkt + Projecten (eigen projecten); (2) erkende adviseurs: Lead Generator + Energie-Compas; (3) beheer enkel managers (David + Johan): Simulator, Gebruikers, Mandaten, Profiel-import, Demo, Hulpvragen, Lead Generator — opvolging, Contracten (oekene); daaronder «Minder gebruikt». Vereist proxy ≥ 15.316.0.
 // mijnec.js v1.12.0 — 2026-10-18 — tegels vertaald (FR/EN: naam + beschrijving, TEGEL_TR). mijnec.js v1.10.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». mijnec.js v1.10.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). mijnec.js v1.9.0 — 2026-10-16 — (1) tegel '📝 Contracten' enkel voor oekene@gmail.com (oekeneOnly); (2) SNELLER: tegels van de vorige keer meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback: oude checks), niet opnieuw renderen bij INITIAL_SESSION/TOKEN_REFRESHED, config + Supabase-lib parallel. mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
@@ -285,8 +286,17 @@ function tegelsInCache(uid, apps) {
   try { localStorage.setItem('EC_MIJNEC_TEGELS_' + uid, JSON.stringify(apps.map((a) => a.id))); } catch (e) { /* geen opslag */ }
 }
 
+// v1.13.0 (Johan 18-10): doorverwijzing na het aanmelden — /login?naar=/apps/ek.html?case=… (mailknop die via de adviseur
+//   bij de klant komt). Enkel relatieve /apps/-paden (geen open redirect). Al aangemeld → meteen door.
+function naarPad() {
+  try { const n = new URLSearchParams(location.search).get('naar') || '';
+    return (/^\/apps\/[A-Za-z0-9_.\-\/]+\.html(\?[^#\s]*)?$/.test(n) && n.indexOf('//') < 0) ? n : null; } catch (e) { return null; }
+}
 async function render() {
   const loggedIn = !!SESSION;
+  const naar = naarPad();
+  if (loggedIn && naar) { location.replace(naar); return; }
+  if (!loggedIn && naar && !$('login-msg').textContent) $('login-msg').textContent = _t('Meld je aan om je dossier te openen — je krijgt een code per mail.', 'Connectez-vous pour ouvrir votre dossier — vous recevrez un code par e-mail.', 'Sign in to open your file — you will receive a code by e-mail.');
   $('gate').classList.toggle('hidden', loggedIn);
   $('app').classList.toggle('hidden', !loggedIn);
   $('portal-logout').classList.toggle('hidden', !loggedIn);
