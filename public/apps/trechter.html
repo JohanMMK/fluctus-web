@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Kompas-trechter · Energie-Compas</title>
+<link rel="icon" href="/favicon-ec-32.png">
+<!-- trechter.html v1.0.0 (2026-10-18, Johan): KOMPAS-TRECHTER (manager, server ≥ 15.337.0 GET /api/ek/trechter) — hoeveel dossiers elke
+     kompasfase bereikten (Je data · Advies · Exact · Offertes · Bevestigd · Sturing aan), waar ze nu staan en de mediane tijd tot het eerste resultaat. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/apps/mijnec-knop.js?v=1.0.1" defer></script>
+<style>
+  :root{--navy:#1F3864;--green:#05B050;--line:#DDE3EA;--muted:#5A6577;--bg:#F4F7FB}
+  body{margin:0;background:var(--bg);font:14px/1.5 Poppins,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#14203a}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 40px}
+  .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .top h1{font-size:19px;margin:0;color:var(--navy)}
+  .top select{margin-left:auto;font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  @media(max-width:620px){.kpis{grid-template-columns:1fr}}
+  .kpis div{border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .kpis b{display:block;font-size:24px;color:var(--navy)} .kpis small{color:var(--muted);font-size:12px}
+  .rij{display:grid;grid-template-columns:150px minmax(0,1fr) 110px;gap:10px;align-items:center;padding:6px 0}
+  @media(max-width:620px){.rij{grid-template-columns:110px minmax(0,1fr) 80px}}
+  .rij .n{font-weight:600;color:var(--navy);font-size:13px}
+  .bar{height:22px;border-radius:0 4px 4px 0;background:#E3E8EF;position:relative}
+  .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;background:var(--navy)}
+  .rij .v{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:#14203a}
+  .rij .v small{color:var(--muted)}
+  .sub{color:var(--muted);font-size:12.5px}
+  table{width:100%;border-collapse:collapse;font-size:13px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right} th:first-child,td:first-child{text-align:left}
+  th{color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:#F5F8FC}
+  .fout{background:#FDECEC;color:#8a1f1f;border-radius:10px;padding:12px 14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>🧭 Kompas-trechter</h1>
+    <select id="dagen" aria-label="Periode"><option value="30">laatste 30 dagen</option><option value="90">laatste 90 dagen</option><option value="180" selected>laatste 180 dagen</option><option value="365">laatste 365 dagen</option></select></div>
+  <div id="root"><div class="card sub">⏳ Laden…</div></div>
+</div>
+<script>
+(function(){
+  var CFG={}, PROXY='', sb=null, SESSION=null;
+  function $(id){ return document.getElementById(id); }
+  function esc(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  async function hdr(){ var tok=SESSION&&SESSION.access_token; try{ var d=await sb.auth.getSession(); if(d&&d.data&&d.data.session){ SESSION=d.data.session; tok=SESSION.access_token; } }catch(e){} return { 'Authorization':'Bearer '+tok }; }
+  var KEY=['data','advies','exact','offertes','bevestigd','sturing'];
+  var NAAM=['1 · Je data','2 · Advies','3 · Exact','4 · Offertes','5 · Bevestigd','6 · Sturing aan'];
+  var NU={1:'Wacht op data',2:'In de adviesfase',4:'In de offertefase',5:'Offerte opgeladen, nog niet bevestigd',6:'Bevestigd, sturing nog niet aan',7:'Sturing aan'};
+  function render(j){
+    var n=j.dossiers||0, B=j.bereikt||{}, max=Math.max(1,n);
+    var conv=function(a,b){ return a>0?Math.round(b/a*100)+' %':'—'; };
+    var h='<div class="card"><div class="kpis">'+
+      '<div><small>Dossiers ('+j.dagen+' dagen)</small><b>'+n+'</b></div>'+
+      '<div><small>Advies → bevestigd</small><b>'+conv(B.advies||0,B.bevestigd||0)+'</b></div>'+
+      '<div><small>Mediane tijd tot eerste resultaat</small><b>'+(j.mediaan_min_tot_resultaat==null?'—':(j.mediaan_min_tot_resultaat<120?j.mediaan_min_tot_resultaat+' min':Math.round(j.mediaan_min_tot_resultaat/60)+' u'))+'</b></div>'+
+    '</div></div>';
+    h+='<div class="card"><div style="font-weight:700;color:var(--navy);margin-bottom:6px">Fase bereikt</div>';
+    var vorig=n;
+    KEY.forEach(function(k,i){ var v=B[k]||0, pct=Math.round(v/max*100);
+      h+='<div class="rij"><span class="n">'+esc(NAAM[i])+'</span><span class="bar" title="'+v+' van '+n+'"><i style="width:'+pct+'%"></i></span><span class="v">'+v+' <small>('+pct+' %'+(k!=='exact'&&i>0?' · '+conv(vorig,v)+' van vorige':'')+')</small></span></div>';
+      if(k!=='exact') vorig=v; });
+    h+='<div class="sub" style="margin-top:6px">«Exact» is optioneel en loopt parallel — het telt niet mee in de doorstroom. Demo-dossiers tellen niet mee.</div></div>';
+    var S=j.staat_nu||{};
+    h+='<div class="card"><div style="font-weight:700;color:var(--navy);margin-bottom:6px">Waar de dossiers nu staan</div><table><thead><tr><th>Volgende stap</th><th>Dossiers</th></tr></thead><tbody>'+
+      [1,2,4,5,6,7].map(function(f){ return '<tr><td>'+esc(NU[f])+'</td><td>'+(S[f]||0)+'</td></tr>'; }).join('')+'</tbody></table></div>';
+    $('root').innerHTML=h;
+  }
+  async function laad(){
+    $('root').innerHTML='<div class="card sub">⏳ Laden…</div>';
+    try{ var r=await fetch(PROXY+'/api/ek/trechter?dagen='+encodeURIComponent($('dagen').value)+'&_='+Date.now(),{ headers:await hdr(), cache:'no-store' }); var j=await r.json().catch(function(){ return {}; });
+      if(r.status===401){ $('root').innerHTML='<div class="fout">Enkel voor managers.</div>'; return; } if(!r.ok||!j.ok) throw new Error(j.error||('fout '+r.status)); render(j); }
+    catch(e){ $('root').innerHTML='<div class="fout">'+esc(e.message)+'</div>'; }
+  }
+  (async function(){
+    try{ var rc=await fetch('/api/config'); CFG=await rc.json(); PROXY=(CFG.fluctusProxyUrl||'').replace(/\/+$/,''); }catch(e){ CFG={}; }
+    if(!PROXY) PROXY='https://lucid-amazement-production.up.railway.app';
+    if(!CFG.supabaseUrl||!CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd.</div>'; return; }
+    sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+    var d=await sb.auth.getSession(); SESSION=d.data.session; if(!SESSION){ location.href='https://www.energie-compas.eu/login'; return; }
+    $('dagen').onchange=laad; laad();
+  })();
+})();
+</script>
+</body>
+</html>
