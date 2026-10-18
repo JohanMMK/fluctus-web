@@ -1,3 +1,4 @@
+// mijnec.js v1.14.0 — 2026-10-18 — tegel «Kompas-trechter» (managers, server ≥ 15.337.0).
 // mijnec.js v1.13.0 — 2026-10-18 — /login?naar=/apps/… : na het aanmelden (of al aangemeld) meteen door naar het dossier (mailknop via de adviseur).
 // mijnec.js v1.12.0 — 2026-10-16 — laag 1 en 2 volgen de server-toegang (rol-standaard + toekenning − per gebruiker uitgezet in Gebruikers; proxy ≥ 15.320.0).
 // mijnec.js v1.11.0 — 2026-10-16 — MijnEC in drie lagen: (1) iedereen die inlogt: Energiemarkt + Projecten (eigen projecten); (2) erkende adviseurs: Lead Generator + Energie-Compas; (3) beheer enkel managers (David + Johan): Simulator, Gebruikers, Mandaten, Profiel-import, Demo, Hulpvragen, Lead Generator — opvolging, Contracten (oekene); daaronder «Minder gebruikt». Vereist proxy ≥ 15.316.0.
@@ -49,6 +50,7 @@ const APP_CATALOG = [
   { id: 'hulp', naam: 'Hulpvragen', ico: '🙋', beschrijving: 'Hulpvragen van klanten en demo-bezoekers: open, beantwoord of gebeld — beantwoorden in het project.', url: '/apps/hulp.html', managerOnly: true },   // 2026-10-11 (Johan): hulpvragen
   { id: 'contracten', naam: 'Contracten', ico: '📝', beschrijving: 'Samenwerkingsovereenkomsten (Brelco-model) opmaken, ter ondertekening sturen en digitaal laten tekenen.', url: '/apps/contracten.html', oekeneOnly: true },   // v1.9.0 (Johan 16-10): enkel oekene
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
+  { id: 'trechter', naam: 'Kompas-trechter', ico: '🧭', beschrijving: 'Hoeveel dossiers elke kompasfase bereikten (data → advies → offertes → bevestigd → sturing aan) en waar ze nu staan.', url: '/apps/trechter.html', managerOnly: true },   // 2026-10-18 (Johan): kompas-trechter
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
 ];
 
@@ -73,6 +75,7 @@ const TEGEL_TR = {
   hulp:          { fr: ['Questions d’aide', 'Questions des clients : ouvertes, répondues ou rappelées — répondre dans le projet.'], en: ['Help requests', 'Customer questions: open, answered or called back — answer in the project.'] },
   contracten:    { fr: ['Contrats', 'Rédiger des conventions de collaboration, les envoyer et les faire signer numériquement.'], en: ['Contracts', 'Draft cooperation agreements, send them and have them signed digitally.'] },
   'leadgen-log': { fr: ['Lead Generator — suivi', 'Qui fait quoi dans le Lead Generator : communes ouvertes, parkings consultés, leads notés.'], en: ['Lead Generator — follow-up', 'Who does what in the Lead Generator: municipalities opened, car parks viewed, leads noted.'] },
+  trechter:      { fr: ['Entonnoir boussole', 'Combien de dossiers ont atteint chaque étape (données → conseil → offres → confirmé → pilotage actif).'], en: ['Compass funnel', 'How many files reached each step (data → advice → quotes → confirmed → control on).'] },
   campagne:      { fr: ['Campagne EPC', 'Gérer les contacts et envoyer le mail de campagne avec la brochure.'], en: ['EPC campaign', 'Manage contacts and send the campaign e-mail with the brochure.'] }
 };
 function tegelTekst(a) { const L = _FR ? 'fr' : (_EN ? 'en' : null), x = L && TEGEL_TR[a.id] && TEGEL_TR[a.id][L]; return x ? { naam: x[0], beschrijving: x[1] } : { naam: a.naam, beschrijving: a.beschrijving }; }
