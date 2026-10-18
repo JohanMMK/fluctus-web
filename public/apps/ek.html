@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.96.0 (2026-10-18, Johan): AANMELDEN VIA DE MAILKNOP — ?li=<sleutel> (server ≥ 15.336.0) → /api/ek/inlog → verifyOtp: de klant is meteen aangemeld (geen 6 cijfers), sessie blijft in de browser; li verdwijnt uit de adresbalk; bestaande sessie (adviseur/oekene) wordt nooit gewisseld. «← Naar MijnEC» ook voor een aangemelde klant (taal volgt). -->
 <!-- ek.html v0.95.0 (2026-10-18, Johan): WHITE-LABEL — inbound-case.merk (server ≥ 15.334.0) gaat als payload.merk mee naar klantrapport/bankdossier/energiestudie. -->
 <!-- ek.html v0.94.0 (2026-10-17, Johan): ZIP PER PROJECT — knop «⬇ Alles voor dit project (ZIP)»: <projectnaam>.zip met map <projectnaam>/: energierapport altijd; rapport aanvaarde offerte + bankdossier + (bedrijf, aftrek mogelijk) energiestudie + ingevuld VEKA-sjabloon ENKEL als een offerte opgeladen én bevestigd is als verkocht (ook voor oekene). Documenten via verborgen iframe (klantrapport ≥ 0.63.0, ?zip=1). -->
 <!-- ek.html v0.93.0 (2026-10-17, Johan): TIPJE VAN DE DOSSIERS in het resultatenscherm (#ek-aftrek): bankdossier (3 scenario's, cijfers vergrendeld) + dossier verhoogde investeringsaftrek (status + indicatief voordeel zichtbaar, toets/energiestudie/VEKA-sjabloon vergrendeld); 🔓 zodra een offerte opgeladen en bevestigd is als verkocht → knoppen «Open je bankdossier / energiestudie». Losse knoppen 🏦/📑 enkel nog voor oekene. -->
@@ -3536,7 +3537,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var hb=$('ek-hulpadv-blok'); if(hb) hb.classList.toggle('hidden', !(adviseur && TOKEN && (window._EK_HULP||[]).length));   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
       var evt=$('ev-tab'); if(evt) evt.classList.toggle('ev-klant', !_ekAdvView());   // v0.50.3: betalend/kW/€/kWh enkel in de adviseursweergave
       var cm=$('btn-concept'); if(cm) cm.style.display=adviseur?'inline-block':'none';
-      var mec=$('ek-mijnec'); if(mec) mec.classList.toggle('hidden', !(advCtx && !EK_KLANTVIEW));
+      var mec=$('ek-mijnec'); if(mec){ mec.classList.toggle('hidden', !((advCtx || !!window._EK_SESSIE_MAIL) && !EK_KLANTVIEW)); try{ var _lg=(window.EC_LANG==='fr'||window.EC_LANG==='en')?('/'+window.EC_LANG):''; mec.href='https://www.energie-compas.eu'+_lg+'/login'; }catch(eMl){} }   // v0.96.0: ook een aangemelde klant
       var scn=$('dim-scenario'); if(scn) scn.classList.toggle('hidden', !((advCtx && !EK_KLANTVIEW) || _ekKlantDossier()));   // v0.84.0: ook de klant   // v0.76.0: scenarionaam enkel voor adviseurs   // v0.70.3: «← Naar MijnEC» voor adviseurs/oekene, niet in klantweergave   // v0.70.2: concept-mail met rapport enkel voor oekene
       var ov=$('btn-off-volgen'); if(ov) ov.style.display=adviseur?'inline-block':'none';   // v0.37.0 (Johan): offertes volgen enkel voor oekene   // v0.17: voertuig-defaults enkel voor oekene@gmail.com
       var _ao=_ekAdvOk();   // v0.84.0: + klant · v0.78.0: cabine / LS-MS / DNB-Elia ook voor adviseurs
@@ -3548,6 +3549,22 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   // v0.30.0 (Johan): wissel tussen adviseur- en klant-weergave zodat de adviseur de klant-CX kan inschatten.
   function _ekToggleKlantview(){ EK_KLANTVIEW=!EK_KLANTVIEW; try{ _ekApplyGate(); }catch(e){} try{ _ekFactuurExtra(); }catch(e){} }
+  // v0.96.0 (Johan 18-10): AANMELDEN VIA DE MAILKNOP. De knop in onze klantmail draagt een ondertekende sleutel (&li=, server ≥ 15.336.0).
+  //   Geen sessie → POST /api/ek/inlog → verifyOtp → sessie bewaard in deze browser (volgende bezoeken: meteen aangemeld).
+  //   Al aangemeld (met hetzelfde of een ander account, bv. adviseur/oekene die de link test) → niets wisselen.
+  //   De sleutel verdwijnt meteen uit de adresbalk (niet mee in bladwijzers of gedeelde links).
+  async function _ekMailInlog(){
+    var q=new URLSearchParams(location.search), li=q.get('li'); if(!li) return;
+    try{ q.delete('li'); var nu=location.pathname+(q.toString()?'?'+q.toString():'')+location.hash; history.replaceState(history.state,'',nu); }catch(eU){}
+    if(!_EK_SB) return;
+    var d0=null; try{ d0=await _EK_SB.auth.getSession(); }catch(e0){}
+    if(d0&&d0.data&&d0.data.session) return;
+    var r=await fetch(API+'/api/ek/inlog',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ li:li }), cache:'no-store' });
+    var j=await r.json().catch(function(){ return {}; });
+    if(!r.ok||!j.ok||!j.otp||!j.email) return;   // vervallen / adviseur-account → gewoon zoals voorheen (dossier via de link, aanmelden kan via MijnEC)
+    var v=await _EK_SB.auth.verifyOtp({ email:j.email, token:String(j.otp), type:'email' });
+    if(v&&v.error) v=await _EK_SB.auth.verifyOtp({ email:j.email, token:String(j.otp), type:'magiclink' });
+  }
   async function _ekResolveGate(){
     try{
       if(!_EK_SB_CFG){ var rc=await fetch('/api/config'); _EK_SB_CFG=await rc.json(); }
@@ -3555,7 +3572,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(!window.supabase) await _ekLaadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
         _EK_SB=window.supabase.createClient(_EK_SB_CFG.supabaseUrl, _EK_SB_CFG.supabaseAnonKey);
       }
+      try{ await _ekMailInlog(); }catch(eLi){}   // v0.96.0: aanmelden via de mailknop (?li=)
       var email=null; if(_EK_SB){ var d=await _EK_SB.auth.getSession(); if(d&&d.data&&d.data.session&&d.data.session.user) email=(d.data.session.user.email||'').toLowerCase(); }
+      window._EK_SESSIE_MAIL=email||null;
       EK_IS_OEKENE=(email==='oekene@gmail.com');
       // v0.78.0: erkende adviseur (rol adviseur/manager) → dossierbeheer, LS/MS, DNB/Elia, cabine, voertuigparameters (dit dossier)
       EK_IS_ADV=false;
