@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.97.0 (2026-10-18, Johan): VOORSPELBARE INGANG — het dossier (?case=) wordt pas verwerkt als vaststaat wie er aangemeld is (klant/adviseur/partner/oekene); geen race meer tussen dossier-laden en login-controle (adviseur kreeg soms het klant-auto-resultaat). Veiligheidsnet 8 s. -->
 <!-- ek.html v0.96.0 (2026-10-18, Johan): AANMELDEN VIA DE MAILKNOP — ?li=<sleutel> (server ≥ 15.336.0) → /api/ek/inlog → verifyOtp: de klant is meteen aangemeld (geen 6 cijfers), sessie blijft in de browser; li verdwijnt uit de adresbalk; bestaande sessie (adviseur/oekene) wordt nooit gewisseld. «← Naar MijnEC» ook voor een aangemelde klant (taal volgt). -->
 <!-- ek.html v0.95.0 (2026-10-18, Johan): WHITE-LABEL — inbound-case.merk (server ≥ 15.334.0) gaat als payload.merk mee naar klantrapport/bankdossier/energiestudie. -->
 <!-- ek.html v0.94.0 (2026-10-17, Johan): ZIP PER PROJECT — knop «⬇ Alles voor dit project (ZIP)»: <projectnaam>.zip met map <projectnaam>/: energierapport altijd; rapport aanvaarde offerte + bankdossier + (bedrijf, aftrek mogelijk) energiestudie + ingevuld VEKA-sjabloon ENKEL als een offerte opgeladen én bevestigd is als verkocht (ook voor oekene). Documenten via verborgen iframe (klantrapport ≥ 0.63.0, ?zip=1). -->
@@ -3130,7 +3131,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{
       var tk=new URLSearchParams(location.search).get('case'); if(!tk) return;
       TOKEN=tk;
-      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
+      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){ return _ekGateKlaar().then(function(){ return j; }); }).then(function(j){   // v0.97.0: eerst vaststellen wie er aangemeld is, dan pas het dossier tonen/doorrekenen
         if(!j||!j.ok) return;
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
         try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
@@ -3443,6 +3444,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   na de coverage-preview kan de adviseur het profiel op het dossier bewaren (/api/profiel/bevestig). ══
   //   AUTH: de prep-tegel draait same-origin met de portal → dezelfde Supabase-sessie (manager) wordt lui geladen.
   var _EK_SB=null, _EK_SB_CFG=null;
+  // v0.97.0 (Johan 18-10): VOORSPELBARE INGANG. Het dossier (?case=) wordt pas verwerkt nadat de login-gate weet wie er kijkt
+  //   (klant / adviseur / partner / oekene). Vroeger kon het dossier sneller binnen zijn dan de controle → een adviseur werd even
+  //   als klant behandeld (auto-resultaat, klantgids). Veiligheidsnet: na 8 s gaat het dossier hoe dan ook door.
+  var _EK_GATE_OK, _EK_GATE_P;   // bewust zonder beginwaarde (hoisting)
+  function _ekGateKlaar(){ if(!_EK_GATE_P) _EK_GATE_P=new Promise(function(r){ _EK_GATE_OK=r; }); return Promise.race([_EK_GATE_P, new Promise(function(r){ setTimeout(r, 8000); })]); }
+  function _ekGateGedaan(){ if(!_EK_GATE_P) _EK_GATE_P=Promise.resolve(); else if(_EK_GATE_OK) _EK_GATE_OK(); }
   function _ekLaadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=function(){ nok(new Error('kon script niet laden')); }; document.head.appendChild(s); }); }
   async function _ekAuthHeaders(){
     try{
@@ -3582,6 +3589,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(_tk){ var _rw=await fetch(API+'/api/ek/wie',{ headers:{ Authorization:'Bearer '+_tk }, cache:'no-store' }); var _jw=await _rw.json().catch(function(){return{};}); EK_IS_ADV=!!(_jw&&_jw.ok&&_jw.adviseur); } }catch(eW){ EK_IS_ADV=false; } }
     }catch(e){ EK_IS_OEKENE=false; }
     _ekApplyGate();
+    _ekGateGedaan();   // v0.97.0
   }
   function _ekB64(buf){ var bin='',u=new Uint8Array(buf),C=0x8000; for(var i=0;i<u.length;i+=C) bin+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(bin); }
   async function _ekGz(txt){ if(typeof CompressionStream==='undefined') return null; var cs=new CompressionStream('gzip'); var w=cs.writable.getWriter(); w.write(new TextEncoder().encode(txt)); w.close(); return _ekB64(await new Response(cs.readable).arrayBuffer()); }
