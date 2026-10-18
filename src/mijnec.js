@@ -1,6 +1,6 @@
 // mijnec.js v1.12.0 — 2026-10-16 — laag 1 en 2 volgen de server-toegang (rol-standaard + toekenning − per gebruiker uitgezet in Gebruikers; proxy ≥ 15.320.0).
 // mijnec.js v1.11.0 — 2026-10-16 — MijnEC in drie lagen: (1) iedereen die inlogt: Energiemarkt + Projecten (eigen projecten); (2) erkende adviseurs: Lead Generator + Energie-Compas; (3) beheer enkel managers (David + Johan): Simulator, Gebruikers, Mandaten, Profiel-import, Demo, Hulpvragen, Lead Generator — opvolging, Contracten (oekene); daaronder «Minder gebruikt». Vereist proxy ≥ 15.316.0.
-// mijnec.js v1.10.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». mijnec.js v1.10.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). mijnec.js v1.9.0 — 2026-10-16 — (1) tegel '📝 Contracten' enkel voor oekene@gmail.com (oekeneOnly); (2) SNELLER: tegels van de vorige keer meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback: oude checks), niet opnieuw renderen bij INITIAL_SESSION/TOKEN_REFRESHED, config + Supabase-lib parallel. mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
+// mijnec.js v1.12.0 — 2026-10-18 — tegels vertaald (FR/EN: naam + beschrijving, TEGEL_TR). mijnec.js v1.10.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». mijnec.js v1.10.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). mijnec.js v1.9.0 — 2026-10-16 — (1) tegel '📝 Contracten' enkel voor oekene@gmail.com (oekeneOnly); (2) SNELLER: tegels van de vorige keer meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback: oude checks), niet opnieuw renderen bij INITIAL_SESSION/TOKEN_REFRESHED, config + Supabase-lib parallel. mijnec.js v1.8.0 — 2026-10-15 — manager-portal: niet-actieve tegels onderaan onder een lijn «Minder gebruikt» (gedempt); Academy niet meer automatisch; Energie-Compas/Mijn klanten/Laadplein ook apart toe te kennen (Gebruikers v1.9). mijnec.js v1.7.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.6.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller). v1.5.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.4.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.3.0 — 2026-10-10 — MijnEC portaal (Energie-Compas).
 // v1.3.0 (Johan): + Engels (/en/login → <html lang="en">); de taal gaat mee naar /api/auth/otp-request → aanmeldcode-mail in NL/FR/EN.
 // v1.1.0 (Johan): login-OTP via proxy /api/auth/otp-request (Graph, EC-branded mail van noreply@energie-compas.eu);
 //   valt terug op sb.auth.signInWithOtp bij endpoint-fout. Géén Supabase "Mijn Fluctus"-mail meer bij normale flow.
@@ -50,6 +50,31 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
 ];
+
+// v1.12.0 (Johan 18-10): tegels vertaald (FR/EN) — naam + beschrijving per app-id; NL blijft in APP_CATALOG.
+//   FR/EN zonder merknamen van netbeheerder/agentschap (geen «Fluvius»/«VEKA»).
+const TEGEL_TR = {
+  ek:            { fr: ['Energie-Compas', 'Analyse énergétique rapide → économies et rendement en un écran, avec un lien conseiller pour partager le résultat.'], en: ['Energie-Compas', 'Quick energy analysis → savings and return on one screen, with an adviser link to share the result.'] },
+  adviseur:      { fr: ['Mes clients', 'Invitez vos clients à une analyse énergétique. Ils envoient leur facture et sont automatiquement liés à vous.'], en: ['My customers', 'Invite customers to an energy analysis. They send their bill and are automatically linked to you.'] },
+  energiekompas: { fr: ['Parcours énergie', 'Votre conseil énergétique en un parcours : particulier ou entreprise → économies, rendement et conseil.'], en: ['Energy journey', 'Your energy advice in one journey: household or company → savings, return and advice.'] },
+  academy:       { fr: ['Academy', 'Formation, modules et certificats.'], en: ['Academy', 'Training, modules and certificates.'] },
+  energiemarkt:  { fr: ['Marché de l’énergie', 'Données de marché (spot et déséquilibre) — met à jour les données de simulation.'], en: ['Energy market', 'Market data (spot and imbalance) — updates the simulation data.'] },
+  gemeenteplan:  { fr: ['Lead Generator', 'Choisissez une commune → carte des parkings d’entreprise et des cabines moyenne tension pour trouver de nouveaux leads.'], en: ['Lead Generator', 'Choose a municipality → map of company car parks and medium-voltage substations to find new leads.'] },
+  kamino:        { fr: ['Kamino', '4 questions → réponse + rapport. Votre chemin vers une électrification maximale.'], en: ['Kamino', '4 questions → answer + report. Your path to maximum electrification.'] },
+  simulator:     { fr: ['Simulateur', 'Facture → conception → offre + rapport.'], en: ['Simulator', 'Bill → design → quote + report.'] },
+  betaalplein:   { fr: ['Parc de recharge', 'Raccordement existant → parc de recharge : estimez les sessions, voyez le rendement + le rapport client.'], en: ['Charging hub', 'Existing connection → charging hub: estimate the sessions, see the return + customer report.'] },
+  thuisladen:    { fr: ['Recharge à domicile', 'Borne via plan cafétéria : optimiser PV et batterie à la maison.'], en: ['Home charging', 'Cafeteria-plan charger: optimise PV and battery at home.'] },
+  gebruikers:    { fr: ['Utilisateurs', 'Gérer l’accès aux outils.'], en: ['Users', 'Manage access to the tools.'] },
+  mandaten:      { fr: ['Mandats', 'Statut des mandats par EAN + confirmations d’adresse à vérifier.'], en: ['Mandates', 'Mandate status per EAN + address confirmations to check.'] },
+  projecten:     { fr: ['Projets', 'Ouvrir et suivre vos projets (gestionnaires : tous les projets, statut, prochaine action et archives).'], en: ['Projects', 'Open and follow up your projects (managers: all projects, status, next action and archive).'] },
+  'profiel-import': { fr: ['Import de profil', 'Convertir un profil de consommation (CSV/Excel, tout format) en profil mesuré d’un projet.'], en: ['Profile import', 'Convert a consumption profile (CSV/Excel, any format) into a measured profile for a project.'] },
+  demo:          { fr: ['Démo', 'Démo de l’expérience client : chaque étape par visiteur, avec horodatage et scores.'], en: ['Demo', 'Customer experience demo: every step per visitor, with timestamp and scores.'] },
+  hulp:          { fr: ['Questions d’aide', 'Questions des clients : ouvertes, répondues ou rappelées — répondre dans le projet.'], en: ['Help requests', 'Customer questions: open, answered or called back — answer in the project.'] },
+  contracten:    { fr: ['Contrats', 'Rédiger des conventions de collaboration, les envoyer et les faire signer numériquement.'], en: ['Contracts', 'Draft cooperation agreements, send them and have them signed digitally.'] },
+  'leadgen-log': { fr: ['Lead Generator — suivi', 'Qui fait quoi dans le Lead Generator : communes ouvertes, parkings consultés, leads notés.'], en: ['Lead Generator — follow-up', 'Who does what in the Lead Generator: municipalities opened, car parks viewed, leads noted.'] },
+  campagne:      { fr: ['Campagne EPC', 'Gérer les contacts et envoyer le mail de campagne avec la brochure.'], en: ['EPC campaign', 'Manage contacts and send the campaign e-mail with the brochure.'] }
+};
+function tegelTekst(a) { const L = _FR ? 'fr' : (_EN ? 'en' : null), x = L && TEGEL_TR[a.id] && TEGEL_TR[a.id][L]; return x ? { naam: x[0], beschrijving: x[1] } : { naam: a.naam, beschrijving: a.beschrijving }; }
 
 // v1.11.0 (Johan 16-10): MijnEC in drie lagen boven «Minder gebruikt»:
 //   laag 1 = iedereen die inlogt (geverifieerd mailadres): Energiemarkt, Projecten (server toont enkel eigen projecten);
@@ -239,7 +264,8 @@ function renderLauncher(apps) {
     t.className = 'app-tile'; t.dataset.app = a.id;   // v1.6.0: data-app voor tellers
     t.href = (a.id === 'academy') ? academyUrl() : a.url;
     if (a.extern) { t.target = '_blank'; t.rel = 'noopener'; }
-    t.innerHTML = `<div class="ico">${a.ico}</div><h3>${a.naam}</h3><p>${a.beschrijving}</p>`;
+    const _tt = tegelTekst(a);   // v1.12.0: FR/EN
+    t.innerHTML = `<div class="ico">${a.ico}</div><h3>${_tt.naam}</h3><p>${_tt.beschrijving}</p>`;
     if (laagVan(a) === 4) { t.style.opacity = '.6'; t.style.background = '#f7f8fa'; }
     host.appendChild(t);
   });
