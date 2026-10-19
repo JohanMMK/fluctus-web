@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Contracten · Energie-Compas</title>
+<!-- contracten.html v1.4.0 (2026-10-19, Johan, server ≥ 15.341.0): NIEUW FORMAT (sjabloon v2: feedback-clausule, non-circumventie — velden feedback_dagen, nc_maanden, nc_boete_pct) · «✍️ Mijn handtekening» (één keer tekenen, gaat mee in elk verstuurd contract) · PDF-VERSIES per contract (bij ondertekening automatisch + «📄 Maak PDF»), openen via een kortlevende link. -->
 <!-- contracten.html v1.3.0 (2026-10-18, Johan, server ≥ 15.334.0): HUISSTIJL — WHITE-LABEL per partner (merknaam, logo, kleuren, lettertype, contact) in de contractfiche; POST /api/contract/merk. -->
 <!-- contracten.html v1.2.0 (2026-10-17, Johan, server ≥ 15.321.0): REKENINSTELLINGEN — BATTERIJSTAFFELS PER PARTNER. Blok onder de
      contractvelden: particulier-paren (kW/kWh), klein-bedrijf-paren + drempel (kVA), C&I-eenheid. Vooringevuld met de huidige
@@ -86,7 +87,7 @@
   async function laadLijst(){ var j=await api('/api/contract/lijst'); LIJST=j.contracten||[]; }
   function renderLijst(){
     VIEW='lijst';
-    var h='<div class="bar"><button class="btn p" id="nieuw">＋ Nieuw contract</button><button class="btn" id="ververs">↻ Vernieuwen</button><span class="sub">Sjabloon: '+esc(SJ?SJ.naam:'—')+'</span></div>';
+    var h='<div class="bar"><button class="btn p" id="nieuw">＋ Nieuw contract</button><button class="btn" id="ververs">↻ Vernieuwen</button><button class="btn" id="mijnht">✍️ Mijn handtekening</button><span class="sub">Sjabloon: '+esc(SJ?SJ.naam:'—')+'</span></div>';
     h+='<div class="wrap"><table><thead><tr><th>Referentie</th><th>Partner</th><th>Ondertekenaar</th><th>Status</th><th>Toegang</th><th>Laatst gewijzigd</th><th>Verstuurd</th><th>Getekend</th><th></th></tr></thead><tbody>';
     if(!LIJST.length) h+='<tr><td colspan="9"><div class="state">Nog geen contracten. Klik op «＋ Nieuw contract».</div></td></tr>';
     LIJST.forEach(function(c){
@@ -99,6 +100,7 @@
     $('root').innerHTML=h;
     $('nieuw').onclick=function(){ openEditor(null); };
     $('ververs').onclick=async function(){ await laadLijst(); renderLijst(); };
+    $('mijnht').onclick=htModal;   // v1.4.0
     Array.prototype.forEach.call(document.querySelectorAll('tr[data-id]'),function(tr){ tr.onclick=function(e){ if(e.target.closest('[data-kopie]')||e.target.closest('[data-tg]')) return; openEditor(tr.getAttribute('data-id')); }; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-tg]'),function(b){ b.onclick=async function(e){ e.stopPropagation(); var id=b.getAttribute('data-tg'), c=LIJST.filter(function(x){return x.id===id;})[0]; if(!c) return; var aan=c.toegang_aan===false;
       if(!aan&&!confirm('Toegang voor iedereen met een e-mail op @'+c.domein+' afzetten?')) return;
@@ -121,6 +123,7 @@
     ['Vergoeding per site (excl. btw, EUR)',[ ['tarief_part','Particulier','num'], ['tarief_ls','Laagspanning (LS)','num'], ['tarief_ms','Middenspanning (MS)','num'] ]],
     ['Business development',[ ['bd_aan','Artikel business development opnemen','chk'], ['bd_tarief','Tarief per begonnen uur (EUR excl. btw)','num'], ['bd_betaal_dagen','Betaling binnen (dagen)','num'] ]],
     ['Overige',[ ['nda_datum','Datum ondertekende NDA (leeg = algemene vertrouwelijkheidsclausule)','text'], ['evaluatie_maanden','Evaluatie minstens om de … maanden','num'], ['opzeg_maanden','Opzegtermijn (maanden)','num'], ['kickoff','Kick-off via Teams van 1 uur','chk'], ['geldigheid_dagen','Geldigheid aanbod / teken-link (dagen)','num'], ['extra_bepalingen','Bijzondere bepalingen (optioneel)','area'] ]],
+    ['Feedback & non-circumventie (sjabloon v2)',[ ['feedback_dagen','Fluctus mag de eindklant contacteren na … dagen zonder feedback','num'], ['nc_maanden','Non-circumventie: termijn na einde (maanden)','num'], ['nc_boete_pct','Forfaitaire schadevergoeding bij inbreuk (% bovenop de vergoeding)','num'] ]],
     ['Ondertekenaar Fluctus',[ ['fluctus_vert_naam','Naam','text'], ['fluctus_vert_functie','Functie','text'] ]]
   ];
   function veldHtml(f, v, dis){
@@ -139,7 +142,7 @@
   }
   function renderEditor(){
     var c=CUR, v=c.velden||{}, dis=(c.status==='getekend');
-    var h='<div class="bar"><button class="btn" id="terug">← Alle contracten</button><b style="color:var(--navy)">'+esc(c.referentie||'Nieuw contract')+'</b><span class="st st-'+esc(c.status)+'">'+esc(ST[c.status]||c.status)+'</span><span class="sub" id="dirty"></span></div>';
+    var h='<div class="bar"><button class="btn" id="terug">← Alle contracten</button><b style="color:var(--navy)">'+esc(c.referentie||'Nieuw contract')+'</b><span class="st st-'+esc(c.status)+'">'+esc(ST[c.status]||c.status)+'</span><span class="sub">'+(c.id&&!c.sjabloon_v2?'sjabloon v1 (oud format)':'sjabloon v2')+'</span><span class="sub" id="dirty"></span></div>';
     h+='<div class="ed"><div class="form">';
     if(c.status==='verstuurd') h+='<div class="info">⏳ Verstuurd naar <b>'+esc(c.verstuurd_naar||'')+'</b> op '+esc(datum(c.verstuurd_ts))+(c.mail?(c.mail.sent?' (mail vertrokken)':' — <span class="err">mail niet vertrokken'+(c.mail.reden&&c.mail.reden!=='niet gevraagd'?': '+esc(c.mail.reden):'')+'</span>'):'')+'. Link geldig tot '+esc(datum(c.teken_tot))+'.<br>Wijzigt u de tekst, dan vervalt de verstuurde link en moet u opnieuw versturen.</div>';
     if(c.status==='getekend'&&c.getekend) h+='<div class="info ok">✔ Getekend door <b>'+esc(c.getekend.naam)+'</b> ('+esc(c.getekend.functie)+', '+esc(c.getekend.mail||'')+') op '+esc(datum(c.getekend.ts))+' · IP '+esc(c.getekend.ip||'?')+'<br>SHA-256 <code>'+esc(c.getekend.hash||'')+'</code>'+(c.getekend.hash===c.hash?' — identiek aan de verzonden tekst':' — <span class="err">AFWIJKEND</span>')+'</div>';
@@ -160,8 +163,10 @@
     if(c.status==='verstuurd'&&c.teken_link) h+='<button class="btn" id="kopieer">🔗 Kopieer teken-link</button>';
     if(c.id) h+='<button class="btn" id="print">🖨️ Afdrukken / PDF</button>';
     if(c.status==='getekend'&&c.document_link) h+='<a class="btn" href="'+esc(c.document_link)+'" target="_blank" rel="noopener">📄 Getekende versie</a>';
+    if(c.id) h+='<button class="btn" id="pdfmaak" title="PDF van de huidige versie maken en bij dit contract bewaren">📄 Maak PDF</button>';   // v1.4.0
     if(c.id&&(c.status==='verstuurd'||c.status==='concept')) h+='<button class="btn r" id="intrek">⛔ '+(c.status==='verstuurd'?'Intrekken':'Archiveren')+'</button>';
     h+='</div><div class="msg" id="msg"></div>';
+    if(c.id) h+='<div class="info"><b>PDF-versies</b>'+((c.pdfs&&c.pdfs.length)?'<br>'+c.pdfs.map(function(x){ return '<a href="#" data-pdf="'+esc(x.id)+'">📄 '+esc(x.naam)+'</a> <span class="sub">'+esc(datum(x.ts))+' · '+esc(x.soort)+(x.grootte?' · '+Math.round(x.grootte/1024)+' kB':'')+(x.door?' · '+esc(x.door):'')+'</span>'; }).join('<br>'):'<br><span class="sub">Nog geen PDF. Bij ondertekening door de partner wordt de getekende PDF automatisch gemaakt, gemaild (partner + oekene) en hier bewaard.</span>')+'</div>';   // v1.4.0
     if(c.log&&c.log.length) h+='<div class="info"><b>Historiek</b><br>'+c.log.slice().reverse().map(function(l){ return esc(datum(l.ts))+' · '+esc(l.actie)+(l.wie?' · '+esc(l.wie):'')+(l.naar?' → '+esc(l.naar):''); }).join('<br>')+'</div>';
     h+='</div><div class="prev"><iframe id="prev" title="Voorbeeld"></iframe></div></div>';
     $('root').innerHTML=h;
@@ -171,6 +176,8 @@
     if($('verstuur')) $('verstuur').onclick=verstuurModal;
     if($('kopieer')) $('kopieer').onclick=function(){ kopieer(c.teken_link); };
     if($('print')) $('print').onclick=afdrukken;
+    if($('pdfmaak')) $('pdfmaak').onclick=pdfMaak;   // v1.4.0
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pdf]'),function(a){ a.onclick=function(e){ e.preventDefault(); pdfOpen(a.getAttribute('data-pdf')); }; });
     if($('intrek')) $('intrek').onclick=intrekken;
     if($('tg')) $('tg').onclick=wisselToegang;
     if($('stf-bewaar')) $('stf-bewaar').onclick=function(){ bewaarStaffels(false); };
@@ -276,6 +283,48 @@
       var html=await r.text(); var w=window.open('','_blank'); if(!w){ msg('Pop-up geblokkeerd — sta pop-ups toe voor deze pagina.','warn'); return; }
       w.document.open(); w.document.write(html); w.document.close(); setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} },700);
     }catch(e){ msg('Afdrukken lukte niet: '+esc(e.message),'err'); }
+  }
+  // v1.4.0 (Johan 19-10): PDF-versies + handtekening Fluctus
+  async function pdfMaak(){
+    var b=$('pdfmaak'); if(b) b.disabled=true; msg('⏳ PDF maken…');
+    try{ var j=await api('/api/contract/pdf-maak',{ id:CUR.id }); CUR=j.contract; renderEditor(); msg('📄 PDF gemaakt en bewaard.','ok'); }
+    catch(e){ if(b) b.disabled=false; msg(esc(e.message),'err'); }
+  }
+  async function pdfOpen(pid){
+    var w=window.open('','_blank');
+    try{ var j=await api('/api/contract/pdf?id='+encodeURIComponent(CUR.id)+'&pdf='+encodeURIComponent(pid)); if(w) w.location=j.url; else location.href=j.url; }
+    catch(e){ if(w) w.close(); msg('PDF openen lukte niet: '+esc(e.message),'err'); }
+  }
+  async function htModal(){
+    var d=document.createElement('div'); d.className='modal';
+    d.innerHTML='<div><h3 style="margin:0 0 6px;color:var(--navy)">✍️ Mijn handtekening</h3>'+
+      '<p class="sub" style="margin:0 0 8px">Teken één keer met de muis of je vinger. Ze komt in het vak «Voor Fluctus.net CVSO» van elk contract dat je vanaf nu verstuurt (en in de getekende PDF). De vingerafdruk (SHA-256) van de tekst verandert er niet door.</p>'+
+      '<div id="ht-nu" class="sub" style="margin-bottom:6px">Laden…</div>'+
+      '<canvas id="ht-c" width="520" height="160" style="width:100%;height:160px;border:1px dashed #9aa5b8;border-radius:10px;background:#fff;touch-action:none;cursor:crosshair"></canvas>'+
+      '<label>Naam (moet gelijk zijn aan de ondertekenaar Fluctus in het contract)</label><input type="text" id="ht-naam" value="Johan Konings">'+
+      '<div class="acts" style="position:static;margin-top:10px"><button class="btn p" id="ht-ok">💾 Bewaar handtekening</button><button class="btn" id="ht-leeg">Leegmaken</button><button class="btn r" id="ht-wis">Verwijderen</button><button class="btn" id="ht-x">Sluiten</button></div><div class="msg" id="ht-msg"></div></div>';
+    document.body.appendChild(d);
+    var cv=$('ht-c'), cx=cv.getContext('2d'), teken=false, iets=false;
+    cx.lineWidth=2.6; cx.lineCap='round'; cx.lineJoin='round'; cx.strokeStyle='#0B1F4D';
+    function pos(e){ var r=cv.getBoundingClientRect(), t=e.touches?e.touches[0]:e; return { x:(t.clientX-r.left)*cv.width/r.width, y:(t.clientY-r.top)*cv.height/r.height }; }
+    function start(e){ e.preventDefault(); teken=true; var p=pos(e); cx.beginPath(); cx.moveTo(p.x,p.y); }
+    function beweeg(e){ if(!teken) return; e.preventDefault(); var p=pos(e); cx.lineTo(p.x,p.y); cx.stroke(); iets=true; }
+    function stop(){ teken=false; }
+    cv.addEventListener('mousedown',start); cv.addEventListener('mousemove',beweeg); window.addEventListener('mouseup',stop);
+    cv.addEventListener('touchstart',start,{passive:false}); cv.addEventListener('touchmove',beweeg,{passive:false}); cv.addEventListener('touchend',stop);
+    $('ht-x').onclick=function(){ d.remove(); };
+    $('ht-leeg').onclick=function(){ cx.clearRect(0,0,cv.width,cv.height); iets=false; };
+    try{ var j=await api('/api/contract/handtekening'); var ht=j.handtekening;
+      $('ht-nu').innerHTML=ht&&ht.img?('Huidige handtekening ('+esc(ht.naam||'')+', '+esc(datum(ht.ts))+'):<br><img src="'+ht.img+'" alt="handtekening" style="max-height:60px;border:1px solid #e3e8ef;border-radius:6px;background:#fff">'):'Nog geen handtekening bewaard.';
+      if(ht&&ht.naam) $('ht-naam').value=ht.naam;
+    }catch(e){ $('ht-nu').textContent='Laden lukte niet: '+e.message; }
+    $('ht-ok').onclick=async function(){
+      if(!iets){ $('ht-msg').innerHTML='<span class="err">Teken eerst in het vak.</span>'; return; }
+      this.disabled=true;
+      try{ await api('/api/contract/handtekening',{ img:cv.toDataURL('image/png'), naam:$('ht-naam').value }); $('ht-msg').innerHTML='<span class="ok">✔ Bewaard — komt in elk contract dat je vanaf nu verstuurt.</span>'; setTimeout(function(){ d.remove(); },1200); }
+      catch(e){ this.disabled=false; $('ht-msg').innerHTML='<span class="err">'+esc(e.message)+'</span>'; }
+    };
+    $('ht-wis').onclick=async function(){ if(!confirm('Handtekening verwijderen?')) return; try{ await api('/api/contract/handtekening',{ wis:true }); $('ht-nu').textContent='Verwijderd.'; }catch(e){ $('ht-msg').innerHTML='<span class="err">'+esc(e.message)+'</span>'; } };
   }
   async function wisselToegang(){
     var aan=CUR.toegang_aan===false;

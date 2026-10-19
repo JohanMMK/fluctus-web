@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.104.0 (2026-10-19, Johan): COMMENTAAR-LOG in het invoerscherm (server ≥ 15.341.0) — één vrij tekstveld per dossier; vrije tekst uit de mail/website-upload staat er automatisch in; onderaan staat altijd een datumregel «— dd/mm/jjjj uu:mm —» klaar: wie eronder typt zet die datum vast, na 30 min zonder typen komt er een nieuwe datumregel klaar; automatisch bewaard. -->
 <!-- ek.html v0.103.0 (2026-10-19, Johan): HULPVRAAG NAAR DE ADVISEUR (server ≥ 15.340.0) — vraag van de klant op een project met adviseur → de adviseur krijgt een mail met de vraag + link naar het dossier en antwoordt zelf in blok «Hulpvragen» (de klant krijgt de melding); tekst in de hulp-modal aangepast. «🙋 Hulp nodig?» nu ook voor adviseurs: hun vraag gaat naar het Energie-Compas-team (intern gesprek, niet zichtbaar voor de klant). -->
 <!-- ek.html v0.102.2 (2026-10-19, Johan): «Je bestaande zonnepanelen — injectie sturen» weg (kaart + KPI's + regel in blok 2; niet meer opgehaald, dus ook geen sturing in de bijlage van het klantrapport — de bestaande PV zelf blijft vermeld). «↺ Terug naar het adres» als witte knop. -->
 <!-- ek.html v0.102.1 (2026-10-19, Johan): FIX blok 1 (locatie) ontbrak in de adviseursweergave zonder ?adv=1; FIX «Je keuze — nog niet vastgelegd» bij het advies zelf (advies-cel naar de rooster-kolom gesnapt). -->
@@ -830,6 +831,13 @@
       <div><label class="fld">Jaarlijkse injectie (MWh)</label><input type="number" id="i-best-inj" step="0.1" min="0" inputmode="decimal" value="0" placeholder="0 = onbekend"><div class="sub" style="margin-top:2px">Van je factuur. Leeg/0 → we nemen aan dat alles zelf verbruikt wordt.</div></div>
     </div>
       </div>
+    </div>
+
+    <!-- v0.104.0 (Johan 19-10): COMMENTAAR-LOG van het dossier -->
+    <div id="ek-comm-blok" class="hidden noprint" data-i18n-skip="1" style="margin:10px 0 4px">
+      <label class="fld" id="ek-comm-lbl" for="ek-comm">📝 Commentaar</label>
+      <textarea id="ek-comm" rows="5" spellcheck="true" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #D6E0EC;border-radius:10px;font:inherit;font-size:14px;line-height:1.5;resize:vertical;min-height:110px"></textarea>
+      <div class="sub" id="ek-comm-st" style="margin-top:3px"></div>
     </div>
 
     <!-- Zacht kader: wat de klant zelf nog aanvult -->
@@ -3317,6 +3325,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(!j||!j.ok) return;
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
         try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
+        try{ if(window._ekComm) window._ekComm(j.commentaar||'', !!j.demo); }catch(eCm){}   // v0.104.0: commentaar-log
         try{ window._EK_DNB=j.netbeheerder||(j.baseCase&&j.baseCase.dnb)||''; }catch(eDnb){}   // v0.50.0: netbeheerder → uitleg profieldata
         try{ window._EK_IS_DEMO=!!j.demo; window._EK_KLANT_PROF=Array.isArray(j.klant_profielen)?j.klant_profielen:[]; if(window._ekPuRender) window._ekPuRender(); }catch(ePu){}   // v0.54.0
         try{ window._EK_HULP=Array.isArray(j.hulp)?j.hulp:[]; if(window._ekHulpAdvRender) window._ekHulpAdvRender(); if(window._ekDemo && window._ekDemo.hulpAntw) window._ekDemo.hulpAntw(); }catch(eH){}   // v0.52.0: hulpvragen + antwoorden   // v0.45.0: demo klantbeleving · v0.47.0: klant-gids
@@ -7287,6 +7296,55 @@ var _simVoortgang=(function(){
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind); else bind();
   setInterval(function(){ try{ bind(); zicht(); }catch(e){} }, 1000);
+})();
+</script>
+<script>
+// ══ v0.104.0 (Johan 19-10): COMMENTAAR-LOG — één vrij tekstveld per dossier, als log met datumregels ══
+//   • Onderaan staat altijd een «klaar»-datumregel (— dd/mm/jjjj uu:mm —) met niets eronder; die wordt niet bewaard.
+//   • Wie eronder typt, zet die datum vast (de regel wordt mee bewaard). Na 30 min zonder typen staat er een nieuwe datumregel klaar.
+//   • Automatisch bewaard (1,5 s na het typen) via POST /api/ek/commentaar.
+(function(){
+  var API_C='https://lucid-amazement-production.up.railway.app', LAATST=0, T=null, BEWAARD='', DEMO=false, KLAAR=false;
+  var RE=/^— \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}( · [^\n]*)? —$/;
+  function el(id){ return document.getElementById(id); }
+  function p2(n){ return (n<10?'0':'')+n; }
+  function stempel(){ var d=new Date(); return '— '+p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+' '+p2(d.getHours())+':'+p2(d.getMinutes())+' —'; }
+  function L3x(nl,fr,en){ try{ return (typeof L3==='function')?L3(nl,fr,en):nl; }catch(e){ return nl; } }
+  function zonderKlaar(t){ var L=String(t||'').replace(/\s+$/,'').split('\n'); if(L.length && RE.test(L[L.length-1].trim())) L.pop(); return L.join('\n').replace(/\s+$/,''); }   // klaarstaande datumregel (niets eronder) niet bewaren
+  function zetKlaar(){
+    var ta=el('ek-comm'); if(!ta) return;
+    var pos=ta.selectionStart, focus=(document.activeElement===ta), basis=zonderKlaar(ta.value);
+    ta.value=(basis?basis+'\n\n':'')+stempel()+'\n';
+    if(!focus) ta.scrollTop=ta.scrollHeight; else { try{ ta.selectionStart=ta.selectionEnd=ta.value.length; }catch(e){} }
+    KLAAR=true;
+  }
+  function hoogte(){ var ta=el('ek-comm'); if(!ta) return; ta.style.height='auto'; ta.style.height=Math.min(Math.max(ta.scrollHeight+4,110),420)+'px'; }
+  function st(t,c){ var s=el('ek-comm-st'); if(s){ s.textContent=t; s.style.color=c||''; } }
+  async function bewaar(){
+    var ta=el('ek-comm'); if(!ta||!window.TOKEN||DEMO) return;
+    var tekst=zonderKlaar(ta.value); if(tekst===BEWAARD) { st(L3x('✔ Bewaard','✔ Enregistré','✔ Saved')); return; }
+    st(L3x('⏳ Bewaren…','⏳ Enregistrement…','⏳ Saving…'));
+    try{ var hd=(window._ekLogHdr?window._ekLogHdr():{'Content-Type':'application/json'}); hd['Content-Type']='application/json';
+      var r=await fetch(API_C+'/api/ek/commentaar',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, tekst:tekst }) });
+      var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+      BEWAARD=tekst; st(L3x('✔ Bewaard','✔ Enregistré','✔ Saved'));
+    }catch(e){ st(L3x('Bewaren lukte niet — probeer opnieuw.','Échec de l’enregistrement — réessayez.','Saving failed — try again.'),'#8a1f1f'); }
+  }
+  window._ekComm=function(tekst, demo){
+    var b=el('ek-comm-blok'), ta=el('ek-comm'); if(!b||!ta) return;
+    DEMO=!!demo; BEWAARD=String(tekst||'').replace(/\s+$/,'');
+    var lb=el('ek-comm-lbl'); if(lb) lb.textContent='📝 '+L3x('Commentaar','Commentaire','Comments');
+    ta.placeholder=L3x('Vrije tekst bij dit dossier — typ onder de datum.','Texte libre pour ce dossier — tapez sous la date.','Free text for this file — type below the date.');
+    ta.value=BEWAARD; b.classList.remove('hidden'); LAATST=0; zetKlaar(); hoogte();
+    st(L3x('Zichtbaar voor iedereen met toegang tot dit dossier · wordt automatisch bewaard','Visible pour toute personne ayant accès à ce dossier · enregistré automatiquement','Visible to everyone with access to this file · saved automatically'));
+    if(!ta._ekComm){ ta._ekComm=true;
+      ta.addEventListener('input',function(){ LAATST=Date.now(); KLAAR=false; hoogte(); clearTimeout(T); T=setTimeout(bewaar,1500); });
+      ta.addEventListener('blur',function(){ clearTimeout(T); bewaar(); });
+      ta.addEventListener('focus',function(){ if(LAATST && Date.now()-LAATST>1800000) zetKlaar(); else if(KLAAR) zetKlaar(); });   // klaarstaande datum = nu
+    }
+  };
+  // na 30 min zonder typen: nieuwe datumregel klaarzetten (enkel als er sindsdien iets onder de vorige getypt werd)
+  setInterval(function(){ try{ var ta=el('ek-comm'); if(!ta||!LAATST||KLAAR) return; if(Date.now()-LAATST>1800000 && document.activeElement!==ta){ zetKlaar(); hoogte(); } }catch(e){} }, 60000);
 })();
 </script>
 </body>
