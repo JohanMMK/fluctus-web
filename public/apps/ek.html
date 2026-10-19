@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.102.0 (2026-10-19, Johan): DIESELGENERATOR VERVANGEN in de invoer (onder de voertuigen) — enkel oekene, enkel bedrijf: kVA, liter/jaar, starten/dag, €/liter, draaivenster, dagen/week → generator in de bedrijf-sweep/cel/rapport (zelfde model als Kamino); bewaard op het dossier (server ≥ 15.339.0); resultaat: «Dieselgenerator vervangen: ± € … diesel vermeden per jaar» in blok 2. -->
 <!-- ek.html v0.101.4 (2026-10-18, Johan): geen «Het kompas wijst» meer in blok 2 vanaf fase 4; «Klant verwittigen» naast «Concept-mail met rapport»; adres niet meer dubbel in het locatievak; kompasbalk (Je data … Sturing aan) in de vaste bovenbalk van het resultaat; blokken 1, 2, 5 en 6 inklapbaar met dezelfde logica (kop + ▼/▶, standaard 1+2 open, 5+6 dicht, per dossier onthouden; 3 en 4 niet); Lead Generator-link nooit in de klantweergave (ook niet na wisselen). -->
 <!-- ek.html v0.101.3 (2026-10-18, Johan): blok 2 — scenarionaam naast «Bekijk je …», altijd «🔍 Vergelijk andere combinaties» (rooster terug openen, ook na het vastleggen); het kompas in blok 2 toont vanaf fase 4 enkel een wegwijzer «↓ Naar 4 · Offertes / 5 · Bankdossier / 6 · Sturing» — geen dubbele knoppen meer (die staan in het blok zelf). -->
 <!-- ek.html v0.101.2 (2026-10-18, Johan): ingeklapte balk «Kies zelf je combinatie» even hoog als «Wat je investeert — detail»; blok 6 «Sturing» standaard ingeklapt (klik op de kop, de kompasbalk of «Vraag advies over je sturing» opent het); knoppen Bankdossier + Energiestudie (adviseur) in blok 5 rechts van «Laad je bevestigde offerte op». -->
@@ -875,6 +876,27 @@
         </div>
         <input type="hidden" id="i-ev" value="0">
       </div>
+      <!-- v0.102.0 (Johan 19-10): DIESELGENERATOR VERVANGEN — enkel oekene, enkel bedrijf. Zelfde model als Kamino / de simulator
+           (server _ekBedrijfCtx: generator = synthetische last op de kVA-piek, 3,3 kWh_e per liter; referentie = gebouw zonder
+           generator + vermeden diesel). Bewaard op het dossier (ek_bevestigd.generator) → geldt voor iedereen die het dossier opent. -->
+      <div id="gen-blok" class="hidden" data-i18n-skip="1" style="margin-top:10px;padding:10px 12px;border:1px dashed #C7D3E2;border-radius:10px;background:#FBFCFE">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin:0;font-weight:700;color:var(--navy)"><input type="checkbox" id="gen-aan" style="width:auto;margin:0"> ⚙️ Dieselgenerator vervangen <span class="sub" style="font-weight:400">(enkel zichtbaar voor oekene)</span></label>
+        <div id="gen-velden" class="hidden" style="margin-top:8px">
+          <div class="row2">
+            <div><label class="fld">Vermogen generator (kVA)</label><input type="number" id="gen-kva" min="0" step="1" inputmode="numeric" placeholder="bv. 100"></div>
+            <div><label class="fld">Dieselverbruik (liter/jaar)</label><input type="number" id="gen-liter" min="0" step="100" inputmode="numeric" placeholder="bv. 3000"></div>
+          </div>
+          <div class="row2">
+            <div><label class="fld">Starten per dag</label><input type="number" id="gen-starts" min="1" step="1" value="1" inputmode="numeric"></div>
+            <div><label class="fld">Dieselprijs (€/liter)</label><input type="number" id="gen-eur" min="0" step="0.01" value="1.58" inputmode="decimal"></div>
+          </div>
+          <div class="row2">
+            <div><label class="fld">Draait van – tot (uur)</label><div style="display:flex;gap:6px;align-items:center"><input type="number" id="gen-vs" min="0" max="23" step="1" value="7" inputmode="numeric"><span>–</span><input type="number" id="gen-ve" min="1" max="24" step="1" value="18" inputmode="numeric"></div></div>
+            <div><label class="fld">Dagen per week</label><input type="number" id="gen-dagen" min="1" max="7" step="1" value="5" inputmode="numeric"></div>
+          </div>
+          <div class="sub" style="margin-top:4px">De batterij (en PV) neemt het werk van de generator over: zijn stroom komt van je aansluiting, de vermeden diesel telt als besparing (3,3 kWh per liter).</div>
+        </div>
+      </div>
       <div class="row2">
         <div><label class="fld">E-mail (voor je update)</label><input type="email" id="i-mail" inputmode="email" placeholder="je@voorbeeld.be"></div>
         <div><label class="fld">Telefoon</label><input type="tel" id="i-tel" inputmode="tel" placeholder="+32 …"></div>
@@ -1252,6 +1274,20 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   var PROJ_BATT=null;   // per-project batterij-override {eenheid_kw,eenheid_kwh,rte_pct,dod_pct} of null → val terug op BATT_DEF
   var BATT_RTE=92, BATT_DOD=90;             // effectief (per dossier) — gaat mee in de sweep/rapport-body
   var BATT_EENHEID_KW=125, BATT_EENHEID_KWH=250;   // effectief (per dossier) — rooster-staffel = veelvouden hiervan tot T_acc
+  // v0.102.0 (Johan 19-10): dieselgenerator vervangen (enkel oekene-invoer; bewaard op het dossier; enkel bedrijf)
+  var GEN=null;
+  function _ekGenLees(){ var g=function(id){ var x=document.getElementById(id); return x?(+String(x.value).replace(',','.')||0):0; };
+    var aan=!!(document.getElementById('gen-aan')||{}).checked, kva=g('gen-kva'), lit=g('gen-liter');
+    GEN=(aan&&kva>0&&lit>0)?{ kva:Math.round(kva), liter_jaar:Math.round(lit), starts:Math.max(1,Math.round(g('gen-starts')||1)), diesel_eur_l:(g('gen-eur')||1.58),
+      venster_start:Math.max(0,Math.min(23,Math.round(g('gen-vs')))), venster_eind:Math.max(1,Math.min(24,Math.round(g('gen-ve')||18))), dagen_per_week:Math.max(1,Math.min(7,Math.round(g('gen-dagen')||5))) }:null;
+    return GEN; }
+  function _ekGenBody(bewaar){ var part=false; try{ part=((document.querySelector('input[name=ktype]:checked')||{}).value==='particulier'); }catch(e){}
+    if(!GEN || (part && !bewaar)) return bewaar?null:{}; return Object.assign({}, GEN); }
+  function _ekGenZet(g){ GEN=g?{ kva:+g.kva||0, liter_jaar:+g.liter_jaar||0, starts:+g.starts||1, diesel_eur_l:+g.diesel_eur_l||1.58, venster_start:(g.venster_start!=null?+g.venster_start:7), venster_eind:(g.venster_eind!=null?+g.venster_eind:18), dagen_per_week:+g.dagen_per_week||5 }:null;
+    var z=function(id,v){ var x=document.getElementById(id); if(x) x.value=(v==null?'':v); };
+    var c=document.getElementById('gen-aan'); if(c) c.checked=!!GEN; var vv=document.getElementById('gen-velden'); if(vv) vv.classList.toggle('hidden', !GEN);
+    if(GEN){ z('gen-kva',GEN.kva); z('gen-liter',GEN.liter_jaar); z('gen-starts',GEN.starts); z('gen-eur',GEN.diesel_eur_l); z('gen-vs',GEN.venster_start); z('gen-ve',GEN.venster_eind); z('gen-dagen',GEN.dagen_per_week); } }
+  window._ekGenZet=_ekGenZet;
   var PALEN_AC=0, PALEN_DC=0;   // v0.66.0 (Johan): vast aantal laadpalen per dossier (oekene-invoer, ek_bevestigd.palen_ac/dc); 0 = automatisch
   var CABINE_KVA=0;   // v0.34 (Johan): kVA van de bestaande cabine (per PROJECT, adviseur-input). >0 → overschrijding = cabine-upgradekost server-side
   var PROJ_EV_CFG=null;   // v0.34 (Johan): per-PROJECT voertuigdefaults-override {ev_types:[{key,kwhkm,kmjaar,fullload_kwh}]} — valt terug op de globale standaard
@@ -2394,7 +2430,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
         ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),   // v0.60.0: handmatige LS/MS mee · v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
-        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
+        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -2695,7 +2731,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
         ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),   // v0.60.0: handmatige LS/MS mee · v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
-        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
+        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };   // v0.24.35 (Johan): manuele "Pas aan"-combi's meebewaren → bij heropenen terug op de heatmap
       var _r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -2724,7 +2760,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   + fallback-combi (4,5 kWp/10 kWh), km/laadvraag-KPI's (kpi-modus particulier). Thuislaad-buckets → wagenpark-pleinen.
     var _toeEff = particulier?aansluitingKw:toegangKw;
     var _sweepPath = '/api/energiekompas/bedrijf-sweep';
-    var _sweepBody = { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:_toeEff, spanning:_spanningEff(_toeEff), toegangsvermogen_kw:_toeEff, profielNaam:profiel, klanttype:(particulier?'particulier':'bedrijf'), woning:particulier, pleinen:(particulier?_pleinenParticulier():_pleinenV2()), generator:{}, rte_pct:BATT_RTE, dod_pct:BATT_DOD, batt_eenheid_kw:BATT_EENHEID_KW, batt_eenheid_kwh:BATT_EENHEID_KWH, cabine_kva:(CABINE_KVA>0?CABINE_KVA:undefined), ev_cfg:_ekEvCfgForBody(), crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined), project_id:STATE_CODE||undefined,
+    var _sweepBody = { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:_toeEff, spanning:_spanningEff(_toeEff), toegangsvermogen_kw:_toeEff, profielNaam:profiel, klanttype:(particulier?'particulier':'bedrijf'), woning:particulier, pleinen:(particulier?_pleinenParticulier():_pleinenV2()), generator:_ekGenBody(), rte_pct:BATT_RTE, dod_pct:BATT_DOD, batt_eenheid_kw:BATT_EENHEID_KW, batt_eenheid_kwh:BATT_EENHEID_KWH, cabine_kva:(CABINE_KVA>0?CABINE_KVA:undefined), ev_cfg:_ekEvCfgForBody(), crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined), project_id:STATE_CODE||undefined,
       elia:_eliaEff(), elia_net_vast_jaar:STATE_ELIA_NET_VAST, elia_cap_jaar:STATE_ELIA_CAP, elia_heffingen_vast_jaar:STATE_ELIA_HEF };   // v0.34 (Johan): batt-eenheid + cabine-kVA + per-project ev_cfg mee   // v0.18: RTE/DoD → sweep; Fase 2: crate (#2 C-factor) + bestaande_pv (#4) → rooster+cel+rapport; v0.24.4: project_id → server past opgeladen kwartierdata toe (databron); v0.24.41: Elia-aansluiting + verankerde net/heffingen → server _eliaSwap (sweep+cel+rapport delen _sweepBody)
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
@@ -2734,6 +2770,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var ond=(_res[0].status==='fulfilled')?_res[0].value:null;
     var kpiR=(_res[1].status==='fulfilled'&&_res[1].value&&_res[1].value.kpi)?_res[1].value:null;
     var swp=(_res[2].status==='fulfilled')?_res[2].value:null;
+    try{ window._EK_GEN_RES=(swp&&swp.generator)||null; }catch(eG){}   // v0.102.0: vermeden diesel (bedrijf-sweep)
     var _swpErr=(_res[2].status==='rejected')?_res[2].reason:null;   // v0.41.0
     STATE_DATABRON=(swp&&swp.databron)||null;
     try{ var _mb=$('meth-bron'); if(_mb) _mb.textContent=(STATE_DATABRON&&STATE_DATABRON.gemeten)?'Berekend op je gemeten kwartierdata (Fluvius) over een volledig jaar.':'Indicatief, op een standaardprofiel geschaald op je verbruik. De exacte cijfers volgen uit de studie op je echte meetgegevens.'; }catch(eMb){}   // v0.65.4: methodiek-voetnoot volgt de databron   // v0.24.4: welke databron rekende de analyse (gemeten kwartierdata vs standaardprofiel)
@@ -3405,6 +3442,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           CABINE_KVA=(+B.cabine_kva>0)?Math.round(+B.cabine_kva):0; if($('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:'');
           PALEN_AC=(+B.palen_ac>0)?Math.round(+B.palen_ac):0; PALEN_DC=(+B.palen_dc>0)?Math.round(+B.palen_dc):0;   // v0.66.0
           if($('i-palen-ac')) $('i-palen-ac').value=(PALEN_AC>0?PALEN_AC:''); if($('i-palen-dc')) $('i-palen-dc').value=(PALEN_DC>0?PALEN_DC:'');
+          try{ _ekGenZet((B.generator&&+B.generator.kva>0)?B.generator:null); }catch(eG){}   // v0.102.0: dieselgenerator terug op dit dossier
           if(B.ean_afname){ STATE_EAN_AFNAME=B.ean_afname; STATE_EAN_INJECTIE=B.ean_injectie||''; STATE_EAN_GEKEND=true; }
           // v0.24.14 (Johan): herstel de commodity-referentie uit de factuur (anders valt netHef/huidig energietarief terug bij heropenen).
           if(+B.nethef>0) NETHEF=+B.nethef;
@@ -6946,7 +6984,7 @@ var _simVoortgang=(function(){
     knopKleur('btn-off-opvragen', K.fase===4 && kzOk && !K.gevraagd && !offs.length);
     knopKleur('btn-off-opladen', K.fase===4 && kzOk && (K.gevraagd || !vraagKan) && !offN);
     knopKleur('btn-off-evalueren', K.fase===5);
-    var sig=[JSON.stringify(K),kl,SEL.modus,SEL.vast,SEL.isBest,SEL.afwijk,JSON.stringify(SEL.kz),gezien,A.k,SEL.offerte&&SEL.offerte.id,combo,besp,inv,!!_pl,rend,tvt,fact,ev,inj,window.EC_LANG,A.z,offN,adv&&adv.email,!!(el('pd-blok')&&!el('pd-blok').classList.contains('hidden'))].join('|'); if(sig===_laatste) return; _laatste=sig;
+    var sig=[JSON.stringify(K),kl,SEL.modus,SEL.vast,SEL.isBest,SEL.afwijk,JSON.stringify(SEL.kz),gezien,A.k,SEL.offerte&&SEL.offerte.id,combo,besp,inv,!!_pl,rend,tvt,fact,ev,inj,window.EC_LANG,A.z,offN,adv&&adv.email,!!(el('pd-blok')&&!el('pd-blok').classList.contains('hidden')),JSON.stringify(window._EK_GEN_RES&&window._EK_GEN_RES.diesel_vermeden_eur_jaar)].join('|'); if(sig===_laatste) return; _laatste=sig;
     // blok 1 «Je data»
     var weet=[];
     if(window.STATE_HEEFT_FACTUUR) weet.push('✓ '+L3('factuur','facture','bill'));
@@ -6979,6 +7017,7 @@ var _simVoortgang=(function(){
       (!kort&&(A.p||K.fase!==2)?'<div class="kmp-wijst"><div class="kt">🧭 '+e(L3('Het kompas wijst','La boussole indique','The compass points'))+'</div><div class="kz">'+e(A.z)+'</div><div class="ka">'+
         (A.p?'<button class="btn sm" type="button" id="kmp-p">'+e(A.p[0])+'</button>':'')+(A.s?'<a id="kmp-s">'+e(A.s[0])+'</a>':'')+'</div></div>'
         :(!kort&&A.s?'<div class="kmp-ver"><a id="kmp-s" style="cursor:pointer;color:#1F3864;font-weight:600;text-decoration:underline">'+e(A.s[0])+'</a></div>':''))+
+      (window._EK_GEN_RES&&+window._EK_GEN_RES.diesel_vermeden_eur_jaar>0?'<div class="rg">⚙️ '+e(L3('Dieselgenerator vervangen: ± ','Remplacement du groupe diesel : ± ','Diesel generator replaced: ± '))+'<b>€ '+e(_ekNf(window._EK_GEN_RES.diesel_vermeden_eur_jaar,0))+'</b>'+e(L3(' diesel vermeden per jaar (',' de diesel évité par an (',' diesel avoided per year ('))+e(_ekNf(window._EK_GEN_RES.liter_jaar,0))+' L · '+e(_ekNf(Math.round((+window._EK_GEN_RES.egen_kwh_jaar||0)/100)/10,1))+e(L3(' MWh nu via je aansluiting).',' MWh via votre raccordement).',' MWh via your connection).'))+'</div>':'')+
       (kl&&inj&&inj!=='—'?'<div class="rg">☀️ '+e(L3('Extra: je injectie sturen op je bestaande zonnepanelen levert ','En plus : piloter l’injection de vos panneaux existants rapporte ','Extra: steering the injection of your existing panels earns '))+'<b>'+e(inj)+'</b>.</div>':'');
     var scn=el('dim-scenario'), park=el('ek-antw-extra'); if(scn && park && kop.contains(scn)) park.appendChild(scn);   // v0.101.3: eerst parkeren (innerHTML wist anders het veld)
     kop.innerHTML=h; k.style.display='';
@@ -7177,5 +7216,23 @@ var _simVoortgang=(function(){
 })();
 </script>
 
+<script>
+/* v0.102.0 (Johan 19-10): dieselgenerator-blok — enkel zichtbaar voor oekene (niet in de klantweergave) en enkel bij een bedrijf. */
+(function(){
+  function el(id){ return document.getElementById(id); }
+  function bind(){
+    var c=el('gen-aan'); if(c && !c._b){ c._b=1; c.addEventListener('change',function(){ var v=el('gen-velden'); if(v) v.classList.toggle('hidden',!c.checked); try{ _ekGenLees(); }catch(e){} }); }
+    ['gen-kva','gen-liter','gen-starts','gen-eur','gen-vs','gen-ve','gen-dagen'].forEach(function(id){ var x=el(id); if(x && !x._b){ x._b=1; x.addEventListener('input',function(){ try{ _ekGenLees(); }catch(e){} }); } });
+  }
+  function zicht(){
+    var b=el('gen-blok'); if(!b) return; var oek=false, kv=false, part=false;
+    try{ oek=!!EK_IS_OEKENE; kv=!!EK_KLANTVIEW; }catch(e){}
+    try{ part=((document.querySelector('input[name=ktype]:checked')||{}).value==='particulier'); }catch(e){}
+    b.classList.toggle('hidden', !(oek && !kv && !part));
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind); else bind();
+  setInterval(function(){ try{ bind(); zicht(); }catch(e){} }, 1000);
+})();
+</script>
 </body>
 </html>
