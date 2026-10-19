@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.103.0 (2026-10-19, Johan): HULPVRAAG NAAR DE ADVISEUR (server ≥ 15.340.0) — vraag van de klant op een project met adviseur → de adviseur krijgt een mail met de vraag + link naar het dossier en antwoordt zelf in blok «Hulpvragen» (de klant krijgt de melding); tekst in de hulp-modal aangepast. «🙋 Hulp nodig?» nu ook voor adviseurs: hun vraag gaat naar het Energie-Compas-team (intern gesprek, niet zichtbaar voor de klant). -->
 <!-- ek.html v0.102.2 (2026-10-19, Johan): «Je bestaande zonnepanelen — injectie sturen» weg (kaart + KPI's + regel in blok 2; niet meer opgehaald, dus ook geen sturing in de bijlage van het klantrapport — de bestaande PV zelf blijft vermeld). «↺ Terug naar het adres» als witte knop. -->
 <!-- ek.html v0.102.1 (2026-10-19, Johan): FIX blok 1 (locatie) ontbrak in de adviseursweergave zonder ?adv=1; FIX «Je keuze — nog niet vastgelegd» bij het advies zelf (advies-cel naar de rooster-kolom gesnapt). -->
 <!-- ek.html v0.102.0 (2026-10-19, Johan): DIESELGENERATOR VERVANGEN in de invoer (onder de voertuigen) — enkel oekene, enkel bedrijf: kVA, liter/jaar, starten/dag, €/liter, draaivenster, dagen/week → generator in de bedrijf-sweep/cel/rapport (zelfde model als Kamino); bewaard op het dossier (server ≥ 15.339.0); resultaat: «Dieselgenerator vervangen: ± € … diesel vermeden per jaar» in blok 2. -->
@@ -3724,7 +3725,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var eb=$('ev-def-btn'); if(eb) eb.style.display=_ekAdvOk()?'inline-flex':'none';   // v0.84.0: ook de klant   // v0.78.0: ook adviseurs (enkel voertuigparameters van dit dossier)
       var vw=$('ek-verwittig-blok'); if(vw) vw.classList.toggle('hidden', !(adviseur && TOKEN));
       try{ if(window._ekPuRender) window._ekPuRender(); }catch(ePu){}   // v0.54.0
-      var hb=$('ek-hulpadv-blok'); if(hb) hb.classList.toggle('hidden', !(adviseur && TOKEN && (window._EK_HULP||[]).length));   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
+      var hb=$('ek-hulpadv-blok'); var _hbMag=!!(window._ekHulpBlokMag && window._ekHulpBlokMag()); if(hb) hb.classList.toggle('hidden', !(_hbMag && (window._EK_HULP||[]).length));   // v0.103.0: ook de adviseur
+      try{ if(_hbMag && window._ekHulpVernieuw){ var _nuH=Date.now(); if(!window._EK_HULP_VT || _nuH-window._EK_HULP_VT>30000 || window._EK_HULP_VTK!==TOKEN){ window._EK_HULP_VT=_nuH; window._EK_HULP_VTK=TOKEN; window._ekHulpVernieuw(); } } }catch(eHv){}   // v0.103.0: interne gesprekken ophalen (ingelogd)   // v0.52.0   // v0.50.0: klant verwittigen — enkel oekene
       var evt=$('ev-tab'); if(evt) evt.classList.toggle('ev-klant', !_ekAdvView());   // v0.50.3: betalend/kW/€/kWh enkel in de adviseursweergave
       var cm=$('btn-concept'); if(cm) cm.style.display=adviseur?'inline-block':'none';
       var mec=$('ek-mijnec'); if(mec){ mec.classList.toggle('hidden', !((advCtx || !!window._EK_SESSIE_MAIL) && !EK_KLANTVIEW)); try{ var _lg=(window.EC_LANG==='fr'||window.EC_LANG==='en')?('/'+window.EC_LANG):''; mec.href='https://www.energie-compas.eu'+_lg+'/login'; }catch(eMl){} }   // v0.96.0: ook een aangemelde klant
@@ -3774,6 +3776,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     }catch(e){ EK_IS_OEKENE=false; }
     if(!(EK_IS_OEKENE||EK_IS_ADV)){ EK_PREPADV=false; EK_KLANTVIEW=false; }   // v0.100.0 (Johan): ?adv=1 / ?prep=1 geeft enkel een adviseursweergave aan ingelogde managers, adviseurs en oekene
     _ekApplyGate();
+    window._EK_GATE_KLAAR=true;   // v0.103.0: login bekend (chat-link kiest klantgesprek of adviseursblok)
     _ekGateGedaan();   // v0.97.0
   }
   function _ekB64(buf){ var bin='',u=new Uint8Array(buf),C=0x8000; for(var i=0;i<u.length;i+=C) bin+=String.fromCharCode.apply(null,u.subarray(i,i+C)); return btoa(bin); }
@@ -5006,24 +5009,55 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function p2(n){ return (n<10?'0':'')+n; }
   function tok(){ try{ return (typeof TOKEN!=='undefined' && TOKEN) || ''; }catch(e){ return ''; } }
   function advWeergave(){ try{ if(EK_KLANTVIEW) return false; return !!(EK_IS_OEKENE || EK_IS_ADV || EK_PREPADV); }catch(e){ return false; } }
+  function advGebruiker(){ try{ return !!(EK_IS_ADV && !EK_IS_OEKENE && !EK_KLANTVIEW); }catch(e){ return false; } }   // v0.103.0: ingelogde adviseur/manager in de adviseursweergave
   function openAdvVraag(){ return (window._EK_HULP||[]).filter(function(h){ return h.reden==='adviseur' && (h.status||'open')==='open'; })[0]||null; }
   function fab(){
-    var f=el('ek-hulp-fab'), toon=!!tok() && !advWeergave() && !el('ek-hulp-mod');
+    var f=el('ek-hulp-fab'), toon=!!tok() && (!advWeergave() || advGebruiker()) && !el('ek-hulp-mod');   // v0.103.0: ook adviseurs (vraag aan het team)
     if(!toon){ if(f) f.style.display='none'; return; }
     if(!f){ f=document.createElement('button'); f.type='button'; f.id='ek-hulp-fab'; f.className='noprint'; f.setAttribute('data-i18n-skip','1'); f.onclick=openMod; document.body.appendChild(f); }
     var t='🙋 '+L3('Hulp nodig?','Besoin d’aide ?','Need help?'); if(f.textContent!==t) f.textContent=t;
     f.style.display='';
   }
   function sluit(){ var m=el('ek-hulp-mod'); if(m) m.remove(); fab(); }
+  // v0.103.0 (Johan 19-10): ADVISEUR → vraag aan het Energie-Compas-team (intern gesprek op dit dossier; de klant ziet het niet).
+  window._ekHulpTeamMod=function(){ openTeamMod(); };
+  function openTeamMod(){
+    var nI=(window._EK_HULP||[]).filter(function(h){ return h.intern; }).length;
+    var h='<div class="hm-box" role="dialog" aria-modal="true">'+
+      '<h3>Vraag het Energie-Compas-team</h3>'+
+      '<div style="color:#5A6577">Je vraag over dit dossier gaat naar het Energie-Compas-team — niet naar de klant. Je krijgt antwoord per mail en in het blok «Adviseur» → «Hulpvragen».</div>'+
+      '<textarea id="hm-team-txt" rows="4" style="width:100%;box-sizing:border-box;margin-top:10px;padding:9px 11px;border:1px solid #D6E0EC;border-radius:9px;font:inherit" placeholder="Je vraag (bv. over de dimensionering, de offerte, de cijfers…)"></textarea>'+
+      '<label style="display:flex;gap:8px;align-items:center;margin:6px 0;font-weight:600;font-size:14px"><input type="checkbox" id="hm-team-bel"> Bel me liever terug</label>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" id="hm-team-go">✉️ Verstuur je vraag</button>'+(nI?'<button type="button" class="btn ghost sm" id="hm-team-zie">💬 Bekijk je gesprekken ('+nI+')</button>':'')+'<span class="sub" id="hm-team-st" style="margin:0"></span></div>'+
+      '<div style="text-align:right;margin-top:14px"><button type="button" class="btn ghost sm" id="hm-x">Sluiten</button></div></div>';
+    var m=document.createElement('div'); m.id='ek-hulp-mod'; m.setAttribute('data-i18n-skip','1'); m.innerHTML=h; document.body.appendChild(m);
+    fab();
+    el('hm-x').onclick=sluit; m.addEventListener('click',function(ev){ if(ev.target===m) sluit(); });
+    function naarBlok(){ sluit(); try{ var b=el('ek-hulpadv-blok'); if(window._ekHulpAdvRender) window._ekHulpAdvRender(); if(b){ b.classList.remove('hidden'); b.scrollIntoView({behavior:'smooth',block:'start'}); } }catch(e){} }
+    if(el('hm-team-zie')) el('hm-team-zie').onclick=naarBlok;
+    el('hm-team-go').onclick=async function(){
+      var bt=this, st=el('hm-team-st'), tx=(el('hm-team-txt').value||'').trim(), bel=el('hm-team-bel').checked;
+      if(!tx && !bel){ st.style.color='#8a5a00'; st.textContent='Schrijf eerst je vraag.'; return; }
+      bt.disabled=true; st.style.color='#6B7689'; st.textContent='⏳ Versturen…';
+      try{ var hd={'Content-Type':'application/json'}; try{ Object.assign(hd, (await _ekAuthHeaders())||{}); }catch(eA){ throw new Error('meld je eerst aan'); }
+        var r=await fetch(API+'/api/ek/hulp',{ method:'POST', headers:hd, body:JSON.stringify({ token:tok(), reden:'knop', commentaar:tx, terugbellen:bel, context:{ taal:'nl' } }) });
+        var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+        if(Array.isArray(j.hulp)) window._EK_HULP=j.hulp;
+        st.style.color='#1E7A42'; st.textContent='✔ Verstuurd — je krijgt antwoord per mail en in «Hulpvragen».'; bt.style.display='none';
+        setTimeout(naarBlok, 1400);
+      }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; }
+    };
+  }
   function openMod(){
     if(el('ek-hulp-mod')) return;
-    var A=window._EK_ADV||null, heeftGesprek=(window._EK_HULP||[]).some(function(h){ return h.reden!=='adviseur'; }), oa=openAdvVraag();
+    if(advGebruiker()){ openTeamMod(); return; }   // v0.103.0
+    var A=window._EK_ADV||null, heeftGesprek=(window._EK_HULP||[]).some(function(h){ return h.reden!=='adviseur' && !h.intern; }), oa=openAdvVraag();
     var h='<div class="hm-box" role="dialog" aria-modal="true">'+
       '<h3>'+esc(L3('Waarmee kunnen we je helpen?','Comment pouvons-nous vous aider ?','How can we help you?'))+'</h3>'+
       '<div style="color:#5A6577">'+esc(L3('Twijfel je over wat je nu moet doen? Kies hieronder.','Vous hésitez sur la suite ? Choisissez ci-dessous.','Not sure what to do next? Choose below.'))+'</div>'+
       '<button type="button" class="hm-opt" id="hm-vraag"><span class="i">💬</span><span><b>'+esc(heeftGesprek?L3('Bekijk je gesprek','Voir votre conversation','View your conversation'):L3('Stel je vraag','Posez votre question','Ask your question'))+'</b><span class="s">'+esc(L3('Je krijgt antwoord per mail en hier in je project.','Vous recevez la réponse par e-mail et ici dans votre projet.','You get an answer by e-mail and here in your project.'))+'</span></span></button>';
     if(A && A.email){
-      h+='<div class="hm-opt" style="cursor:default"><span class="i">👤</span><span><b>'+esc(L3('Je adviseur','Votre conseiller','Your adviser'))+'</b><span class="s">'+esc(A.naam||'')+(A.naam?' · ':'')+'<a href="mailto:'+esc(A.email)+'">'+esc(A.email)+'</a><br>'+esc(L3('Je vragen gaan rechtstreeks naar je adviseur.','Vos questions vont directement à votre conseiller.','Your questions go straight to your adviser.'))+'</span></span></div>';
+      h+='<div class="hm-opt" style="cursor:default"><span class="i">👤</span><span><b>'+esc(L3('Je adviseur','Votre conseiller','Your adviser'))+'</b><span class="s">'+esc(A.naam||'')+(A.naam?' · ':'')+'<a href="mailto:'+esc(A.email)+'">'+esc(A.email)+'</a><br>'+esc(L3('Je adviseur krijgt je vraag meteen per mail en antwoordt hier in je project.','Votre conseiller reçoit votre question immédiatement par e-mail et vous répond ici, dans votre projet.','Your adviser gets your question by e-mail right away and replies here in your project.'))+'</span></span></div>';
     } else if(oa){
       var d=new Date(+oa.ts);
       h+='<div class="hm-opt" style="cursor:default"><span class="i">✔</span><span><b>'+esc(L3('Adviseur gevraagd','Conseiller demandé','Adviser requested'))+'</b><span class="s">'+esc(L3('Op ','Le ','On ')+p2(d.getDate())+'-'+p2(d.getMonth()+1)+'-'+d.getFullYear()+L3(' — een adviseur belt je zo snel mogelijk.',' — un conseiller vous appelle au plus vite.',' — an adviser will call you as soon as possible.'))+'</span></span></div>';
@@ -5827,26 +5861,32 @@ var _simVoortgang=(function(){
       '<div style="font-size:11.5px;color:#6B7689">'+wie+' · '+esc(dt(m.ts))+(m.bel?' · <b style="color:#B45309">📞 wil teruggebeld worden</b>':'')+'</div>'+
       (m.tekst?'<div style="white-space:pre-wrap">'+esc(m.tekst)+'</div>':'')+'</div></div>';
   }
-  async function vernieuw(){ try{ var r=await fetch(API_H+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN||'')+'&cb='+Date.now(),{ cache:'no-store' }); var j=await r.json(); if(j&&j.ok&&Array.isArray(j.hulp)){ window._EK_HULP=j.hulp; window._ekHulpAdvRender(); } }catch(e){} }
+  async function vernieuw(){ try{ var _hh={}; try{ if(window._ekHulpBlokMag && window._ekHulpBlokMag() && typeof _ekAuthHeaders==='function') _hh=(await _ekAuthHeaders())||{}; }catch(eA){ _hh={}; } delete _hh['Content-Type']; var r=await fetch(API_H+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN||'')+'&cb='+Date.now(),{ cache:'no-store', headers:_hh }); /* v0.103.0: ingelogd → ook interne gesprekken */ var j=await r.json(); if(j&&j.ok&&Array.isArray(j.hulp)){ window._EK_HULP=j.hulp; window._ekHulpAdvRender(); } }catch(e){} }
+  window._ekHulpVernieuw=vernieuw;   // v0.103.0
+  // v0.103.0: zichtbaar voor oekene én de ingelogde adviseur/manager (adviseursweergave); TEAM = oekene/manager, anders de adviseur van het project.
+  window._ekHulpBlokMag=function(){ try{ return !!(window.TOKEN && !EK_KLANTVIEW && (EK_IS_OEKENE || EK_IS_ADV)); }catch(e){ return false; } };
+  function team(){ try{ return !!EK_IS_OEKENE; }catch(e){ return false; } }
   window._ekHulpAdvRender=function(){
     var b=document.getElementById('ek-hulpadv-blok'); if(!b) return;
     var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
-    try{ var adv=(window.EK_IS_OEKENE && !window.EK_KLANTVIEW); b.classList.toggle('hidden', !(adv && window.TOKEN && L.length)); }catch(e){}
+    var TM=team();
+    try{ b.classList.toggle('hidden', !(window._ekHulpBlokMag() && L.length)); }catch(e){}
     if(!L.length){ b.innerHTML=''; return; }
-    var nOpen=L.filter(function(h){ return h.status==='open'; }).length;
+    var nOpen=L.filter(function(h){ return h.status==='open' && (TM || !h.intern); }).length;   // v0.103.0: adviseur — enkel de vragen van zijn klant wachten op hem
     var h='<div style="border:1px solid #F0DDA8;background:#FFFBF0;border-radius:12px;padding:12px 14px">'+
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><div style="font-weight:800;color:#1F3864">💬 Hulpvragen van deze klant'+(nOpen?' — <span style="color:#B45309">'+nOpen+' wacht op ons</span>':' — alles beantwoord')+'</div><button type="button" class="btn ghost sm" data-hver="1" data-nolog="1" style="margin-left:auto">↻ Vernieuwen</button></div>';
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><div style="font-weight:800;color:#1F3864">💬 Hulpvragen'+(TM?' van deze klant':'')+(nOpen?' — <span style="color:#B45309">'+nOpen+(TM?' wacht op ons':' wacht op jou')+'</span>':' — alles beantwoord')+'</div><button type="button" class="btn ghost sm" data-hver="1" data-nolog="1" style="margin-left:auto">↻ Vernieuwen</button></div>';
     L.forEach(function(x){
-      var c=x.context||{}, open=(x.status==='open'), B=berichten(x);
-      var stTxt=open?'<b style="color:#B45309">wacht op ons</b>':(x.status==='beantwoord'?'<b style="color:#1E7A42">beantwoord</b>':'<b style="color:#2a44a8">'+(x.status==='gebeld'?'gebeld':'afgesloten')+'</b>');
+      var c=x.context||{}, open=(x.status==='open'), B=berichten(x), IN=!!x.intern, gv=(x.gevraagd_door&&(x.gevraagd_door.naam||x.gevraagd_door.mail))||'de adviseur';
+      var stTxt=open?'<b style="color:#B45309">'+(IN?(TM?'wacht op ons':'wacht op het team'):(TM?'wacht op ons':'wacht op jou'))+'</b>':(x.status==='beantwoord'?'<b style="color:#1E7A42">beantwoord</b>':'<b style="color:#2a44a8">'+(x.status==='gebeld'?'gebeld':'afgesloten')+'</b>');
       h+='<div style="border-top:1px solid #F0E6C8;padding:8px 0">'+
+        (IN?'<div style="font-size:12.5px;font-weight:700;color:#5B3FA0;margin-bottom:2px">🔒 Vraag van '+esc(gv)+' aan het Energie-Compas-team — niet zichtbaar voor de klant</div>':'')+
         '<div style="font-size:12.5px;color:#6B7689">gestart '+esc(dt(x.ts))+' · '+(x.reden==='adviseur'?'<b>🙋 adviseur gevraagd</b> — duid een adviseur aan':x.reden==='niet_rendabel'?'geen rendabele combinatie':(x.reden==='mail'?'uit de inkomende mail — <b>'+esc(x.commentaar||'Controleer dit project')+'</b>':'via de knop'))+(x.terugbellen?' · <b style="color:#B45309">📞 terugbellen</b>':'')+' · '+stTxt+' · '+B.length+' bericht'+(B.length===1?'':'en')+'</div>'+
         '<div style="font-size:12.5px;color:#4A5568;margin:2px 0 6px">'+[x.mail?'✉ '+esc(x.mail):'', x.gsm?'📞 '+esc(x.gsm):'', (c.beste_tvt!=null?'beste TVT '+String(c.beste_tvt).replace('.',',')+' j':'geen TVT ≤ 15 j'), (c.pv||c.batt_kw)?('combi '+c.pv+' kWp / '+c.batt_kw+' kW / '+c.batt_kwh+' kWh'):'' ].filter(Boolean).join(' · ')+'</div>'+
         '<div style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow:auto;padding:2px">'+B.map(bubbel).join('')+'</div>'+
-        '<textarea data-hid="'+esc(x.id)+'" rows="3" style="width:100%;box-sizing:border-box;margin-top:8px;padding:8px 10px;border:1px solid #D6E0EC;border-radius:8px;font:inherit" placeholder="'+(open?'Je antwoord aan de klant (wordt gemaild in zijn taal en verschijnt in het gesprek — schrijf in die taal), of een notitie bij terugbellen':'Nog iets toevoegen aan dit gesprek? (wordt gemaild en verschijnt in het gesprek)')+'"></textarea>'+
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" data-hact="mail" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Verstuur antwoord</button>'+
-          (open?'<button type="button" class="btn ghost sm" data-hact="gebeld" data-hid="'+esc(x.id)+'" data-nolog="1">📞 Gebeld (afsluiten)</button>':'')+
-          ((x.status!=='gesloten'&&x.status!=='gebeld')?'<button type="button" class="btn ghost sm" data-hact="sluiten" data-hid="'+esc(x.id)+'" data-nolog="1">✔ Afsluiten zonder mail</button>':'')+'</div>'+
+        '<textarea data-hid="'+esc(x.id)+'" rows="3" style="width:100%;box-sizing:border-box;margin-top:8px;padding:8px 10px;border:1px solid #D6E0EC;border-radius:8px;font:inherit" placeholder="'+(IN&&!TM?'Je bericht aan het Energie-Compas-team':(IN?'Je antwoord aan '+esc(gv)+' (krijgt een melding per mail en leest het hier in het dossier)':(!TM?'Je antwoord aan de klant — de klant krijgt een mail dat er een bericht klaarstaat en leest het in zijn project (schrijf in zijn taal), of een notitie bij terugbellen':(open?'Je antwoord aan de klant (wordt gemaild in zijn taal en verschijnt in het gesprek — schrijf in die taal), of een notitie bij terugbellen':'Nog iets toevoegen aan dit gesprek? (wordt gemaild en verschijnt in het gesprek)'))))+'"></textarea>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+(IN&&!TM?'<button type="button" class="btn sm" data-hact="bericht" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Stuur bericht</button>':'<button type="button" class="btn sm" data-hact="mail" data-hid="'+esc(x.id)+'" data-nolog="1">✉️ Verstuur antwoord</button>')+
+          ((IN&&!TM)?'':((open?'<button type="button" class="btn ghost sm" data-hact="gebeld" data-hid="'+esc(x.id)+'" data-nolog="1">📞 Gebeld (afsluiten)</button>':'')+
+          ((x.status!=='gesloten'&&x.status!=='gebeld')?'<button type="button" class="btn ghost sm" data-hact="sluiten" data-hid="'+esc(x.id)+'" data-nolog="1">✔ Afsluiten zonder mail</button>':'')))+'</div>'+
         '<div class="sub" data-hst="'+esc(x.id)+'" style="margin-top:4px"></div></div>';
     });
     b.innerHTML=h+'</div>';
@@ -5854,11 +5894,16 @@ var _simVoortgang=(function(){
     Array.prototype.forEach.call(b.querySelectorAll('[data-hact]'),function(bt){ bt.onclick=async function(){
       var id=bt.getAttribute('data-hid'), act=bt.getAttribute('data-hact'), ta=b.querySelector('textarea[data-hid="'+id+'"]'), st=b.querySelector('[data-hst="'+id+'"]');
       var tx=(ta&&ta.value||'').trim();
-      if(act==='mail' && tx.length<3){ st.style.color='#8a5a00'; st.textContent='Schrijf eerst een antwoord.'; return; }
-      if(act==='mail' && !confirm(window._EK_ADV&&window._EK_ADV.email?('Dit project heeft een adviseur — het antwoord gaat enkel naar '+window._EK_ADV.email+'. Nu mailen?'):'Dit antwoord nu naar de klant mailen?')) return;   // v0.77.0
+      if((act==='mail'||act==='bericht') && tx.length<3){ st.style.color='#8a5a00'; st.textContent='Schrijf eerst een '+(act==='bericht'?'bericht':'antwoord')+'.'; return; }
+      var xh=(window._EK_HULP||[]).filter(function(q){ return String(q.id)===String(id); })[0]||{}, TM=team();
+      var vraag=!TM?((xh.mail||(document.getElementById('i-mail')&&document.getElementById('i-mail').value))?('Dit antwoord nu naar de klant ('+(xh.mail||document.getElementById('i-mail').value)+') sturen? De klant krijgt een mail dat er een bericht klaarstaat.'):'Dit antwoord nu naar de klant sturen?')
+        :(xh.intern?'Dit antwoord nu naar de adviseur mailen?':(window._EK_ADV&&window._EK_ADV.email?('Dit project heeft een adviseur — het antwoord gaat enkel naar '+window._EK_ADV.email+'. Nu mailen?'):'Dit antwoord nu naar de klant mailen?'));   // v0.77.0 · v0.103.0
+      if(act==='mail' && !confirm(vraag)) return;
       bt.disabled=true; st.style.color='var(--muted)'; st.textContent='⏳ Bezig…';
-      try{ var hd=(window._ekLogHdr?window._ekLogHdr():{}); hd['Content-Type']='application/json';
-        var r=await fetch(API_H+'/api/ek/hulp-antwoord',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, actie:act, antwoord:tx }) });
+      try{ var hd={}; try{ hd=(typeof _ekAuthHeaders==='function')?((await _ekAuthHeaders())||{}):{}; }catch(eA){ hd=(window._ekLogHdr?window._ekLogHdr():{}); } hd['Content-Type']='application/json';   // v0.103.0: verse sessie (ook adviseurs)
+        var r=(act==='bericht')
+          ? await fetch(API_H+'/api/ek/hulp-bericht',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, tekst:tx }) })   // v0.103.0: adviseur → bericht aan het team (intern gesprek)
+          : await fetch(API_H+'/api/ek/hulp-antwoord',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, actie:act, antwoord:tx }) });
         var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
         window._EK_HULP=j.hulp||window._EK_HULP; window._ekHulpAdvRender();
       }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; }
@@ -6334,7 +6379,7 @@ var _simVoortgang=(function(){
   // v0.52.0: antwoorden op hulpvragen (klant/demo) — link in het invoerscherm én onder «Hulp vragen» → modal
   function dtK(ts){ var d=new Date(+ts); if(isNaN(d.getTime())) return ''; return p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear(); }
   // v0.71.0: GESPREK (chat) — alle hulpvragen van dit dossier chronologisch, reageren in het laatste gesprek.
-  function hulpLijst(){ return (window._EK_HULP||[]).slice().sort(function(a,c){ return (+a.ts||0)-(+c.ts||0); }); }
+  function hulpLijst(){ return (window._EK_HULP||[]).filter(function(x){ return !x.intern; }).slice().sort(function(a,c){ return (+a.ts||0)-(+c.ts||0); }); }
   function chatB(x){ if(x.berichten&&x.berichten.length) return x.berichten; var B=[]; if(x.commentaar||x.terugbellen) B.push({ ts:x.ts, van:'klant', tekst:x.commentaar||'', bel:x.terugbellen }); if(x.antwoord) B.push({ ts:x.beantwoord_ts, van:'ek', soort:'mail', tekst:x.antwoord }); else if(x.status==='gebeld') B.push({ ts:x.beantwoord_ts, van:'ek', soort:'gebeld', tekst:'' }); return B; }
   function chatSleutel(){ return hulpLijst().map(function(x){ var B=chatB(x); return x.id+':'+B.length+':'+(x.status||''); }).join('|'); }
   function chatHtml(){
@@ -6355,7 +6400,7 @@ var _simVoortgang=(function(){
   }
   var _chatPoll=null;
   async function chatHaal(){
-    try{ if(!window.TOKEN) return false; var r=await fetch(API_D+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{ cache:'no-store' });
+    try{ if(!window.TOKEN) return false; var _hh={}; try{ if(window._ekHulpBlokMag && window._ekHulpBlokMag() && typeof _ekAuthHeaders==='function') _hh=(await _ekAuthHeaders())||{}; }catch(eA){ _hh={}; } delete _hh['Content-Type']; var r=await fetch(API_D+'/api/ek/hulp-chat?token='+encodeURIComponent(window.TOKEN)+'&cb='+Date.now(),{ cache:'no-store', headers:_hh });   // v0.103.0
       var j=await r.json(); if(!(j&&j.ok&&Array.isArray(j.hulp))) return false;
       var oud=chatSleutel(); window._EK_HULP=j.hulp; if(chatSleutel()===oud) return false;
       hulpAntw(); try{ if(window._ekHulpAdvRender) window._ekHulpAdvRender(); }catch(e){} return true; }catch(e){ return false; }
@@ -6397,15 +6442,21 @@ var _simVoortgang=(function(){
   var _chatLinkGedaan=false;
   function chatViaLink(poging){
     try{ if(_chatLinkGedaan) return; var q=new URLSearchParams(location.search); if(q.get('chat')!=='1') return;
+      if(!window._EK_GATE_KLAAR && (poging||0)<10){ setTimeout(function(){ chatViaLink((poging||0)+1); }, 800); return; }   // v0.103.0: eerst weten wie kijkt
+      if(window._ekHulpBlokMag && window._ekHulpBlokMag()){   // v0.103.0: adviseur/oekene via de mail → blok «Hulpvragen» in de adviseurskaart
+        _chatLinkGedaan=true; try{ q.delete('chat'); history.replaceState(history.state,'',location.pathname+(q.toString()?'?'+q.toString():'')+location.hash); }catch(eU){}
+        Promise.resolve(window._ekHulpVernieuw?window._ekHulpVernieuw():null).then(function(){ setTimeout(function(){ var hb=document.getElementById('ek-hulpadv-blok'); if(hb && !hb.classList.contains('hidden')) hb.scrollIntoView({behavior:'smooth',block:'start'}); }, 600); });
+        return; }
       if(!(window.TOKEN && (window._EK_HULP||[]).length)){ if((poging||0)<6) setTimeout(function(){ chatViaLink((poging||0)+1); }, 800); return; }
       _chatLinkGedaan=true; mChat(); klog('hulp_chat_via_mail',{});
       try{ q.delete('chat'); var u=location.pathname+(q.toString()?'?'+q.toString():'')+location.hash; history.replaceState(history.state,'',u); }catch(eU){}
     }catch(e){}
   }
-  function hulpOpen(){ var L=window._EK_HULP||[]; if(L.length && window.TOKEN && !(window.EK_IS_OEKENE && !window.EK_KLANTVIEW)) mChat(); else mHulp('knop'); }
+  function hulpOpen(){ try{ if(window.EK_IS_ADV && !window.EK_IS_OEKENE && !window.EK_KLANTVIEW && window._ekHulpTeamMod){ window._ekHulpTeamMod(); return; } }catch(eT){}   // v0.103.0: adviseur → vraag aan het team
+    var L=hulpLijst(); if(L.length && window.TOKEN && !(window.EK_IS_OEKENE && !window.EK_KLANTVIEW)) mChat(); else mHulp('knop'); }
   function hulpAntw(){
     try{
-      var L=window._EK_HULP||[]; if(!D.aan || adv()) return;
+      var L=hulpLijst(); if(!D.aan || adv()) return;   // v0.103.0: zonder interne gesprekken
       var lt=hulpLijst().slice(-1)[0], B=lt?chatB(lt):[], lm=B[B.length-1];
       var nieuw=!!(lm && lm.van==='ek' && lm.soort!=='gesloten' && lsGet('EK_HULP_GEZIEN_'+(window.TOKEN||''))!==chatSleutel());
       var open=L.some(function(x){ return x.status==='open'; });
