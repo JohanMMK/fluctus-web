@@ -5,6 +5,18 @@
    capacity tariff, self-consumption, self-sufficiency, payback period, (paid) charging hub, (un)managed charging, imbalance,
    passive response, dynamic (spot) contract, quarter-hourly data, standard load profile (SLP), negotiation note.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_EN_SEG = {
+/* v1.0.26 (2026-10-19, Johan): klantrapport zonder voertuigen / generator */
+"Energie (na injectie)": "Energy (after injection)",
+"Energie (incl. generatorlast, na injectie)": "Energy (incl. generator load, after injection)",
+"Dit rapport toont wat eigen productie, opslag en slimme sturing voor jou kunnen betekenen. De cijfers komen uit een simulatie op kwartierbasis, gevoed door de ervaring van meer dan {#} analyses.": "This report shows what your own generation, storage and smart control can mean for you. The figures come from a quarter-hourly simulation, built on the experience of more than {#} analyses.",
+"b. Gebouw, met PV + batterij (slimme sturing + batterij)": "b. Building, with PV + battery (smart control + battery)",
+"b. Gebouw, met batterij (slimme sturing + batterij)": "b. Building, with battery (smart control + battery)",
+"b. Gebouw, met PV (slimme sturing)": "b. Building, with PV (smart control)",
+"b. Gebouw, met installatie (slimme sturing)": "b. Building, with installation (smart control)",
+"c. Gebouw, met PV + batterij (slimme sturing + batterij)": "c. Building, with PV + battery (smart control + battery)",
+"c. Gebouw, met batterij (slimme sturing + batterij)": "c. Building, with battery (smart control + battery)",
+"c. Gebouw, met PV (slimme sturing)": "c. Building, with PV (smart control)",
+"c. Gebouw, met installatie (slimme sturing)": "c. Building, with installation (smart control)",
 "Netverzwaring als je laadt zonder eigen infrastructuur": "Grid upgrade if you charge without your own infrastructure",
 "nodig zonder batterij of sturing": "needed without battery or smart control",
 "Netto marge betalend laadplein (omzet − elektriciteit)": "Net margin paid charging plaza (revenue − electricity)",

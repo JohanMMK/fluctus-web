@@ -2,6 +2,18 @@
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_FR_SEG = {
+/* v1.4.9 (2026-10-19, Johan): klantrapport zonder voertuigen / generator */
+"Energie (na injectie)": "Énergie (après injection)",
+"Energie (incl. generatorlast, na injectie)": "Énergie (charge du groupe incl., après injection)",
+"Dit rapport toont wat eigen productie, opslag en slimme sturing voor jou kunnen betekenen. De cijfers komen uit een simulatie op kwartierbasis, gevoed door de ervaring van meer dan {#} analyses.": "Ce rapport montre ce que la production propre, le stockage et le pilotage intelligent peuvent représenter pour vous. Les chiffres proviennent d'une simulation au quart d'heure, alimentée par l'expérience de plus de {#} analyses.",
+"b. Gebouw, met PV + batterij (slimme sturing + batterij)": "b. Bâtiment, avec PV + batterie (pilotage intelligent + batterie)",
+"b. Gebouw, met batterij (slimme sturing + batterij)": "b. Bâtiment, avec batterie (pilotage intelligent + batterie)",
+"b. Gebouw, met PV (slimme sturing)": "b. Bâtiment, avec PV (pilotage intelligent)",
+"b. Gebouw, met installatie (slimme sturing)": "b. Bâtiment, avec installation (pilotage intelligent)",
+"c. Gebouw, met PV + batterij (slimme sturing + batterij)": "c. Bâtiment, avec PV + batterie (pilotage intelligent + batterie)",
+"c. Gebouw, met batterij (slimme sturing + batterij)": "c. Bâtiment, avec batterie (pilotage intelligent + batterie)",
+"c. Gebouw, met PV (slimme sturing)": "c. Bâtiment, avec PV (pilotage intelligent)",
+"c. Gebouw, met installatie (slimme sturing)": "c. Bâtiment, avec installation (pilotage intelligent)",
 "Netverzwaring als je laadt zonder eigen infrastructuur": "Renforcement du réseau si vous rechargez sans infrastructure propre",
 "nodig zonder batterij of sturing": "nécessaire sans batterie ni pilotage",
 "Netto marge betalend laadplein (omzet − elektriciteit)": "Marge nette du parc de recharge payant (chiffre d’affaires − électricité)",
