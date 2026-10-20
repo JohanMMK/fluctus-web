@@ -1,3 +1,4 @@
+// portal.js v1.21.0 — 2026-10-20 — «Mijn klanten» en «EnergieKompas» enkel nog voor managers (kwamen mee via de toegang energiekompas van Energie-Compas).
 // portal.js v1.20.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». portal.js v1.20.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). portal.js v1.19.1 — 2026-10-16 — tegel 'Contracten' enkel voor oekene@gmail.com. portal.js v1.19.0 — 2026-10-16 — managerOnly-tegel 'contracten' (📝 Contracten → /apps/contracten.html). portal.js v1.18.0 — 2026-10-16 — SNELLER INLOGGEN: tegels uit de laatste sessie meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback op de oude checks), render niet opnieuw bij INITIAL_SESSION/TOKEN_REFRESHED (zelfde gebruiker), config + Supabase-lib parallel laden. portal.js v1.17.0 — 2026-10-15 — manager-portal: niet-actieve tegels (Mijn klanten, EnergieKompas, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne) onderaan onder een lijn «Minder gebruikt», gedempt; Academy niet meer automatisch (per gebruiker toe te kennen); gatedBy-tegels (Energie-Compas, Mijn klanten, Laadplein) ook apart toe te kennen. portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
 // ── Portaal: Academy/Supabase-login + RBAC-launcher + offerte-flow ───────────
 // CHANGELOG (nieuwste bovenaan):
@@ -62,6 +63,7 @@ const $ = (id) => document.getElementById(id);
 // gefilterd via de fluctus-proxy /api/app-access/check.
 // Volgorde van de tegels op Mijn Fluctus (Johan 06-08):
 //   1 Academy · 2 Energiemarkt · 3 Lead Generator (gemeenteplan) · 4 Kamino · 5 Simulator · 6 Thuisladen · 7 Gebruikers
+const MGR_ENKEL = new Set(['adviseur', 'energiekompas']);   /* v1.21.0: oude tegels, niet voor adviseurs */
 const APP_CATALOG = [
   { id: 'academy',     naam: 'Fluctus Academy',  ico: '🎓', beschrijving: 'Opleiding, modules en certificaten.', url: '/apps/academy.html' },   // v1.17.0 (Johan 15-10): niet meer automatisch — per gebruiker toe te kennen (Gebruikers-app)
   // Energiemarkt = gewone app: managers zien ze automatisch, verkopers enkel na
@@ -250,6 +252,7 @@ async function toegankelijkeApps(token, email) {
   // als er per ongeluk een app-grant op zijn account zou staan.
   return APP_CATALOG.filter((a) => {
     if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.19.1
+    if (MGR_ENKEL.has(a.id)) return role === 'manager';   /* v1.21.0 (Johan 20-10) */
     if (a.altijd) return true;
     if (role === 'klant') return false;
     if (a.managerOnly) return role === 'manager';

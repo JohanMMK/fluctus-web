@@ -1,3 +1,4 @@
+// mijnec.js v1.15.0 — 2026-10-20 — «Mijn klanten» en «Energie-schil» enkel nog voor managers (adviseurs kregen ze mee via de toegang energiekompas van Energie-Compas).
 // mijnec.js v1.14.0 — 2026-10-18 — tegel «Kompas-trechter» (managers, server ≥ 15.337.0).
 // mijnec.js v1.13.0 — 2026-10-18 — /login?naar=/apps/… : na het aanmelden (of al aangemeld) meteen door naar het dossier (mailknop via de adviseur).
 // mijnec.js v1.12.0 — 2026-10-16 — laag 1 en 2 volgen de server-toegang (rol-standaard + toekenning − per gebruiker uitgezet in Gebruikers; proxy ≥ 15.320.0).
@@ -31,6 +32,7 @@ const T = {
 // App-catalogus — zelfde app_id's en gating als het bestaande portaal (managers
 // bepalen de toegang per gebruiker). Enkel de zichtbare namen zijn merk-neutraal.
 // Vlaggen: altijd | managerOnly | gatedBy | extern | video.
+const MGR_ENKEL = new Set(['adviseur', 'energiekompas']);   /* v1.15.0: oude tegels, niet voor adviseurs */
 const APP_CATALOG = [
   { id: 'ek',           naam: 'Energie-Compas',   ico: '📊', beschrijving: 'Snelle energie-analyse → besparing & rendement in één scherm, met adviseur-link om het resultaat te delen.', url: '/apps/ek.html?prep=1', gatedBy: 'energiekompas' },
   { id: 'adviseur',     naam: 'Mijn klanten',     ico: '👥', beschrijving: 'Nodig klanten uit voor een energie-analyse. Zij sturen hun factuur en worden automatisch aan jou gekoppeld.', url: '/apps/adviseur.html', gatedBy: 'energiekompas' },
@@ -226,6 +228,7 @@ async function toegankelijkeApps(token, email) {
   return APP_CATALOG.filter((a) => {
     if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.9.0
     const laag = laagVan(a);   // v1.11.0
+    if (MGR_ENKEL.has(a.id)) return role === 'manager' || isMgr;   /* v1.15.0 (Johan 20-10) */
     if (laag === 1) return isMgr || verleend.has(a.id);          // iedereen die inlogt (v1.12.0: tenzij in Gebruikers uitgezet — server beslist)
     if (laag === 2) return isMgr || verleend.has(a.id);          // erkende adviseurs (rol-standaard) of toegekend, tenzij uitgezet
     if (laag === 3) return isMgr;                                 // beheer: enkel managers
