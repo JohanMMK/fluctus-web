@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.106.0 (2026-10-21, Johan): knop «📁 Projectnummer maken» naast de klantnaam als er nog geen projectnummer is (oekene/adviseur, niet in de klantweergave); maakt het FLX-dossier via _ekMaakDossier. NL/FR/EN. -->
 <!-- ek.html v0.105.1 (2026-10-19, Johan): «Rapport wordt opgebouwd…» is nu een opvallend blok (kader, draaiend icoon, vette tekst) i.p.v. kleine cursieve tekst — de gebruiker ziet dat er iets gebeurt. -->
 <!-- ek.html v0.105.0 (2026-10-19, Johan, server ≥ 15.343.0): GENERATOR — veld «Huur generator (€/maand)» (leeg = 0, telt mee als vermeden kost) en «Opbrengst (kWh per liter)» (standaard 2,8 = realistisch voor een huur-genset op deellast; was 3,3); blok 2 toont diesel + huur. -->
 <!-- ek.html v0.104.2 (2026-10-19, Johan): klantrapport-payload krijgt generator (vermeden diesel, meerkost net, netto) → klantrapport ≥ v0.66.0 hoofdstuk «Extra besparing: dieselgenerator vervangen». -->
@@ -815,7 +816,7 @@
     <!-- v0.13.9: adviseur/manager kan zelf klant + BTW invullen (enkel getoond in adviseur/prep-modus) → mee in de deel-link -->
     <!-- v0.38.0 (Johan): klantnaam + BTW ook in de klantweergave zichtbaar en aanpasbaar -->
     <div class="row2" id="klant-btw-blok" style="margin-top:6px">
-      <div><label class="fld">Klantnaam</label><input type="text" id="i-klant" placeholder="Bedrijf of persoon" autocomplete="organization"></div>
+      <div><label class="fld">Klantnaam</label><div style="display:flex;gap:6px;align-items:center"><input type="text" id="i-klant" placeholder="Bedrijf of persoon" autocomplete="organization" style="flex:1;min-width:0"><button type="button" id="ek-klant-pnr" class="btn ghost" style="display:none;white-space:nowrap;padding:6px 10px;font-size:12.5px" onclick="window._ekPnrMaak&&window._ekPnrMaak()"></button></div><div class="sub" id="ek-klant-pnr-st" style="margin-top:2px"></div></div>
       <div><label class="fld">BTW-nummer</label><input type="text" id="i-btw" placeholder="BE0123456789" autocomplete="off"></div>
     </div>
     <div id="adv-klant-blok" class="hidden" style="margin-top:6px">
@@ -4487,6 +4488,25 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekBusy(st, txt){ if(!st) return; try{ if(!document.getElementById('ek-busy-css')){ var c=document.createElement('style'); c.id='ek-busy-css'; c.textContent='@keyframes ekspin{to{transform:rotate(360deg)}} .ek-busy{display:flex;align-items:center;gap:10px;margin:8px 0;padding:10px 14px;border:1px solid #BFD3F2;background:#EEF4FF;border-radius:10px;color:#1F3864;font-weight:700;font-style:normal;font-size:15px} .ek-busy i{width:18px;height:18px;border:3px solid #BFD3F2;border-top-color:#1F3864;border-radius:50%;animation:ekspin .8s linear infinite;flex:0 0 auto} .ek-busy span{font-weight:400;font-size:13px;color:#4A5568;display:block}'; document.head.appendChild(c); } }catch(e){}
     st.style.fontStyle='normal'; st.innerHTML='<div class="ek-busy"><i></i><div>'+txt+'<span>'+_ekL3('Even geduld — dit duurt meestal 10 à 30 seconden.','Un instant — cela prend généralement 10 à 30 secondes.','Please wait — this usually takes 10 to 30 seconds.')+'</span></div></div>'; }
   window._ekBusy=_ekBusy;
+  // v0.106.0 (Johan 21-10): vanuit de tegel met enkel een klantnaam (nog geen projectnummer) → knop «📁 Projectnummer maken» naast de klant
+  //   (enkel oekene/adviseur, niet in de klantweergave). Maakt het FLX-dossier via _ekMaakDossier (zelfde als bij het opladen). NL/FR/EN.
+  function _ekPnrKnop(){
+    var b=$('ek-klant-pnr'); if(!b) return;
+    var ik=$('i-klant'), naam=ik?String(ik.value||'').trim():'';
+    var toon=!!((EK_IS_OEKENE||EK_IS_ADV) && !EK_KLANTVIEW && !STATE_CODE && naam);
+    b.style.display=toon?'':'none';
+    if(toon && !b.disabled) b.textContent=_ekL3('📁 Projectnummer maken','📁 Créer un numéro de projet','📁 Create project number');
+  }
+  window._ekPnrMaak=async function(){
+    var b=$('ek-klant-pnr'), st=$('ek-klant-pnr-st'); if(!b || STATE_CODE) return _ekPnrKnop();
+    b.disabled=true; b.textContent=_ekL3('⏳ Bezig…','⏳ En cours…','⏳ Working…');
+    try{ await _ekMaakDossier({}); }catch(e){}
+    b.disabled=false;
+    if(st){ if(STATE_CODE){ st.style.color='var(--green)'; st.textContent=_ekL3('✔ Projectnummer ','✔ Numéro de projet ','✔ Project number ')+STATE_CODE; }
+      else { st.style.color='#C0392B'; st.textContent=_ekL3('Projectnummer maken mislukt — probeer opnieuw.','La création du numéro de projet a échoué — réessayez.','Creating the project number failed — please try again.'); } }
+    _ekPnrKnop();
+  };
+  try{ document.addEventListener('input', function(e){ if(e.target && e.target.id==='i-klant') _ekPnrKnop(); }); setInterval(_ekPnrKnop, 1500); }catch(e){}
   async function toonKlantrapport(opt){
     opt=(opt&&opt.sel)?opt:null; var _zip=!!(opt&&opt.zip); if(!_zip && !(opt&&opt.offerte)) window._EK_RAP_GEZIEN=true;   // v0.99.0: kompas fase 2   // v0.94.0: zip → geen tabblad, geeft de rapport-URL terug (ZIP per project)   // v0.83.0: {sel, body, offerte, st} = rapport voor een opgeladen offerte
     try{ if(window._ekVersieCheck) window._ekVersieCheck(true); }catch(eV){}   // v0.41.2: versiewacht (balk bij nieuwere versie)
