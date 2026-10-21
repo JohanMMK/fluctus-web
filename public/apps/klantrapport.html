@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.69.2 (2026-10-21, Johan): BETALEND LAADPLEIN — (1) netdeel van de laadkost uit de referentie zonder installatie ((nul.netkosten − gebouw_netk)/(nul − gebouw_saldo); fallback netaandeel referentiefactuur) i.p.v. de verhouding uit de cel mét installatie (84 % → verdubbeling 2029 woog dubbel); (2) de verkoopprijs/omzet volgt de reële aankoopkost van stroom op de locatie (zelfde index als de laadkost: energie → inflatie, net → netpad + 2029) → marge per kWh blijft. Standaard voor alle dossiers. -->
 <!-- klantrapport.html v0.69.1 (2026-10-21, Johan, ek ≥ 0.107.0): referentie «niets doen» (investeerder, D.referentie='niets'): de aansluitingspost heet «Aansluiting verzwaren (nog nodig mét je installatie)» i.p.v. «Netverzwaring als je laadt zonder eigen infrastructuur»; vermeden verzwaring = 0 (komt uit EK). -->
 <!-- klantrapport.html v0.69.0 (2026-10-21, Johan): ENERGIESTUDIE VOOR ALLE GEWESTEN — gewest uit de postcode van het verbruiksadres (of ?gewest=vl|wal|bru): bevoegde instantie, status en procedure per gewest; VEKA-verwijzingen enkel nog als methode-referentie buiten Vlaanderen. Uitgebreide VERKLARING OP EER van de auteur (standaard ir. Johan Konings, burgerlijk ingenieur) + afzonderlijke verklaring van de onderneming (DNSH, KO-status, niet in moeilijkheden). Twee nieuwe pagina's «Stappenplan: zo krijgt u de verhoogde investeringsaftrek» (vóór de investering → uitvoering → attest per gewest → aangifte → bewaren) en «Bronmateriaal van de overheid» met alle links. -->
 <!-- klantrapport.html v0.68.1 (2026-10-20, Johan): FR-woordenboek v1.4.10 (verhoogde investeringsaftrek, loadfactor, piek, maand-jaar) — enkel de cache-versie van fr-ec-seg.js. -->
@@ -543,7 +544,13 @@ var _BZK=(function(){ if(!HAS_BZ) return null;
   var lpMwh=+L.mwh||0, aandeel=(lpMwh>0&&mwh>0)?Math.min(1,mwh/lpMwh):1;
   var viaRef=(geb!=null&&nul!=null&&nul>geb);
   var kost=viaRef?Math.round((nul-geb)*aandeel):Math.round(kC);
-  var net=(kC>0)?Math.round(kost*kN/kC):Math.round(kN);
+  // v0.69.2 (Johan 21-10): NETDEEL van de laadkost uit de REFERENTIE (zonder installatie) — vroeger de verhouding uit de cel MÉT
+  //   installatie (daar levert PV de energie → bijna alles netkosten, bv. 84 %) → de 2029-verdubbeling woog veel te zwaar.
+  //   (nul.netkosten − gebouw_netk) / (nul.saldo − gebouw_saldo); oude server zonder gebouw_netk → netaandeel van de referentiefactuur.
+  var _nulN=(D.factuur&&D.factuur.nul&&D.factuur.nul.netkosten!=null)?+D.factuur.nul.netkosten:null, _gebN=(L.gebouw_netk!=null)?+L.gebouw_netk:null, _sh=null;
+  if(viaRef && _nulN!=null && _gebN!=null && (nul-geb)>0) _sh=(_nulN-_gebN)/(nul-geb);
+  else if(_nulN!=null && nul>0) _sh=_nulN/nul;
+  var net=(_sh!=null&&isFinite(_sh))?Math.round(kost*Math.max(0,Math.min(1,_sh))):((kC>0)?Math.round(kost*kN/kC):Math.round(kN));
   var TB=(D.financieel&&D.financieel.twee_beslissingen)||{}, E=TB.elektrificatie||{};
   var acN=+E.ac_aantal||0, dcN=+E.dc_aantal||0;
   return { omzet:Math.round(omzet), mwh:mwh, kost:kost, net:net, kostCel:Math.round(kC), stuur:Math.round(30*acN+300*dcN), marge:Math.round(omzet-kost), viaRef:viaRef };
@@ -1344,7 +1351,7 @@ function _locatieFoto(){
       tvt:function(j){ return 'Indicatieve eenvoudige terugverdientijd van het laadplein: ± <b>'+_num(j,1)+' jaar</b>.'; },
       vz:'De netverzwaring die laden zónder eigen infrastructuur vraagt, staat bij de twee beslissingen; met je installatie wordt ze (deels) vermeden.',
       h4:'Zo telt het mee in het financieel plan',
-      plan:function(){ return 'Het plan «met laadpalen en laadsessies» telt de netto marge elk jaar op bij de besparing op je factuur, en de investering in de laadpalen bij de investering. De omzet stijgt met de inflatie ('+_num(infl,0)+' %/jaar). Van de elektriciteitskost volgt het netkosten-deel het snellere netkostenpad (inflatie + '+_num(extra,0)+' %'+(dubJ?', verdubbeling in '+dubJ:'')+'), de rest de inflatie. Het plan «zonder laadpalen en zonder laadsessies» rekent enkel op je installatie.'; },
+      plan:function(){ return 'Het plan «met laadpalen en laadsessies» telt de netto marge elk jaar op bij de besparing op je factuur, en de investering in de laadpalen bij de investering. De verkoopprijs aan de paal volgt de reële aankoopkost van stroom op deze locatie (alle kosten), zodat je marge per kWh behouden blijft. Van die kost volgt het netkosten-deel het snellere netkostenpad (inflatie + '+_num(extra,0)+' %'+(dubJ?', verdubbeling in '+dubJ:'')+'), de rest de inflatie. Het plan «zonder laadpalen en zonder laadsessies» rekent enkel op je installatie.'; },
       noot:'Bedragen exclusief btw, indicatieve raming.' },
     fr:{ titel:'Votre parc de recharge payant — énergie, coûts et marge',
       lead:'Les visiteurs rechargent à vos bornes et paient au kWh. Vous voyez ci-dessous combien d’énergie votre parc fournit, ce que cette énergie vous coûte et ce qu’il reste net — et comment cela compte dans le plan financier.',
@@ -1359,7 +1366,7 @@ function _locatieFoto(){
       tvt:function(j){ return 'Temps de retour simple indicatif du parc de recharge : ± <b>'+_num(j,1)+' ans</b>.'; },
       vz:'Le renforcement du réseau qu’exige la recharge sans infrastructure propre figure dans les deux décisions ; avec votre installation, il est (en partie) évité.',
       h4:'Comment cela compte dans le plan financier',
-      plan:function(){ return 'Le plan « avec bornes et sessions de recharge » ajoute chaque année la marge nette à l’économie sur votre facture, et l’investissement dans les bornes à l’investissement. Le chiffre d’affaires suit l’inflation ('+_num(infl,0)+' %/an). Dans le coût de l’électricité, la part réseau suit l’évolution plus rapide des coûts de réseau (inflation + '+_num(extra,0)+' %'+(dubJ?', doublement en '+dubJ:'')+'), le reste suit l’inflation. Le plan « sans bornes et sans sessions de recharge » ne porte que sur votre installation.'; },
+      plan:function(){ return 'Le plan « avec bornes et sessions de recharge » ajoute chaque année la marge nette à l’économie sur votre facture, et l’investissement dans les bornes à l’investissement. Le prix de vente à la borne suit le coût réel d’achat de l’électricité sur ce site (tous coûts compris), de sorte que votre marge par kWh est préservée. Dans le coût de l’électricité, la part réseau suit l’évolution plus rapide des coûts de réseau (inflation + '+_num(extra,0)+' %'+(dubJ?', doublement en '+dubJ:'')+'), le reste suit l’inflation. Le plan « sans bornes et sans sessions de recharge » ne porte que sur votre installation.'; },
       noot:'Montants hors TVA, estimation indicative.' },
     en:{ titel:'Your paid charging plaza — energy, costs and margin',
       lead:'Visitors charge at your chargers and pay per kWh. Below you see how much energy your plaza delivers, what that energy costs you and what remains net — and how this counts in the financial plan.',
@@ -1374,7 +1381,7 @@ function _locatieFoto(){
       tvt:function(j){ return 'Indicative simple payback of the charging plaza: ± <b>'+_num(j,1)+' years</b>.'; },
       vz:'The grid upgrade that charging without your own infrastructure requires is shown under the two decisions; with your installation it is (partly) avoided.',
       h4:'How this counts in the financial plan',
-      plan:function(){ return 'The plan “with chargers and charging sessions” adds the net margin to the savings on your bill every year, and the investment in the chargers to the investment. Revenue follows inflation ('+_num(infl,0)+' %/year). Of the electricity cost, the grid-cost share follows the faster grid-cost path (inflation + '+_num(extra,0)+' %'+(dubJ?', doubling in '+dubJ:'')+'), the rest follows inflation. The plan “without chargers and without charging sessions” covers your installation only.'; },
+      plan:function(){ return 'The plan “with chargers and charging sessions” adds the net margin to the savings on your bill every year, and the investment in the chargers to the investment. The selling price at the charger follows the real purchase cost of electricity at this site (all costs included), so your margin per kWh is preserved. Of the electricity cost, the grid-cost share follows the faster grid-cost path (inflation + '+_num(extra,0)+' %'+(dubJ?', doubling in '+dubJ:'')+'), the rest follows inflation. The plan “without chargers and without charging sessions” covers your installation only.'; },
       noot:'Amounts excluding VAT, indicative estimate.' }
   }[L];
   var td='padding:6px 8px', tdr='padding:6px 8px;text-align:right;white-space:nowrap';
@@ -1683,8 +1690,8 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){ 
     var eB=rest*Math.pow(1+infl,t-1);                                                    // commodity/heffingen → inflatie
     var nB=(bespNet+cap)*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1);           // netkosten-deel + vermeden capaciteitstarief → sneller pad + 2029
     var oB=_opexTot*Math.pow(1+infl,t-1);                                                // OPEX (onderhoud + sturing) → inflatie, in mindering
-    var omzetT=_bzIn?(omzet0*Math.pow(1+infl,t-1)):0;                                    // omzet betalend plein → inflatie
     var kostET=_bzIn?((kostE0-kostN0)*Math.pow(1+infl,t-1) + kostN0*Math.pow((1+infl)*(1+extra),t-1)*(jaar>=dubJ?dubF:1)):0;    // v0.46.0: commodity/heffingen → inflatie; netkosten-deel → netpad (+2029)
+    var omzetT=_bzIn?((kostE0>0)?(omzet0*kostET/kostE0):(omzet0*Math.pow(1+infl,t-1))):0;   // v0.69.2 (Johan 21-10): verkoopprijs volgt de reële aankoopkost van stroom op de locatie (energie + net + heffingen) → marge per kWh blijft behouden
     var plazaT=omzetT-kostET;
     var laadT=laadS0*Math.pow(1+infl,t-1);                                                // v0.40.0: laadsessies naar het bedrijf → inflatie
     var aftT=(t===2 && !IS_PART && (+_AFTREK_V||0)>0)?(+_AFTREK_V):0;   // v0.61.0: geschat voordeel verhoogde investeringsaftrek (25 % × 40 % × investering PV+batterij) in jaar 2
@@ -1754,9 +1761,9 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){ 
   h+='<p class="note">Aannames: investering uit eigen middelen, geen financieringskosten; besparing jaar 1 = '+eur(besp1)+
      (opexJ>0?(' − exploitatiekost '+eur(opexJ)+'/jaar = <b>'+eur(besp1-opexJ)+' netto jaar 1</b>'):'')+
      '. Kosten geïndexeerd met '+_num(infl*100,0)+' %/jaar'+(BW&&extra>0?(', het netkosten-deel van de besparing (net­gebruik + capaciteitstarief) met inflatie + '+_num(extra*100,0)+' %/jaar'+(dubJ<9999?' + eenmalige verdubbeling in '+dubJ:'')):'')+
-     (_bzIn?('. '+_L3('<b>Betalend laadplein:</b> de omzet aan de paal stijgt met de inflatie; van de elektriciteitskost om te laden (zonder installatie) volgt het netkosten-deel het snellere netkostenpad, de rest de inflatie. De netto plaza-marge telt bovenop de '+CS_SL+'-besparing; de investering in de laadpalen zit in de investering. Zie «Je betalend laadplein».',
-        '<b>Parc de recharge payant :</b> le chiffre d’affaires à la borne suit l’inflation ; dans le coût de l’électricité pour la recharge (sans installation), la part réseau suit l’évolution plus rapide des coûts de réseau, le reste suit l’inflation. La marge nette du parc s’ajoute à l’économie de l’installation ; l’investissement dans les bornes est inclus dans l’investissement. Voir « Votre parc de recharge payant ».',
-        '<b>Paid charging plaza:</b> revenue at the charger follows inflation; of the electricity cost for charging (without installation), the grid-cost share follows the faster grid-cost path and the rest follows inflation. The net plaza margin comes on top of the installation savings; the investment in the chargers is included in the investment. See “Your paid charging plaza”.')):'')+
+     (_bzIn?('. '+_L3('<b>Betalend laadplein:</b> de verkoopprijs aan de paal volgt de reële aankoopkost van stroom op deze locatie (alle kosten); van de elektriciteitskost om te laden (zonder installatie) volgt het netkosten-deel het snellere netkostenpad, de rest de inflatie. De netto plaza-marge telt bovenop de '+CS_SL+'-besparing; de investering in de laadpalen zit in de investering. Zie «Je betalend laadplein».',
+        '<b>Parc de recharge payant :</b> le prix de vente à la borne suit le coût réel d’achat de l’électricité sur ce site (tous coûts compris) ; dans le coût de l’électricité pour la recharge (sans installation), la part réseau suit l’évolution plus rapide des coûts de réseau, le reste suit l’inflation. La marge nette du parc s’ajoute à l’économie de l’installation ; l’investissement dans les bornes est inclus dans l’investissement. Voir « Votre parc de recharge payant ».',
+        '<b>Paid charging plaza:</b> the selling price at the charger follows the real purchase cost of electricity at this site (all costs included); of the electricity cost for charging (without installation), the grid-cost share follows the faster grid-cost path and the rest follows inflation. The net plaza margin comes on top of the installation savings; the investment in the chargers is included in the investment. See “Your paid charging plaza”.')):'')+
      '. Bedragen exclusief btw. Indicatieve raming, geen persoonlijk financieel advies.'+
      (laadS0>0?'<span> De besparing op laadsessies naar het bedrijf indexeert met de inflatie.</span>':'')+'</p>';
   h+='</div>';

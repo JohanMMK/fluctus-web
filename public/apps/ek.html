@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.108.0 (2026-10-21, Johan): BETALEND LAADPLEIN standaard — netdeel van de laadkost uit de referentie zonder installatie ((refNetk − gebouwNetk)/(refKost − gebouwSaldo), server ≥ 15.346.0; anders netaandeel van de referentiefactuur) i.p.v. de cel mét installatie; de verkoopprijs volgt de reële aankoopkost (alle kosten) → marge geïndexeerd zoals de laadkost (rooster, KPI, plan). -->
 <!-- ek.html v0.107.0 (2026-10-21, Johan): REFERENTIE PER DOSSIER — «Niets doen (investeerder)» naast «Laden zonder installatie (aansluiting verzwaren)»: geen vermeden verzwaring, de verzwaring die mét installatie nog nodig is telt als kost (_vzRef); bewaard in bevestigd.referentie, mee in het rapport. + Eigen totaalprijs (Pas aan, bv. carport) = meerprijs op PV+batterij, de laadpalen worden niet meer mee geschaald (± € 20k te veel in «investering incl. laadpalen»). + Detail «Wat je investeert» en «Totale investering» tellen de verzwaring die mét installatie nog nodig is mee → zelfde bedrag als blok 2 en het rapport. -->
 <!-- ek.html v0.106.0 (2026-10-21, Johan): knop «📁 Projectnummer maken» naast de klantnaam als er nog geen projectnummer is (oekene/adviseur, niet in de klantweergave); maakt het FLX-dossier via _ekMaakDossier. NL/FR/EN. -->
 <!-- ek.html v0.105.1 (2026-10-19, Johan): «Rapport wordt opgebouwd…» is nu een opvallend blok (kader, draaiend icoon, vette tekst) i.p.v. kleine cursieve tekst — de gebruiker ziet dat er iets gebeurt. -->
@@ -1803,12 +1804,14 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var mwh=+bz.geladen_mwh||0, tot=0; (Array.isArray(a.per_type)?a.per_type:[]).forEach(function(x){ tot+=(+(x&&x.geladen_mwh)||0); });
     var aandeel=(tot>0&&mwh>0)?Math.min(1,mwh/tot):1, kost=kC;
     if(typeof HM!=='undefined' && HM && HM.refKost!=null && HM.gebouwSaldo!=null && (+HM.refKost)>(+HM.gebouwSaldo)) kost=((+HM.refKost)-(+HM.gebouwSaldo))*aandeel;
-    var net=(kC>0)?(kost*kN/kC):0;
+    // v0.108.0 (Johan 21-10): netdeel van de laadkost uit de REFERENTIE zonder installatie (vroeger de verhouding van de cel mét installatie → te groot)
+    var sh=null; try{ if(HM && HM.refKost!=null && HM.refNetk!=null){ if(HM.gebouwSaldo!=null && HM.gebouwNetk!=null && (+HM.refKost)>(+HM.gebouwSaldo)) sh=((+HM.refNetk)-(+HM.gebouwNetk))/((+HM.refKost)-(+HM.gebouwSaldo)); else if(+HM.refKost>0) sh=(+HM.refNetk)/(+HM.refKost); } }catch(eS){}
+    var net=(sh!=null&&isFinite(sh))?(kost*Math.max(0,Math.min(1,sh))):((kC>0)?(kost*kN/kC):0);
     return { omzet:omzet, kost:kost, net:net, marge:omzet-kost };
   }catch(e){ return null; } }
   function _planLaden(a, BV, m){
     var L=_laadsesVan(a), Z=_plazaVan(a); if((!L && !Z) || !BV) return null;   // v0.67.5: ook bij enkel een betalend laadplein
-    var _lb=L?L.besparing:0, _zr=Z?(Z.omzet-(Z.kost-Z.net)):0, _zn=Z?(-Z.net):0, _zm=Z?Math.round(Z.marge):0;
+    var _zs=(Z&&Z.kost>0)?Math.max(0,Math.min(1,Z.net/Z.kost)):0, _lb=L?L.besparing:0, _zr=Z?(Z.marge*(1-_zs)):0, _zn=Z?(Z.marge*_zs):0, _zm=Z?Math.round(Z.marge):0;   // v0.108.0 (Johan 21-10): verkoopprijs volgt de reële aankoopkost (alle kosten) → de marge volgt dezelfde index als de laadkost (energie → inflatie, net → netpad)
     var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capL=palen+_vzRef(a);   /* v0.107.0 */   // v0.64.0: + varia naar de laadpalen
     var netInv=Math.max(0,(+BV.netInv||0)+capL);
     var cf=_escCashflow((+BV.besp_rest||0)+_lb+_zr, (+BV.besp_net||0)+_zn, (+BV.opex_jaar||0)+(+BV.sturLp||0));   // v0.67.5: + plaza (omzet & commodity → inflatie, netdeel → netpad)
@@ -2060,7 +2063,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       kmVoor:(sw.km_dekking_voor!=null?sw.km_dekking_voor:null),   // v0.24.46 §6c: km-dekking ZONDER installatie (0,0-cel)
       verzwVoor:(sw.verzwaring_voor_eenmalig!=null?+sw.verzwaring_voor_eenmalig:0),   // v0.24.53 (Johan): eenmalige aansluitingskost VOOR (referentie, zonder PV/batt)
       aansluitingVoorKw:(sw.aansluiting_voor_kw!=null?+sw.aansluiting_voor_kw:0),
-      gebouwSaldo:(sw.gebouw_saldo!=null?+sw.gebouw_saldo:null),   // v0.24.59 (Johan, punt 1): gebouw-only factuur (geen laden) → €/100 km = (cel.kost − gebouwSaldo)/km, consistent met bijlage 4
+      gebouwSaldo:(sw.gebouw_saldo!=null?+sw.gebouw_saldo:null), gebouwNetk:(sw.gebouw_netk!=null?+sw.gebouw_netk:null),   // v0.108.0   // v0.24.59 (Johan, punt 1): gebouw-only factuur (geen laden) → €/100 km = (cel.kost − gebouwSaldo)/km, consistent met bijlage 4
       lpMwh:((sw.dimensionering&&sw.dimensionering.laadplein_mwh)||0),   // v0.24.46: laadplein-jaarverbruik (MWh) → km-dekking enkel relevant met laadplein
       rowLabel:function(v){ var m=battMap[v]; return (m&&m.kw>0)?(_kNum(m.kw)+' kW<br>'+_kNum(m.kwh)+' kWh'):'geen batt'; }, colLabel:function(v){ return v>0?(v+' kWp'):'geen PV'; },   // v0.24.61 (Johan punt 6): kW/kWh onder elkaar + k-notatie → smaller rooster
       realFind:function(ry,cx){ return A.find(function(x){return x._ry===ry&&x._cx===cx;}); }, best:best, sel:best };
