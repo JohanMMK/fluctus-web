@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.111.0 (2026-10-23, Johan): KLANTTYPE BEDRIJF VAN BIJ DE START — aansluit- of toegangsvermogen > 10 kVA/kW óf jaarafname > 30 MWh ⇒ «Bedrijf» (en een residentieel profiel → kantoor). Geldt bij het inlezen van factuur/case, bij heropenen (velden en opgeladen profiel) én live tijdens het invullen van afname/piek. Een handmatige keuze (Particulier/Bedrijf) blijft altijd leidend; de regel zet nooit terug naar particulier. (Vroeger: > 25 kW of > 25 MWh, enkel bij het laden.) -->
 <!-- ek.html v0.110.0 (2026-10-23, Johan): (1) BESTAANDE PV UIT DE GEMETEN INJECTIE — bevat het injectieprofiel een volledig gemeten jaar (≥ 12 gemeten maanden of label «gemeten»), dan wordt «Bestaande zonnepanelen (kWp)» = 1,1 × de hoogste gemeten injectiepiek (kW); bij opladen én bij heropenen (server ≥ 15.348.0 geeft de gemeten injectiepiek mee), tenzij de adviseur het veld zelf aanpaste (best_pv_bron 'manueel' blijft bewaard). (2) BESTANDSNAAM → ROL: bij twee profielbestanden staat afname/injectie standaard volgens de bestandsnaam (injectie, injection, teruglevering, INJ… / afname, verbruik, prélèvement, AFN…); de server doet hetzelfde bij één bestand met één reeks. -->
 <!-- ek.html v0.109.0 (2026-10-21, Johan): (1) VERZWARING VOLGT DE GEFACTUREERDE PIEK — ligt de jaarpiek met laadplein > 2 % boven de bestaande aansluiting, dan telt het verschil als verzwaring (zelfde regel als server ≥ 15.347.0, hier als vangnet: max(server, piekregel)) → Pas aan-cel Outdoor Ternat € 0 → ± € 3.600. (2) «Je keuze» toont na een herberekening de Pas aan-cel (eigen prijs) i.p.v. de standaardcel op dezelfde plaats. (3) Verhoogde investeringsaftrek telt als cash in JAAR 1 (vroeger jaar 2) in terugverdientijd en rendement. -->
 <!-- ek.html v0.108.0 (2026-10-21, Johan): BETALEND LAADPLEIN standaard — netdeel van de laadkost uit de referentie zonder installatie ((refNetk − gebouwNetk)/(refKost − gebouwSaldo), server ≥ 15.346.0; anders netaandeel van de referentiefactuur) i.p.v. de cel mét installatie; de verkoopprijs volgt de reële aankoopkost (alle kosten) → marge geïndexeerd zoals de laadkost (rooster, KPI, plan). -->
@@ -1582,7 +1583,18 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var ob=$('optout-blok'); if(ob){ var hide=part && !adv; ob.style.display=hide?'none':''; if(hide){ var oc=$('i-optout'); if(oc) oc.checked=false; } }
     Array.prototype.forEach.call(document.querySelectorAll('.nopart'), function(e){ e.style.display=part?'none':''; });
   }
-  function _evAfleiden(){ if(_KTYPE_USER) return; var pr=$('i-profiel'); _evSetKlanttype((pr&&pr.value==='residentieel')?'particulier':'bedrijf'); var br=$('ktype-bron'); if(br) br.textContent='afgeleid uit het profiel — pas gerust aan'; }
+  function _evAfleiden(){ if(_KTYPE_USER) return; var pr=$('i-profiel'); _evSetKlanttype((pr&&pr.value==='residentieel')?'particulier':'bedrijf'); var br=$('ktype-bron'); if(br) br.textContent='afgeleid uit het profiel — pas gerust aan'; try{ _ekBedrijfUitVelden(); }catch(e){} }
+  // v0.111.0 (Johan 23-10): BEDRIJF-DREMPEL — aansluit-/toegangsvermogen > 10 kVA (kW) of jaarafname > 30 MWh ⇒ bedrijf, van bij de start.
+  function _ekBedrijfDrempel(afnMwh, toeKw, aanslKva){ return (+afnMwh||0)>30 || (+toeKw||0)>10 || (+aanslKva||0)>10; }
+  function _ekBedrijfUitVelden(aanslKva){
+    if(_KTYPE_USER) return false;   // handmatige keuze blijft leidend
+    var afnV=+(($('i-afname')||{}).value)||0, toeV=+(($('i-toegang')||{}).value)||0;
+    if(!_ekBedrijfDrempel(afnV, toeV, aanslKva)) return false;
+    if($('i-profiel') && $('i-profiel').value==='residentieel') $('i-profiel').value='kantoor';
+    if(KLANTTYPE!=='bedrijf'){ _evSetKlanttype('bedrijf'); }
+    var br=$('ktype-bron'); if(br) br.textContent='bedrijf: '+((toeV>10||(+aanslKva||0)>10)?'aansluit-/toegangsvermogen > 10 kVA':'jaarafname > 30 MWh')+' — pas gerust aan';
+    return true;
+  }
   function _evApplyTotal(n){ n=Math.max(0,Math.round(+n||0));
     // v0.24.10 (Johan): n=0 → rij met aantal 0 (respecteer "geen wagens"); NIET terugzetten naar 1.
     if(KLANTTYPE==='bedrijf'){ EV_ROWS = [{type:'personenwagen',aantal:n,moment:'overdag',weekend:false}]; _evRenderRows(); }   // v0.24.59: personenwagen → overdag
@@ -1687,6 +1699,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var hb=$('bp-herbereken'); if(hb) hb.onclick=_battHerbereken;
     var tg=$('i-toegang'); if(tg){ tg.addEventListener('input',_updSpanningBadge); tg.addEventListener('change',_updSpanningBadge); }
     ['i-afname','i-best-inj','i-toegang','i-kost'].forEach(function(id){ var e=$(id); if(e){ e.addEventListener('input',function(){ try{ _ekOekeneSamenvatting(); }catch(x){} }); } });
+    ['i-afname','i-toegang'].forEach(function(id){ var e=$(id); if(e){ e.addEventListener('change',function(){ try{ _ekBedrijfUitVelden(); }catch(x){} }); e.addEventListener('input',function(){ try{ _ekBedrijfUitVelden(); }catch(x){} }); } });   // v0.111.0: bedrijf van bij de start
     var _bpv=$('i-best-pv'); if(_bpv){ _bpv.addEventListener('input',function(){ window._EK_PV_BRON='manueel'; var n=$('i-best-pv-noot'); if(n) n.textContent=''; }); }   // v0.110.0: zelf aangepast → niet meer overschrijven met 1,1 × injectiepiek   // v0.24.30: live oekene-samenvatting
     var ad=$('i-adres'); if(ad){ ad.addEventListener('input',function(){ STATE_ADRES=(ad.value||'').trim(); }); }
     _updSpanningBadge();
@@ -3171,7 +3184,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // Fase 2: bestaande PV + injectie uit de factuur voorvullen (gemengde factuur of aparte injectie-PDF).
     if((+bc.pvKwpAanwezig)>0 && $('i-best-pv')) $('i-best-pv').value=Math.round((+bc.pvKwpAanwezig)*10)/10;
     if(inj>0 && $('i-best-inj')) $('i-best-inj').value=inj;
-    var bedr=(opt.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
+    var bedr=(opt.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS')||_ekBedrijfDrempel(afn||((+bc.afnameKwh||0)/1000), toe, bc.aansluitVermogenKva);   // v0.111.0
     $('i-profiel').value = analoog ? 'residentieel' : (opt.profiel || (bedr?'kantoor':'residentieel'));
     if(opt.project_id) STATE_CODE=opt.project_id;
     STATE_KLANT=(bc.klantNaam||opt.naam||'').trim();
@@ -3429,7 +3442,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         // Fase 2: bestaande PV + injectie uit de factuur voorvullen (gemengde factuur of aparte injectie-PDF).
         if((+bc.pvKwpAanwezig)>0 && $('i-best-pv')) $('i-best-pv').value=Math.round((+bc.pvKwpAanwezig)*10)/10;
         if(inj>0 && $('i-best-inj')) $('i-best-inj').value=inj;
-        var bedr=(j.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS');
+        var bedr=(j.modus==='bedrijf')||(+toe>25)||(bc.spanningsniveau==='MS')||_ekBedrijfDrempel(afn||((+bc.afnameKwh||0)/1000), toe, bc.aansluitVermogenKva);   // v0.111.0
         // v0.6.1: onthoud het eerder gekozen profiel; bij analoge meter → residentieel (geen andere info); anders default.
         $('i-profiel').value = analoog ? 'residentieel' : (j.profiel || (bedr?'kantoor':'residentieel'));
         try{ _KTYPE_USER=false; _evAfleiden(); _evApplyTotal(j.ev!=null?j.ev:0); }catch(e){}   // v0.17: Type klant afleiden + EV-invoer vullen uit de case; v0.24.52: nieuw/onbekend → 0 wagens
@@ -3518,7 +3531,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(!pa || !pa.aanwezig) return;
           if(+pa.mwh>0 && $('i-afname')) $('i-afname').value=+pa.mwh;
           if(+pa.piek_kw>0 && $('i-toegang')){ $('i-toegang').value=Math.round(+pa.piek_kw*10)/10; PIEK_IS_SLP=false; }
-          if((+pa.piek_kw>25)||(+pa.mwh>25)){   // bedrijf → bedrijf-sweep stuurt project_id mee → profiel gekoppeld
+          if((+pa.piek_kw>10)||(+pa.mwh>30)){   // v0.111.0: drempel bedrijf (was > 25 kW / > 25 MWh)   // bedrijf → bedrijf-sweep stuurt project_id mee → profiel gekoppeld
             if($('i-profiel') && $('i-profiel').value==='residentieel') $('i-profiel').value='kantoor';
             try{ _KTYPE_USER=false; _evSetKlanttype('bedrijf'); var _br=$('ktype-bron'); if(_br) _br.textContent='afgeleid uit het opgeladen meetprofiel'; }catch(e){}
           }
@@ -3532,7 +3545,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         (function(){
           if(_KTYPE_USER) return;   // een handmatige Type klant-keuze blijft leidend
           var afnV=+(($('i-afname')||{}).value)||0, toeV=+(($('i-toegang')||{}).value)||0, prfV=(($('i-profiel')||{}).value)||'';
-          if((prfV && prfV!=='residentieel') || afnV>25 || toeV>25){
+          if((prfV && prfV!=='residentieel') || _ekBedrijfDrempel(afnV, toeV, (typeof bc!=='undefined'&&bc)?bc.aansluitVermogenKva:0)){   // v0.111.0: > 10 kVA of > 30 MWh (was > 25/25)
             if($('i-profiel') && $('i-profiel').value==='residentieel') $('i-profiel').value='kantoor';
             try{ _evSetKlanttype('bedrijf'); var _br=$('ktype-bron'); if(_br) _br.textContent='afgeleid uit de factuur-/dossiergegevens'; }catch(e){}
           }
