@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.112.0 (2026-10-23, Johan): BESTAANDE PV = GEMIDDELDE VAN TWEE SCHATTINGEN (server ≥ 15.349.0, pv_kwp_schatting): (A) 1,1 × de hoogste gemeten injectiepiek en (B) (zelfverbruik + injectie) ÷ 0,9, met het zelfverbruik = de daling van de afname overdag door de zon. Zonder B (geen volledig jaar afname) → enkel A. De noot onder het veld toont beide. -->
 <!-- ek.html v0.111.0 (2026-10-23, Johan): KLANTTYPE BEDRIJF VAN BIJ DE START — aansluit- of toegangsvermogen > 10 kVA/kW óf jaarafname > 30 MWh ⇒ «Bedrijf» (en een residentieel profiel → kantoor). Geldt bij het inlezen van factuur/case, bij heropenen (velden en opgeladen profiel) én live tijdens het invullen van afname/piek. Een handmatige keuze (Particulier/Bedrijf) blijft altijd leidend; de regel zet nooit terug naar particulier. (Vroeger: > 25 kW of > 25 MWh, enkel bij het laden.) -->
 <!-- ek.html v0.110.0 (2026-10-23, Johan): (1) BESTAANDE PV UIT DE GEMETEN INJECTIE — bevat het injectieprofiel een volledig gemeten jaar (≥ 12 gemeten maanden of label «gemeten»), dan wordt «Bestaande zonnepanelen (kWp)» = 1,1 × de hoogste gemeten injectiepiek (kW); bij opladen én bij heropenen (server ≥ 15.348.0 geeft de gemeten injectiepiek mee), tenzij de adviseur het veld zelf aanpaste (best_pv_bron 'manueel' blijft bewaard). (2) BESTANDSNAAM → ROL: bij twee profielbestanden staat afname/injectie standaard volgens de bestandsnaam (injectie, injection, teruglevering, INJ… / afname, verbruik, prélèvement, AFN…); de server doet hetzelfde bij één bestand met één reeks. -->
 <!-- ek.html v0.109.0 (2026-10-21, Johan): (1) VERZWARING VOLGT DE GEFACTUREERDE PIEK — ligt de jaarpiek met laadplein > 2 % boven de bestaande aansluiting, dan telt het verschil als verzwaring (zelfde regel als server ≥ 15.347.0, hier als vangnet: max(server, piekregel)) → Pas aan-cel Outdoor Ternat € 0 → ± € 3.600. (2) «Je keuze» toont na een herberekening de Pas aan-cel (eigen prijs) i.p.v. de standaardcel op dezelfde plaats. (3) Verhoogde investeringsaftrek telt als cash in JAAR 1 (vroeger jaar 2) in terugverdientijd en rendement. -->
@@ -4154,6 +4155,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   profiel_status.injectie (heropenen, server ≥ 15.348.0). nieuw=true (net opgeladen) overschrijft ook een manuele waarde.
   function _ekPvUitInjectie(c){
     if(!c) return null;
+    var S=c.pv_kwp_schatting;   // v0.112.0: server-schatting = gemiddelde van (A) 1,1 × injectiepiek en (B) (zelfverbruik + injectie) ÷ 0,9
+    if(S && +S.kwp>0) return { kwp: Math.round(+S.kwp*10)/10, piek: +S.piek_injectie_kw||0, a: +S.a_kwp||0, b: (S.b_kwp!=null?+S.b_kwp:null), zelf: (S.zelfverbruik_mwh!=null?+S.zelfverbruik_mwh:null), inj: +S.injectie_mwh||0 };
     var jaar=(+c.gemeten_maanden>=12) || c.label_type==='gemeten';
     var pk=+(c.maandpiek_kw_gemeten!=null ? c.maandpiek_kw_gemeten : (c.piek_kw_gemeten!=null ? c.piek_kw_gemeten : 0));
     if(!jaar || !(pk>0)) return null;
@@ -4163,7 +4166,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var r=_ekPvUitInjectie(c), el=$('i-best-pv'); if(!r || !el) return null;
     if(!nieuw && window._EK_PV_BRON==='manueel') return null;
     var oud=+el.value||0; el.value=String(r.kwp); window._EK_PV_BRON='injectiepiek';
-    var n=$('i-best-pv-noot'); if(n) n.textContent='= 1,1 × hoogste gemeten injectiepiek ('+_ekNf(r.piek)+' kW, volledig jaar gemeten).';
+    var n=$('i-best-pv-noot'); if(n) n.textContent=(r.b!=null && r.b>0)
+      ? ('= gemiddelde van 1,1 × injectiepiek ('+_ekNf(r.a)+' kWp) en (zelfverbruik '+_ekNf(r.zelf)+' + injectie '+_ekNf(r.inj)+' MWh) ÷ 0,9 ('+_ekNf(r.b)+' kWp).')
+      : ('= 1,1 × hoogste gemeten injectiepiek ('+_ekNf(r.piek)+' kW, volledig jaar gemeten).');
     if(Math.abs(oud-r.kwp)>0.05){ try{ LAST_SIG=''; }catch(e1){} try{ _ekOekeneSamenvatting(); }catch(e2){} }
     return r;
   }
@@ -4195,7 +4200,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(+_ta.jaar_mwh>0 && $('i-afname')){ $('i-afname').value=String(Math.round(+_ta.jaar_mwh*10)/10); _ch.push(_ekNf(+_ta.jaar_mwh)+' MWh'); }
           if(+_ta.maandpiek_kw>0 && $('i-toegang')){ $('i-toegang').value=String(Math.round(+_ta.maandpiek_kw*10)/10); _ch.push('piek '+_ekNf(+_ta.maandpiek_kw)+' kW'); }
           try{ var _ti=_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage; if(_ti && +_ti.jaar_mwh>0 && $('i-best-inj')){ $('i-best-inj').value=String(Math.round(+_ti.jaar_mwh*10)/10); _ch.push('injectie '+_ekNf(+_ti.jaar_mwh)+' MWh'); } }catch(eTi){}
-          try{ var _pvI=_ekPvUitInjectieZet(_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage, true); if(_pvI) _ch.push('bestaande PV '+_ekNf(_pvI.kwp)+' kWp (1,1 × injectiepiek '+_ekNf(_pvI.piek)+' kW)'); }catch(ePvU){}   // v0.110.0   // v0.99.0: injectie uit het injectieprofiel
+          try{ var _pvI=_ekPvUitInjectieZet(_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage, true); if(_pvI) _ch.push('bestaande PV '+_ekNf(_pvI.kwp)+' kWp'+((_pvI.b!=null&&_pvI.b>0)?' (gemiddelde van 1,1 × injectiepiek en (zelfverbruik + injectie) ÷ 0,9)':' (1,1 × injectiepiek '+_ekNf(_pvI.piek)+' kW)')); }catch(ePvU){}   // v0.110.0   // v0.99.0: injectie uit het injectieprofiel
           try{ if(!STATE_HEEFT_FACTUUR && $('i-kost')){ $('i-kost').value=''; } }catch(eKs){}   // v0.99.0: zonder factuur geen fictieve € 1.150 — de server schat de kost uit verbruik × marktprijs
           if(_ch.length){ try{ _updSpanningBadge(); }catch(e1){} try{ LAST_SIG=''; }catch(e2){} try{ _ekOekeneSamenvatting(); }catch(e3){} try{ _ekPersistBevestigd(); }catch(e4){}
             var _stA=$('prof-status'); if(_stA){ var _w=document.createElement('div'); _w.style.cssText='font-size:12px;color:#1E7A42;margin-top:6px'; _w.textContent='Jaarafname en piekvermogen aangepast aan het profiel: '+_ch.join(' · ')+'.'; _stA.appendChild(_w); } } } }catch(eAP){}
