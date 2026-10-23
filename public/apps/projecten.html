@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
+<!-- projecten.html v1.6.0 (2026-10-23, Johan): MAANDAFREKENING — knop «🧾 Maandafrekening» (managers, server ≥ 15.350.0): uren per klant, te factureren, per adviseur/partner, Excel. -->
 <!-- projecten.html v1.5.0 (2026-10-19, Johan): KERNCIJFERS (trechter + tegels) standaard ingeklapt — klik «📊 Kerncijfers» om te openen (onthouden in je weergave); klik op de PROJECTNAAM opent het dossier in Energie-Compas op de invoer (nieuw tabblad). -->
 <!-- projecten.html v1.4.1 (2026-10-18, Johan): activiteit «keuze vastgelegd» / «keuze gewist» (server ≥ 15.338.0). -->
 <!-- projecten.html v1.4.0 (2026-10-18, Johan): EERSTE KOLOM VAST — bij horizontaal scrollen blijft de eerste zichtbare kolom (Project) links staan, zodat je ziet op welke rij je bent; tabel scrolt in een eigen kader; rij-hover licht de hele rij op. -->
@@ -162,6 +163,7 @@
       <select id="fBedrijf" class="sel" onchange="V.flt.bedrijf=this.value;weergaveBewaar();render()"></select>
       <span style="position:relative"><button class="btn ghost" id="bKol" onclick="kolMenu(event)">Kolommen ▾</button><div id="kolMenu" class="kolmenu" hidden></div></span>
       <button class="btn ghost tg mgr-only" id="bSel" onclick="selModus()">Selecteren</button>
+      <button class="btn ghost mgr-only" onclick="maandOpen()" title="Uren per klant, te factureren en per adviseur/partner — Excel-download">🧾 Maandafrekening</button>
       <label class="mgr-only"><input type="checkbox" id="toonArchief"> archief</label>
       <span class="telling" id="telling"></span>
     </div>
@@ -572,6 +574,109 @@
       try{ await loadConfig(); FLXModal.init({proxy:PROXY, authHeaders:authHeaders, onDone:laad}); await initAuth(); }
       catch(e){ $('root').innerHTML='<div class="fout">Init-fout: '+esc(e.message)+'</div>'; }
     });
+  </script>
+  <!-- v1.6.0 (2026-10-23, Johan): MAANDAFREKENING (server ≥ 15.350.0) — knop «🧾 Maandafrekening» (managers): per klant de geschatte
+       uren uit je EK-handelingen, te factureren / gefactureerd (NCNP-vergoeding) en subtotalen per adviseur en per partner; Excel-download. -->
+  <style>
+    #mafr .mf-box{ background:#fff; border-radius:12px; width:min(1180px,100%); max-height:92vh; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+    #mafr .mf-kop{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:14px 18px; border-bottom:1px solid var(--line); }
+    #mafr .mf-kop h2{ margin:0; font-size:17px; color:var(--navy); flex:1; min-width:180px; }
+    #mafr .mf-body{ overflow:auto; padding:12px 18px 18px; }
+    #mafr .mf-tabs{ display:flex; gap:6px; margin:4px 0 10px; flex-wrap:wrap; }
+    #mafr .mf-tabs button.on{ background:var(--navy); color:#fff; border-color:var(--navy); }
+    #mafr .mf-kpi{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    #mafr .mf-kpi div{ border:1px solid var(--line); border-radius:10px; padding:8px 12px; min-width:140px; }
+    #mafr .mf-kpi b{ display:block; font-size:18px; color:var(--navy); } #mafr .mf-kpi span{ font-size:11.5px; color:var(--muted); }
+    #mafr table{ border-collapse:collapse; width:100%; font-size:12.5px; }
+    #mafr th{ text-align:left; border-bottom:2px solid var(--navy); padding:5px 7px; white-space:nowrap; position:sticky; top:0; background:#fff; }
+    #mafr td{ border-bottom:1px solid #e6ebf2; padding:5px 7px; vertical-align:top; }
+    #mafr td.r, #mafr th.r{ text-align:right; white-space:nowrap; }
+    #mafr tr.sub td{ background:#F3F7FD; font-weight:700; }
+    #mafr .mf-noot{ font-size:11.5px; color:var(--muted); margin-top:10px; line-height:1.45; }
+  </style>
+  <div id="mafr" class="m-overlay" style="display:none" onclick="if(event.target===this) maandSluit()">
+    <div class="mf-box">
+      <div class="mf-kop">
+        <h2>🧾 Maandafrekening</h2>
+        <input type="month" id="mfMaand" class="sel" onchange="maandLaad()">
+        <button class="btn ghost" id="mfXls" onclick="maandExcel()">⬇ Excel</button>
+        <button class="btn ghost" onclick="maandSluit()">✕</button>
+      </div>
+      <div class="mf-body" id="mfBody"><div class="state">Laden…</div></div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      var MF=null, TAB='klant';
+      function mEur(v){ return v==null ? '—' : '€ '+(+v||0).toLocaleString('nl-BE',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+      function mUur(v){ return (+v||0).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+      function advNaam(r){ return r.adviseur ? (r.adviseur.naam || r.adviseur.email) : '— geen adviseur'; }
+      function vorigeMaand(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+      window.maandOpen=function(){ var m=$('mfMaand'); if(!m.value){ var n=new Date(); m.value = n.getDate()<=10 ? vorigeMaand() : n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0'); } $('mafr').style.display='flex'; maandLaad(); };
+      window.maandSluit=function(){ $('mafr').style.display='none'; };
+      window.maandLaad=async function(){
+        var b=$('mfBody'); b.innerHTML='<div class="state">⏳ Maandafrekening wordt berekend…</div>'; MF=null;
+        try{
+          var r=await fetch(PROXY+'/api/tijdlog/maand?maand='+encodeURIComponent($('mfMaand').value)+'&_='+Date.now(),{headers:await authHeaders(),cache:'no-store'});
+          var j=await r.json().catch(function(){ return null; });
+          if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
+          MF=j; maandRender();
+        }catch(e){ b.innerHTML='<div class="fout">Maandafrekening laden faalde: '+esc(e.message)+'</div>'; }
+      };
+      window.maandTab=function(t){ TAB=t; maandRender(); };
+      function groep(rijen, sleutel){
+        var g={}; rijen.forEach(function(r){ var k=sleutel(r)||'—'; (g[k]=g[k]||{naam:k,klanten:0,uren:0,te:0,gef:0,bd:null}); var x=g[k]; x.klanten++; x.uren+=+r.uren||0; x.te+=+r.te_factureren||0; x.gef+=+(r.gefactureerd&&r.gefactureerd.bedrag)||0; if(r.bd_tarief) x.bd=r.bd_tarief; });
+        return Object.keys(g).map(function(k){ return g[k]; }).sort(function(a,b){ return (b.te-a.te)||(b.uren-a.uren); });
+      }
+      function maandRender(){
+        var b=$('mfBody'); if(!MF) return; var R=MF.rijen||[], T=MF.totaal||{};
+        var h='<div class="mf-kpi"><div><b>'+(T.klanten||0)+'</b><span>klanten met activiteit of facturatie</span></div>'
+          +'<div><b>'+mUur(T.uren)+' u</b><span>geschatte uren (eigen EK-handelingen)</span></div>'
+          +'<div><b>'+mEur(T.te_factureren)+'</b><span>te factureren (getekend, nog niet gefactureerd)</span></div>'
+          +'<div><b>'+mEur(T.gefactureerd)+'</b><span>gefactureerd in deze maand</span></div></div>';
+        h+='<div class="mf-tabs">'+[['klant','Per klant'],['factureren','Te factureren'],['adviseur','Per adviseur'],['partner','Per partner']].map(function(t){ return '<button class="btn ghost'+(TAB===t[0]?' on':'')+'" onclick="maandTab(\''+t[0]+'\')">'+t[1]+'</button>'; }).join('')+'</div>';
+        if(!R.length){ h+='<div class="state">Geen activiteit of facturatie in '+esc(MF.maand)+'.</div>'; b.innerHTML=h; return; }
+        if(TAB==='klant'||TAB==='factureren'){
+          var L = TAB==='factureren' ? R.filter(function(r){ return (r.te_factureren||0)>0 || r.gefactureerd || (r.getekend&&r.getekend.in_maand); }) : R;
+          h+='<table><thead><tr><th>Klant</th><th>Project</th><th>Adviseur</th><th>Partner</th><th class="r">Uren</th><th class="r">Dagen</th><th class="r">Handelingen</th><th>Getekend</th><th class="r">Te factureren</th><th>Gefactureerd</th><th>Fase</th></tr></thead><tbody>';
+          L.forEach(function(r){
+            var gt=r.getekend ? esc(r.getekend.datum)+(r.getekend.in_maand?' ★':'') : '—';
+            var gf=r.gefactureerd ? esc(r.gefactureerd.datum)+(r.gefactureerd.nr?' · '+esc(r.gefactureerd.nr):'')+(r.gefactureerd.bedrag?' · '+mEur(r.gefactureerd.bedrag):'') : '—';
+            var tf=(r.te_factureren==null) ? '<span title="getekend, maar geen partnercontract met vergoeding">? geen contract</span>' : (r.te_factureren>0?mEur(r.te_factureren):'—');
+            h+='<tr><td>'+esc(r.klant||'—')+'</td><td>'+esc(r.project||'—')+'</td><td>'+esc(advNaam(r))+'</td><td>'+esc(r.partner||'—')+'</td><td class="r">'+mUur(r.uren)+'</td><td class="r">'+(r.dagen||0)+'</td><td class="r">'+(r.handelingen||0)+'</td><td>'+gt+'</td><td class="r">'+tf+'</td><td>'+gf+'</td><td>'+esc(r.fase||'—')+(r.status&&r.status!=='actief'?' ('+esc(r.status)+')':'')+'</td></tr>';
+          });
+          h+='</tbody></table>';
+          if(TAB==='factureren' && !L.length) h+='<div class="state">Niets te factureren.</div>';
+        } else {
+          var G=groep(R, TAB==='adviseur' ? advNaam : function(r){ return r.partner || '— geen partner'; });
+          h+='<table><thead><tr><th>'+(TAB==='adviseur'?'Adviseur':'Partner')+'</th><th class="r">Klanten</th><th class="r">Uren</th>'+(TAB==='partner'?'<th class="r">BD-tarief</th>':'')+'<th class="r">Te factureren</th><th class="r">Gefactureerd</th></tr></thead><tbody>';
+          G.forEach(function(x){ h+='<tr><td>'+esc(x.naam)+'</td><td class="r">'+x.klanten+'</td><td class="r">'+mUur(x.uren)+'</td>'+(TAB==='partner'?'<td class="r">'+(x.bd?mEur(x.bd)+'/u':'—')+'</td>':'')+'<td class="r">'+mEur(x.te)+'</td><td class="r">'+mEur(x.gef)+'</td></tr>'; });
+          h+='<tr class="sub"><td>Totaal</td><td class="r">'+R.length+'</td><td class="r">'+mUur(T.uren)+'</td>'+(TAB==='partner'?'<td></td>':'')+'<td class="r">'+mEur(T.te_factureren)+'</td><td class="r">'+mEur(T.gefactureerd)+'</td></tr></tbody></table>';
+        }
+        var mt=MF.methode||{};
+        h+='<div class="mf-noot">Uren = schatting uit je eigen handelingen in de projectlog ('+esc((MF.wie||[]).join(', '))+'): handelingen met minder dan '+(mt.pauze_min||30)+' min ertussen vormen één sessie; per sessie eerste–laatste handeling + '+(mt.plus_min||5)+' min. Mails en telefoons buiten EK tellen niet mee. '
+          +'Te factureren = getekend in of vóór deze maand, nog niet gefactureerd en niet verloren, aan de NCNP-vergoeding uit het partnercontract (★ = getekend in deze maand). '
+          +'BD-tarief = uurtarief business development uit het partnercontract, ter info: uren binnen het Energie-Compas-traject worden volgens het contract niet in regie aangerekend.</div>';
+        b.innerHTML=h;
+      }
+      function _laadXlsx(){ return new Promise(function(ok,nok){ if(window.XLSX) return ok(); var sc=document.createElement('script'); sc.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload=function(){ ok(); }; sc.onerror=function(){ nok(new Error('Excel-module kon niet laden')); }; document.head.appendChild(sc); }); }
+      window.maandExcel=async function(){
+        if(!MF){ return; } var btn=$('mfXls'), oud=btn.innerHTML; btn.disabled=true; btn.innerHTML='⏳ Excel wordt voorbereid…';
+        try{
+          await _laadXlsx(); var R=MF.rijen||[];
+          var kl=R.map(function(r){ return { 'Klant':r.klant||'', 'Project':r.project||'', 'Adviseur':r.adviseur?(r.adviseur.naam||''):'', 'Adviseur e-mail':r.adviseur?(r.adviseur.email||''):'', 'Partner':r.partner||'', 'Uren (geschat)':+r.uren||0, 'Sessies':r.sessies||0, 'Dagen':r.dagen||0, 'Handelingen':r.handelingen||0,
+            'Getekend op':r.getekend?r.getekend.datum:'', 'Getekend deze maand':r.getekend&&r.getekend.in_maand?'ja':'', 'Offertebedrag':r.getekend&&r.getekend.bedrag_offerte||'', 'Te factureren (NCNP)':r.te_factureren==null?'geen contract':(+r.te_factureren||0),
+            'Gefactureerd op':r.gefactureerd?r.gefactureerd.datum:'', 'Factuurnr':r.gefactureerd?(r.gefactureerd.nr||''):'', 'Gefactureerd bedrag':r.gefactureerd?(r.gefactureerd.bedrag||''):'', 'BD-tarief partner (€/u)':r.bd_tarief||'', 'Fase':r.fase||'', 'Status':r.status||'' }; });
+          var sub=function(fn,lab){ return groep(R,fn).map(function(x){ var o={}; o[lab]=x.naam; o['Klanten']=x.klanten; o['Uren (geschat)']=Math.round(x.uren*100)/100; if(lab==='Partner') o['BD-tarief (€/u)']=x.bd||''; o['Te factureren']=x.te; o['Gefactureerd']=x.gef; return o; }); };
+          var wb=XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kl), 'Per klant');
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sub(advNaam,'Adviseur')), 'Per adviseur');
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sub(function(r){ return r.partner||'— geen partner'; },'Partner')), 'Per partner');
+          XLSX.writeFile(wb, 'Maandafrekening_'+MF.maand+'.xlsx');
+        }catch(e){ $('mfBody').insertAdjacentHTML('afterbegin','<div class="fout">Excel maken faalde: '+esc(e.message)+'</div>'); }
+        finally{ btn.disabled=false; btn.innerHTML=oud; }
+      };
+    })();
   </script>
 </body>
 </html>
