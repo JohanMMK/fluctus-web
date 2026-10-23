@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.117.0 (2026-10-23, Johan): ADVISEURSKNOPPEN TONEN DAT ZE BEZIG ZIJN — «Alles voor dit project (ZIP)» en «Concept-mail met rapport» krijgen tijdens het rekenen een draaiend icoon + «Download wordt voorbereid…» / «E-mail wordt voorbereid…» op de knop zelf, en de voortgang (stap x/y, klaar of fout) staat ook onder de knoppen in het adviseursblok (vroeger enkel in de rapport-status, buiten beeld). -->
 <!-- ek.html v0.116.0 (2026-10-23, Johan): REFERENTIEKEUZE WEGGELATEN («we maken het te complex»). Eén model: het gekozen scenario = extra PV + batterij + laadpalen (+ betalende laadpalen) t.o.v. de situatie zonder extra PV/batterij en zonder die laadpalen: investering = PV + batterij + laadpalen + aansluiting voor het laden (netto van de vermeden verzwaring); opbrengst = factuurbesparing + niet-betalende palen: vermeden alternatieve laadkost (elders) − laadkost op de site + betalende palen: verkoopomzet − elektriciteitskost. De knoppen «Vergelijk met» (resultaat) en «Referentie (adviseur)» (invoer) zijn weg; een bewaarde referentie 'niets' wordt genegeerd en bij het volgende bewaren gewist. -->
 <!-- ek.html v0.115.0 (2026-10-23, Johan): (1) REFERENTIE BEPAALT DE TERUGVERDIENTIJD — «laden zonder installatie (verzwaren)»: het laadplein + de verzwaring zitten in beide situaties → KPI's op PV + batterij (netto van de vermeden verzwaring, besparing = factuur); «niets doen (investeerder)»: alles samen (PV + batterij + laadpalen + aansluiting, besparing incl. laadsessies / laadplein-marge). Voorheen volgden de KPI's bij een laadplein altijd het plan mét laadpalen → de keuze veranderde niets aan de TVT. (2) Adviseursblok opgeruimd: kop, rij «Vergelijk met» als één segmentknop + uitleg, daaronder alle acties in dezelfde stijl. -->
 <!-- ek.html v0.114.0 (2026-10-23, Johan): «Vergelijk met» in de adviseursrij als TWEE ZICHTBARE KNOPPEN (laden zonder installatie (verzwaren) · niets doen (investeerder)) i.p.v. een uitklaplijst — de tweede optie was niet te zien. Actieve keuze groen; select blijft verborgen voor de synchronisatie. -->
@@ -1192,6 +1193,10 @@
           #adv-rij .adv-acties .btn:hover{ border-color:#05B050; color:#05B050; }
           #adv-rij .adv-acties #ek-verwittig-blok{ display:contents; }
           #adv-rij .adv-acties #ek-verwittig-blok.hidden{ display:none; }
+          #adv-rij .adv-acties .btn[aria-busy="true"]{ border-color:#05B050; color:#05B050; cursor:progress; opacity:1; }
+          .ek-spin{ display:inline-block; width:13px; height:13px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:ekspin .7s linear infinite; vertical-align:-2px; }
+          @keyframes ekspin{ to{ transform:rotate(360deg); } }
+          #verwittig-status{ font-size:13px; }
         </style>
         <div id="adv-rij" class="noprint">
           <div class="adv-kop">🔧 Adviseur</div>
@@ -4659,8 +4664,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     function einde(){ klaar=true; clearTimeout(to); window.removeEventListener('message',lis); setTimeout(function(){ try{ f.remove(); }catch(x){} }, 50); }
     function lis(ev){ if(klaar || ev.source!==f.contentWindow || !ev.data || ev.data.type!=='ec-zip') return; einde(); if(ev.data.ok) res(ev.data); else rej(new Error(ev.data.error||'rapport faalde')); }
     window.addEventListener('message',lis); f.src=url; document.body.appendChild(f); }); }
+  // v0.117.0 (Johan 23-10): knop toont dat hij bezig is + status in het adviseursblok (verwittig-status), naast de rapport-status.
+  window._ekBtnBezig=function(btn, label){ if(!btn) return function(){}; var oud=btn.innerHTML, w=btn.style.minWidth; btn.style.minWidth=btn.offsetWidth+'px'; btn.disabled=true; btn.setAttribute('aria-busy','true'); btn.innerHTML='<span class="ek-spin" aria-hidden="true"></span> '+label;
+    return function(){ btn.innerHTML=oud; btn.disabled=false; btn.removeAttribute('aria-busy'); btn.style.minWidth=w||''; }; };
+  window._ekAdvMeld=function(t,kl,html){ var a=$('verwittig-status'); if(!a) return; a.style.color=kl||'var(--muted)'; if(html) a.innerHTML=t; else a.textContent=t; };
   window.ekProjectZip=async function(){
-    var st=$('rapport-status'), btn=$('btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } }
+    var st=$('rapport-status'), btn=$('btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
     var sel=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; if(!sel || !window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
     var naam=(String(($('i-klant')||{}).value||'').trim()||String(STATE_CODE||'').trim()||'Energie-Compas').replace(/[\\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
     var a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0];
@@ -4673,7 +4682,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var kt=(document.querySelector('input[name=ktype]:checked')||{}).value||'', T=window._ekAftrekToets?window._ekAftrekToets(oR.sel):null;
       if(kt!=='particulier' && T && (T.status==='alle'||T.status==='klein')) jobs.push({ titel:T3('Energiestudie verhoogde investeringsaftrek','Étude énergétique déduction majorée','Energy study increased deduction'), opt:window._ekOffOpt(a.id,'studie'), xlsx:true });
     } else noot=' Bankdossier en dossier verhoogde investeringsaftrek komen erbij zodra de offerte opgeladen en bevestigd is als verkocht.';
-    if(btn) btn.disabled=true;
+    var _klaar=window._ekBtnBezig(btn, 'Download wordt voorbereid…'); meld('⏳ Download wordt voorbereid…');
     try{
       await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam);
       for(var i=0;i<jobs.length;i++){ var J=jobs[i];
@@ -4687,8 +4696,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var blob=await z.generateAsync({ type:'blob', compression:'DEFLATE' });
       var l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download=naam+'.zip'; document.body.appendChild(l); l.click(); setTimeout(function(){ URL.revokeObjectURL(l.href); l.remove(); }, 4000);
       meld('✔ '+naam+'.zip gedownload ('+jobs.length+' document'+(jobs.length===1?'':'en')+(jobs.some(function(x){ return x.xlsx; })?' + VEKA-sjabloon':'')+').'+noot, 'var(--green)');
-    }catch(e){ meld('ZIP maken lukte niet: '+(e.message||e)+'.'); }
-    finally{ if(btn) btn.disabled=false; }
+    }catch(e){ meld('ZIP maken lukte niet: '+(e.message||e)+'.', '#8a1f1f'); }
+    finally{ _klaar(); }
   };
   // v0.86.0 (Johan 17-10): BANKDOSSIER — zelfde payload als het rapport, klantrapport.html?mode=bank (2 pagina's financiering).
   // v0.89.0: de dossiers horen bij de AANVAARDE offerte — eerst die registreren (klant of adviseur); oekene kan altijd (advies-niveau).
@@ -4723,8 +4732,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!window._RAP_PAYLOAD){ if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
     var sel=(HM&&(HM.sel||HM.best))||null;
     if(!sel){ if(st){ st.style.color='var(--muted)'; st.textContent='Kies eerst een combinatie in de heatmap.'; } return; }
-    if(btn) btn.disabled=true;
+    var _klaar=window._ekBtnBezig(btn, 'E-mail wordt voorbereid…');
     if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Rapport en PDF worden op de server gemaakt, concept-mail wordt klaargezet… (± 30 s)'; }
+    try{ window._ekAdvMeld('⏳ E-mail wordt voorbereid: rapport en PDF worden gemaakt, daarna komt het concept in Outlook… (± 30 s)'); }catch(x){}
     var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) });
     try{
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
@@ -4744,9 +4754,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           (mj.attached?(' met het rapport als PDF ('+(mj.pdf_kb||'?')+' kB)'):' — <b>zonder</b> bijlage'+(mj.attach_error?(': '+_cmEsc(mj.attach_error)):''))+'. '+
           (mj.webLink?('<a href="'+_cmEsc(mj.webLink)+'" target="_blank" rel="noopener">Open het concept</a> — nakijken en verzenden.'):'Je vindt het bij Concepten.')+
           (mj.fallback_reden?('<br><span style="font-size:11px">Doel-mailbox lukte niet ('+_cmEsc(mj.fallback_reden)+'), concept staat in de dossier-mailbox.</span>'):'');
+        try{ window._ekAdvMeld(st.innerHTML, 'var(--green)', true); }catch(x){}
       }
-    }catch(e){ if(st){ st.style.color='var(--muted)'; st.textContent='Concept-mail klaarzetten lukte niet: '+(e&&e.message||e); } }
-    finally{ if(btn) btn.disabled=false; }
+    }catch(e){ if(st){ st.style.color='var(--muted)'; st.textContent='Concept-mail klaarzetten lukte niet: '+(e&&e.message||e); } try{ window._ekAdvMeld('Concept-mail klaarzetten lukte niet: '+(e&&e.message||e), '#8a1f1f'); }catch(x){} }
+    finally{ _klaar(); }
   }
 
   // ══ v0.37.0 (Johan): OFFERTES — opvragen (mail naar oekene), indienen (installateur-scherm), volgen (enkel oekene) ══
