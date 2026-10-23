@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.110.0 (2026-10-23, Johan): (1) BESTAANDE PV UIT DE GEMETEN INJECTIE — bevat het injectieprofiel een volledig gemeten jaar (≥ 12 gemeten maanden of label «gemeten»), dan wordt «Bestaande zonnepanelen (kWp)» = 1,1 × de hoogste gemeten injectiepiek (kW); bij opladen én bij heropenen (server ≥ 15.348.0 geeft de gemeten injectiepiek mee), tenzij de adviseur het veld zelf aanpaste (best_pv_bron 'manueel' blijft bewaard). (2) BESTANDSNAAM → ROL: bij twee profielbestanden staat afname/injectie standaard volgens de bestandsnaam (injectie, injection, teruglevering, INJ… / afname, verbruik, prélèvement, AFN…); de server doet hetzelfde bij één bestand met één reeks. -->
 <!-- ek.html v0.109.0 (2026-10-21, Johan): (1) VERZWARING VOLGT DE GEFACTUREERDE PIEK — ligt de jaarpiek met laadplein > 2 % boven de bestaande aansluiting, dan telt het verschil als verzwaring (zelfde regel als server ≥ 15.347.0, hier als vangnet: max(server, piekregel)) → Pas aan-cel Outdoor Ternat € 0 → ± € 3.600. (2) «Je keuze» toont na een herberekening de Pas aan-cel (eigen prijs) i.p.v. de standaardcel op dezelfde plaats. (3) Verhoogde investeringsaftrek telt als cash in JAAR 1 (vroeger jaar 2) in terugverdientijd en rendement. -->
 <!-- ek.html v0.108.0 (2026-10-21, Johan): BETALEND LAADPLEIN standaard — netdeel van de laadkost uit de referentie zonder installatie ((refNetk − gebouwNetk)/(refKost − gebouwSaldo), server ≥ 15.346.0; anders netaandeel van de referentiefactuur) i.p.v. de cel mét installatie; de verkoopprijs volgt de reële aankoopkost (alle kosten) → marge geïndexeerd zoals de laadkost (rooster, KPI, plan). -->
 <!-- ek.html v0.107.0 (2026-10-21, Johan): REFERENTIE PER DOSSIER — «Niets doen (investeerder)» naast «Laden zonder installatie (aansluiting verzwaren)»: geen vermeden verzwaring, de verzwaring die mét installatie nog nodig is telt als kost (_vzRef); bewaard in bevestigd.referentie, mee in het rapport. + Eigen totaalprijs (Pas aan, bv. carport) = meerprijs op PV+batterij, de laadpalen worden niet meer mee geschaald (± € 20k te veel in «investering incl. laadpalen»). + Detail «Wat je investeert» en «Totale investering» tellen de verzwaring die mét installatie nog nodig is mee → zelfde bedrag als blok 2 en het rapport. -->
@@ -835,7 +836,7 @@
       <label class="fld">Energiekost/jaar (€, van je factuur)</label><input type="number" id="i-kost" step="10" min="0" inputmode="numeric" value="1150" placeholder="onbekend — we schatten uit je verbruik">
     </div>
     <div class="row2">
-      <div><label class="fld">Bestaande zonnepanelen (kWp)</label><input type="number" id="i-best-pv" step="0.5" min="0" inputmode="decimal" value="0" placeholder="0 = geen"><div class="sub" style="margin-top:2px">Reeds geplaatst — zit in je huidige situatie (base case).</div></div>
+      <div><label class="fld">Bestaande zonnepanelen (kWp)</label><input type="number" id="i-best-pv" step="0.5" min="0" inputmode="decimal" value="0" placeholder="0 = geen"><div class="sub" style="margin-top:2px">Reeds geplaatst — zit in je huidige situatie (base case).</div><div class="sub" id="i-best-pv-noot" style="margin-top:2px;color:#1E7A42"></div></div>
       <div><label class="fld">Jaarlijkse injectie (MWh)</label><input type="number" id="i-best-inj" step="0.1" min="0" inputmode="decimal" value="0" placeholder="0 = onbekend"><div class="sub" style="margin-top:2px">Van je factuur. Leeg/0 → we nemen aan dat alles zelf verbruikt wordt.</div></div>
     </div>
       </div>
@@ -1685,7 +1686,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var db=$('ev-def-btn'); if(db) db.onclick=_evDefModal;
     var hb=$('bp-herbereken'); if(hb) hb.onclick=_battHerbereken;
     var tg=$('i-toegang'); if(tg){ tg.addEventListener('input',_updSpanningBadge); tg.addEventListener('change',_updSpanningBadge); }
-    ['i-afname','i-best-inj','i-toegang','i-kost'].forEach(function(id){ var e=$(id); if(e){ e.addEventListener('input',function(){ try{ _ekOekeneSamenvatting(); }catch(x){} }); } });   // v0.24.30: live oekene-samenvatting
+    ['i-afname','i-best-inj','i-toegang','i-kost'].forEach(function(id){ var e=$(id); if(e){ e.addEventListener('input',function(){ try{ _ekOekeneSamenvatting(); }catch(x){} }); } });
+    var _bpv=$('i-best-pv'); if(_bpv){ _bpv.addEventListener('input',function(){ window._EK_PV_BRON='manueel'; var n=$('i-best-pv-noot'); if(n) n.textContent=''; }); }   // v0.110.0: zelf aangepast → niet meer overschrijven met 1,1 × injectiepiek   // v0.24.30: live oekene-samenvatting
     var ad=$('i-adres'); if(ad){ ad.addEventListener('input',function(){ STATE_ADRES=(ad.value||'').trim(); }); }
     _updSpanningBadge();
     _evAfleiden();
@@ -2469,7 +2471,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var kv=(g('i-klant')||'').trim(); if(kv) STATE_KLANT=kv;
       var bv=(g('i-btw')||'').trim(); if(bv) STATE_BTW=bv;
       var av=(g('i-adres')||'').trim(); if(av) STATE_ADRES=av;
-      var _bev={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, injectie_mwh:bestInjMwh,
+      var _bev={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:bestInjMwh,
         profiel:profiel, ev:ev, klant:(STATE_KLANT||''), btw:(STATE_BTW||''), adres:(STATE_ADRES||''),
         ean_afname:(STATE_EAN_AFNAME||''), ean_injectie:(STATE_EAN_INJECTIE||''),
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
@@ -2772,7 +2774,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         var av=($('i-adres')&&$('i-adres').value||'').trim(); if(av) STATE_ADRES=av; })();
       // v0.24.8 (Johan): BEWAAR de volledige bevestigde invoer op het dossier → bij heropenen (mail-link) alles terugzetten,
       //   geen her-afleiding uit de 1-maand-factuur en geen her-vraag van de EAN-rollen.
-      var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, injectie_mwh:bestInjMwh,
+      var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:bestInjMwh,
         profiel:profiel, ev:ev, klant:(STATE_KLANT||''), btw:(STATE_BTW||''), adres:(($('i-adres')&&$('i-adres').value)||STATE_ADRES||'').trim(),
         ean_afname:(STATE_EAN_AFNAME||''), ean_injectie:(STATE_EAN_INJECTIE||''),
         // v0.24.14 (Johan): bewaar de commodity-referentie uit de factuur zodat de onderhandelingsnota bij HEROPENEN klopt
@@ -3475,6 +3477,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(+B.toegang_kw>0 && $('i-toegang')){ $('i-toegang').value=+B.toegang_kw; PIEK_IS_SLP=false; }
           if(+B.kost>0 && $('i-kost')) $('i-kost').value=+B.kost;
           if(B.best_pv_kwp!=null && $('i-best-pv')) $('i-best-pv').value=+B.best_pv_kwp||0;
+          window._EK_PV_BRON=String(B.best_pv_bron||'');   // v0.110.0
           if(B.injectie_mwh!=null && $('i-best-inj')) $('i-best-inj').value=+B.injectie_mwh||0;
           if(B.profiel && $('i-profiel')) $('i-profiel').value=B.profiel;
           if(B.ev!=null||Array.isArray(B.ev_rows)){ try{ _KTYPE_USER=false;
@@ -3503,6 +3506,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           // v0.24.35 (Johan): manuele "Pas aan"-combi's terugzetten → _herstelCustomCombos() (na de sweep) zet ze terug op de heatmap.
           if(Array.isArray(B.custom_combos)) CUSTOM_COMBOS=B.custom_combos.slice(0,20);
         }
+        // v0.110.0 (Johan 23-10): volledig gemeten jaar injectie → bestaande PV = 1,1 × hoogste gemeten injectiepiek (tenzij manueel aangepast).
+        try{ _ekPvUitInjectieZet(STATE_PROFIEL_STATUS && STATE_PROFIEL_STATUS.injectie, false); }catch(ePvI){}
         // v0.24.31 (Johan: "profiel werd niet gekoppeld bij heropenen vanuit de cockpit"): een OPGELADEN gemeten profiel is
         //   LEIDEND. Een dossier dat met de default-invoer (3,5 MWh / 8 kW / residentieel) bewaard werd maar wél een gemeten
         //   profiel draagt, kwam bij heropenen op het particulier-pad (thuisladen) → dat stuurt GEEN project_id mee → het
@@ -3868,7 +3873,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var btw=(($('i-btw')&&$('i-btw').value)||'').trim();
     var adres=(($('i-adres')&&$('i-adres').value)||'').trim();
     var mail=(($('i-mail')&&$('i-mail').value)||'').trim() || 'oekene@gmail.com';
-    var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, injectie_mwh:injMwh,
+    var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
       profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
       ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze (rec.bevestigd.ev_rows)
     var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -3915,7 +3920,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Dossier aanmaken…'; }
     var btn=$('ek-maak-dossier'); if(btn) btn.disabled=true;
     try{
-      var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, injectie_mwh:injMwh,
+      var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
         profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
         ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze
       var _hdD={'Content-Type':'application/json'}; try{ var _ah=await _ekAuthHeaders(); if(_ah&&_ah.Authorization) _hdD.Authorization=_ah.Authorization; }catch(eA){}
@@ -3984,8 +3989,11 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:460px;width:100%;padding:20px 22px;box-shadow:0 12px 40px rgba(0,0,0,.3)">'+
       '<div style="font-size:18px;font-weight:800;color:#1F3864;margin-bottom:4px">📈 Twee profielbestanden</div>'+
       '<div style="font-size:12.5px;color:#5A6577;margin:6px 0 4px">Duid per bestand aan of het de <b>afname</b> of de <b>injectie</b> is.</div>'+
-      rijSel('ek2_a', bA.naam, 'afname')+
-      rijSel('ek2_b', bB.naam, 'injectie')+
+      (function(){ var ra=_ekRolUitNaam(bA.naam), rb=_ekRolUitNaam(bB.naam);   // v0.110.0: standaardrol volgens de bestandsnaam
+        if(ra && !rb) rb=(ra==='afname'?'injectie':'afname'); if(rb && !ra) ra=(rb==='afname'?'injectie':'afname');
+        if(!ra || ra===rb){ ra='afname'; rb='injectie'; }
+        return rijSel('ek2_a', bA.naam, ra)+(ra!=='afname'||_ekRolUitNaam(bA.naam)?'<div style="font-size:11px;color:#1E7A42;margin:-4px 0 4px">↳ voorstel volgens de bestandsnaam</div>':'')+
+          rijSel('ek2_b', bB.naam, rb); })()+
       '<div style="margin-top:6px"><div style="font-size:12.5px;font-weight:600;color:#1F3864;margin-bottom:3px">Dossiernummer (FLX)</div>'+
         '<input id="ek2_flx" value="'+_ekEsc(STATE_CODE||'')+'" placeholder="FLX-XXX-XXXX" style="width:100%;padding:8px 10px;border:1px solid #D5DBE3;border-radius:7px;font:inherit;text-transform:uppercase"></div>'+
       '<div id="ek2_msg" style="font-size:12px;color:#C0392B;margin-top:8px;min-height:1em"></div>'+
@@ -4128,6 +4136,31 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   bewaren we nu meteen automatisch; bij een bestaand profiel blijft de expliciete "toch overschrijven"-knop (409).
     try{ if(!(j && j.huidig && j.huidig.afname)) _ekProfielBevestig(j.concept_id); }catch(e){}
   }
+  // v0.110.0 (Johan 23-10): BESTAANDE PV UIT DE GEMETEN INJECTIE. Is de injectie een volledig jaar gemeten (≥ 12 gemeten maanden of
+  //   label 'gemeten'), dan is de geschatte bestaande PV = 1,1 × de hoogste gemeten injectiepiek (kW). c = coverage (analyse) of
+  //   profiel_status.injectie (heropenen, server ≥ 15.348.0). nieuw=true (net opgeladen) overschrijft ook een manuele waarde.
+  function _ekPvUitInjectie(c){
+    if(!c) return null;
+    var jaar=(+c.gemeten_maanden>=12) || c.label_type==='gemeten';
+    var pk=+(c.maandpiek_kw_gemeten!=null ? c.maandpiek_kw_gemeten : (c.piek_kw_gemeten!=null ? c.piek_kw_gemeten : 0));
+    if(!jaar || !(pk>0)) return null;
+    return { kwp: Math.round(pk*1.1*10)/10, piek: Math.round(pk*10)/10 };
+  }
+  function _ekPvUitInjectieZet(c, nieuw){
+    var r=_ekPvUitInjectie(c), el=$('i-best-pv'); if(!r || !el) return null;
+    if(!nieuw && window._EK_PV_BRON==='manueel') return null;
+    var oud=+el.value||0; el.value=String(r.kwp); window._EK_PV_BRON='injectiepiek';
+    var n=$('i-best-pv-noot'); if(n) n.textContent='= 1,1 × hoogste gemeten injectiepiek ('+_ekNf(r.piek)+' kW, volledig jaar gemeten).';
+    if(Math.abs(oud-r.kwp)>0.05){ try{ LAST_SIG=''; }catch(e1){} try{ _ekOekeneSamenvatting(); }catch(e2){} }
+    return r;
+  }
+  // v0.110.0: rol uit de bestandsnaam (zelfde regels als de server, _piRolUitNaam) — enkel een eenduidige aanwijzing telt.
+  function _ekRolUitNaam(naam){
+    var s=String(naam||'').toLowerCase(); try{ s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }catch(e){}
+    var inj=/injectie|injection|teruglever|terug[\s_.-]?lever|feed[\s_.-]?in|einspeis|(^|[^a-z])inj([^a-z]|$)/.test(s);
+    var af=/afname|prelevement|offtake|consumption|consommation|verbruik|(^|[^a-z])afn([^a-z]|$)|(^|[^a-z])bezug([^a-z]|$)/.test(s);
+    return (inj&&!af)?'injectie':((af&&!inj)?'afname':null);
+  }
   async function _ekProfielBevestig(cid, forceer){
     var b=$('prof-bevestig'); if(b){ b.disabled=true; b.textContent='⏳ Bewaren…'; }
     try{
@@ -4148,7 +4181,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(_ta){ var _ch=[];
           if(+_ta.jaar_mwh>0 && $('i-afname')){ $('i-afname').value=String(Math.round(+_ta.jaar_mwh*10)/10); _ch.push(_ekNf(+_ta.jaar_mwh)+' MWh'); }
           if(+_ta.maandpiek_kw>0 && $('i-toegang')){ $('i-toegang').value=String(Math.round(+_ta.maandpiek_kw*10)/10); _ch.push('piek '+_ekNf(+_ta.maandpiek_kw)+' kW'); }
-          try{ var _ti=_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage; if(_ti && +_ti.jaar_mwh>0 && $('i-best-inj')){ $('i-best-inj').value=String(Math.round(+_ti.jaar_mwh*10)/10); _ch.push('injectie '+_ekNf(+_ti.jaar_mwh)+' MWh'); } }catch(eTi){}   // v0.99.0: injectie uit het injectieprofiel
+          try{ var _ti=_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage; if(_ti && +_ti.jaar_mwh>0 && $('i-best-inj')){ $('i-best-inj').value=String(Math.round(+_ti.jaar_mwh*10)/10); _ch.push('injectie '+_ekNf(+_ti.jaar_mwh)+' MWh'); } }catch(eTi){}
+          try{ var _pvI=_ekPvUitInjectieZet(_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage, true); if(_pvI) _ch.push('bestaande PV '+_ekNf(_pvI.kwp)+' kWp (1,1 × injectiepiek '+_ekNf(_pvI.piek)+' kW)'); }catch(ePvU){}   // v0.110.0   // v0.99.0: injectie uit het injectieprofiel
           try{ if(!STATE_HEEFT_FACTUUR && $('i-kost')){ $('i-kost').value=''; } }catch(eKs){}   // v0.99.0: zonder factuur geen fictieve € 1.150 — de server schat de kost uit verbruik × marktprijs
           if(_ch.length){ try{ _updSpanningBadge(); }catch(e1){} try{ LAST_SIG=''; }catch(e2){} try{ _ekOekeneSamenvatting(); }catch(e3){} try{ _ekPersistBevestigd(); }catch(e4){}
             var _stA=$('prof-status'); if(_stA){ var _w=document.createElement('div'); _w.style.cssText='font-size:12px;color:#1E7A42;margin-top:6px'; _w.textContent='Jaarafname en piekvermogen aangepast aan het profiel: '+_ch.join(' · ')+'.'; _stA.appendChild(_w); } } } }catch(eAP){}

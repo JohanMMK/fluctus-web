@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Profiel-import · Fluctus</title>
+<!-- profiel-import.html v1.3.0 (2026-10-23, Johan): BESTANDSNAAM → ROL — bij het kiezen van een bestand meldt de tegel als de naam op de andere rol wijst (bv. «…_injectie.csv» in het afname-vak). De server (≥ 15.348.0) leest een bestand met één reeks dan als die rol; een bestand met afname én injectie blijft ongewijzigd. -->
 <!-- profiel-import.html v1.2.0 (2026-10-14, Johan): weergave van de analyse via de gedeelde profiel-viz.js (zelfde als de modal in het
      EK-adviseursbeeld); heatmap maanden horizontaal (jan→dec), uren verticaal (0u onder), groenladder zoals de rapport-heatmaps.
      v1.1.0 (2026-09-22) — MANUELE REVIEW + JAARVERBRUIK-BRON: een bestand dat niet automatisch te converteren is,
@@ -113,11 +114,13 @@
           <label class="f" for="fAfname">Afname-profiel <b style="color:var(--amber)">(verplicht)</b></label>
           <input type="file" id="fAfname" accept=".csv,.txt,.xlsx,.xls,.xlsm">
           <div class="sub">CSV of Excel — elk formaat (Fluvius, energiemonitor, datalogger…). Mag ook de injectie bevatten.</div>
+          <div class="sub" id="hAfname" style="color:var(--amber);font-weight:600"></div>
         </div>
         <div class="drop">
           <label class="f" for="fInjectie">Injectie-profiel (optioneel)</label>
           <input type="file" id="fInjectie" accept=".csv,.txt,.xlsx,.xls,.xlsm">
           <div class="sub">Enkel als de injectie in een apart bestand staat.</div>
+          <div class="sub" id="hInjectie" style="color:var(--amber);font-weight:600"></div>
         </div>
       </div>
       <div class="row" style="margin-top:12px">
@@ -178,6 +181,21 @@
     if(!id){ $('projInfo').textContent='Geen geldig FLX-ID.'; return; }
     $('projInfo').innerHTML = p ? ('<b>'+esc(p.naam||p.id)+'</b> · '+(p.profiel_afname?'<span class="pill p-info">heeft al een afname-profiel</span>':'<span class="pill p-neu">nog geen gemeten profiel</span>')+(p.profiel_injectie?' <span class="pill p-info">injectie</span>':'')) : ('<span class="id">'+esc(id)+'</span> (niet in de lijst — de server controleert)');
   }
+  // v1.3.0 (Johan 23-10): rol uit de bestandsnaam (zelfde regels als de server, _piRolUitNaam) — enkel een eenduidige aanwijzing telt.
+  function rolUitNaam(naam){
+    var s=String(naam||'').toLowerCase(); try{ s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }catch(e){}
+    var inj=/injectie|injection|teruglever|terug[\s_.-]?lever|feed[\s_.-]?in|einspeis|(^|[^a-z])inj([^a-z]|$)/.test(s);
+    var af=/afname|prelevement|offtake|consumption|consommation|verbruik|(^|[^a-z])afn([^a-z]|$)|(^|[^a-z])bezug([^a-z]|$)/.test(s);
+    return (inj&&!af)?'injectie':((af&&!inj)?'afname':null);
+  }
+  function naamHint(vak, inputId, hintId){
+    var f=$(inputId).files[0], h=$(hintId); if(!h) return; h.textContent='';
+    if(!f) return; var r=rolUitNaam(f.name);
+    if(r && r!==vak) h.textContent='⚠ De bestandsnaam wijst op '+r+'. Bevat het bestand maar één reeks, dan leest de server die als '+r+'.';
+    else if(r===vak) h.textContent='';
+  }
+  $('fAfname').addEventListener('change', function(){ naamHint('afname','fAfname','hAfname'); });
+  $('fInjectie').addEventListener('change', function(){ naamHint('injectie','fInjectie','hInjectie'); });
   $('projZoek').addEventListener('change', toonProj); $('projZoek').addEventListener('input', function(){ if(projId()) toonProj(); });
 
   // ─── bestand → payload (CSV-tekst of Excel-rijen, gzip + base64) ───
