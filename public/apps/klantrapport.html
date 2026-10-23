@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.71.0 (2026-10-23, Johan): BESTAANDE PV + BATTERIJ — (1) «Ons advies» §3 toont de zelfconsumptie van de bestaande zonnestroom (via de batterij) als aparte post (energiewinst van de installatie zonder spotsturing, factuur.geen) i.p.v. alles onder «Arbitrage op de spotmarkt»; (2) bijlage Zelfconsumptie zet de zelfconsumptie VANDAAG (zonder batterij, uit de PV-injectie zonder installatie) naast die mét batterij, zodat duidelijk is welk deel de batterij toevoegt. -->
 <!-- klantrapport.html v0.70.0 (2026-10-21, Johan): (1) verhoogde investeringsaftrek = cash in JAAR 1 (vroeger jaar 2) in terugverdientijd, rendement en ROI. (2) Referentie «niets doen»: nieuw hoofdstuk «Vergelijking met niets doen» (investering, factuur vandaag vs met project, omzet, exploitatie, netto jaar 1, TVT, rendement, meerwaarde). (3) Betalend laadplein: voorblad toont de marge per kWh i.p.v. €/100 km t.o.v. diesel; blok 1 van «twee beslissingen» heet «Het laadplein bouwen — betalend voor bezoekers» (niet «De vloot elektrisch maken — t.o.v. diesel»), zonder dieselvergelijking. -->
 <!-- klantrapport.html v0.69.2 (2026-10-21, Johan): BETALEND LAADPLEIN — (1) netdeel van de laadkost uit de referentie zonder installatie ((nul.netkosten − gebouw_netk)/(nul − gebouw_saldo); fallback netaandeel referentiefactuur) i.p.v. de verhouding uit de cel mét installatie (84 % → verdubbeling 2029 woog dubbel); (2) de verkoopprijs/omzet volgt de reële aankoopkost van stroom op de locatie (zelfde index als de laadkost: energie → inflatie, net → netpad + 2029) → marge per kWh blijft. Standaard voor alle dossiers. -->
 <!-- klantrapport.html v0.69.1 (2026-10-21, Johan, ek ≥ 0.107.0): referentie «niets doen» (investeerder, D.referentie='niets'): de aansluitingspost heet «Aansluiting verzwaren (nog nodig mét je installatie)» i.p.v. «Netverzwaring als je laadt zonder eigen infrastructuur»; vermeden verzwaring = 0 (komt uit EK). -->
@@ -521,6 +522,7 @@ var CYCLI=_cycliJaar();
 var _V0=D.voorstel||{};
 var HAS_PV   = ((+combi.pv_kwp||0)>0)   || ((+_V0.pv_kwp||0)>0);
 var HAS_BATT = ((+combi.batt_kwh||0)>0) || ((+_V0.batt_kwh||0)>0) || ((+_V0.batt_kw||0)>0);
+var HAS_BEST_PV = !HAS_PV && (((+((D.bestaande_pv||{}).kwp)||0)>0) || ((+((D.zelfconsumptie||{}).pv_productie_mwh)||0)>0));   // v0.71.0: enkel bestaande PV (geen nieuwe in de combi)
 var HAS_LP   = !!D.heeftLaadplein || (Array.isArray(HT.laadplein)&&HT.laadplein.length>0);
 // v0.30.0 (Johan): LOADFACTOR = verbruik (gebouw + laden, MWh) ÷ (kwartierpiek × 8760) — zelfde definitie als het EK-rooster.
 //   na = met installatie (D.piek.sim_na_kw), voor = zonder installatie maar mét laden (D.piek.sim_voor_kw). Hoger = beter benut net.
@@ -866,11 +868,13 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
   if(G0 && G0.saldo!=null){
     var eN=(+N0.energie||0)+(+N0.heffingen||0), eG=(+G0.energie||0)+(+G0.heffingen||0), eO=(+O0.energie||0)+(+O0.heffingen||0);
     var pNet=(+N0.netkosten||0)-(+O0.netkosten||0), pZc=eN-eG, pArb=bF-pNet-pZc;
-    if(HAS_PV) posten.push(['Extra zelfconsumptie (zonnestroom zelf gebruiken)', pZc]); else pArb+=pZc;
+    if(HAS_PV) posten.push(['Extra zelfconsumptie (zonnestroom zelf gebruiken)', pZc]);
+    else if(HAS_BEST_PV && HAS_BATT && pZc>0) posten.push([_T3('Zelfconsumptie van je bestaande zonnestroom (via de batterij)','Autoconsommation de votre production solaire existante (via la batterie)','Self-consumption of your existing solar power (via the battery)'), pZc]);   // v0.71.0
+    else pArb+=pZc;
     posten.push(['Verlaging netkosten (piek en capaciteit)', pNet]);
     if(HAS_BATT) posten.push(['Arbitrage op de spotmarkt', pArb]); else if(posten.length) posten[0][1]+=pArb;
   } else {
-    posten.push([(HAS_PV&&HAS_BATT)?'Zelfconsumptie en arbitrage op de spotmarkt (energie)':(HAS_PV?'Extra zelfconsumptie (energie)':(HAS_BATT?'Arbitrage op de spotmarkt (energie)':'Energie')), ((+N0.energie||0)+(+N0.heffingen||0))-((+O0.energie||0)+(+O0.heffingen||0))]);
+    posten.push([((HAS_PV||HAS_BEST_PV)&&HAS_BATT)?'Zelfconsumptie en arbitrage op de spotmarkt (energie)':(HAS_PV?'Extra zelfconsumptie (energie)':(HAS_BATT?'Arbitrage op de spotmarkt (energie)':'Energie')), ((+N0.energie||0)+(+N0.heffingen||0))-((+O0.energie||0)+(+O0.heffingen||0))]);
     posten.push(['Verlaging netkosten (piek en capaciteit)', (+N0.netkosten||0)-(+O0.netkosten||0)]);
   }
   if(bL>0) posten.push(['Laadsessies naar het bedrijf halen', bL]);
@@ -2175,6 +2179,15 @@ financieelPagina(null, _FIN_ZONDER_LAAD?'Financieel plan over 15 jaar — zonder
        '<div class="don-card"><div class="don-t">Zelfvoorziening van je verbruik</div>'+_donut(seg2, zvPct+'%','zelf voorzien')+_leg(seg2)+
          '<div class="don-foot">Jaarverbruik: <b>'+_num(verbr,verbr<100?1:0)+' MWh/jaar</b></div></div>'+
      '</div>';
+  // v0.71.0 (Johan): bestaande PV + batterij → toon de zelfconsumptie van VANDAAG (zonder batterij) ernaast: het grootste deel is
+  //   rechtstreeks zelfverbruik dat er vandaag al is; de batterij voegt enkel het deel «via de batterij» toe.
+  (function(){ var _bruto=prod+afg; if(!HAS_BATT || HAS_PV || !(nulInj>0) || !(_bruto>0)) return;
+    var _zc0=Math.max(0, Math.min(100, Math.round((_bruto-nulInj)/_bruto*100))), _d=zcPct-_zc0;
+    h+='<p class="note" style="background:#F3FBF6;border:1px solid #B7E0C6;border-radius:6px;padding:6px 9px">'+
+      _T3('<b>Vandaag, zonder batterij, verbruik je al '+_zc0+' % van je zonnestroom zelf</b> (rechtstreeks). Met de batterij wordt dat '+zcPct+' %: de batterij voegt '+(_d>=0?'+':'')+_d+' %-punt toe ('+_num(vb,vb<10?1:0)+' MWh zonnestroom via de batterij).',
+          '<b>Aujourd’hui, sans batterie, vous autoconsommez déjà '+_zc0+' % de votre production solaire</b> (en direct). Avec la batterie, cela passe à '+zcPct+' % : la batterie ajoute '+(_d>=0?'+':'')+_d+' points ('+_num(vb,vb<10?1:0)+' MWh d’énergie solaire via la batterie).',
+          '<b>Today, without a battery, you already use '+_zc0+' % of your solar power yourself</b> (directly). With the battery this becomes '+zcPct+' %: the battery adds '+(_d>=0?'+':'')+_d+' percentage points ('+_num(vb,vb<10?1:0)+' MWh of solar power via the battery).')+'</p>';
+  })();
   if(HAS_BATT) h+='<p class="note"><b>Zelfconsumptie</b> = het deel van je zonnestroom dat je zelf verbruikt (rest = injectie). '+
      '<b>Zelfvoorziening</b> = het deel van je verbruik dat je met eigen zon dekt (rest = afname van het net). '+
      '"Via de batterij" is zonnestroom die je overdag opslaat en later verbruikt, na omzetverlies (± '+Math.round(rte*100)+'% rendement).</p>';
