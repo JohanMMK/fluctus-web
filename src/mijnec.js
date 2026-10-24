@@ -1,3 +1,4 @@
+// mijnec.js v1.18.0 — 2026-10-24 — tegel «Campagne LinkedIn» voor alle managers (managerOnly; vlag alleenVoor blijft beschikbaar).
 // mijnec.js v1.17.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
 // mijnec.js v1.16.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
 // mijnec.js v1.15.0 — 2026-10-20 — «Mijn klanten» en «Energie-schil» enkel nog voor managers (adviseurs kregen ze mee via de toegang energiekompas van Energie-Compas).
@@ -56,7 +57,7 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'trechter', naam: 'Kompas-trechter', ico: '🧭', beschrijving: 'Hoeveel dossiers elke kompasfase bereikten (data → advies → offertes → bevestigd → sturing aan) en waar ze nu staan.', url: '/apps/trechter.html', managerOnly: true },   // 2026-10-18 (Johan): kompas-trechter
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
-  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', alleenVoor: ['oekene@gmail.com', 'patrick@energie-compas.eu'] },   // 2026-10-24 (Johan): LinkedIn-campagne
+  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne — v1.18.0: weer voor alle managers
 ];
 
 // v1.12.0 (Johan 18-10): tegels vertaald (FR/EN) — naam + beschrijving per app-id; NL blijft in APP_CATALOG.
