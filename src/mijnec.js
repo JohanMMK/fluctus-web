@@ -1,3 +1,4 @@
+// mijnec.js v1.16.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
 // mijnec.js v1.15.0 — 2026-10-20 — «Mijn klanten» en «Energie-schil» enkel nog voor managers (adviseurs kregen ze mee via de toegang energiekompas van Energie-Compas).
 // mijnec.js v1.14.0 — 2026-10-18 — tegel «Kompas-trechter» (managers, server ≥ 15.337.0).
 // mijnec.js v1.13.0 — 2026-10-18 — /login?naar=/apps/… : na het aanmelden (of al aangemeld) meteen door naar het dossier (mailknop via de adviseur).
@@ -54,6 +55,7 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'trechter', naam: 'Kompas-trechter', ico: '🧭', beschrijving: 'Hoeveel dossiers elke kompasfase bereikten (data → advies → offertes → bevestigd → sturing aan) en waar ze nu staan.', url: '/apps/trechter.html', managerOnly: true },   // 2026-10-18 (Johan): kompas-trechter
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
+  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne
 ];
 
 // v1.12.0 (Johan 18-10): tegels vertaald (FR/EN) — naam + beschrijving per app-id; NL blijft in APP_CATALOG.
@@ -78,7 +80,8 @@ const TEGEL_TR = {
   contracten:    { fr: ['Contrats', 'Rédiger des conventions de collaboration, les envoyer et les faire signer numériquement.'], en: ['Contracts', 'Draft cooperation agreements, send them and have them signed digitally.'] },
   'leadgen-log': { fr: ['Lead Generator — suivi', 'Qui fait quoi dans le Lead Generator : communes ouvertes, parkings consultés, leads notés.'], en: ['Lead Generator — follow-up', 'Who does what in the Lead Generator: municipalities opened, car parks viewed, leads noted.'] },
   trechter:      { fr: ['Entonnoir boussole', 'Combien de dossiers ont atteint chaque étape (données → conseil → offres → confirmé → pilotage actif).'], en: ['Compass funnel', 'How many files reached each step (data → advice → quotes → confirmed → control on).'] },
-  campagne:      { fr: ['Campagne EPC', 'Gérer les contacts et envoyer le mail de campagne avec la brochure.'], en: ['EPC campaign', 'Manage contacts and send the campaign e-mail with the brochure.'] }
+  campagne:      { fr: ['Campagne EPC', 'Gérer les contacts et envoyer le mail de campagne avec la brochure.'], en: ['EPC campaign', 'Manage contacts and send the campaign e-mail with the brochure.'] },
+  'campagne-li': { fr: ['Campagne LinkedIn', 'Tableau de bord : quoi publier et quand, blogs, premiers commentaires, ambassadeurs et leurs actions, sources.'], en: ['LinkedIn campaign', 'Dashboard: what to post and when, blogs, first comments, ambassadors and their actions, sources.'] },
 };
 function tegelTekst(a) { const L = _FR ? 'fr' : (_EN ? 'en' : null), x = L && TEGEL_TR[a.id] && TEGEL_TR[a.id][L]; return x ? { naam: x[0], beschrijving: x[1] } : { naam: a.naam, beschrijving: a.beschrijving }; }
 
