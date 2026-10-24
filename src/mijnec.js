@@ -1,3 +1,4 @@
+// mijnec.js v1.17.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
 // mijnec.js v1.16.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
 // mijnec.js v1.15.0 — 2026-10-20 — «Mijn klanten» en «Energie-schil» enkel nog voor managers (adviseurs kregen ze mee via de toegang energiekompas van Energie-Compas).
 // mijnec.js v1.14.0 — 2026-10-18 — tegel «Kompas-trechter» (managers, server ≥ 15.337.0).
@@ -55,7 +56,7 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'trechter', naam: 'Kompas-trechter', ico: '🧭', beschrijving: 'Hoeveel dossiers elke kompasfase bereikten (data → advies → offertes → bevestigd → sturing aan) en waar ze nu staan.', url: '/apps/trechter.html', managerOnly: true },   // 2026-10-18 (Johan): kompas-trechter
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
-  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne
+  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', alleenVoor: ['oekene@gmail.com', 'patrick@energie-compas.eu'] },   // 2026-10-24 (Johan): LinkedIn-campagne
 ];
 
 // v1.12.0 (Johan 18-10): tegels vertaald (FR/EN) — naam + beschrijving per app-id; NL blijft in APP_CATALOG.
@@ -193,7 +194,7 @@ async function hulpTeller(token) {
 
 async function toegankelijkeApps(token, email) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly);   // v1.8.0: ook gatedBy-tegels apart checken
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly && !a.alleenVoor);   // v1.8.0: ook gatedBy-tegels apart checken
   const verleend = new Set();
   let role = 'seller', isAdv = false, isMgr = false;   // v1.11.0: adviseur/manager-vlag uit de bulk-respons (proxy ≥ 15.316.0)
   // v1.9.0: één bulk-request (proxy ≥ 15.306.0); lukt dat niet → de oude check per tegel.
@@ -229,6 +230,7 @@ async function toegankelijkeApps(token, email) {
   }));
   if (role === 'manager') isMgr = true;
   return APP_CATALOG.filter((a) => {
+    if (a.alleenVoor) return a.alleenVoor.includes(String(email || '').toLowerCase());   // 2026-10-24
     if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.9.0
     const laag = laagVan(a);   // v1.11.0
     if (MGR_ENKEL.has(a.id)) return role === 'manager' || isMgr;   /* v1.15.0 (Johan 20-10) */
@@ -288,7 +290,7 @@ function tegelsUitCache(uid, email) {
   try {
     const ids = JSON.parse(localStorage.getItem('EC_MIJNEC_TEGELS_' + uid) || 'null');
     if (!Array.isArray(ids)) return null;
-    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter((a) => a && (!a.oekeneOnly || String(email || '').toLowerCase() === 'oekene@gmail.com'));
+    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter((a) => a && (!a.oekeneOnly || String(email || '').toLowerCase() === 'oekene@gmail.com') && (!a.alleenVoor || a.alleenVoor.includes(String(email || '').toLowerCase())));
   } catch (e) { return null; }
 }
 function tegelsInCache(uid, apps) {

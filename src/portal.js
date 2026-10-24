@@ -1,3 +1,4 @@
+// portal.js v1.23.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
 // portal.js v1.22.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
 // portal.js v1.21.0 — 2026-10-20 — «Mijn klanten» en «EnergieKompas» enkel nog voor managers (kwamen mee via de toegang energiekompas van Energie-Compas).
 // portal.js v1.20.1 — 2026-10-16 — tegel 'gemeenteplan' heet nu «Lead Generator» (app_id/URL ongewijzigd); log-tegel «Lead Generator — opvolging». portal.js v1.20.0 — 2026-10-16 — Gemeenteplan = Lead Generator (kaart per gemeente i.p.v. mail) + managerOnly-tegel opvolging (/apps/leadgen-log.html). portal.js v1.19.1 — 2026-10-16 — tegel 'Contracten' enkel voor oekene@gmail.com. portal.js v1.19.0 — 2026-10-16 — managerOnly-tegel 'contracten' (📝 Contracten → /apps/contracten.html). portal.js v1.18.0 — 2026-10-16 — SNELLER INLOGGEN: tegels uit de laatste sessie meteen tonen (localStorage per gebruiker), één POST /api/app-access/bulk i.p.v. 1 check per tegel (fallback op de oude checks), render niet opnieuw bij INITIAL_SESSION/TOKEN_REFRESHED (zelfde gebruiker), config + Supabase-lib parallel laden. portal.js v1.17.0 — 2026-10-15 — manager-portal: niet-actieve tegels (Mijn klanten, EnergieKompas, Academy, Kamino, Laadplein, Thuisladen, EPC-campagne) onderaan onder een lijn «Minder gebruikt», gedempt; Academy niet meer automatisch (per gebruiker toe te kennen); gatedBy-tegels (Energie-Compas, Mijn klanten, Laadplein) ook apart toe te kennen. portal.js v1.16.0 — 2026-10-12 — managerOnly-tegel 'campagne' (📣 EPC-campagne → /apps/campagne.html). v1.15.0 — 2026-10-11 — tegel 'hulp' toont het aantal hulpvragen dat nog beantwoord moet worden (rode teller, via /api/ek/hulp-overzicht). v1.14.0 — 2026-10-11 — managerOnly-tegel 'hulp' (🙋 Hulpvragen → /apps/hulp.html). v1.13.0 — 2026-10-11 — managerOnly-tegel 'demo' (🎬 Demo → /apps/demo.html). v1.12.0 — 2026-09-26 (Europe/Brussels) — tegel 'Mijn klanten' (adviseur.html); + tegel 'Energie-Compas' (ek.html)
@@ -105,7 +106,7 @@ const APP_CATALOG = [
   { id: 'contracten', naam: 'Contracten', ico: '📝', beschrijving: 'Samenwerkingsovereenkomsten (Brelco-model) opmaken, ter ondertekening sturen en digitaal laten tekenen.', url: '/apps/contracten.html', oekeneOnly: true },   // v1.19.0 (Johan 16-10): contracten — v1.19.1: enkel oekene
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
-  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne
+  { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', alleenVoor: ['oekene@gmail.com', 'patrick@energie-compas.eu'] },   // 2026-10-24 (Johan): LinkedIn-campagne
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
 ];
@@ -214,7 +215,7 @@ async function hulpTeller(token) {
 
 async function toegankelijkeApps(token, email) {
   const base = CFG.fluctusProxyUrl || '';
-  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly);   // v1.17.0: ook gatedBy-tegels apart checken (eigen toekenning)
+  const echte = APP_CATALOG.filter((a) => !a.altijd && !a.managerOnly && !a.oekeneOnly && !a.alleenVoor);   // v1.17.0: ook gatedBy-tegels apart checken (eigen toekenning)
   const verleend = new Set();
   let role = 'seller';
   // v1.18.0: één bulk-request (proxy ≥ 15.306.0); lukt dat niet → de oude check per tegel.
@@ -253,6 +254,7 @@ async function toegankelijkeApps(token, email) {
   // project-deeplink, Fase 2c) → toon hem defensief enkel de 'altijd'-tegels, ook
   // als er per ongeluk een app-grant op zijn account zou staan.
   return APP_CATALOG.filter((a) => {
+    if (a.alleenVoor) return a.alleenVoor.includes(String(email || '').toLowerCase());   // 2026-10-24
     if (a.oekeneOnly) return String(email || '').toLowerCase() === 'oekene@gmail.com';   // v1.19.1
     if (MGR_ENKEL.has(a.id)) return role === 'manager';   /* v1.21.0 (Johan 20-10) */
     if (a.altijd) return true;
@@ -383,7 +385,7 @@ function tegelsUitCache(uid) {
   try {
     const ids = JSON.parse(localStorage.getItem('FLX_PORTAL_TEGELS_' + uid) || 'null');
     if (!Array.isArray(ids)) return null;
-    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter((a) => a && !a.oekeneOnly);   // v1.19.1: oekene-tegel nooit uit cache tonen
+    return ids.map((id) => APP_CATALOG.find((a) => a.id === id)).filter((a) => a && !a.oekeneOnly && !a.alleenVoor);   // v1.19.1: oekene-tegel nooit uit cache tonen
   } catch (e) { return null; }
 }
 function tegelsInCache(uid, apps) {
