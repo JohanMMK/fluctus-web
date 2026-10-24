@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.73.0 (2026-10-24, Johan): «Ons advies» §3 — bestaande PV enkel in het gemeten profiel (factuur.geen = niets doen): zelfconsumptiewinst via de batterij geschat uit de energiebalans (MWh via batterij × €/MWh afname vandaag − verloren injectie), apart getoond i.p.v. in «Arbitrage op de spotmarkt». -->
 <!-- klantrapport.html v0.72.0 (2026-10-24, Johan): STAPPENPLAN stap 3 «Tekenen» → «Registreren» van de gekozen offerte in je dossier → gratis bankdossier (en voor ondernemingen het dossier verhoogde investeringsaftrek: energiestudie + VEKA-sjabloon); stap 4 vraagt een getekende én geregistreerde offerte. VEKA / VEKA-sjabloon enkel bij een installatie in Vlaanderen (GEWEST uit de postcode van het verbruiksadres; Wallonië → SPW Energie, Brussel → Leefmilieu Brussel, onbekend → «het bevoegde gewest»; sjabloon → «sjabloon TVT/IRR»). -->
 <!-- klantrapport.html v0.71.0 (2026-10-23, Johan): BESTAANDE PV + BATTERIJ — (1) «Ons advies» §3 toont de zelfconsumptie van de bestaande zonnestroom (via de batterij) als aparte post (energiewinst van de installatie zonder spotsturing, factuur.geen) i.p.v. alles onder «Arbitrage op de spotmarkt»; (2) bijlage Zelfconsumptie zet de zelfconsumptie VANDAAG (zonder batterij, uit de PV-injectie zonder installatie) naast die mét batterij, zodat duidelijk is welk deel de batterij toevoegt. -->
 <!-- klantrapport.html v0.70.0 (2026-10-21, Johan): (1) verhoogde investeringsaftrek = cash in JAAR 1 (vroeger jaar 2) in terugverdientijd, rendement en ROI. (2) Referentie «niets doen»: nieuw hoofdstuk «Vergelijking met niets doen» (investering, factuur vandaag vs met project, omzet, exploitatie, netto jaar 1, TVT, rendement, meerwaarde). (3) Betalend laadplein: voorblad toont de marge per kWh i.p.v. €/100 km t.o.v. diesel; blok 1 van «twee beslissingen» heet «Het laadplein bouwen — betalend voor bezoekers» (niet «De vloot elektrisch maken — t.o.v. diesel»), zonder dieselvergelijking. -->
@@ -877,6 +878,20 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
   if(G0 && G0.saldo!=null){
     var eN=(+N0.energie||0)+(+N0.heffingen||0), eG=(+G0.energie||0)+(+G0.heffingen||0), eO=(+O0.energie||0)+(+O0.heffingen||0);
     var pNet=(+N0.netkosten||0)-(+O0.netkosten||0), pZc=eN-eG, pArb=bF-pNet-pZc;
+    // v0.73.0 (Johan 24-10, Drieghe Azalea): bestaande PV zit enkel in het gemeten profiel (geen kWp in de sim) → de run «zonder spotsturing»
+    //   (factuur.geen) laat de batterij niets doen en is gelijk aan «niets doen». Dan schatten we de zelfconsumptiewinst uit de energiebalans:
+    //   zonnestroom via de batterij (MWh) × gemiddelde energie+heffingen per MWh afname vandaag − verloren injectie-opbrengst; begrensd door de energiewinst.
+    if(HAS_BEST_PV && HAS_BATT && !(pZc>Math.max(50,0.02*Math.abs(eN-eO)))){
+      try{
+        var Zb=D.zelfconsumptie||{}, viaB=+Zb.pv_via_batt_mwh||0, prod=+Zb.pv_productie_mwh||0, nInj=+Zb.pv_nul_injectie_mwh||0, verb=+Zb.verbruik_mwh||0;
+        var afN=verb-Math.max(0,prod-nInj);
+        if(viaB>0 && afN>0 && eN>0){
+          var injVerlies=Math.max(0,(+N0.injectie_opbrengst||0)-(+O0.injectie_opbrengst||0));
+          var zcSch=Math.max(0, Math.min(viaB*(eN/afN)-injVerlies, eN-eO));
+          if(zcSch>0){ pZc=zcSch; pArb=bF-pNet-pZc; }
+        }
+      }catch(eZc){}
+    }
     if(HAS_PV) posten.push(['Extra zelfconsumptie (zonnestroom zelf gebruiken)', pZc]);
     else if(HAS_BEST_PV && HAS_BATT && pZc>0) posten.push([_T3('Zelfconsumptie van je bestaande zonnestroom (via de batterij)','Autoconsommation de votre production solaire existante (via la batterie)','Self-consumption of your existing solar power (via the battery)'), pZc]);   // v0.71.0
     else pArb+=pZc;
