@@ -75,6 +75,65 @@ if (fs.existsSync(DIST)) {
     }
     next();
   });
+  // 2026-10-24 (Johan): LINKEDIN-CAMPAGNE — /blog en /blog/<slug> server-side gevuld uit fluctus-proxy (GET /api/blog…),
+  //   zodat LinkedIn de juiste titel/beeld toont (og-tags); /d/<code>/<post> = klik uit de ambassadeursmail → proxy
+  //   (meet de klik) → LinkedIn met de tekst klaar. Enkel op de EC-hosts.
+  const PROXY_URL = (process.env.FLUCTUS_PROXY_URL || 'https://lucid-amazement-production.up.railway.app').replace(/\/+$/, '');
+  const EC_WWW = 'https://www.energie-compas.eu';
+  const escH = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const absB = (b) => (!b ? `${EC_WWW}/ec-img/campagne/b00-basis.jpg` : (/^https?:/.test(b) ? b : EC_WWW + b));
+  async function proxyJson(pad) {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 6000);
+    try { const r = await fetch(PROXY_URL + pad, { signal: ac.signal, cache: 'no-store' }); const j = await r.json().catch(() => ({})); return { status: r.status, j }; }
+    finally { clearTimeout(t); }
+  }
+  function blogPagina(v) {
+    const f = path.join(DIST_EC, 'blog.html'); if (!fs.existsSync(f)) return null;
+    let h = fs.readFileSync(f, 'utf8');
+    const map = { __EC_TITEL__: escH(v.titel), __EC_BESCHRIJVING__: escH(v.beschrijving), __EC_OG_TITEL__: escH(v.ogTitel || v.titel), __EC_OG_BESCHRIJVING__: escH(v.beschrijving),
+      __EC_OG_BEELD__: escH(absB(v.beeld)), __EC_OG_URL__: escH(v.url), __EC_H1__: escH(v.h1), __EC_KERN__: v.kern, __EC_INHOUD__: v.inhoud };
+    for (const [k, w] of Object.entries(map)) h = h.split(k).join(w);
+    return h;
+  }
+  const KERN_STD = 'Zon en wind leveren gratis energie. Wat ertussen staat, is ons net. Wie zijn aansluiting beter gebruikt, haalt meer energie uit minder vermogen: hij bespaart structureel, oogst stabiel rendement en maakt ruimte vrij voor al zijn buren. Jezelf helpen helpt iedereen.';
+  app.use(async (req, res, next) => {
+    const host = String(req.hostname || '').toLowerCase();
+    if (!EC_HOSTS.has(host) || req.path.startsWith('/api/')) return next();
+    const dm = req.path.match(/^\/d\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9_-]{1,60})\/?$/);
+    if (dm) return res.redirect(302, `${PROXY_URL}/api/c/${encodeURIComponent(dm[1])}/${encodeURIComponent(dm[2])}`);
+    const bm = req.path.match(/^\/blog(?:\/([^\/]+))?\/?$/);
+    if (!bm) return next();
+    try {
+      if (!bm[1]) {   // overzicht
+        const { j } = await proxyJson('/api/blog');
+        const lijst = (j && j.blogs) || [];
+        const kern = escH((j && j.kern) || KERN_STD) + (lijst.some((b) => b.basis) ? ` <a href="/blog/${escH((lijst.find((b) => b.basis) || {}).slug)}">Lees de basis →</a>` : '');
+        const inhoud = lijst.length
+          ? '<div class="blog-lijst">' + lijst.map((b) => `<a class="blog-kaart" href="/blog/${encodeURIComponent(b.slug)}">${b.banner ? `<img src="${escH(b.banner)}" alt="" loading="lazy">` : ''}<div><h3>${escH(b.titel)}</h3><p>${escH(b.lead)}</p>${b.datum ? `<p class="dt">${escH(b.datum.split('-').reverse().join('/'))}</p>` : ''}</div></a>`).join('') + '</div>'
+          : '<p>De eerste berichten verschijnen binnenkort.</p>';
+        const html = blogPagina({ titel: 'Blog — Energie-Compas', beschrijving: 'Hoe je je aansluiting beter gebruikt: voor je eigen rendement en voor al je buren.', h1: 'Jezelf helpen helpt iedereen', url: `${EC_WWW}/blog`, beeld: '/ec-img/campagne/b00-basis.jpg', kern, inhoud });
+        if (!html) return next();
+        res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.send(html);
+      }
+      const slug = decodeURIComponent(bm[1]);
+      const { status, j } = await proxyJson('/api/blog/' + encodeURIComponent(slug));
+      if (status !== 200 || !j || !j.blog) {
+        const html = blogPagina({ titel: 'Niet gevonden — Energie-Compas', beschrijving: '', h1: 'Dit bericht verschijnt binnenkort', url: `${EC_WWW}/blog`, beeld: '', kern: escH(KERN_STD), inhoud: '<p>Dit bericht is (nog) niet gepubliceerd.</p><p><a class="blog-terug" href="/blog">← Alle berichten</a></p>' });
+        res.status(404).setHeader('Content-Type', 'text/html; charset=utf-8'); return res.send(html || 'Niet gevonden');
+      }
+      const b = j.blog;
+      const kern = escH(j.kern || KERN_STD) + (j.basis && j.basis !== b.slug ? ` <a href="/blog/${escH(j.basis)}">Lees de basis →</a>` : '');
+      const inhoud = `<article class="blog-art">${b.banner ? `<img class="banner" src="${escH(b.banner)}" alt="">` : ''}${b.html || (b.lead ? `<p>${escH(b.lead)}</p>` : '')}`
+        + `<div class="blog-cta"><a class="btn" href="/contact">Wat betekent dit voor jou? Vraag je gratis analyse</a><a class="btn ghost" href="/ambassadeur">Ben je adviseur? Word ambassadeur</a></div>`
+        + `<p><a class="blog-terug" href="/blog">← Alle berichten</a></p></article>`;
+      const html = blogPagina({ titel: `${b.titel} — Energie-Compas`, ogTitel: b.titel, beschrijving: b.lead || '', h1: b.titel, url: `${EC_WWW}/blog/${encodeURIComponent(b.slug)}`, beeld: b.banner, kern, inhoud });
+      if (!html) return next();
+      res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.send(html);
+    } catch (e) {
+      console.warn('[blog]', e.message);
+      return next();
+    }
+  });
   // Host-routing voor de Energie-Compas-site: clean URLs op de root van energie-compas.eu.
   app.use((req, res, next) => {
     const host = String(req.hostname || '').toLowerCase();
