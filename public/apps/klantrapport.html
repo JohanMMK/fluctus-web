@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.75.0 (2026-10-25, Johan): PAGINERING VOOR ALLE PAGINA'S — niets weggeknipt (ook geen voetnoot), blokken (tabel/grafiek/rooster/kader) nooit over twee bladen, tussenkop verhuist mee; klein restje → pagina iets compacter (zoom ≥ 0,85) i.p.v. een bijna leeg vervolgblad. -->
 <!-- klantrapport.html v0.74.0 (2026-10-25, Johan): SCHRIJFREGELS (KB Schrijfregels_universeel.md) — geen herhaling van het voorblad in hoofdstuk 1, één uitleg «dynamisch contract» + «Vandaag + laden», jargon in gewone taal (kaarten, hoofdstuk dynamisch contract/EMS, financieel plan: break-even/ROI/OPEX/netto meerwaarde), jaar 1 in de tabel gemarkeerd (incl. belastingvoordeel), lege rij «Varia» weg, eigen uitleg per hoofdstuk in de inhoud + woordenlijst, bijlage injectie: 2 kaarten + 1 zin onbalans. NL/FR/EN via _L3/_T3. Geldt ook voor white-label (D.merk). -->
 <!-- klantrapport.html v0.73.0 (2026-10-24, Johan): «Ons advies» §3 — bestaande PV enkel in het gemeten profiel (factuur.geen = niets doen): zelfconsumptiewinst via de batterij geschat uit de energiebalans (MWh via batterij × €/MWh afname vandaag − verloren injectie), apart getoond i.p.v. in «Arbitrage op de spotmarkt». -->
 <!-- klantrapport.html v0.72.0 (2026-10-24, Johan): STAPPENPLAN stap 3 «Tekenen» → «Registreren» van de gekozen offerte in je dossier → gratis bankdossier (en voor ondernemingen het dossier verhoogde investeringsaftrek: energiestudie + VEKA-sjabloon); stap 4 vraagt een getekende én geregistreerde offerte. VEKA / VEKA-sjabloon enkel bij een installatie in Vlaanderen (GEWEST uit de postcode van het verbruiksadres; Wallonië → SPW Energie, Brussel → Leefmilieu Brussel, onbekend → «het bevoegde gewest»; sjabloon → «sjabloon TVT/IRR»). -->
@@ -129,8 +130,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.4.13"></script>
-<script src="en-ec-seg.js?v=1.0.28"></script>
+<script src="fr-ec-seg.js?v=1.4.14"></script>
+<script src="en-ec-seg.js?v=1.0.29"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -2909,42 +2910,58 @@ async function _genPdf(){
 //  geraakt; cover/achterpagina/tabel-only blijven ongemoeid.
 // ============================================================================
 (function _splitRoosterPaginas(){
+  // v0.75.0 (Johan 25-10): ALGEMENE PAGINERING voor ALLE pagina's (niet enkel pagina's met roosters):
+  //   (1) niets wordt weggeknipt: wat niet past, verhuist als geheel blok (tabel, grafiek, rooster, kader, sectie) naar een
+  //       «(vervolg)»-pagina — nooit een blok over twee pagina's; een tussenkop (h2/h3) verhuist mee met wat erop volgt;
+  //   (2) geen vervolgblad voor een klein restje: past de pagina met ≤ 15 % verkleining (CSS zoom ≥ 0,85), dan wordt de
+  //       inhoud van die pagina iets compacter gezet in plaats van ± 2 cm tekst naar een nieuw blad te sturen;
+  //   (3) één blok dat op zich groter is dan een blad wordt verkleind tot het past (min. 0,70).
+  //   Meting met getBoundingClientRect (werkt correct met zoom). Voorblad/achterblad/scheidingsblad blijven ongemoeid.
   try{
     if(!R) return;
     var probe=document.createElement('div');
     probe.style.cssText='position:absolute;left:-9999px;top:0;height:100mm;width:1mm;visibility:hidden';
-    R.appendChild(probe); var pxmm=probe.offsetHeight/100; R.removeChild(probe);
+    R.appendChild(probe); var pxmm=probe.getBoundingClientRect().height/100; R.removeChild(probe);
     if(!pxmm || !isFinite(pxmm) || pxmm<=0) return;
-    var EPS=6, guard=0;
-    function kidH(el){ var s=getComputedStyle(el); return el.offsetHeight+(parseFloat(s.marginTop)||0)+(parseFloat(s.marginBottom)||0); }
-    function isBlok(el){ return el.classList && (el.classList.contains('heat-wrap')||el.classList.contains('kg')||el.classList.contains('split-blok')); }   // v0.26.0: + .split-blok (laadplein-bijlage)
+    var EPS=6, guard=0, ZMIN=0.85, ZMIN_BLOK=0.70, RESTJE=0.25;
+    function availVan(pg){ var cs=getComputedStyle(pg); var foot=pg.querySelector('.a4-foot');
+      return 296*pxmm-(parseFloat(cs.paddingTop)||0)-(parseFloat(cs.paddingBottom)||0)-(foot?foot.getBoundingClientRect().height:0)-EPS; }
+    function onderkant(content, el){ var cr=content.getBoundingClientRect(), r=el.getBoundingClientRect(); var mb=parseFloat(getComputedStyle(el).marginBottom)||0; var z=parseFloat(content.style.zoom)||1; return (r.bottom-cr.top)+mb*z; }
+    function natuurlijk(content){ var kids=content.children, m=0; for(var i=0;i<kids.length;i++){ var o=onderkant(content,kids[i]); if(o>m) m=o; } return m; }
+    function isKop(el){ return /^H[2-4]$/.test(el.tagName) || (el.classList && el.classList.contains('kop')); }
+    function zetZoom(content,z){ content.style.zoom = (z>=0.999?'':String(Math.round(z*1000)/1000)); }
     var pi=0;
     while(pi < R.querySelectorAll('.a4').length){
-      if(++guard>500) break;
+      if(++guard>600) break;
       var pg=R.querySelectorAll('.a4')[pi];
       var content=pg.querySelector('.a4-content');
-      if(!content || !content.querySelector('.heat-wrap, .kg, .split-blok')){ pi++; continue; }
-      var cs=getComputedStyle(pg);
-      var padT=parseFloat(cs.paddingTop)||0, padB=parseFloat(cs.paddingBottom)||0;
-      var foot=pg.querySelector('.a4-foot'); var footH=foot?foot.offsetHeight:0;
-      var avail=296*pxmm - padT - padB - footH - EPS;
+      if(!content){ pi++; continue; }
+      var avail=availVan(pg), nat=natuurlijk(content);
+      if(nat<=avail){ pi++; continue; }
+      var vast=pg.classList.contains('cover')||pg.classList.contains('back')||pg.classList.contains('divider');
+      if(vast){ pi++; continue; }   // voorblad/achterblad/scheidingsblad: eigen vaste opmaak (vullen het blad bewust)
       var kids=[].slice.call(content.children);
-      var sum=0; kids.forEach(function(el){ sum+=kidH(el); });
-      if(sum<=avail){ pi++; continue; }                 // past op 1 blad → ok
-      // bepaal splitpunt: hou leidende kop/intro + zoveel blokken als passen (min. 1 blok)
-      var used=0, split=-1, zagBlok=false;
-      for(var k=0;k<kids.length;k++){
-        var el=kids[k], h=kidH(el), blk=isBlok(el);
-        if(blk && zagBlok && used+h>avail){ split=k; break; }   // dit blok past niet meer
-        // v0.31.0: een .split-sectie (tekstsectie op p. 2) mag ook als EERSTE blok verhuizen, als er inhoud vóór staat en ze op een vers blad past
-        if(blk && !zagBlok && used>0 && el.classList.contains('split-sectie') && used+h>avail && h<avail*0.85){ split=k; break; }
-        used+=h; if(blk) zagBlok=true;
+      // splitpunt: eerste kind dat niet meer past (de paginakop + titel tellen niet als inhoud)
+      var split=-1, eersteInhoud=0;
+      while(eersteInhoud<kids.length && (kids[eersteInhoud].classList.contains('kop') || kids[eersteInhoud].tagName==='H1')) eersteInhoud++;
+      for(var k=eersteInhoud;k<kids.length;k++){ if(onderkant(content,kids[k])>avail){ split=k; break; } }
+      // tussenkoppen verhuizen mee met wat erop volgt
+      while(split>eersteInhoud && isKop(kids[split-1])) split--;
+      var restH = split>=0 ? (nat - (split>0 ? (kids[split].getBoundingClientRect().top-content.getBoundingClientRect().top) : 0)) : 0;
+      var zFit = avail/nat;
+      // (2) klein restje → pagina iets compacter zetten in plaats van een bijna leeg vervolgblad
+      if(vast || split<=eersteInhoud || (restH < avail*RESTJE && zFit>=ZMIN)){
+        var zMin = vast ? ZMIN_BLOK : (split<=eersteInhoud ? ZMIN_BLOK : ZMIN);
+        var z=Math.max(zMin, zFit*0.995); zetZoom(content, z);
+        // controleer na het zetten (tekst herloopt bij zoom → kan iets anders uitvallen)
+        var tries=0; while(natuurlijk(content)>avail && tries<6 && z>zMin){ z=Math.max(zMin, z-0.02); zetZoom(content,z); tries++; }
+        if(natuurlijk(content)<=avail || vast || split<=eersteInhoud){ pi++; continue; }
+        zetZoom(content,1);   // lukte niet binnen de grens → toch splitsen
       }
-      if(split<0){ pi++; continue; }                    // niets te verplaatsen (1 reusachtig blok) → laat staan
       var move=kids.slice(split);
       // bouw vervolg-pagina
       var titel=''; var h1=pg.querySelector('h1');
-      if(h1) titel=h1.textContent.replace(/\s*\(vervolg\)\s*$/,'');
+      if(h1) titel=h1.textContent.replace(/\s*\((vervolg|suite|continued)\)\s*$/,'');
       var kopNode=pg.querySelector('.kop');
       var np=document.createElement('div'); np.className='a4';
       var nc=document.createElement('div'); nc.className='a4-content';
@@ -2958,7 +2975,7 @@ async function _genPdf(){
       nf.innerHTML='<span>'+(typeof _identLeft==='function'?_identLeft():'')+(window._DEMO?' · voorbeeld':'')+'</span><span class="a4-nr"></span>';
       np.appendChild(nc); np.appendChild(nf);
       pg.parentNode.insertBefore(np, pg.nextSibling);
-      pi++;   // ga verder; de nieuwe pagina wordt zo dadelijk zelf geevalueerd (kan opnieuw splitsen)
+      pi++;   // de nieuwe pagina wordt zo dadelijk zelf geëvalueerd (kan opnieuw splitsen of verkleinen)
     }
     // hernummer alle voetteksten
     var pref=(typeof PID!=='undefined' && PID)?('Dossier '+(typeof esc==='function'?esc(PID):PID)+' · '):'';
