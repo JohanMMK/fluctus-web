@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- energiemarkt.html v1.6.0 — 2026-10-27 (Johan): ZON-DATA TERUG — server v15.354.1 haalt PV uit de nieuwe Elia-datasets ods209/ods210 (België-totaal); oude zon-cache eenmalig ÷3 (was de som van België + gewesten + provincies); waarschuwing als Elia een deel van de periode niet levert. -->
 <!-- energiemarkt.html v1.5.0 — 2026-10-16 15:45 (Europe/Madrid) — MUISAANWIJZER OMGEDRAAID (Johan): gewone aanwijzer =
      klassiek pijltje met lichtgroene invulling (#8ee5a8, donkergroene rand; ec-cursor-pijl.png 24px + @2x). Boven iets
      klikbaars = het EC-kompas i.p.v. het handje (ec-cursor-klik.png 34px + @2x, volle dekking, donkere halo, hotspot op de
@@ -692,6 +693,7 @@ async function fetchRenewable(dataset, label, cacheKey, fromDate, toDate){
       var data=await r.json();
       cache[cacheKey]=mergeArr(cache[cacheKey]||[], (data.data||[]).map(function(p){return{t:new Date(p.t).getTime(),v:p.v};}));
       log(label+' segment klaar: '+(data.data||[]).length+' punten — opslaan...','ok');
+      if(data.waarschuwing&&data.waarschuwing.length) log(label+': deel van de periode niet beschikbaar bij Elia — '+String(data.waarschuwing[0]).slice(0,140),'warn');   // v1.6.0
       // cacheKey kan 'wind' of 'solar' zijn; dat is ook de dataset-naam op de server
       var kb=await saveDataset(cacheKey, cache[cacheKey]);
       if(kb!==null)log(label+' opgeslagen ('+kb+' KB)','ok');
@@ -734,6 +736,21 @@ window.fdFetch=async function(){
       }
       cache.spot=[];
       cache.cacheVersion='entsoe-v1';
+    }
+
+    // 1c. v1.6.0 (Johan 27-10): ZON-SCHAAL. De oude zon-reeks (Elia ods032, group_by-som) telde België + gewesten +
+    //   provincies op (≈ 3× het Belgische totaal: pieken tot 23,7 GW). Sinds 26/10 leveren we het echte Belgische totaal
+    //   (ods209/ods210, server v15.354.1). Eenmalige correctie ÷3 van de oude punten — idempotent: enkel als de oude
+    //   reeks nog een piek > 12 GW heeft (het Belgische PV-park haalt dat niet). Zonnevorm (solar_norm) wijzigt niet.
+    if(!cache._loadErrors.solar && cache.solar && cache.solar.length){
+      var _grens=Date.UTC(2026,9,26), _mx=0;
+      cache.solar.forEach(function(p){ if(p.t<_grens && p.v>_mx) _mx=p.v; });
+      if(_mx>12000){
+        cache.solar=cache.solar.map(function(p){ return p.t<_grens ? {t:p.t, v:Math.round(p.v/3*10)/10} : p; });
+        log('Zon-schaal gecorrigeerd: oude reeks was de som van België + gewesten + provincies (piek '+Math.round(_mx)+' MW) — nu het Belgische totaal (÷3)','warn');
+        var _kbz=await saveDataset('solar', cache.solar);
+        if(_kbz!==null) log('Zon (gecorrigeerd) opgeslagen ('+_kbz+' KB)','ok');
+      }
     }
 
     // 2. Bepaal PER DATASET wat nog ontbreekt
