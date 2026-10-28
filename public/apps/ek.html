@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.122.0 (2026-10-28, Johan): vinkje «prijs is all-in (incl. aansluiting verzwaren)» bij Pas aan — de eigen totaalprijs bevat dan de verzwaring; installatieprijs = totaal − verzwaring van die cel (TVT/rendement/rapport volgen), bewaard als allIn op de combi. -->
 <!-- ek.html v0.121.0 (2026-10-28, Johan): «Wat je investeert» — invulveld heet «Prijs installatie»; een netverzwaring staat er apart onder (+ Aansluiting verzwaren) en het totaal toont installatie + aansluiting. Geen rekenwijziging. -->
 <!-- ek.html v0.120.0 (2026-10-27, Johan): MS-stap standaard € 120.000 (nieuwe cabine) en LS/MS-grens 80 kVA in de standaardinstellingen en het verzwaring-vangnet. -->
 <!-- ek.html v0.119.0 (2026-10-27, Johan): offertekaart «Investering incl. laadpalen» rekent met de laadpalenprijs van de offerte (zoals het rapport) i.p.v. de modelprijs × standaard aantal palen. -->
@@ -1366,6 +1367,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekMaandLabel(van,tot){ try{ var M=['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']; var a=new Date(van),b=new Date(tot); var d=b&&!isNaN(b)?new Date(b.getTime()-86400000):a; var mi=d.getMonth(); return (mi>=0&&mi<12)?M[mi]:''; }catch(e){ return ''; } }
   // ── Fase 2 (Johan) — "pas aan"-overrides die op het HELE rooster inwerken ──
   var CRATE_OV=null;     // #2: C-factor (kWh/kW) uit "pas aan" → geldt voor ALLE batterij-opties (nieuwe sweep met crate)
+  var PRIJS_ALLIN=false;   // v0.122.0 (Johan 28-10): eigen totaalprijs is all-in (incl. aansluiting verzwaren)
   var PRIJS_FACTOR=1;    // #3: prijs-prorata — totale-prijs-override / engineprijs → schaalt ELKE cel (investering + TVT/rendement)
   var _prijsTouched=false; // #3: heeft de gebruiker het totaalprijs-veld zelf getypt? (dan volgt de prijs de componenten niet meer)
   var OPEX_JAAR=0;       // v0.24.27 (Johan): JAARLIJKSE exploitatiekost (€/jaar) via "Pas aan" → trekt jaarlijks van de cashflow af (TVT/rendement/15j-plan), geïndexeerd met inflatie
@@ -2150,6 +2152,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _customExtra(a){ if(!a || !a._custom) return 0; var f=+a._prijsFactor||1; if(Math.abs(f-1)<1e-6) return 0;
     var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0), ac=(a._ac!=null?a._ac:_acDefault()), dc=(a._dc!=null?a._dc:0);
     return Math.round(_invTotRaw(pvKwp, battKwh, ac, dc).tot*(f-1)); }
+  // v0.122.0 (Johan 28-10, Deca): «prijs is all-in» — de eigen totaalprijs bevat de aansluiting/verzwaring al → de installatieprijs
+  //   = eigen totaal − verzwaring van DIE cel. Factor telkens herrekend op de verzwaring van de (exact) berekende cel.
+  function _comboVan(pv, bkw){ var key=Math.round(+pv||0)+'|'+Math.round(+bkw||0); for(var k=0;k<CUSTOM_COMBOS.length;k++){ var c=CUSTOM_COMBOS[k]; if((Math.round(+c.pv||0)+'|'+Math.round(+c.battKw||0))===key) return c; } return null; }
+  function _allInFactor(c, cell){ if(!c || !c.allIn || !(+c.prijsTot>0)) return null;
+    var kwh=Math.round((c.battKwh!=null&&c.battKwh>0)?c.battKwh:((+c.battKw||0)*_crate())), raw=_invTotRaw(+c.pv||0, kwh, (c.ac|0), (c.dc|0)).tot;
+    var vz=Math.max(0, +(cell&&cell.verzwaring_eenmalig)||0); return raw>0 ? Math.max(0, (+c.prijsTot)-vz)/raw : null; }
   function _invVan(a){ if(!a) return null;
     if(a._custom && a.capex!=null) return Math.round((+a.capex||0)+_customExtra(a));   // v0.67.4: backend-capex + eigen meerprijs
     // v0.33.4 (Johan): TOTALE investering = de backend-capex (anker PV+batterij + laadpalen), zodat "Totale investering" = het
@@ -2232,6 +2240,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _hmKiesDbl(ry,cx){ _hmKiesExact=true; try{ _hmKies(ry,cx); } finally { _hmKiesExact=false; } }
   function _hmKies(ry,cx){ var H=HM; if(!H) return; var a=_cellAt(H,ry,cx); if(!a) return;
     // v0.24.26 (Johan): kies je een manuele combi in de tabel → herstel ZIJN prijs, exploitatiekost en palen (INV_OV) → paycards + "toon rapport" kloppen voor die combi.
+    PRIJS_ALLIN=!!(a._custom && a._allIn);   // v0.122.0
     if(a._custom){ PRIJS_FACTOR=(+a._prijsFactor>0?a._prijsFactor:1); OPEX_JAAR=(+a._opex||0); OPEX_RATIO=(+a._opexRatio||0); INV_OV={ pvKwp:(+a.pvKwp||0), battKw:(+a.battKw||0), battKwh:(+a.battKwh||0), ac:(a._ac!=null?a._ac:0), dc:(a._dc!=null?a._dc:0) }; }
     H.sel=a; renderRapport(a); _hmDetail(a); renderHeatmap();
     if(_hmKiesExact && a._interp && !a._exact && H.compute){ var d=$('hm-detail'); if(d) d.innerHTML='± geschat — ⏳ exacte berekening…';
@@ -2432,21 +2441,30 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       // #3: totaalprijs bewerkbaar → prijs-prorata over alle cellen.
       // v0.121.0 (Johan 28-10, Deca): het invulveld is de prijs van de INSTALLATIE; een netverzwaring komt er apart bij (Fluvius) — nu ook zo benoemd.
       var _vzE=(typeof HM!=='undefined'&&HM&&HM.sel)?Math.max(0,+HM.sel.verzwaring_eenmalig||0):0;
-      rows+='<tr class="tot"><td>Prijs installatie (pas gerust aan)'+(_vzE>0?'<div class="invspec">zonder aansluiting verzwaren</div>':'')+'</td><td class="r"><input type="number" id="inv-tot-in" value="'+Math.round(m.tot)+'" step="100" min="0" inputmode="numeric" class="invin" style="width:130px"> €</td></tr>';
-      if(_vzE>0) rows+=_invRij('+ Aansluiting verzwaren', 'komt er apart bij (netbeheerder), niet in de installatieprijs: '+eur(_vzE));
+      window._INV_VZE=_vzE;
+      rows+='<tr class="tot"><td><span id="inv-tot-lbl">'+(PRIJS_ALLIN?'Totaalprijs all-in (pas gerust aan)':'Prijs installatie (pas gerust aan)')+'</span>'
+           +'<div class="invspec"><label style="cursor:pointer"><input type="checkbox" id="inv-allin"'+(PRIJS_ALLIN?' checked':'')+'> prijs is all-in (incl. aansluiting verzwaren)</label></div></td>'
+           +'<td class="r"><input type="number" id="inv-tot-in" value="'+Math.round(m.tot+(PRIJS_ALLIN?_vzE:0))+'" step="100" min="0" inputmode="numeric" class="invin" style="width:130px"> €</td></tr>';
+      if(_vzE>0) rows+='<tr><td>'+esc0('Aansluiting verzwaren')+'<div class="invspec" id="inv-vz-txt">'+(PRIJS_ALLIN?('zit in je all-in prijs: '+eur(_vzE)):('komt er apart bij (netbeheerder), niet in de installatieprijs: '+eur(_vzE)))+'</div></td><td class="r"></td></tr>';
     } else {
       if((+OPEX_JAAR||0)>0 && !_ekIsPart()) rows+=_invRij('Jaarlijkse exploitatiekost', String(Math.round(+OPEX_JAAR||0))+' €/jaar');
       var _vzN=(typeof HM!=='undefined'&&HM&&HM.sel)?Math.max(0,+HM.sel.verzwaring_eenmalig||0):0;   // v0.107.0: aansluiting/verzwaring die mét installatie nog nodig is
-      if(_vzN>0){   // v0.121.0: installatieprijs en netverzwaring apart tonen, zodat een eigen totaalprijs herkenbaar blijft
+      if(_vzN>0 && PRIJS_ALLIN){   // v0.122.0: all-in — de verzwaring zit in de eigen totaalprijs
+        rows+=_invRij('Aansluiting verzwaren', 'zit in je all-in prijs: '+eur(_vzN));
+      } else if(_vzN>0){   // v0.121.0: installatieprijs en netverzwaring apart tonen, zodat een eigen totaalprijs herkenbaar blijft
         rows+=_invRij('Prijs installatie', eur(m.tot));
         rows+=_invRij('+ Aansluiting verzwaren', 'nog nodig mét je installatie, bij de netbeheerder (niet in de installatieprijs): '+eur(_vzN));
       }
-      rows+='<tr class="tot"><td>Totale investering (indicatief)'+(_vzN>0?'<div class="invspec">installatie '+eur(m.tot)+' + aansluiting '+eur(_vzN)+'</div>':'')+'</td><td class="r" id="inv-tot">'+eur(m.tot+_vzN)+'</td></tr>';
+      rows+='<tr class="tot"><td>Totale investering (indicatief)'+(_vzN>0?('<div class="invspec">'+(PRIJS_ALLIN?('all-in, waarvan installatie '+eur(m.tot)+' en aansluiting '+eur(_vzN)):('installatie '+eur(m.tot)+' + aansluiting '+eur(_vzN)))+'</div>'):'')+'</td><td class="r" id="inv-tot">'+eur(m.tot+_vzN)+'</td></tr>';
     }
     $('invrows').innerHTML=rows;
     if(INV_EDIT){ _prijsTouched=false;
       ['inv-pv','inv-bkw','inv-bkwh-in','inv-ac','inv-dc'].forEach(function(id){ var el=$(id); if(el) el.oninput=_invRecalc; });
       var pt=$('inv-tot-in'); if(pt) pt.oninput=function(){ _prijsTouched=true; };
+      var ai=$('inv-allin'); if(ai) ai.onchange=function(){ var on=ai.checked, vz=+window._INV_VZE||0, l=$('inv-tot-lbl'), t=$('inv-vz-txt');   // v0.122.0
+        if(l) l.textContent=on?'Totaalprijs all-in (pas gerust aan)':'Prijs installatie (pas gerust aan)';
+        if(t) t.textContent=on?('zit in je all-in prijs: '+eur(vz)):('komt er apart bij (netbeheerder), niet in de installatieprijs: '+eur(vz));
+        if(!_prijsTouched) _invRecalc(); };
       _invRecalc();
     }
   }
@@ -2457,7 +2475,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var crate=(bkw>0&&bkwh>0)?(Math.round(bkwh/bkw*100)/100):_crate();
     if($('inv-crate')) $('inv-crate').textContent='C-factor '+String(crate).replace('.',',')+' u'+(Math.abs(crate-_crate())>0.05?' — wijzigt álle batterij-opties':'');
     // Prijs volgt de componenten zolang de klant het totaalveld niet zelf typte.
-    if(!_prijsTouched && $('inv-tot-in')) $('inv-tot-in').value=Math.round(_invTotMajor(pv,bkwh,ac,dc).tot);
+    if(!_prijsTouched && $('inv-tot-in')) $('inv-tot-in').value=Math.round(_invTotMajor(pv,bkwh,ac,dc).tot+(($('inv-allin')&&$('inv-allin').checked)?(+window._INV_VZE||0):0));
   }
   function _invEditToggle(){
     if(INV_EDIT){ _invSave(); return; }
@@ -2471,14 +2489,16 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var ac=Math.max(0,Math.round(+($('inv-ac')&&$('inv-ac').value)||0)), dc=Math.max(0,Math.round(+($('inv-dc')&&$('inv-dc').value)||0));
     // #3 prijs-prorata: factor = (manuele totaalprijs) / (factor-vrije engineprijs van deze combi).
     var manual=+($('inv-tot-in')&&$('inv-tot-in').value)||0, rawTot=_invTotRaw(pv,bkwh,ac,dc).tot;
-    PRIJS_FACTOR=(manual>0&&rawTot>0)?(manual/rawTot):1;
+    PRIJS_ALLIN=!!($('inv-allin')&&$('inv-allin').checked);   // v0.122.0
+    var _vzS=PRIJS_ALLIN?(+window._INV_VZE||0):0;   // voorlopig de verzwaring van de huidige cel; na de exacte berekening herrekend (stamp)
+    PRIJS_FACTOR=(manual>0&&rawTot>0)?(Math.max(0,manual-_vzS)/rawTot):1;
     OPEX_JAAR=Math.max(0, +($('inv-opex')&&$('inv-opex').value)||0);   // v0.24.27: JAARLIJKSE exploitatiekost
     OPEX_RATIO=(OPEX_JAAR>0)?(OPEX_JAAR/Math.max(1,_invTotMajor(pv,bkwh,ac,dc).tot)):0;   // €/jaar per € investering → pro-rata over alle cellen
     // #2 C-factor uit kW × kWh.
     var crate=(bkw>0&&bkwh>0)?(bkwh/bkw):_crate();
     INV_OV={ pvKwp:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc }; INV_EDIT=false; _invBtnLabel();
     // v0.24.26 (Johan): onthoud deze manuele combi (incl. prijs + exploitatiekost) → overleeft "opnieuw"/herrekening → terug op de heatmap.
-    (function(){ var e={ pv:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc, prijsFactor:PRIJS_FACTOR, prijsTot:((manual>0&&rawTot>0)?Math.round(manual):null), opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:crate };   // v0.69.1: eigen totaal ABSOLUUT bewaren
+    (function(){ var e={ pv:pv, battKw:bkw, battKwh:bkwh, ac:ac, dc:dc, prijsFactor:PRIJS_FACTOR, prijsTot:((manual>0&&rawTot>0)?Math.round(manual):null), allIn:(PRIJS_ALLIN&&manual>0&&rawTot>0), opex:OPEX_JAAR, opexRatio:OPEX_RATIO, crate:crate };   // v0.69.1: eigen totaal ABSOLUUT bewaren
       var key=Math.round(pv)+'|'+Math.round(bkw), i=-1;
       for(var k=0;k<CUSTOM_COMBOS.length;k++){ if((Math.round(CUSTOM_COMBOS[k].pv)+'|'+Math.round(CUSTOM_COMBOS[k].battKw))===key){ i=k; break; } }
       if(i>=0) CUSTOM_COMBOS[i]=e; else CUSTOM_COMBOS.push(e); })();
@@ -2505,7 +2525,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{ _ekPersistBevestigd(); }catch(e){}   // v0.24.36 (Johan): combi meteen op het dossier bewaren (ook zonder her-sweep) → niet vergeten bij heropenen
     var d=$('hm-detail'); if(d) d.innerHTML='± je combinatie — ⏳ exacte berekening…';
     // v0.24.26: stempel de cel met ZIJN prijs/exploitatiekost/palen → eigen investering + TVT, en herstelbaar bij herselectie.
-    var stamp=function(cell){ if(cell){ cell._custom=true; cell._prijsFactor=PRIJS_FACTOR; cell._opex=OPEX_JAAR; cell._opexRatio=OPEX_RATIO; cell._ac=(INV_OV?INV_OV.ac:0); cell._dc=(INV_OV?INV_OV.dc:0); } };
+    var stamp=function(cell){ if(cell){ var _cb=_comboVan(pv,bkw), _fa=_allInFactor(_cb,cell); if(_fa!=null){ PRIJS_FACTOR=_fa; if(_cb) _cb.prijsFactor=_fa; }   // v0.122.0: all-in → factor op de verzwaring van deze cel
+        cell._allIn=!!(_cb&&_cb.allIn); cell._custom=true; cell._prijsFactor=PRIJS_FACTOR; cell._opex=OPEX_JAAR; cell._opexRatio=OPEX_RATIO; cell._ac=(INV_OV?INV_OV.ac:0); cell._dc=(INV_OV?INV_OV.dc:0); } };
     var fin=function(cell){ if(cell){ stamp(cell); H.computed[ry+'|'+cx]=cell; H.sel=cell; renderRapport(cell); _hmDetail(cell); } renderHeatmap(); };
     if(H.compute){ H.compute(ry,cx,function(ex){ fin(ex||_cellAt(H,ry,cx)); }); }
     else fin(_cellAt(H,ry,cx));
@@ -2575,7 +2596,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(H.rows.indexOf(ry)<0){ H.rows.push(ry); H.rows.sort(function(a,b){return a-b;}); }
       if(H.cols.indexOf(cx)<0){ H.cols.push(cx); H.cols.sort(function(a,b){return a-b;}); }
       H.customCells[ry+'|'+cx]=true;
-      var stamp=function(cell){ if(cell){ cell._custom=true; cell._prijsFactor=c.prijsFactor; cell._opex=c.opex; cell._opexRatio=c.opexRatio; cell._ac=c.ac; cell._dc=c.dc; H.computed[ry+'|'+cx]=cell;
+      var stamp=function(cell){ if(cell){ var _fa=_allInFactor(c,cell); if(_fa!=null) c.prijsFactor=_fa;   // v0.122.0: all-in
+        cell._allIn=!!c.allIn; cell._custom=true; cell._prijsFactor=c.prijsFactor; cell._opex=c.opex; cell._opexRatio=c.opexRatio; cell._ac=c.ac; cell._dc=c.dc; H.computed[ry+'|'+cx]=cell;
         // v0.109.0 (Johan 21-10): staat de selectie op deze plaats (keuze of advies), dan wordt het de Pas aan-cel (eigen prijs) — anders toonde «Je keuze» na een herberekening de standaardcel.
         if(H===HM && H.sel && String(H.sel._ry)===String(ry) && H.sel._cx===cx && H.sel!==cell){ H.sel=cell; try{ renderRapport(cell); _hmDetail(cell); }catch(eR){} }
         else if(H===HM && H.sel===cell){ try{ renderRapport(cell); }catch(eR){} } } };
