@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.125.0 (2026-10-28, Johan): VOLTMASTERS-VERGELIJKING UITGEVOERD — adviseur kiest batterijsturing voorzichtig/volledig en de leveranciersfee injectie (factuur); sweep/cel/rapport krijgen ze mee (netladen, injectie_fee_eur_mwh). Onder de databron: netbeheerder + bron (postcode/fallback), meldingen (geen postcode → tarieven West + geen certificaten), extra's in de berekening (dieselgenerator, laadplein) en de sturing. Klantrapport-payload: vm_vergelijking, vm_vergelijkbaar, prijzen, dispatch, grd. -->
 <!-- ek.html v0.124.0 (2026-10-28, Johan): ROOSTER-LABELS in MW/MWh vanaf 1.000 (2,5 MW / 5 MWh i.p.v. 2,5k kW / 5k kWh). -->
 <!-- ek.html v0.123.0 (2026-10-28, Johan): CERTIFICATEN groene stroom + WKK per dossier (adviseur, bedrijf): €/MWh van de factuur, leeg = standaard per gewest (server), vrijstelling enkel met reden; gaat mee in sweep/cel/rapport (certificaten + cert_postcode), wordt bewaard en teruggezet; noot toont de gebruikte bron. -->
 <!-- ek.html v0.122.0 (2026-10-28, Johan): vinkje «prijs is all-in (incl. aansluiting verzwaren)» bij Pas aan — de eigen totaalprijs bevat dan de verzwaring; installatieprijs = totaal − verzwaring van die cel (TVT/rendement/rapport volgen), bewaard als allIn op de combi. -->
@@ -868,6 +869,12 @@
         <option value="niet_op_factuur">Vrijgesteld — staat niet op de factuur</option>
       </select>
       <div class="sub" style="margin-top:2px">Vul in wat op de factuur staat. Leeg = standaard per gewest (Vlaanderen € 11 + € 4,20). Vrijstelling enkel met reden; een Elia-aansluiting is op zich geen vrijstelling.</div>
+      <!-- v0.125.0 (Johan 28-10): batterijsturing + leveranciersfee injectie (Voltmasters-vergelijking) -->
+      <div class="row2" style="margin-top:8px">
+        <div><label class="fld">Batterijsturing</label><select id="i-netladen" style="width:100%"><option value="">Voorzichtig — slijtage meegerekend (standaard)</option><option value="volledig">Volledig — maximale arbitrage (zoals Voltmasters)</option></select></div>
+        <div><label class="fld">Leveranciersfee injectie (€/MWh)</label><input type="number" id="i-inj-fee" step="0.1" min="0" inputmode="decimal" placeholder="leeg = contractstaffel"></div>
+      </div>
+      <div class="sub" style="margin-top:2px">Voorzichtig rekent de slijtage van de batterij mee in de sturing (± € 49/MWh ontladen) en laadt dus minder uit het net om te verkopen. Fee injectie: wat de leverancier per geïnjecteerde MWh inhoudt (factuur).</div>
       <div class="sub" id="i-cert-noot" style="margin-top:2px;color:#1E7A42"></div>
     </div>
       </div>
@@ -1009,6 +1016,7 @@
       <div class="ekmeta" id="ek-klant" style="font-weight:600;color:var(--navy)"></div>
       <div class="ekmeta" id="a4-meta">—</div>
       <div class="ekmeta" id="ek-databron" style="font-weight:600"></div>
+      <div class="ekmeta" id="ek-meldingen" data-i18n-skip="1"></div>   <!-- v0.125.0 -->
     </div>
     <!-- v0.80.0 (Johan 17-10): locatie van het project op de luchtfoto (adviseursweergave) -->
     <div class="card hidden ek-sec" id="ek-loc-card" style="margin:0 0 12px;padding:12px 14px">
@@ -1950,7 +1958,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _inputSig(){
     var g=function(id){ var e=$(id); return e?(e.value||''):''; };
     var rows=''; try{ rows=JSON.stringify(typeof EV_ROWS!=='undefined'?EV_ROWS:[]); }catch(e){}
-    return [g('i-profiel'),g('i-ev'),g('i-afname'),g('i-toegang'),g('i-kost'),g('i-best-pv'),g('i-best-inj'),g('i-cert-gsc'),g('i-cert-wkk'),g('i-cert-vrij'),   // v0.123.0: certificaten → herrekenen
+    return [g('i-profiel'),g('i-ev'),g('i-afname'),g('i-toegang'),g('i-kost'),g('i-best-pv'),g('i-best-inj'),g('i-cert-gsc'),g('i-cert-wkk'),g('i-cert-vrij'),g('i-netladen'),g('i-inj-fee'),   // v0.123.0: certificaten → herrekenen · v0.125.0: sturing + fee injectie
       (typeof KLANTTYPE!=='undefined'?(KLANTTYPE||''):''),STATE_EAN_AFNAME||'',STATE_EAN_INJECTIE||'',STATE_ADRES||'',
       g('i-klant'),g('i-btw'),g('i-adres'),   // v0.24.34 (Johan): klantnaam/BTW/adres in de signature → een naam-wijziging herrekent (en bewaart de nieuwe naam) i.p.v. de dedup te raken
       g('ev-p-nacht'),g('ev-p-dag'),g('ev-p-24'),rows,String(BATT_RTE),String(BATT_DOD),String(CRATE_OV||'')].join('|');
@@ -2003,6 +2011,16 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekCertBody(){ var a=$('i-cert-gsc'), b=$('i-cert-wkk'), v=$('i-cert-vrij');
     var gs=(a&&a.value!=='')?Math.max(0,+a.value||0):null, wk=(b&&b.value!=='')?Math.max(0,+b.value||0):null, r=(v&&v.value)||'';
     if(gs==null && wk==null && !r) return null; return { gsc_eur_mwh:gs, wkk_eur_mwh:wk, vrijgesteld:!!r, reden:r }; }
+  // v0.125.0: batterijsturing + leveranciersfee injectie (adviseur) → sweep/cel/rapport + bewaard op het dossier
+  function _ekNetladen(){ var e=$('i-netladen'); return (e&&e.value==='volledig')?'volledig':''; }
+  function _ekInjFee(){ var e=$('i-inj-fee'); if(!e||e.value==='') return null; var v=+String(e.value).replace(',','.'); return isFinite(v)?Math.max(0,Math.min(200,v)):null; }
+  function _ekMeldingen(swp, body){ var el=$('ek-meldingen'); if(!el) return; var d=[], w=[];
+    try{ if(swp&&swp.grd) d.push('Netbeheerder: '+swp.grd+(swp.grd_bron==='postcode'?' (uit de postcode)':(swp.grd_bron==='opgegeven'?'':''))); }catch(e){}
+    try{ (swp&&swp.meldingen||[]).forEach(function(m){ if(m&&m.tekst) w.push('⚠️ '+m.tekst); }); }catch(e){}
+    try{ var g=body&&body.generator; if(g&&+g.kva>0) d.push('incl. vervanging dieselgenerator ('+Math.round(+g.kva)+' kVA, '+_ekNf(+g.liter_jaar||0,0)+' l/j)'); }catch(e){}
+    try{ var pl=(body&&body.pleinen)||[]; if(pl.length){ var n=0; pl.forEach(function(p){ n+=(+p.aantal||0); }); d.push('incl. laadplein ('+n+' voertuigen)'); } }catch(e){}
+    try{ if(swp&&swp.dispatch&&swp.dispatch.modus==='volledig') d.push('batterijsturing: volledig'); if(swp&&swp.dispatch&&swp.dispatch.injectie_fee_eur_mwh!=null) d.push('fee injectie € '+String(swp.dispatch.injectie_fee_eur_mwh).replace('.',',')+'/MWh'); }catch(e){}
+    el.innerHTML=''; if(d.length){ var a=document.createElement('div'); a.textContent=d.join(' · '); el.appendChild(a); } w.forEach(function(t){ var b=document.createElement('div'); b.textContent=t; b.style.color='#b5600a'; el.appendChild(b); }); }
   function _ekCertPostcode(){ var m=String(STATE_ADRES||(($('i-adres')&&$('i-adres').value)||'')).match(/\b([1-9]\d{3})\b/); return m?m[1]:''; }
   function _ekCertNoot(c){ var el=$('i-cert-noot'); if(!el) return; if(!c){ el.textContent=''; return; }
     var t={ standaard:'Standaard '+(c.regio||'')+': € '+String(c.gsc).replace('.',',')+' + € '+String(c.wkk).replace('.',',')+'/MWh', factuur:'Uit factuur/manueel: € '+String(c.gsc).replace('.',',')+' + € '+String(c.wkk).replace('.',',')+'/MWh',
@@ -2581,6 +2599,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         certificaten:_ekCertBody(),   // v0.123.0
+        netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
         referentie:(REF_NIETS?'niets':''),   // v0.107.0
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -2888,6 +2907,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         certificaten:_ekCertBody(),   // v0.123.0
+        netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
         referentie:(REF_NIETS?'niets':''),   // v0.107.0
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };   // v0.24.35 (Johan): manuele "Pas aan"-combi's meebewaren → bij heropenen terug op de heatmap
       var _r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
@@ -2918,7 +2938,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _sweepPath = '/api/energiekompas/bedrijf-sweep';
     var _sweepBody = { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:_toeEff, spanning:_spanningEff(_toeEff), toegangsvermogen_kw:_toeEff, profielNaam:profiel, klanttype:(particulier?'particulier':'bedrijf'), woning:particulier, pleinen:(particulier?_pleinenParticulier():_pleinenV2()), generator:_ekGenBody(), rte_pct:BATT_RTE, dod_pct:BATT_DOD, batt_eenheid_kw:BATT_EENHEID_KW, batt_eenheid_kwh:BATT_EENHEID_KWH, cabine_kva:(CABINE_KVA>0?CABINE_KVA:undefined), ev_cfg:_ekEvCfgForBody(), crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined), project_id:STATE_CODE||undefined,
       elia:_eliaEff(), elia_net_vast_jaar:STATE_ELIA_NET_VAST, elia_cap_jaar:STATE_ELIA_CAP, elia_heffingen_vast_jaar:STATE_ELIA_HEF,
-      certificaten:_ekCertBody(), cert_postcode:_ekCertPostcode() };   // v0.123.0: certificaten per dossier   // v0.34 (Johan): batt-eenheid + cabine-kVA + per-project ev_cfg mee   // v0.18: RTE/DoD → sweep; Fase 2: crate (#2 C-factor) + bestaande_pv (#4) → rooster+cel+rapport; v0.24.4: project_id → server past opgeladen kwartierdata toe (databron); v0.24.41: Elia-aansluiting + verankerde net/heffingen → server _eliaSwap (sweep+cel+rapport delen _sweepBody)
+      certificaten:_ekCertBody(), cert_postcode:_ekCertPostcode(), netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee() };   // v0.123.0: certificaten per dossier   // v0.34 (Johan): batt-eenheid + cabine-kVA + per-project ev_cfg mee   // v0.18: RTE/DoD → sweep; Fase 2: crate (#2 C-factor) + bestaande_pv (#4) → rooster+cel+rapport; v0.24.4: project_id → server past opgeladen kwartierdata toe (databron); v0.24.41: Elia-aansluiting + verankerde net/heffingen → server _eliaSwap (sweep+cel+rapport delen _sweepBody)
     var _res = await Promise.allSettled([
       _post('/api/kamino/onderhandel',{ profielNaam:profNaam, baseCase:bc, heatmaps:false, project_id:STATE_CODE||undefined }),
       _post('/api/energiekompas/kpi',{ modus:(particulier?'particulier':'bedrijf'), afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:(aansluitingKw>0?aansluitingKw/0.9:0), huidige_kost:kost, wagens:ev, km:STUB.km_per_wagen }),
@@ -3002,7 +3022,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // Volledige simulatie → interactieve heatmap (zelfde engine). Geen anchors → geen heatmap, KPI's op fallback-sizing.
     HM=null;
     try{ if(swp&&swp.anchors&&swp.anchors.length){ _hmBedrijf(swp, _sweepBody); } }catch(e){ HM=null; }
-    try{ _ekCertNoot(swp&&swp.certificaten); }catch(eCn){}   // v0.123.0: toon welke certificaten gerekend zijn   // v0.24.39: één rooster-engine (bedrijf-sweep) voor woning én bedrijf
+    try{ _ekCertNoot(swp&&swp.certificaten); }catch(eCn){}
+    try{ _ekMeldingen(swp, _sweepBody); }catch(eMl){}   // v0.125.0: netbeheerder, meldingen, extra's, sturing   // v0.123.0: toon welke certificaten gerekend zijn   // v0.24.39: één rooster-engine (bedrijf-sweep) voor woning én bedrijf
     // v0.41.0 (Johan): GEEN stille noodcombinatie meer. Zonder rooster (server druk / time-out / fout) tonen we GEEN resultaat
     //   op de fallback-sizing (afname×0,9 kWp / ×0,6 kWh, zonder KPI's) maar blijven we op het invoerscherm met een melding.
     if(!HM){ _ekSimFout(_swpErr, swp); return; }
@@ -3594,6 +3615,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(B.btw){ STATE_BTW=B.btw; if($('i-btw')) $('i-btw').value=B.btw; }
           if(B.adres){ STATE_ADRES=B.adres; if($('i-adres')) $('i-adres').value=B.adres; }
           if(B.spanning==='LS'||B.spanning==='MS') _spanningZet(B.spanning);   // v0.60.0: handmatige LS/MS terug
+          if($('i-netladen')) $('i-netladen').value=(B.netladen==='volledig'?'volledig':'');   // v0.125.0
+          if($('i-inj-fee')) $('i-inj-fee').value=(B.injectie_fee_eur_mwh!=null?B.injectie_fee_eur_mwh:'');   // v0.125.0
           if(B.certificaten && typeof B.certificaten==='object'){ var _cB=B.certificaten;   // v0.123.0
             if($('i-cert-gsc')) $('i-cert-gsc').value=(_cB.gsc_eur_mwh!=null?_cB.gsc_eur_mwh:''); if($('i-cert-wkk')) $('i-cert-wkk').value=(_cB.wkk_eur_mwh!=null?_cB.wkk_eur_mwh:''); if($('i-cert-vrij')) $('i-cert-vrij').value=(_cB.vrijgesteld?(_cB.reden||'niet_op_factuur'):''); }
           if(B.elia==='ELIA'||B.elia==='DNB'){ STATE_ELIA=B.elia; try{ _updEliaBadge(); }catch(eE){} var _es=$('ek-elia-ovr'); if(_es) _es.value=B.elia; }   // v0.78.0
@@ -4519,6 +4542,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       referentie: (REF_NIETS?'niets':''),   // v0.107.0
       huidig_all_in_jaar: Math.round(+C.kostNu||0),   // v0.24.9 (Johan): de ECHTE all-in jaarfactuur (excl btw) → "uw huidige contract" = dit bedrag
       factuur: j.factuur, heat: j.heat, combi: j.combi, battwaarde: battwaarde, certificaten: (j.certificaten||null),   // v0.123.0
+      vm_vergelijking: (j.vm_vergelijking||null), vm_vergelijkbaar: (j.vm_vergelijkbaar||null), prijzen: (j.prijzen||null), dispatch: (j.dispatch||null), grd: (j.grd||null), grd_bron: (j.grd_bron||null), extras: (j.extras||null),   // v0.125.0
       financieel: Object.assign({ energieprijs_stijging_pct:3, posten:posten }, j.financieel||{}, {
         investering:_mfull.tot,                                           // all-in (cover "totale investering")
         investering_pvbatt:Math.round(_bv.invPvBatt),                     // v0.33 (Johan): PV+batterij (de TVT-noemer)

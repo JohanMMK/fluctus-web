@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.79.0 (2026-10-28, Johan): (1) factuurvergelijking — gemiddelde prijs per MWh afname en injectie, zonder en met installatie (server ≥ 15.357.0, D.prijzen); (2) NIEUWE BIJLAGE «Vergelijking met Voltmasters» wanneer het dossier een Voltmasters-simulatie op dezelfde case heeft (D.vm_vergelijking): kerncijfers naast elkaar, de vergelijkbare besparing (zonder piek/toegangsvermogen en zonder «opgeslagen zonnestroom») en een korte, automatisch opgebouwde toelichting bij het verschil. NL/FR/EN. -->
 <!-- klantrapport.html v0.78.0 (2026-10-28, Johan): factuurvergelijking toont «waarvan certificaten groene stroom + WKK» onder Energie + een noot met de bron (factuur / standaard per gewest / vrijgesteld / niet meegerekend). -->
 <!-- klantrapport.html v0.77.0 (2026-10-27, Johan): OFFERTERAPPORT ZONDER ONS ADVIES — p. 2 heet «Je offerte samengevat», geen tabel «Je offerte naast ons advies» in het stappenplan, inhoudstafel aangepast, en nooit de bijlage «Alle kengetallen per combinatie» (enkel het scenario van de offerte). -->
 <!-- klantrapport.html v0.76.0 (2026-10-27, Johan): grafiek «Afname en injectie per maand» (stijl p3 Voltmasters, in EK-huisstijl) in de factuurvergelijking — per maand vandaag / met zonnepanelen / met zonnepanelen + batterij, afname boven en injectie onder de nullijn (D.energie_maand, server v15.354.0). v0.75.3 (2026-10-25, Johan): FR/EN eerst vertalen, dan pagineren (+ vangnet na het laden, window.__KR_KLAAR). v0.75.2 (2026-10-25, Johan): voorblad dat langer wordt dan A4 (FR) wordt licht verkleind. v0.75.1: inhoudstafel (ná de paginering gevuld) past zich ook aan: compacter, desnoods zonder woordenlijst. -->
@@ -1244,6 +1245,11 @@ function _locatieFoto(){
       vrijgesteld:_L3('Je bent vrijgesteld van certificaten groene stroom + WKK; ze zijn niet meegerekend.','Vous êtes exonéré des certificats verts et de cogénération ; ils ne sont pas comptés.','You are exempt from green power and CHP certificates; they are not included.'),
       geen_standaard:_L3('Certificaten groene stroom + WKK zijn niet meegerekend: geef de bedragen van je factuur door voor een volledige vergelijking.','Les certificats verts et de cogénération ne sont pas comptés : communiquez les montants de votre facture pour une comparaison complète.','Green power and CHP certificates are not included: share the amounts on your bill for a complete comparison.') };
     if(_ctt[_CT.bron]) h+='<p class="note">'+_ctt[_CT.bron]+'</p>'; } }catch(eCt){}
+  try{ var _PZ=D.prijzen||null; if(_PZ && _PZ.nul && _PZ.opt && !IS_PART){   // v0.79.0: gemiddelde prijs per MWh (commodity) — afname en injectie
+    var _pz=function(v){ return (v==null)?'–':('€ '+_num(v,0)); }, _ptx=[];
+    if(_PZ.nul.afname_eur_mwh!=null||_PZ.opt.afname_eur_mwh!=null) _ptx.push(_T3('afname ','achat ','offtake ')+_pz(_PZ.nul.afname_eur_mwh)+' → '+_pz(_PZ.opt.afname_eur_mwh));
+    if(_PZ.nul.injectie_eur_mwh!=null||_PZ.opt.injectie_eur_mwh!=null) _ptx.push(_T3('injectie ','injection ','injection ')+_pz(_PZ.nul.injectie_eur_mwh)+' → '+_pz(_PZ.opt.injectie_eur_mwh));
+    if(_ptx.length) h+='<p class="note">'+_L3('Gemiddelde energieprijs per MWh (zonder → met installatie): ','Prix moyen de l\'énergie par MWh (sans → avec installation) : ','Average energy price per MWh (without → with installation): ')+esc(_ptx.join(' · '))+'.</p>'; } }catch(ePz){}
   // v0.15.0 (Johan): naast de €-posten ook de VOLUMES op het net — MWh afname en injectie, per situatie (zonder vs met installatie).
   var EM=D.energie_mwh||null;
   if(EM && _GVt && _GEN.energie_mwh_zonder_gen) EM=Object.assign({}, EM, { nul:_GEN.energie_mwh_zonder_gen });   // v0.68.0: volumes vandaag = zonder generatorlast
@@ -2830,6 +2836,56 @@ var _QC_HTML=null;   // v0.17.0 (Johan punt 5): compacte QC onder de disclaimer 
     '<p class="note" style="margin-top:12px;color:var(--grijs)">'+T.bron+'</p>'+
   '</div>';
   pagina(h2+p2);
+})();
+
+// v0.79.0 (Johan 28-10): BIJLAGE «VERGELIJKING MET VOLTMASTERS» — enkel als het dossier een Voltmasters-simulatie op dezelfde case
+//   heeft (D.vm_vergelijking, bewaard via /api/kamino/vm-vergelijking). Kerncijfers naast elkaar + de VERGELIJKBARE besparing:
+//   EK zonder het capaciteitsdeel (maandpiek/toegangsvermogen, dat Voltmasters niet rekent) en Voltmasters zonder «opgeslagen
+//   zonnestroom» (staat op geen factuur). Toelichting automatisch uit de cijfers. Eigen teksten NL/FR/EN (data-i18n-skip).
+(function(){
+  var V=D.vm_vergelijking; if(!V || IS_PART || !(+V.besparing_eur || +V.kost_vandaag_eur)) return;
+  var L=(window.EC_LANG==='fr'||window.EC_LANG==='en')?window.EC_LANG:'nl';
+  var t=function(nl,fr,en){ return L==='fr'?fr:(L==='en'?en:nl); };
+  var VG=D.vm_vergelijkbaar||{}, EM=D.energie_mwh||{}, DP=D.dispatch||{};
+  var ekBesp=Math.round(besp), ekCap=(VG.capaciteit_besparing!=null)?Math.round(+VG.capaciteit_besparing):null;
+  var ekVgl=(VG.besparing_zonder_capaciteit!=null)?Math.round(+VG.besparing_zonder_capaciteit):(ekCap!=null?ekBesp-ekCap:ekBesp);
+  var vmBesp=Math.round(+V.besparing_eur||0), vmSS=Math.round(+V.stored_solar_eur||0), vmVgl=vmBesp-vmSS;
+  var ekTvt=(_FINKPI&&isFinite(+_FINKPI.tvt)&&+_FINKPI.tvt>0)?(+_FINKPI.tvt):null, vmTvt=(+V.tvt_jaar>0)?+V.tvt_jaar:null;
+  var ekNul=Math.round(+NUL.saldo||0), vmNul=Math.round(+V.kost_vandaag_eur||0);
+  var mw=function(x){ return (x==null||!isFinite(+x))?'–':(_num(+x,1)+' MWh'); }, jr=function(x){ return x==null?'–':(_num(x,1)+' '+t('jaar','ans','years')); };
+  var rij=function(lbl,a,b,cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td><td>'+a+'</td><td>'+b+'</td></tr>'; };
+  var tab='<table class="f"><thead><tr><th>'+t('Kerncijfer','Indicateur','Key figure')+'</th><th>Energie-Compas</th><th>Voltmasters</th></tr></thead><tbody>'+
+    rij(t('Factuur vandaag (per jaar)','Facture actuelle (par an)','Current bill (per year)'), eur(ekNul), eur(vmNul))+
+    rij(t('Besparing per jaar','Économie par an','Saving per year'), eur(ekBesp), eur(vmBesp))+
+    rij(t('waarvan lagere piek en toegangsvermogen','dont pointe et puissance d\'accès réduites','of which lower peak and access power'), ekCap!=null?eur(ekCap):'–', t('niet meegerekend','non comptée','not included'), 'sub')+
+    rij(t('waarvan «opgeslagen zonnestroom»','dont «énergie solaire stockée»','of which «stored solar power»'), t('bestaat niet','n\'existe pas','not used'), vmSS?signEur(vmSS):'–', 'sub')+
+    rij('<b>'+t('Vergelijkbare besparing','Économie comparable','Comparable saving')+'</b>', '<b>'+eur(ekVgl)+'</b>', '<b>'+eur(vmVgl)+'</b>', 'tot')+
+    rij(t('Terugverdientijd','Temps de retour','Payback time'), jr(ekTvt), jr(vmTvt))+
+    rij(t('Afname van het net na de installatie','Prélèvement réseau après installation','Grid offtake after installation'), mw(EM.opt&&EM.opt.afname_mwh), mw(V.afname_mwh_na))+
+    rij(t('Injectie na de installatie','Injection après installation','Injection after installation'), mw(EM.opt&&EM.opt.injectie_mwh), mw(V.injectie_mwh_na))+
+    '</tbody></table>';
+  // toelichting — uit de cijfers
+  var d=(vmVgl>0)?(ekVgl/vmVgl-1)*100:0, ad=Math.abs(Math.round(d)), r=[];
+  var kop2=(ad<=10)?t('Beide berekeningen liggen dicht bij elkaar: de vergelijkbare besparing verschilt '+ad+' %.','Les deux calculs sont proches : l\'économie comparable diffère de '+ad+' %.','Both calculations are close: the comparable saving differs by '+ad+' %.')
+          :(d<0?t('Onze vergelijkbare besparing ligt '+ad+' % lager dan die van Voltmasters: we rekenen bewust voorzichtiger.','Notre économie comparable est inférieure de '+ad+' % à celle de Voltmasters : nous calculons volontairement plus prudemment.','Our comparable saving is '+ad+' % lower than Voltmasters\': we deliberately calculate more conservatively.')
+                :t('Onze vergelijkbare besparing ligt '+ad+' % hoger dan die van Voltmasters.','Notre économie comparable est supérieure de '+ad+' % à celle de Voltmasters.','Our comparable saving is '+ad+' % higher than Voltmasters\'.'));
+  if(ekCap) r.push(t('Wij rekenen ook de lagere maandpiek en het toegangsvermogen mee ('+eur(ekCap)+' per jaar). Dat bedrag staat op je factuur; Voltmasters laat het buiten beschouwing.','Nous comptons aussi la pointe mensuelle et la puissance d\'accès réduites ('+eur(ekCap)+' par an). Ce montant figure sur votre facture ; Voltmasters ne le prend pas en compte.','We also count the lower monthly peak and access power ('+eur(ekCap)+' per year). That amount is on your bill; Voltmasters leaves it out.'));
+  if(vmSS<0) r.push(t('Voltmasters trekt «opgeslagen zonnestroom» apart af ('+signEur(vmSS)+'). Bij ons zit dat effect al in de afname- en injectiekost.','Voltmasters déduit à part «l\'énergie solaire stockée» ('+signEur(vmSS)+'). Chez nous, cet effet est déjà inclus dans les coûts de prélèvement et d\'injection.','Voltmasters deducts «stored solar power» separately ('+signEur(vmSS)+'). In our calculation that effect is already in the offtake and injection costs.'));
+  else if(vmSS) r.push(t('Voltmasters telt «opgeslagen zonnestroom» apart mee ('+signEur(vmSS)+'). Die vermeden afname zit bij ons al in de lagere afnamekost; we tellen ze niet twee keer.','Voltmasters compte à part «l\'énergie solaire stockée» ('+signEur(vmSS)+'). Ce prélèvement évité est déjà inclus chez nous dans le coût d\'achat réduit ; nous ne le comptons pas deux fois.','Voltmasters counts «stored solar power» separately ('+signEur(vmSS)+'). That avoided offtake is already in our lower offtake cost; we do not count it twice.'));
+  if(HAS_BATT && DP.modus!=='volledig' && d<-10) r.push(t('Onze batterijsturing rekent de slijtage van de batterij mee. Ze laadt daardoor minder uit het net om later te verkopen dan Voltmasters, wat de levensduur spaart.','Notre pilotage de la batterie tient compte de son usure. Elle charge donc moins sur le réseau pour revendre plus tard que chez Voltmasters, ce qui préserve sa durée de vie.','Our battery control accounts for battery wear. It therefore charges less from the grid to sell later than Voltmasters, which preserves its lifetime.'));
+  if(vmNul>0 && Math.abs(ekNul/vmNul-1)>0.05) r.push(t('Je factuur van vandaag ligt bij ons '+Math.abs(Math.round((ekNul/vmNul-1)*100))+' % '+(ekNul>vmNul?'hoger':'lager')+'. Wij rekenen ook de certificaten groene stroom en WKK en alle heffingen mee; de leveranciersvergoedingen kunnen verschillen.','Votre facture actuelle est chez nous '+Math.abs(Math.round((ekNul/vmNul-1)*100))+' % '+(ekNul>vmNul?'plus élevée':'plus basse')+'. Nous comptons aussi les certificats verts et de cogénération et toutes les contributions ; les frais du fournisseur peuvent différer.','Your current bill is '+Math.abs(Math.round((ekNul/vmNul-1)*100))+' % '+(ekNul>vmNul?'higher':'lower')+' in our calculation. We also include green power and CHP certificates and all levies; supplier fees may differ.'));
+  var ema=EM.nul&&+EM.nul.afname_mwh, vma=+V.afname_mwh_voor;
+  if(ema>0 && vma>0 && Math.abs(ema/vma-1)>0.05) r.push(t('Het jaarverbruik verschilt ('+mw(ema)+' tegenover '+mw(vma)+'): de meetperiode of de aanvulling van ontbrekende kwartieren is niet dezelfde.','La consommation annuelle diffère ('+mw(ema)+' contre '+mw(vma)+') : la période de mesure ou le complément des quarts d\'heure manquants n\'est pas le même.','Annual consumption differs ('+mw(ema)+' versus '+mw(vma)+'): the measuring period or the filling of missing quarter-hours is not the same.'));
+  var h=_bijlage(t('Vergelijking met Voltmasters','Comparaison avec Voltmasters','Comparison with Voltmasters'));
+  var p='<div data-i18n-skip="1">'+
+    '<p class="lead" style="margin:2px 0 8px">'+esc(t('We lieten dezelfde case ook doorrekenen in de simulator van Voltmasters: dezelfde kwartierdata van je meter en dezelfde installatie en investering. Zo zie je hoe onze berekening zich verhoudt tot een tweede rekentool.','Nous avons également fait calculer le même cas dans le simulateur de Voltmasters : mêmes données quart-horaires de votre compteur, même installation et même investissement. Vous voyez ainsi comment notre calcul se situe par rapport à un deuxième outil.','We also ran the same case in the Voltmasters simulator: the same quarter-hour data from your meter and the same installation and investment. This shows how our calculation compares with a second tool.'))+'</p>'+
+    tab+
+    '<h2 style="margin-top:12px">'+esc(t('Toelichting','Commentaire','Comment'))+'</h2>'+
+    '<p style="font-size:12px;margin:2px 0 6px"><b>'+esc(kop2)+'</b></p>'+
+    (r.length?'<ul style="margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.5">'+r.map(function(x){ return '<li style="margin:4px 0">'+esc(x)+'</li>'; }).join('')+'</ul>':'')+
+    '<p class="note" style="margin-top:10px;color:var(--grijs)">'+esc(t('Bron: Voltmasters-simulatie','Source : simulation Voltmasters','Source: Voltmasters simulation')+(V.referentie?' '+V.referentie:'')+(V.datum?' ('+V.datum+')':'')+'. '+t('Vergelijkbare besparing = besparing zonder lagere piek en toegangsvermogen (Energie-Compas) en zonder «opgeslagen zonnestroom» (Voltmasters).','Économie comparable = économie hors pointe et puissance d\'accès réduites (Energie-Compas) et hors «énergie solaire stockée» (Voltmasters).','Comparable saving = saving without lower peak and access power (Energie-Compas) and without «stored solar power» (Voltmasters).'))+'</p>'+
+  '</div>';
+  pagina(h+p);
 })();
 
 // ACHTERPAGINA — laatste blad (waiver + afsluiting). Geen even/oneven-forcing meer.
