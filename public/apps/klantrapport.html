@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.84.0 (2026-10-29, Johan): bijlage «Vergelijking met Voltmasters» niet meer automatisch — enkel met gemeten Fluvius-kwartierdata (D.databron.gemeten) én een vinkje rechtsboven op het voorblad (scherm-only, niet afgedrukt; keuze per dossier in localStorage, pagina herlaadt). -->
 <!-- klantrapport.html v0.83.0 (2026-10-29, Johan): LOCATIE — satellietfoto over de volle breedte (640 × 340, ± 17 × 9 cm) en ingezoomd op het perceel (zoom 18 i.p.v. uitzoomen tot cabine/laadpalen in beeld); adres, cabines en laadpalen in drie kolommen eronder. -->
 <!-- klantrapport.html v0.82.0 (2026-10-28, Johan): bijlage Voltmasters — hun logo bescheiden in de kop van hun kolom; hun cijfers met hun eigen accent (geel #F8B81E, donkere kop/totaal zoals in hun rapport). -->
 <!-- klantrapport.html v0.81.0 (2026-10-28, Johan): bijlage Voltmasters — TVT van Voltmasters in ons financieel model ZONDER onze piek-/toegangsvermogenbesparing (Voltmasters stuurt niet op de maandpiek); enkel hun besparing zonder «stored solar». -->
@@ -189,6 +190,8 @@
   .hero .lf{display:block;font-size:10.5px;color:var(--grijs);margin-top:4px;font-weight:600}   /* v0.51.0: loadfactor in het kVA-vak */
   .hero.kompakt{margin:8px 0 4px} .hero.kompakt .box{padding:9px 10px} .hero.kompakt .l{min-height:0} .hero.kompakt .v{font-size:22px;margin-top:3px}   /* v0.51.0: hoofdstuk 1 compact */
   table.f.kompakt td,table.f.kompakt th{padding-top:4px;padding-bottom:4px}
+  .vm-toggle{position:absolute;top:5mm;right:6mm;z-index:5;display:flex;align-items:center;gap:6px;font-size:11px;color:#14203a;background:#FEF6E1;border:1px solid #F8B81E;border-radius:6px;padding:4px 8px;cursor:pointer}   /* v0.84.0 */
+  @media print{ .noprint,.vm-toggle{display:none!important} }
   .loc-grid{display:block;margin-top:4px}   /* v0.83.0: foto over de volle breedte, info eronder */
   .loc-foto{position:relative;width:100%;aspect-ratio:640/340;border-radius:8px;overflow:hidden;background:#dfe5ec;border:1px solid var(--lijn);margin-bottom:4mm}
   .loc-foto img{width:100%;height:100%;object-fit:cover;display:block}
@@ -453,6 +456,13 @@ if(MERK) EC_LOGO=MERK.logo;
 
 var R=document.getElementById('rapport'), _pg=0;
 var PID=D.project_id||'';
+// v0.84.0 (Johan 29-10): bijlage «Vergelijking met Voltmasters» NIET meer automatisch. Enkel toegelaten als het dossier
+//   gemeten kwartierdata van Fluvius heeft (Voltmasters werkt enkel met echte profielen) én als ze op het voorblad met een
+//   vinkje is aangezet (scherm-only, niet mee afgedrukt). De keuze geldt per dossier in deze browser (localStorage).
+var _VM_SLEUTEL='KR_VM_BIJLAGE_'+(PID||'demo');
+var _VM_MAG=!!(D.vm_vergelijking && !D.particulier && D.databron && D.databron.gemeten);
+function _vmAan(){ try{ return localStorage.getItem(_VM_SLEUTEL)==='1'; }catch(e){ return false; } }
+window._vmZet=function(aan){ try{ if(aan) localStorage.setItem(_VM_SLEUTEL,'1'); else localStorage.removeItem(_VM_SLEUTEL); }catch(e){} location.reload(); };
 var KLANT=(D.klant&&D.klant.naam)||'', BTW=(D.klant&&D.klant.btw)||'';
 var SCENARIO=String(D.scenario||'').trim().slice(0,80);   // v0.50.0 (Johan): scenarionaam rechtsboven op elke pagina
 // v0.28.0 (Johan): tabtitel met klant/dossier, zodat meerdere tabbladen uit elkaar te houden zijn.
@@ -835,7 +845,11 @@ var _hstNr=0; function hoofdstuk(t){ _hstNr++; return kop(t, _hstNr); }
          '<b style="color:#14203a">Je dossier online</b> — bekijk en vergelijk je resultaten in Energie-Compas:<br>'+
          '<a href="'+esc(D.ek_link)+'" target="_blank" rel="noopener" style="color:#14203a;word-break:break-all">'+esc(D.ek_link)+'</a></div>'):'')+
     '</div>';
-  _appendPage('cover', h);
+  var _cv=_appendPage('cover', h);
+  // v0.84.0: vinkje «Bijlage Voltmasters» rechtsboven op het voorblad — enkel op het scherm (class noprint), enkel als het mag.
+  if(_VM_MAG && _cv){ var _vb=document.createElement('label'); _vb.className='noprint vm-toggle'; _vb.setAttribute('data-i18n-skip','1');
+    _vb.innerHTML='<input type="checkbox"'+(_vmAan()?' checked':'')+' onchange="_vmZet(this.checked)"> '+(_L3('Bijlage «Vergelijking met Voltmasters» toevoegen','Ajouter l\u2019annexe «Comparaison avec Voltmasters»','Add appendix «Comparison with Voltmasters»'));
+    _cv.appendChild(_vb); }
 })();
 
 // ADVIES (p2, v0.42.0 Johan) — vier adviespunten: aansluiting, hardware, besparing (incl. laadsessies) + opsplitsing, EMS/onbalans.
@@ -2844,7 +2858,7 @@ var _QC_HTML=null;   // v0.17.0 (Johan punt 5): compacte QC onder de disclaimer 
 //   EK zonder het capaciteitsdeel (maandpiek/toegangsvermogen, dat Voltmasters niet rekent) en Voltmasters zonder «opgeslagen
 //   zonnestroom» (staat op geen factuur). Toelichting automatisch uit de cijfers. Eigen teksten NL/FR/EN (data-i18n-skip).
 (function(){
-  var V=D.vm_vergelijking; if(!V || IS_PART || !(+V.besparing_eur || +V.kost_vandaag_eur)) return;
+  var V=D.vm_vergelijking; if(!V || IS_PART || !_VM_MAG || !_vmAan() || !(+V.besparing_eur || +V.kost_vandaag_eur)) return;   // v0.84.0: enkel met Fluvius-profiel én vinkje
   var L=(window.EC_LANG==='fr'||window.EC_LANG==='en')?window.EC_LANG:'nl';
   var t=function(nl,fr,en){ return L==='fr'?fr:(L==='en'?en:nl); };
   var VG=D.vm_vergelijkbaar||{}, EM=D.energie_mwh||{}, DP=D.dispatch||{};
