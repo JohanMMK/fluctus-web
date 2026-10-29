@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.127.0 (2026-10-29, Johan): (A) laadsessie-besparing t.o.v. het GOEDKOOPSTE alternatief per voertuigtype — laden elders (gezonde mix) of diesel (server per_type.diesel_eur_mwh, 15.359.0); (B) offerte: DC-laadbuffer kW/kWh (batterij op de DC-bus van de lader, enkel voor de voertuigen) → bedrijf-cel/rapport-body dc_buffer_kw/kwh; «Batterij» = enkel de AC-batterij. -->
 <!-- ek.html v0.126.0 (2026-10-29, Johan): EIGEN LAADVENSTER PER VOERTUIGRIJ — laadmoment «eigen venster …» met van/tot (uur, per kwartier, over middernacht mag); gaat als venster_start/venster_eind naar de sweep (server + simulator ondersteunden dat al) en wordt op het dossier bewaard (ev_rows vs/ve, server 15.358.0). Rapport toont het venster via per_type.laadmoment. -->
 <!-- ek.html v0.125.0 (2026-10-28, Johan): VOLTMASTERS-VERGELIJKING UITGEVOERD — adviseur kiest batterijsturing voorzichtig/volledig en de leveranciersfee injectie (factuur); sweep/cel/rapport krijgen ze mee (netladen, injectie_fee_eur_mwh). Onder de databron: netbeheerder + bron (postcode/fallback), meldingen (geen postcode → tarieven West + geen certificaten), extra's in de berekening (dieselgenerator, laadplein) en de sturing. Klantrapport-payload: vm_vergelijking, vm_vergelijkbaar, prijzen, dispatch, grd. -->
 <!-- ek.html v0.124.0 (2026-10-28, Johan): ROOSTER-LABELS in MW/MWh vanaf 1.000 (2,5 MW / 5 MWh i.p.v. 2,5k kW / 5k kWh). -->
@@ -1878,7 +1879,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var CREG={V:322.5,B:368.8,W:377.9}[gw], P_PUB=400, P_SNEL=550;
       var MIX={ personenwagen:{t:0.60,p:0.25,s:0.15}, bestelwagen:{t:0,p:0.55,s:0.45}, lichte_vracht:{t:0,p:0.35,s:0.65}, vrachtwagen:{t:0,p:0.10,s:0.90}, bus:{t:0,p:0.10,s:0.90} };
       var b=0; pt.forEach(function(x){ if(!x || x.betalend || !(+x.geladen_mwh>0)) return; var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
-        b+=(+x.geladen_mwh)*((m.t*CREG+m.p*P_PUB+m.s*P_SNEL)-kostB); });
+        var pE=m.t*CREG+m.p*P_PUB+m.s*P_SNEL, pD=+x.diesel_eur_mwh||0; if(pD>0&&pD<pE) pE=pD;   // v0.127.0 (A): goedkoopste alternatief — laden elders of diesel
+        b+=(+x.geladen_mwh)*(pE-kostB); });
       b=Math.round(b); return b>0 ? { besparing:b, kostB:kostB } : null;
     }catch(e){ return null; }
   }
@@ -4942,6 +4944,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _offSimCel(pr){
     var body=Object.assign({}, window._RAP_PAYLOAD||{}, { pv_kwp:pr.pv, batt_kw:pr.kw, batt_kwh:pr.kwh });
     if(pr.kwh>0){ if(pr.rte>0) body.rte_pct=pr.rte; if(pr.dod>0) body.dod_pct=pr.dod; }
+    if(pr.dcbKwh>0){ body.dc_buffer_kwh=pr.dcbKwh; body.dc_buffer_kw=(pr.dcbKw>0?pr.dcbKw:pr.dcbKwh); }   // v0.127.0: DC-laadbuffer (server 15.359.0)
     return _post('/api/energiekompas/bedrijf-cel', body).then(function(j){
       if(!(j&&j.ok&&j.cel)) return null;
       var c=j.cel, besp=(HM&&HM.refKost!=null)?(HM.refKost-c.kost):null, bespNet=(HM&&HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;
@@ -5065,7 +5068,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function pr(d){
     var lp=(d.prijs_lp!=null)?+d.prijs_lp:0, pvb=(d.prijs_pv!=null||d.prijs_batt!=null)?((+d.prijs_pv||0)+(+d.prijs_batt||0)):((d.totaal!=null)?Math.max(0,(+d.totaal)-lp):0);
     return { pv:+d.pv_kwp||0, kw:+d.batt_kw||((+d.batt_kwh||0)>0?Math.round((+d.batt_kwh)/2):0), kwh:+d.batt_kwh||0, rte:+d.rte||0, dod:+d.dod||0, ac:d.ac!=null?+d.ac:null, dc:d.dc!=null?+d.dc:null,
-      prijsPvBatt:Math.round(pvb), prijsLp:Math.round(lp), totaal:(d.totaal!=null?Math.round(+d.totaal):null) };
+      prijsPvBatt:Math.round(pvb), prijsLp:Math.round(lp), totaal:(d.totaal!=null?Math.round(+d.totaal):null),
+      dcbKw:+d.dc_buffer_kw||0, dcbKwh:+d.dc_buffer_kwh||0 };   // v0.127.0: DC-laadbuffer
   }
   function sleutel(o){ return o.id+'|'+JSON.stringify(o.data||{})+'|'+((window._RAP_PAYLOAD&&JSON.stringify(window._RAP_PAYLOAD).length)||0)+'|'+(HM&&HM.refKost); }
   window._offMfull=function(d,m){
@@ -5078,7 +5082,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   };
   window._offRapportZet=function(po, o){
     var d=o.data||{};
-    po.offerte={ id:o.id, installateur:d.installateur||'', datum:d.datum||'', referentie:d.referentie||'', totaal_excl_btw:(d.totaal!=null?d.totaal:null), bestand:o.naam||'' };
+    po.offerte={ id:o.id, installateur:d.installateur||'', datum:d.datum||'', referentie:d.referentie||'', totaal_excl_btw:(d.totaal!=null?d.totaal:null), bestand:o.naam||'', dc_buffer_kw:(+d.dc_buffer_kw||null), dc_buffer_kwh:(+d.dc_buffer_kwh||null) };   // v0.127.0
     po.scenario=('Offerte '+(d.installateur||'')).trim().slice(0,80);
     po.kengetallen=null;   // geen roosterbijlage: het rapport volgt de combinatie van de offerte
   };
@@ -5090,6 +5094,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       (o.onzeker&&o.onzeker.length?'<div class="sub" style="color:#9E480E">'+e(L3('Onzeker gelezen: ','Lecture incertaine : ','Uncertain: '))+e(o.onzeker.join(', '))+'</div>':'')+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+veld('installateur',L3('Installateur','Installateur','Installer'),d.installateur,200)+veld('referentie',L3('Referentie','Référence','Reference'),d.referentie)+veld('datum',L3('Datum','Date','Date'),d.datum)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+veld('pv_kwp','PV (kWp)',d.pv_kwp)+veld('batt_kw',L3('Batterij kW','Batterie kW','Battery kW'),d.batt_kw)+veld('batt_kwh',L3('Batterij kWh','Batterie kWh','Battery kWh'),d.batt_kwh)+veld('rte','RTE (%)',d.rte)+veld('dod','DoD (%)',d.dod)+veld('ac',L3('Laadpalen AC','Bornes AC','AC chargers'),d.ac)+veld('dc',L3('Laadpalen DC','Bornes DC','DC chargers'),d.dc)+'</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+veld('dc_buffer_kw',L3('DC-laadbuffer kW','Tampon DC kW','DC buffer kW'),d.dc_buffer_kw)+veld('dc_buffer_kwh',L3('DC-laadbuffer kWh','Tampon DC kWh','DC buffer kWh'),d.dc_buffer_kwh)+'<span class="sub" style="flex:3;min-width:220px;align-self:center;margin:0">'+e(L3('Batterij op de DC-bus van de lader: levert enkel aan de voertuigen. Vul bij «Batterij» dan enkel de AC-batterij in (gebouw, markt, onbalans).','Batterie sur le bus DC du chargeur : alimente uniquement les véhicules. Indiquez alors sous «Batterie» uniquement la batterie AC.','Battery on the charger DC bus: supplies the vehicles only. Enter only the AC battery under «Battery».'))+'</span></div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+veld('prijs_pv',L3('Prijs PV (€ excl. btw)','Prix PV (€ HTVA)','PV price (€ excl. VAT)'),d.prijs_pv)+veld('prijs_batt',L3('Prijs batterij (€)','Prix batterie (€)','Battery price (€)'),d.prijs_batt)+veld('prijs_lp',L3('Prijs laadpalen (€)','Prix bornes (€)','Charger price (€)'),d.prijs_lp)+veld('totaal',L3('Totaal (€ excl. btw)','Total (€ HTVA)','Total (€ excl. VAT)'),d.totaal)+'</div>'+
       '<div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap"><button class="btn sm" type="button" data-ofok="'+e(o.id)+'">✔ '+e(L3('Bevestig en reken door','Confirmer et calculer','Confirm and calculate'))+'</button>'+
       '<button class="btn ghost sm" type="button" data-ofdel="'+e(o.id)+'">🗑 '+e(L3('Verwijder','Supprimer','Delete'))+'</button><span class="sub" id="off-est" style="margin:0"></span></div></div>';
@@ -5113,7 +5118,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(ref) h+='<tr style="background:#F4F7FB;font-style:italic"><td style="text-align:left"><b>'+e(L3('Advies / je keuze','Conseil / votre choix','Advice / your choice'))+'</b></td><td>—</td><td>'+(_anchorKwp(ref)>0?f(_anchorKwp(ref),1)+' kWp':'—')+'</td><td>'+(+ref.battKwh>0?f(ref.battKw)+' kW / '+f(ref.battKwh)+' kWh':'—')+'</td>'+
       kpis.map(function(k){ var M=HM_METRICS[k], v=M?M.val(ref):null; return '<td>'+((v!=null&&isFinite(v))?M.fmt(v):'—')+'</td>'; }).join('')+'<td></td></tr>';
     L.forEach(function(o){ var d=o.data||{}, c=CEL[sleutel(o)];
-      h+='<tr><td style="text-align:left;white-space:nowrap"><b>'+e(d.installateur||o.naam||L3('Offerte','Offre','Offer'))+'</b>'+(d.referentie?'<div class="sub" style="margin:0">'+e(d.referentie)+'</div>':'')+(c&&window._ekAftrekToets?(function(){ var T=window._ekAftrekToets(c), t=window._ekAftrekTekst(T,true); return t?'<div class="sub" style="margin:0;color:'+(T.status==='alle'?'#065f46':(T.status==='klein'?'#8A5300':'#5A6577'))+'" title="'+e(String(window._ekAftrekTekst(T,false)).replace(/<[^>]+>/g,''))+'">'+e(t)+'</div>':''; })():'')+'</td><td>'+(d.totaal!=null?eur(d.totaal):'—')+'</td><td>'+(d.pv_kwp>0?f(d.pv_kwp,1)+' kWp':'—')+'</td><td>'+(d.batt_kwh>0?f(d.batt_kw)+' kW / '+f(d.batt_kwh)+' kWh':'—')+'</td>'+
+      h+='<tr><td style="text-align:left;white-space:nowrap"><b>'+e(d.installateur||o.naam||L3('Offerte','Offre','Offer'))+'</b>'+(d.referentie?'<div class="sub" style="margin:0">'+e(d.referentie)+'</div>':'')+(c&&window._ekAftrekToets?(function(){ var T=window._ekAftrekToets(c), t=window._ekAftrekTekst(T,true); return t?'<div class="sub" style="margin:0;color:'+(T.status==='alle'?'#065f46':(T.status==='klein'?'#8A5300':'#5A6577'))+'" title="'+e(String(window._ekAftrekTekst(T,false)).replace(/<[^>]+>/g,''))+'">'+e(t)+'</div>':''; })():'')+'</td><td>'+(d.totaal!=null?eur(d.totaal):'—')+'</td><td>'+(d.pv_kwp>0?f(d.pv_kwp,1)+' kWp':'—')+'</td><td>'+(d.batt_kwh>0?f(d.batt_kw)+' kW / '+f(d.batt_kwh)+' kWh':'—')+((+d.dc_buffer_kwh>0)?'<div class="sub" style="margin:0">+ '+f(d.dc_buffer_kwh)+' kWh DC</div>':'')+'</td>'+
         kpis.map(function(k){ var M=HM_METRICS[k], v=(c&&M)?M.val(c):null; return '<td>'+((v!=null&&isFinite(v))?M.fmt(v):(c===undefined?'⏳':'⚠'))+'</td>'; }).join('')+
         '<td style="white-space:nowrap">'+(window._EK_OFF_KEUZE===o.id?'<span class="sub" style="margin:0 6px 0 0;color:#B45309;font-weight:700">● '+e(L3('Gekozen','Choisie','Chosen'))+'</span>':'<button class="btn sm" type="button" data-ofkies="'+e(o.id)+'"'+(c?'':' disabled')+' title="'+e(L3('Deze offerte wordt je keuze — bovenaan, in het rooster en in het bank- en aftrekblok','Cette offre devient votre choix','This quote becomes your choice'))+'">☝️ '+e(L3('Kies','Choisir','Choose'))+'</button> ')+'<button class="btn ghost sm" type="button" data-ofrap="'+e(o.id)+'"'+(c?'':' disabled')+'>📄 '+e(L3('Rapport','Rapport','Report'))+'</button> <button class="btn ghost sm" type="button" data-ofedit="'+e(o.id)+'" title="'+e(L3('Aanpassen','Modifier','Edit'))+'">✏️</button>'+tekenKnop(o,c)+'</td></tr>'; });
     T.innerHTML=h+'</tbody>';
@@ -5227,6 +5232,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var o=(window._EK_OFF||[]).filter(function(x){ return x.id===id; })[0]; if(!o) return;
     var c=CEL[sleutel(o)]; if(!c){ el('off-rst').textContent=L3('Even geduld, de offerte wordt nog doorgerekend.','Un instant, l’offre est encore en calcul.','Please wait, the quote is still being calculated.'); return; }
     var p=pr(o.data||{}), body={}; if(p.kwh>0){ if(p.rte>0) body.rte_pct=p.rte; if(p.dod>0) body.dod_pct=p.dod; }
+    if(p.dcbKwh>0){ body.dc_buffer_kwh=p.dcbKwh; body.dc_buffer_kw=(p.dcbKw>0?p.dcbKw:p.dcbKwh); }   // v0.127.0
     var fn=window.toonKlantrapport||toonKlantrapport; await fn({ sel:c, body:body, offerte:o, st:'off-rst', bank:bank===true, studie:bank==='studie', grootte:(o.aanvaard&&o.aanvaard.grootte)||null, afschrijving:(o.aanvaard&&o.aanvaard.afschrijving)||null });
   }
   // v0.94.0: opties voor een rapport/dossier van een offerte (ZIP per project); null als de offerte nog niet doorgerekend is
@@ -5234,6 +5240,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var o=(window._EK_OFF||[]).filter(function(x){ return x.id===id; })[0]; if(!o) return null;
     var c=CEL[sleutel(o)]; if(!c) return null;
     var p=pr(o.data||{}), body={}; if(p.kwh>0){ if(p.rte>0) body.rte_pct=p.rte; if(p.dod>0) body.dod_pct=p.dod; }
+    if(p.dcbKwh>0){ body.dc_buffer_kwh=p.dcbKwh; body.dc_buffer_kw=(p.dcbKw>0?p.dcbKw:p.dcbKwh); }   // v0.127.0
     return { sel:c, body:body, offerte:o, bank:soort==='bank', studie:soort==='studie', grootte:(o.aanvaard&&o.aanvaard.grootte)||null, afschrijving:(o.aanvaard&&o.aanvaard.afschrijving)||null };
   };
   function koppel(){ var i=el('off-file'); if(i) i.onchange=function(){ var f=i.files&&i.files[0]; i.value=''; opladen(f); }; }

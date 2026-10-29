@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.86.0 (2026-10-29, Johan): (A) laadsessies naar het bedrijf t.o.v. het GOEDKOOPSTE alternatief per voertuigtype — laden elders of diesel (per_type.diesel_eur_mwh, server 15.359.0); rij toont dan «diesel · l/100 km × €/l»; (B) DC-laadbuffer van de offerte als aparte rij in de specificaties. -->
 <!-- klantrapport.html v0.85.0 (2026-10-29, Johan): vinkje «Bijlage Voltmasters» enkel voor managers (check via /api/ek/wie met de sessie in deze browser); geen manager → geen vinkje en een eventueel aangezette keuze wordt gewist. -->
 <!-- klantrapport.html v0.84.0 (2026-10-29, Johan): bijlage «Vergelijking met Voltmasters» niet meer automatisch — enkel met gemeten Fluvius-kwartierdata (D.databron.gemeten) én een vinkje rechtsboven op het voorblad (scherm-only, niet afgedrukt; keuze per dossier in localStorage, pagina herlaadt). -->
 <!-- klantrapport.html v0.83.0 (2026-10-29, Johan): LOCATIE — satellietfoto over de volle breedte (640 × 340, ± 17 × 9 cm) en ingezoomd op het perceel (zoom 18 i.p.v. uitzoomen tot cabine/laadpalen in beeld); adres, cabines en laadpalen in drie kolommen eronder. -->
@@ -140,8 +141,8 @@
 <!-- v0.32.0 (2026-10-10, Johan): + ENGELS (?lang=en of KLANTRAPPORT_DATA.lang=en) via en-ec-seg.js + i18n-ec v0.3.0. -->
 <!-- v0.18.0 (Johan): FR-variant via i18n-laag. NL blijft default; FR enkel met ?lang=fr. Dict vóór runtime. -->
 <script src="fr-ec-dict.js?v=0.3.0"></script>
-<script src="fr-ec-seg.js?v=1.4.14"></script>
-<script src="en-ec-seg.js?v=1.0.29"></script>
+<script src="fr-ec-seg.js?v=1.4.15"></script>
+<script src="en-ec-seg.js?v=1.0.30"></script>
 <script src="i18n-ec.js?v=0.3.1"></script>
 <style>
   :root{
@@ -665,9 +666,12 @@ var _LAADSES=null;
   rows.forEach(function(x){
     var m=MIX[String(x.type||'').toLowerCase()]||{t:0,p:0.5,s:0.5};
     var prijs=m.t*CREG+m.p*P_PUB+m.s*P_SNEL, mwh=+x.geladen_mwh||0;
+    // v0.86.0 (Johan 29-10, A): het GOEDKOOPSTE alternatief telt — is diesel goedkoper dan laden elders (bv. vrachtwagen aan snelladers),
+    //   dan rekenen we met diesel (server per_type.diesel_eur_mwh = l/100 km × €/L ÷ kWh/km).
+    var pD=+x.diesel_eur_mwh||0, alt=(pD>0&&pD<prijs)?'diesel':'laden'; if(alt==='diesel') prijs=pD;
     var kE=mwh*prijs, kB=mwh*kostB;
     totE+=kE; totB+=kB; totMwh+=mwh;
-    lijst.push({ naam:(x.voertuig||x.type||'—'), km:+x.km_geleverd||0, mwh:mwh, m:m, prijs:prijs, kE:kE, kB:kB, b:kE-kB });
+    lijst.push({ naam:(x.voertuig||x.type||'—'), km:+x.km_geleverd||0, mwh:mwh, m:m, prijs:prijs, kE:kE, kB:kB, b:kE-kB, alt:alt, l100:+x.diesel_l100||0, eurL:+x.diesel_eur_l||0 });
   });
   var besp=Math.round(totE-totB);
   if(!(besp>0)) return;
@@ -1218,6 +1222,7 @@ function _locatieFoto(){
   if(D.offerte&&D.offerte.installateur) rows.push([(window.EC_LANG==='fr'?'Offre':(window.EC_LANG==='en'?'Quote':'Offerte')), D.offerte.installateur+([D.offerte.referentie,D.offerte.datum].filter(Boolean).length?' \u00b7 '+[D.offerte.referentie,D.offerte.datum].filter(Boolean).join(' \u00b7 '):'')+(D.offerte.totaal_excl_btw!=null?' \u00b7 '+eur(D.offerte.totaal_excl_btw)+' '+(window.EC_LANG==='fr'?'HTVA':(window.EC_LANG==='en'?'excl. VAT':'excl. btw')):'')]);   // v0.52.0
   if(pvKwp) rows.push(['PV-systeem', _num(pvKwp,0)+' kWp']);
   if(bKwh||bKw) rows.push(['Batterij', [(bKw?_num(bKw,0)+' kW':''),(bKwh?_num(bKwh,0)+' kWh':''),(bCy!=null?'≈ '+_num(bCy,0)+' cycli/jaar':'')].filter(Boolean).join(' · ')]);
+  if(D.offerte&&+D.offerte.dc_buffer_kwh>0) rows.push(['DC-laadbuffer (enkel voor de voertuigen)', [(+D.offerte.dc_buffer_kw>0?_num(D.offerte.dc_buffer_kw,0)+' kW':''),_num(D.offerte.dc_buffer_kwh,0)+' kWh'].filter(Boolean).join(' · ')]);   // v0.86.0 (B)
   if(ac&&ac.aantal) rows.push(['Laadpalen AC', _num(ac.kva,0)+' kVA × '+_num(ac.aantal,0)]);
   if(dc&&dc.aantal) rows.push(['Laadpalen DC', _num(dc.aantal,0)+' × fastDC']);
   h+='<div class="split-blok split-sectie">';   // v0.31.0: zie hierboven
@@ -1392,7 +1397,7 @@ function _locatieFoto(){
   h+='<table class="f"><thead><tr><th>Voertuig</th><th>Geladen<br>MWh/jaar</th><th>Laadmix elders<br><span class="muted" style="font-weight:400;white-space:nowrap">thuis / publiek / snel</span></th><th>Prijs elders<br>€/MWh</th><th>Kost elders</th><th>Kost op je bedrijf</th><th>Besparing</th></tr></thead><tbody>';
   lijst.forEach(function(r){
     h+='<tr><td>'+esc(r.naam)+(r.km>0?'<br><span class="muted">'+_num(r.km,0)+' km</span>':'')+'</td><td>'+_num(r.mwh,1)+'</td>'+
-       '<td style="white-space:nowrap">'+Math.round(r.m.t*100)+' / '+Math.round(r.m.p*100)+' / '+Math.round(r.m.s*100)+' %</td><td>'+_num(Math.round(r.prijs),0)+'</td>'+
+       '<td style="white-space:nowrap">'+(r.alt==='diesel'?('diesel<br><span class="muted">'+_num(r.l100,0)+' l/100 km × € '+_num(r.eurL,2)+'/l</span>'):(Math.round(r.m.t*100)+' / '+Math.round(r.m.p*100)+' / '+Math.round(r.m.s*100)+' %'))+'</td><td>'+_num(Math.round(r.prijs),0)+'</td>'+
        '<td style="white-space:nowrap">'+eur(r.kE)+'</td><td style="white-space:nowrap">'+eur(r.kB)+'</td><td class="pos" style="white-space:nowrap">'+signEur(r.b)+'</td></tr>';
   });
   if(lijst.length>1) h+='<tr class="tot"><td>Totaal</td><td>'+_num(totMwh,1)+'</td><td></td><td></td><td style="white-space:nowrap">'+eur(totE)+'</td><td style="white-space:nowrap">'+eur(totB)+'</td><td class="pos" style="white-space:nowrap">'+signEur(besp)+'</td></tr>';
@@ -1409,6 +1414,7 @@ function _locatieFoto(){
      'De kost op je bedrijf is de meerkost van het laden op je eigen factuur zónder installatie (energie + net + heffingen, gedeeld door het laadverbruik); '+
      'de extra besparing van je installatie op dat laden zit al in de factuurvergelijking en telt hier niet dubbel. '+
      'Toegepast op de kilometers die het model op je bedrijfsparking laadt. Bedragen exclusief btw, richtprijzen.</p>';
+  if(lijst.some(function(r){ return r.alt==='diesel'; })) h+='<p class="note">Is rijden op diesel goedkoper dan laden elders, dan vergelijken we met diesel: dieselverbruik × dieselprijs (excl. btw), omgerekend per MWh elektriciteit die het voertuig verbruikt.</p>';   // v0.86.0
   h+='<p class="note">Deze extra besparing komt van het laden op je eigen parking (de laadpalen), '+NIET_VAN+'. Het eerste financieel plan hierna rekent ze mee, samen met de investering in de laadpalen.</p>';
   h+='</div>';
   pagina(h);
@@ -1717,6 +1723,7 @@ function _locatieFoto(){
   var specRows=[];
   if(_pvK) specRows.push(['Zonnepanelen', _num(_pvK,0)+' kWp']);
   if(_bKwh||_bKw) specRows.push(['Batterij', [(_bKw?_num(_bKw,0)+' kW':''),(_bKwh?_num(_bKwh,0)+' kWh':'')].filter(Boolean).join(' · ')]);
+  if(D.offerte&&+D.offerte.dc_buffer_kwh>0) specRows.push(['DC-laadbuffer (enkel voor de voertuigen)', [(+D.offerte.dc_buffer_kw>0?_num(D.offerte.dc_buffer_kw,0)+' kW':''),_num(D.offerte.dc_buffer_kwh,0)+' kWh'].filter(Boolean).join(' · ')]);   // v0.86.0 (B)
   if(V0.laadpalen_ac&&V0.laadpalen_ac.aantal) specRows.push(['Laadpalen AC', _num(V0.laadpalen_ac.kva,0)+' kVA × '+_num(V0.laadpalen_ac.aantal,0)]);
   if(V0.laadpalen_dc&&V0.laadpalen_dc.aantal) specRows.push(['Laadpalen DC (fastDC)', _num(V0.laadpalen_dc.aantal,0)+' ×']);
   (function(){ var _vr=(typeof _variaPvb==='function'?_variaPvb():0)+((typeof _variaLaden==='function'&&_PLAN_L)?_variaLaden():0); if(_vr>0) specRows.push(['Varia', eur(_vr)]); })();   // v0.74.0: geen lege rij meer
