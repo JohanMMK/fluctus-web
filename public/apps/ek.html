@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.127.1 (2026-10-29, Johan): een bewaarde aansluiting/toegangsvermogen hoger dan de gemeten piek blijft bij heropenen staan (het gemeten profiel overschreef ze altijd met de gemeten piek, bv. 55 → 40 kW). -->
 <!-- ek.html v0.127.0 (2026-10-29, Johan): (A) laadsessie-besparing t.o.v. het GOEDKOOPSTE alternatief per voertuigtype — laden elders (gezonde mix) of diesel (server per_type.diesel_eur_mwh, 15.359.0); (B) offerte: DC-laadbuffer kW/kWh (batterij op de DC-bus van de lader, enkel voor de voertuigen) → bedrijf-cel/rapport-body dc_buffer_kw/kwh; «Batterij» = enkel de AC-batterij. -->
 <!-- ek.html v0.126.0 (2026-10-29, Johan): EIGEN LAADVENSTER PER VOERTUIGRIJ — laadmoment «eigen venster …» met van/tot (uur, per kwartier, over middernacht mag); gaat als venster_start/venster_eind naar de sweep (server + simulator ondersteunden dat al) en wordt op het dossier bewaard (ev_rows vs/ve, server 15.358.0). Rapport toont het venster via per_type.laadmoment. -->
 <!-- ek.html v0.125.0 (2026-10-28, Johan): VOLTMASTERS-VERGELIJKING UITGEVOERD — adviseur kiest batterijsturing voorzichtig/volledig en de leveranciersfee injectie (factuur); sweep/cel/rapport krijgen ze mee (netladen, injectie_fee_eur_mwh). Onder de databron: netbeheerder + bron (postcode/fallback), meldingen (geen postcode → tarieven West + geen certificaten), extra's in de berekening (dieselgenerator, laadplein) en de sturing. Klantrapport-payload: vm_vergelijking, vm_vergelijkbaar, prijzen, dispatch, grd. -->
@@ -3611,6 +3612,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(j.bevestigd){ var B=j.bevestigd;
           if(+B.afname_mwh>0 && $('i-afname')) $('i-afname').value=+B.afname_mwh;
           if(+B.toegang_kw>0 && $('i-toegang')){ $('i-toegang').value=+B.toegang_kw; PIEK_IS_SLP=false; }
+          window._EK_TOE_DOSSIER=(+B.toegang_kw>0)?(+B.toegang_kw):0;   // v0.127.1: bewaarde aansluiting (adviseur) — een gemeten profiel mag die niet verlagen
           if(+B.kost>0 && $('i-kost')) $('i-kost').value=+B.kost;
           if(B.best_pv_kwp!=null && $('i-best-pv')) $('i-best-pv').value=+B.best_pv_kwp||0;
           window._EK_PV_BRON=String(B.best_pv_bron||'');   // v0.110.0
@@ -3657,7 +3659,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           var pa=STATE_PROFIEL_STATUS && STATE_PROFIEL_STATUS.afname;
           if(!pa || !pa.aanwezig) return;
           if(+pa.mwh>0 && $('i-afname')) $('i-afname').value=+pa.mwh;
-          if(+pa.piek_kw>0 && $('i-toegang')){ $('i-toegang').value=Math.round(+pa.piek_kw*10)/10; PIEK_IS_SLP=false; }
+          // v0.127.1 (Johan 29-10): een bewaarde aansluiting HOGER dan de gemeten piek blijft staan (bv. 55 kVA bij een gemeten piek van 40 kW);
+          //   anders zakte de aansluiting bij elk heropenen naar de gemeten piek → fictieve verzwaring zodra er laden bijkomt.
+          if(+pa.piek_kw>0 && $('i-toegang') && !((+window._EK_TOE_DOSSIER||0) > +pa.piek_kw)){ $('i-toegang').value=Math.round(+pa.piek_kw*10)/10; PIEK_IS_SLP=false; }
           if((+pa.piek_kw>10)||(+pa.mwh>30)){   // v0.111.0: drempel bedrijf (was > 25 kW / > 25 MWh)   // bedrijf → bedrijf-sweep stuurt project_id mee → profiel gekoppeld
             if($('i-profiel') && $('i-profiel').value==='residentieel') $('i-profiel').value='kantoor';
             try{ _KTYPE_USER=false; _evSetKlanttype('bedrijf'); var _br=$('ktype-bron'); if(_br) _br.textContent='afgeleid uit het opgeladen meetprofiel'; }catch(e){}
