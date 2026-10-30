@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- markt.html v0.6.0 (2026-10-30, Johan): voordeel 2 = «Panelen sturen op de onbalans» — gepland afzetten op de spotmarkt en TOCH WEER AANZETTEN als de onbalansmarkt injectie beloont (groen), extra afzetten bij een negatieve onbalansprijs (oranje); teksten, legende, grafiek ② en stap 5 daarop afgestemd (server 15.367.0). Oude pagina's (zonder «aan»-reeks) houden de oude uitleg. -->
 <!-- markt.html v0.5.1 (2026-10-30, Johan): de voorbeelddag heet voluit wat ze is — «de meest lucratieve dag van het voorbije jaar» (tegel, grafiektitel, stap 5, resultaatvak) + zin dat een gewone dag veel minder oplevert. -->
 <!-- markt.html v0.5.0 (2026-10-30, Johan): GEEN VINKJES/«COMBINEER» MEER — de simulatie optimaliseert altijd alles samen. Onderaan de INTEGRALE meerwaarde (excl. onbalans) uit de volledige simulatie; elk voordeel toont welk % het op zich van dat totaal is (tegel, stap 5, PDF); opgeteld > 100 % (overlap). Onbalans (2 en 4) = meevaller, apart, niet in het totaal. -->
 <!-- markt.html v0.4.2 (2026-10-30, Johan): «Het net helpen» — hangt af van de energieleverancier (deel voor hem, extraatje om te bespreken zodra de monitoring goed werkt). -->
@@ -97,12 +98,12 @@ var API='https://lucid-amazement-production.up.railway.app';
 var Q=new URLSearchParams(location.search), MID=Q.get('mid')||'', PDF=Q.get('pdf')==='1';
 var D=null, KEY=null, STAP=1, ELIA={}, SPEEL=null, CUR=null, MERK=null;
 var VOLG=['cu','co','zc','on','pk','lg','gk','cb','ar','pl','pg'];
-var NAAM={cu:'Panelen af bij een negatieve spotprijs',co:'Panelen af bij een negatieve onbalansprijs',zc:'Zonnestroom bewaren voor dure momenten',on:'Het net helpen met de batterij (onbalans)',
+var NAAM={cu:'Panelen af bij een negatieve spotprijs',co:'Panelen sturen op de onbalans',zc:'Zonnestroom bewaren voor dure momenten',on:'Het net helpen met de batterij (onbalans)',
   pk:'Uw hoogste piek afvlakken',lg:'Laden als uw eigen verbruik laag is',gk:'Goedkoop inkopen',cb:'Goedkoop én onder uw piek laden',ar:'Goedkoop kopen, duur verkopen',
   pl:'Laden op de parking zonder piek',pg:'Laden op de parking buiten de piek'};
 var GROEP={cu:'Zonder batterij',co:'Zonder batterij',zc:'Met een batterij',on:'Met een batterij',pk:'Met een batterij',lg:'Met een batterij',gk:'Met een batterij',cb:'Met een batterij',ar:'Met een batterij',pl:'Laden op uw bedrijfsparking',pg:'Laden op uw bedrijfsparking'};
 var KORT={cu:'Bij een negatieve prijs kost injecteren geld. De sturing zet uw panelen dan even af. Geen batterij nodig.',
-  co:'Bovenop de planning van de dag voordien: ook afzetten als de onbalansprijs onder nul duikt.',
+  co:'Gepland afzetten bij een negatieve spotprijs, en toch weer aanzetten als de onbalansmarkt u daarvoor beloont.',
   zc:'Middagoverschot opslaan en gebruiken op de duurste momenten van de dag.',on:'De batterij reageert op het prijssignaal als het net uit balans is.',
   pk:'De batterij springt bij op uw drukste kwartier, zodat uw piek lager blijft.',lg:'De batterij vullen terwijl er ruimte is op uw aansluiting.',
   gk:'Stroom nemen in de goedkoopste uren van de dag.',cb:'Goedkoop laden én zonder uw piek te verhogen.',ar:'Laden bij een lage prijs, terugleveren bij een hoge.',
@@ -118,10 +119,11 @@ function argmin(a){var b=-1,bv=Infinity;for(var i=0;i<a.length;i++){if(a[i]<bv){
 function H(){return D.hefbomen[KEY];}
 function park(k){return k==='pl'||k==='pg';}
 function wagens(h){var v=(h&&h.ev)||{};return v.type==='vrachtwagen'?['vrachtwagen','vrachtwagens']:['personenwagen','personenwagens'];}
-function lblVoor(k){return k==='cu'?'zonder afzetten':(k==='co'?'enkel gepland afzetten':(k==='on'?'batterij zonder onbalans':(park(k)?'allemaal tegelijk laden':'zonder batterij')));}
-function lblMet(k){return (k==='cu'||k==='co')?'met afzetten':(k==='on'?'met onbalans-respons':(park(k)?'slim laden':'met batterij'));}
+function lblVoor(k){return k==='cu'?'zonder afzetten':(k==='co'?'gepland op de spotmarkt':(k==='on'?'batterij zonder onbalans':(park(k)?'allemaal tegelijk laden':'zonder batterij')));}
+function lblMet(k){return k==='co'?'met sturing op de onbalans':(k==='cu')?'met afzetten':(k==='on'?'met onbalans-respons':(park(k)?'slim laden':'met batterij'));}
 function merkNaam(){return MERK?(MERK.naam||''):'Energie-Compas';}
 function moment(k,h){
+  if(k==='co'&&h.aan&&h.aan.indexOf(1)>=0) return argmax(h.voor,function(i){return h.aan[i]===1?((h.voor[i]||0)-(h.met[i]||0)):-1;});   // v0.6.0: het «toch weer aan»-moment
   if(k==='cu'||k==='co') return argmax(h.voor,function(i){return (h.met[i]||0)-(h.voor[i]||0);});
   if(k==='zc') return argmax(h.laden);
   if(k==='on') return argmax(h.met,function(i){return Math.abs((h.met[i]||0)-(h.voor[i]||0));});
@@ -134,7 +136,7 @@ function moment(k,h){
 var MEEVALLER={co:1,on:1};
 // v0.5.1: welke dag tonen we? (de server kiest per voordeel de dag met het grootste effect; parking = gewone werkdag)
 var LUCR={cu:1,co:1,zc:1,gk:1,cb:1,ar:1};
-function dagKort(k){ return LUCR[k]?'meest lucratieve dag':(k==='pk'?'dag met de grootste piekverlaging':(k==='lg'?'dag met het meeste laden op rustige momenten':(k==='on'?'dag met de meeste reactie op het net':((k==='pl'||k==='pg')?'gewone werkdag':'voorbeelddag')))); }
+function dagKort(k){ if(k==='co'&&D&&D.hefbomen&&D.hefbomen.co&&D.hefbomen.co.aan) return 'meest lucratieve dag met «toch weer aan»'; return LUCR[k]?'meest lucratieve dag':(k==='pk'?'dag met de grootste piekverlaging':(k==='lg'?'dag met het meeste laden op rustige momenten':(k==='on'?'dag met de meeste reactie op het net':((k==='pl'||k==='pg')?'gewone werkdag':'voorbeelddag')))); }
 function integ(){ return (D&&D.integraal&&+D.integraal.eur>0)?+D.integraal.eur:0; }
 function pctKeys(){ return ['cu','zc','pk','gk','cb','ar'].concat(D&&D.ev_aanwezig?['pg']:[]).filter(function(k){return D.hefbomen&&D.hefbomen[k]&&D.hefbomen[k].jaar&&+D.hefbomen[k].jaar.eur>0;}); }
 function pct(k){ var I=integ(), j=D.hefbomen[k]&&D.hefbomen[k].jaar; if(!I||!j||!(+j.eur>0)||pctKeys().indexOf(k)<0) return null; return Math.round(j.eur/I*100); }
@@ -153,7 +155,7 @@ function tekst(k,h,s){
   var m=CUR==null?0:Math.round(CUR), sp=h.spot, iMin=argmin(sp), iMax=argmax(sp), dg=dagTxt(h.datum), neg=sp.filter(function(v){return v<0;}).length;
   var piekV=Math.max.apply(null,h.voor), piekM=Math.max.apply(null,h.met), w=wagens(h), ev=h.ev||{}, kp=h.kpi||{};
   var t1={cu:['Panelen even af als injecteren geld kost','Soms is er zo veel zon en wind in België dat de stroomprijs onder nul zakt. Wie dan stroom op het net zet, betaalt erbij. Slimme sturing zet uw zonnepanelen op zo’n moment even af. Wat u zelf verbruikt, blijft van uw panelen komen. <b>Hiervoor is geen batterij nodig.</b>'],
-    co:['Ook afzetten als het net uit balans is','De dag voordien legt de sturing vast wanneer uw panelen afgaan: op de kwartieren met een negatieve spotprijs (dat noemen we nomineren). Op de dag zelf kan het net toch nog uit balans raken. Duikt de <b>onbalansprijs</b> dan onder nul, dan zet de sturing uw panelen ook op dat moment even af. Zo volgt u het signaal van het net (passieve respons). <b>Hiervoor is geen batterij nodig.</b>'],
+    co:(h.aan?['Panelen sturen op de onbalans','De dag voordien plant de sturing op de spotmarkt: uw panelen gaan af op de kwartieren met een negatieve spotprijs (dat noemen we nomineren). Op de dag zelf kijkt de sturing naar de <b>onbalansmarkt</b>. Betaalt die op een gepland afgezet moment net goed voor stroom op het net, dan zet ze uw panelen <b>toch weer aan</b>. Duikt de onbalansprijs onder nul op een moment dat u wél injecteert, dan gaan ze extra af. Zo stuurt u uw panelen op het signaal van het net (passieve respons). <b>Hiervoor is geen batterij nodig.</b>']:['Ook afzetten als het net uit balans is','De dag voordien legt de sturing vast wanneer uw panelen afgaan: op de kwartieren met een negatieve spotprijs (dat noemen we nomineren). Op de dag zelf kan het net toch nog uit balans raken. Duikt de <b>onbalansprijs</b> dan onder nul, dan zet de sturing uw panelen ook op dat moment even af. Zo volgt u het signaal van het net (passieve respons). <b>Hiervoor is geen batterij nodig.</b>']),
     zc:['Zonnestroom bewaren voor dure momenten','Uw zonnepanelen maken het meest rond de middag, als u vaak minder gebruikt dan ze maken. Zonder batterij gaat dat overschot het net op, meestal voor weinig. Met een batterij bewaart u het en gebruikt u het op de <b>duurste</b> momenten van de dag. Dan neemt u minder van het net.'],
     on:['Het net een handje helpen','Het net moet elk moment in evenwicht zijn. Is er even te veel of te weinig stroom, dan loopt de onbalansprijs op of zakt ze. De batterij kan dan even meer of minder nemen. Ze volgt gewoon dat prijssignaal (passieve respons).'],
     pk:['Uw hoogste piek lager houden','Een deel van uw nettarief hangt af van uw drukste kwartier van de maand (het capaciteitstarief). Springt de batterij op dat moment bij, dan blijft uw piek lager en betaalt u minder.'],
@@ -172,13 +174,13 @@ function tekst(k,h,s){
   if(s===3){
     var p=['Grafiek ② toont de prijs per kwartier. De laagste spotprijs is <b>'+ckwh(sp[iMin])+'</b> om '+uur(iMin)+', de hoogste <b>'+ckwh(sp[iMax])+'</b> om '+uur(iMax)+'.'];
     if(neg>0) p.push('Gedurende <b>'+nf(neg/4,1)+' uur</b> is de spotprijs zelfs <b style="color:var(--rood)">negatief</b>.');
-    if(k==='co'||k==='on') p.push('De <b>grijze lijn</b> is de onbalansprijs. Ze springt veel meer op en neer dan de spotprijs'+(k==='co'?', en duikt soms onder nul terwijl de spotprijs nog positief is.':'.'));
+    if(k==='co'||k==='on') p.push('De <b>grijze lijn</b> is de onbalansprijs. Ze springt veel meer op en neer dan de spotprijs'+(k==='co'?(h.aan?': soms ver boven de spotprijs (het net is kort en betaalt voor stroom), soms onder nul (het net heeft te veel).':', en duikt soms onder nul terwijl de spotprijs nog positief is.'):'.'));
     p.push('Grafiek ③ toont waarom: hoeveel zon en wind heel België die dag maakt. Veel zon of wind betekent een lage prijs.');
     return {h:'Wat gebeurt er op de markt?',p:p};}
   if(s===4){
     var mt=uur(m), iDis=argmax(h.ontladen||[]), x={
       cu:'Om '+mt+' is de spotprijs '+ckwh(sp[m])+'. De sturing zet uw panelen dan even (deels) af <span style="color:var(--amber);font-weight:700">(oranje zone)</span>: u zet geen stroom op het net en betaalt dus niets bij.',
-      co:'Om '+mt+' is de spotprijs nog '+ckwh(sp[m])+', maar de onbalansprijs zakt naar <b>'+ckwh(h.imb[m])+'</b>. Bovenop wat al gepland was, zet de sturing uw panelen dan even af <span style="color:var(--amber);font-weight:700">(oranje zone)</span>.',
+      co:(h.aan&&h.aan[m]===1)?('Om '+mt+' was een negatieve spotprijs van '+ckwh(sp[m])+' gepland, dus uw panelen zouden afstaan. Maar de onbalansprijs is nu <b>'+ckwh(h.imb[m])+'</b>: het net komt stroom tekort en betaalt voor elke kWh. De sturing zet uw panelen <b>toch weer aan</b> <span style="color:var(--groen-d);font-weight:700">(groene zone)</span>.'):(h.aan&&h.aan[m]===-1)?('Om '+mt+' is de spotprijs nog '+ckwh(sp[m])+', maar de onbalansprijs zakt naar <b>'+ckwh(h.imb[m])+'</b>. De sturing zet uw panelen dan extra af <span style="color:var(--amber);font-weight:700">(oranje zone)</span>.'):('Om '+mt+' is de spotprijs nog '+ckwh(sp[m])+', maar de onbalansprijs zakt naar <b>'+ckwh(h.imb[m])+'</b>. Bovenop wat al gepland was, zet de sturing uw panelen dan even af <span style="color:var(--amber);font-weight:700">(oranje zone)</span>.'),
       zc:'Om '+mt+' maken uw panelen meer dan u gebruikt. De batterij laadt dat overschot op <span style="color:var(--groen-d);font-weight:700">(groene zone)</span> en geeft het terug op de duurste momenten'+(iDis>=0&&(h.ontladen[iDis]||0)>0?(', rond '+uur(iDis)+' aan '+ckwh(sp[iDis])):'')+' <span style="color:#2a6fb0;font-weight:700">(blauwe zone)</span>. Dan neemt u minder van het net.',
       on:'Om '+mt+' is de onbalansprijs '+ckwh(h.imb[m])+' tegenover een spotprijs van '+ckwh(sp[m])+'. De batterij volgt dat signaal en neemt even '+((h.met[m]>h.voor[m])?'meer':'minder')+' stroom van het net.',
       pk:'Uw drukste kwartier is om '+mt+': '+nf(piekV,0)+' kW. De batterij levert dan zelf stroom <span style="color:#2a6fb0;font-weight:700">(blauwe zone)</span>, zodat u van het net maar '+nf(piekM,0)+' kW nodig hebt.',
@@ -191,7 +193,9 @@ function tekst(k,h,s){
     return {h:'Wat doet deze actie?',p:[x,'De groene lijn in grafiek ① is '+lblMet(k)+'; grijs'+(park(k)?' + rood':'')+' is '+lblVoor(k)+'.']};}
   var j=h.jaar||{}, p5=[];
   if(k==='cu') p5.push('Die dag zet u ± <b>'+nf(kp.kwh,0)+' kWh</b> niet op het net aan een negatieve prijs. Dat spaart ± <b>€ '+nf(kp.eur,2)+'</b>. Over het voorbije jaar: ± '+nf((j.kwh||0)/1000,1)+' MWh en ± <b>€ '+nf(j.eur,0)+'</b>.');
-  if(k==='co') p5.push('Die dag reageert u op ± <b>'+nf(kp.kwh,0)+' kWh</b> aan een negatieve onbalansprijs (± € '+nf(kp.eur,2)+'). Over het voorbije jaar: ± <b>€ '+nf(j.eur,0)+'</b>.');
+  if(k==='co'&&h.aan){ p5.push('Die dag gaan uw panelen ± <b>'+nf(kp.kwh_aan,0)+' kWh</b> toch weer aan (± € '+nf(kp.eur_aan,2)+')'+(kp.kwh_af>0?' en ± '+nf(kp.kwh_af,0)+' kWh extra af (± € '+nf(kp.eur_af,2)+')':'')+'. Over het voorbije jaar: ± <b>€ '+nf(j.eur,0)+'</b>, waarvan ± € '+nf(j.eur_aan,0)+' door toch weer aan te zetten ('+nf((j.kwh_aan||0)/1000,1)+' MWh) en ± € '+nf(j.eur_af,0)+' door extra af te zetten ('+nf((j.kwh_af||0)/1000,1)+' MWh).');
+    p5.push('We rekenen behoudend: de sturing kent de onbalansprijs niet op voorhand, dus we tellen maar '+(j.capture_pct||65)+' % van wat mogelijk was, na de injectievergoeding van de leverancier. Dit hangt af van uw energieleverancier en van hoe goed hij met u meedenkt.'); }
+  else if(k==='co') p5.push('Die dag reageert u op ± <b>'+nf(kp.kwh,0)+' kWh</b> aan een negatieve onbalansprijs (± € '+nf(kp.eur,2)+'). Over het voorbije jaar: ± <b>€ '+nf(j.eur,0)+'</b>.');
   if(k==='zc') p5.push('Die dag bewaart de batterij ± <b>'+nf(kp.kwh,0)+' kWh</b> zonnestroom voor de duurste momenten (± € '+nf(kp.eur,0)+'). Over het voorbije jaar: ± <b>€ '+nf(j.eur,0)+'</b>.');
   if(k==='on') p5.push('Die dag reageert de batterij op het net met ± <b>'+nf(kp.kwh,0)+' kWh</b>.'+(j.eur>0?' Over het voorbije jaar: ± <b>€ '+nf(j.eur,0)+'</b>.':'')+' We rekenen behoudend: de sturing kent de onbalansprijs niet op voorhand, dus we tellen maar '+((j.controle&&j.controle.capture_pct)||65)+' % van wat mogelijk was, min de extra heffingen en de vergoeding van de leverancier.');
   if(k==='on') p5.push('<b>Dit hangt af van uw energieleverancier</b> en van hoe goed hij met u meedenkt; voor zijn werk houdt hij allicht een deel voor zich. Zie het als een extraatje om te bespreken zodra de monitoring goed werkt: meteen een test of uw leverancier echt meedenkt om de kosten voor u, voor iedereen en voor het net lager te maken.');
@@ -202,9 +206,9 @@ function tekst(k,h,s){
     p5.push('Met uw bestaande aansluiting kunt u op zo’n werkdag ± <b>'+nf(kp.km_max,0)+' km</b> laden'+(ev.type==='vrachtwagen'?' met vrachtwagens':' met personenwagens')+'. Over het voorbije jaar: gemiddeld ± <b>'+nf(j.km_dag,0)+' km per werkdag</b>.');
     if(extra>0) p5.push('Met de batterij erbij komt daar per dag nog ± '+nf(extra,0)+' km bij.'); }
   if(k==='pg') p5.push('Kost per 100 km die dag: allemaal tegelijk <b>€ '+nf(kp.e100_dom,2)+'</b>, slim <b>€ '+nf(kp.e100_slim,2)+'</b>. Over het voorbije jaar: € '+nf(j.e100_slim,2)+' i.p.v. € '+nf(j.e100_dom,2)+' per 100 km, ± <b>€ '+nf(j.eur,0)+'</b> minder per jaar.');
-  if(LUCR[k]&&p5.length){ var _z='de meest lucratieve dag van het voorbije jaar (<b>'+dg+'</b>)';
+  if(LUCR[k]&&p5.length){ var _z=(k==='co'&&h.aan)?('de meest lucratieve dag van het voorbije jaar waarop uw panelen toch weer aangingen (<b>'+dg+'</b>)'):('de meest lucratieve dag van het voorbije jaar (<b>'+dg+'</b>)');
     p5[0]=p5[0].replace(/^Die dag /,'Op '+_z+' ').replace(/^Het prijsvoordeel die dag:/,'Het prijsvoordeel op '+_z+':');
-    p5.splice(1,0,'Dat is bewust de meest lucratieve dag van het jaar. Een gewone dag levert veel minder op: het jaarbedrag is de som van alle dagen, ook de vele dagen waarop dit weinig of niets oplevert.'); }
+    p5.splice(1,0,'Dat is bewust een uitschieter. Een gewone dag levert veel minder op: het jaarbedrag is de som van alle dagen, ook de vele dagen waarop dit weinig of niets oplevert.'); }
   if(k==='pk'&&p5.length){ p5[0]=p5[0].replace('Uw piek die dag:','Uw piek op de dag met de grootste piekverlaging van het voorbije jaar (<b>'+dg+'</b>):'); }
   var _I=integ(), _p=pct(k);
   if(_I&&MEEVALLER[k]) p5.push('Dit komt <b>bovenop</b> de ± € '+nf(_I,0)+' per jaar die alles samen oplevert (zonder onbalans): een meevaller, geen deel ervan.');
@@ -246,7 +250,7 @@ function g1(h,toonMet,q){
     s+='<path d="'+vlak(h.voor,lo,hi,t,b)+'" fill="#C9D3DF" opacity=".8"/>';
     if(toonMet){var bw=W/95+0.4;
       for(var i=0;i<96;i++){var d=(h.met[i]||0)-(h.voor[i]||0);if(Math.abs(d)<0.05)continue;
-        var kleur=(KEY==='cu'||KEY==='co')?'rgba(232,147,12,.38)':(d>0?'rgba(106,175,66,.32)':'rgba(93,169,233,.35)');
+        var kleur=(KEY==='co'&&h.aan&&h.aan[i]===1)?'rgba(106,175,66,.45)':((KEY==='cu'||KEY==='co')?'rgba(232,147,12,.38)':(d>0?'rgba(106,175,66,.32)':'rgba(93,169,233,.35)'));
         var y1=y(h.voor[i],lo,hi,t,b),y2=y(h.met[i],lo,hi,t,b);s+='<rect x="'+(X(i)-bw/2)+'" y="'+Math.min(y1,y2)+'" width="'+bw+'" height="'+Math.abs(y2-y1)+'" fill="'+kleur+'"/>';}
       s+='<path d="'+lijn(h.met,lo,hi,t,b)+'" fill="none" stroke="#6AAF42" stroke-width="2.4"/>';}
   }
@@ -259,7 +263,8 @@ function g2(h,q){
   var all=h.spot.concat((KEY==='on'||KEY==='co')?h.imb:[]).filter(function(v){return isFinite(v);});var mx=Math.max(50,Math.max.apply(null,all)),mn=Math.min(0,Math.min.apply(null,all));
   var hi=rond(mx*1.1),lo=mn<0?rond(mn*1.1):0,t=8,b=125,s=as(lo/10,hi/10,t,b,ticks(lo/10,hi/10,4),'');
   var bw=W/95+0.4;h.spot.forEach(function(v,i){if(v<0)s+='<rect x="'+(X(i)-bw/2)+'" y="'+t+'" width="'+bw+'" height="'+(b-t)+'" fill="rgba(214,69,69,.10)"/>';});
-  if(KEY==='co') h.imb.forEach(function(v,i){if(v<0&&h.spot[i]>=0)s+='<rect x="'+(X(i)-bw/2)+'" y="'+t+'" width="'+bw+'" height="'+(b-t)+'" fill="rgba(232,147,12,.14)"/>';});
+  if(KEY==='co'&&h.aan) h.aan.forEach(function(a,i){if(a)s+='<rect x="'+(X(i)-bw/2)+'" y="'+t+'" width="'+bw+'" height="'+(b-t)+'" fill="'+(a===1?'rgba(106,175,66,.22)':'rgba(232,147,12,.16)')+'"/>';});
+  else if(KEY==='co') h.imb.forEach(function(v,i){if(v<0&&h.spot[i]>=0)s+='<rect x="'+(X(i)-bw/2)+'" y="'+t+'" width="'+bw+'" height="'+(b-t)+'" fill="rgba(232,147,12,.14)"/>';});
   s+='<clipPath id="c2"><rect x="'+L+'" y="'+t+'" width="'+W+'" height="'+(b-t)+'"/></clipPath>';
   if(h.imb&&h.imb.length)s+='<path clip-path="url(#c2)" d="'+lijn(h.imb.map(function(v){return v/10;}),lo/10,hi/10,t,b)+'" fill="none" stroke="#9AA6B8" stroke-width="'+((KEY==='on'||KEY==='co')?1.7:1.1)+'"/>';
   s+='<path d="'+lijn(h.spot.map(function(v){return v/10;}),lo/10,hi/10,t,b)+'" fill="none" stroke="#003A5D" stroke-width="2.4"/>';
@@ -278,7 +283,7 @@ function zetCursor(qf){
   var h=D&&KEY&&H(); if(!h) return;
   var tt=document.getElementById('tt1'); if(tt){ tt.setAttribute('transform','translate('+(qf>66?-196:6)+',0)');
     var a=document.getElementById('tt1a'),b=document.getElementById('tt1b'),c=document.getElementById('tt1c'),v0=h.voor[q]||0,v1=h.met[q]||0;
-    if(a) a.textContent=uur(q)+' · '+ckwh(h.spot[q]);
+    if(a) a.textContent=uur(q)+' · spot '+ckwh(h.spot[q])+((KEY==='co'||KEY==='on')&&h.imb&&h.imb.length?(' · onbalans '+ckwh(h.imb[q])):'');
     if(b) b.textContent=lblVoor(KEY)+': '+(v0>=0?'afname ':'injectie ')+nf(Math.abs(v0),0)+' kW';
     if(c) c.textContent=lblMet(KEY)+': '+(v1>=0?'afname ':'injectie ')+nf(Math.abs(v1),0)+' kW';
     try{var bw=190;[a,b,c].forEach(function(e){if(e&&e.getComputedTextLength)bw=Math.max(bw,e.getComputedTextLength()+16);});
@@ -370,7 +375,7 @@ function teken(){
   document.getElementById('d1').textContent=dagTxt(h.datum)+' · '+dagKort(KEY)+' · kW per kwartier';
   document.getElementById('l1').innerHTML=pk
     ? ('<span><i style="background:#C9D3DF"></i>gebouw</span><span><i style="background:rgba(214,69,69,.38)"></i>allemaal tegelijk laden</span>'+(toonMet?'<span><i style="background:rgba(106,175,66,.5)"></i>slim laden</span>':'')+'<span><i style="background:#D64545;height:2px"></i>uw aansluiting</span>')
-    : ('<span><i style="background:#C9D3DF"></i>'+lblVoor(KEY)+': afname ↑ / injectie ↓</span>'+(toonMet?('<span><i style="background:var(--groen)"></i>'+lblMet(KEY)+'</span>'+((KEY==='cu'||KEY==='co')?'<span><i style="background:rgba(232,147,12,.5)"></i>panelen even af</span>':'<span><i style="background:rgba(106,175,66,.4)"></i>batterij laadt</span><span><i style="background:rgba(93,169,233,.45)"></i>batterij levert</span>')):''));
+    : ('<span><i style="background:#C9D3DF"></i>'+lblVoor(KEY)+': afname ↑ / injectie ↓</span>'+(toonMet?('<span><i style="background:var(--groen)"></i>'+lblMet(KEY)+'</span>'+(KEY==='co'&&H()&&H().aan?'<span><i style="background:rgba(106,175,66,.55)"></i>toch weer aan (onbalans betaalt)</span><span><i style="background:rgba(232,147,12,.5)"></i>extra af</span>':(KEY==='cu'||KEY==='co')?'<span><i style="background:rgba(232,147,12,.5)"></i>panelen even af</span>':'<span><i style="background:rgba(106,175,66,.4)"></i>batterij laadt</span><span><i style="background:rgba(93,169,233,.45)"></i>batterij levert</span>')):''));
   var q=(STAP>=2)?Math.round(CUR):null;
   document.getElementById('g1').innerHTML=g1(h,toonMet,q); document.getElementById('g2').innerHTML=g2(h,q); document.getElementById('g3').innerHTML=g3(h,q);
   if(q!=null) zetCursor(CUR);
