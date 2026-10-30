@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.90.0 (2026-10-30, Johan): KLIKBARE INHOUDSTAFEL — elke titel en paginanummer in de inhoudstafel springt naar dat hoofdstuk/die bijlage; op elke pagina staat in de voettekst «↑ Inhoud» (FR «Sommaire», EN «Contents») terug naar de inhoudstafel. Ook in de server-PDF. -->
 <!-- klantrapport.html v0.89.0 (2026-10-30, Johan): VOORZICHTIG SCENARIO (bankdossier + energiestudie/investeringsaftrek) rekent met 100 % van de gesimuleerde besparing i.p.v. 85 %; de andere regels blijven (−2 %/jaar veroudering, geen prijsstijging, geen onbalans, geen laadsessie-besparing of plaza-marge, opex in mindering, 10 jaar). -->
 <!-- klantrapport.html v0.88.0 (2026-10-30, Johan): ONBALANS = EXTRAATJE VIA DE LEVERANCIER — bij het onbalans-potentieel staat nu duidelijk dat het afhangt van je energieleverancier en hoe goed hij meedenkt, dat hij allicht een deel voor zich houdt, en dat je het bespreekt zodra de monitoring goed werkt (meteen een test of hij echt meedenkt). -->
 <!-- klantrapport.html v0.87.0 (2026-10-29, Johan): DC-laadbuffer van de offerte overal vermeld naast de batterij (voorblad, samenvatting, factuurvergelijking, stappen, investering, batterij-bijlage, energiestudie). -->
@@ -158,7 +159,9 @@
   body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:var(--zwart);background:#e9edf2;font-size:14px;line-height:1.55}
   .a4{background:#fff;width:210mm;min-height:297mm;margin:14px auto;padding:16mm 18mm 13mm;box-shadow:0 2px 14px rgba(0,0,0,.12);display:flex;flex-direction:column;position:relative}
   .a4 > .a4-content{flex:1}
-  .a4-foot{margin-top:auto;padding-top:8px;font-size:9px;color:var(--grijs);border-top:1px solid var(--lijn);display:flex;justify-content:space-between}
+  .a4-foot{margin-top:auto;padding-top:8px;font-size:9px;color:var(--grijs);border-top:1px solid var(--lijn);display:flex;justify-content:space-between;gap:10px}
+  .a4-foot a.a4-toc{color:var(--grijs);text-decoration:none;white-space:nowrap} .a4-foot a.a4-toc:hover{text-decoration:underline}
+  a.toc-a{color:inherit;text-decoration:none} a.toc-a:hover{text-decoration:underline}
   /* neutrale kop */
   .kop{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid var(--groen);padding-bottom:9px;margin-bottom:16px}
   /* v0.45.0 (Johan): Energie-Compas-huisstijl — volledig logo (wit), Poppins voor titels, palet ink #14203a / groen #05B050 */
@@ -3173,6 +3176,21 @@ function _krPagineer(){
 }
 _krPagineer(); window._krPagineer=_krPagineer;
 
+// v0.90.0 (Johan 30-10): op elke pagina (behalve voorblad, achterblad en de inhoudstafel zelf) een link «↑ Inhoud» in de
+//   voettekst naar de inhoudstafel. Werkt in de browser én in de server-PDF (Chromium bewaart interne links). Idempotent:
+//   opnieuw oproepen na een her-paginering voegt enkel toe waar de link nog ontbreekt.
+function _krTocVoet(){
+  var toc=R&&R.querySelector('.a4[data-toc]'); if(!toc) return; toc.id='kr-inhoud';
+  var allp=R.querySelectorAll('.a4');
+  for(var n=0;n<allp.length;n++){
+    var pg=allp[n]; if(pg===toc||pg.classList.contains('cover')||pg.classList.contains('back')) continue;
+    var f=pg.querySelector('.a4-foot'); if(!f||f.querySelector('.a4-toc')) continue;
+    var a=document.createElement('a'); a.className='a4-toc'; a.href='#kr-inhoud'; a.setAttribute('data-i18n-skip','1');
+    a.textContent='↑ '+_T3('Inhoud','Sommaire','Contents');
+    if(f.children.length>1) f.insertBefore(a, f.lastElementChild); else f.appendChild(a);
+  }
+}
+window._krTocVoet=_krTocVoet;
 // v0.42.0 (Johan): INHOUDSTAFEL invullen ná de her-paginering — hoofdstukken (genummerd) + bijlagen met hun paginanummer.
 // v0.56.0 (Johan 17-10): DRIE LAGEN + LEESWIJZER — A. Beslissen (voorblad, advies, stappenplan: 2 minuten) · B. Begrijpen
 //   (de hoofdstukken: hoe we rekenden) · C. Controleren (bijlagen: je verbruik, je installatie aan het werk, overige), met per
@@ -3205,7 +3223,8 @@ _krPagineer(); window._krPagineer=_krPagineer;
       var isBij=!h1.querySelector('.hnr') && /^(Bijlage|Annexe|Appendix)\b/i.test(t), isH=!!h1.querySelector('.hnr');
       if(isBij) laag='C'; else if(isH && laag==='A') laag='B';
       var L=leert(t.replace(/^(Bijlage|Annexe|Appendix)\s*\d+\s*[—–-]\s*/i,''));
-      items.push({ t:t, p:n+1, laag:laag, bij:isBij, h:isH, leert:L?L[1]:'', groep:isBij?((L&&L[2])||'o'):'' });
+      if(!pg.id) pg.id='kr-h'+(n+1);   // v0.90.0: anker voor de klikbare inhoudstafel
+      items.push({ t:t, p:n+1, id:pg.id, laag:laag, bij:isBij, h:isH, leert:L?L[1]:'', groep:isBij?((L&&L[2])||'o'):'' });
     }
     var LAAG={ A:[_L3('A. Beslissen','A. Décider','A. Decide'), _L3((D.offerte?'2 minuten — het antwoord, je offerte samengevat en het stappenplan':'2 minuten — het antwoord, ons advies en het stappenplan'),'2 minutes — la réponse, notre conseil et le plan','2 minutes — the answer, our advice and the plan')],
       B:[_L3('B. Begrijpen','B. Comprendre','B. Understand'), _L3('hoe we rekenden — voor wie wil weten waarom','comment nous avons calculé','how we calculated')],
@@ -3218,7 +3237,7 @@ _krPagineer(); window._krPagineer=_krPagineer;
       if(x.laag!==huidig){ huidig=x.laag; rows+='<tr><td colspan="2" style="padding:10px 0 3px;border-bottom:1px solid #E2E8F0"><span style="font-weight:700;color:#0A2540">'+LAAG[x.laag][0]+'</span> <span style="color:#64748B;font-size:11.5px">— '+LAAG[x.laag][1]+'</span>'+
         (x.laag==='C'?'<div style="font-size:10.5px;color:#64748B;margin-top:2px">'+['v','i','o'].map(function(g){ return '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+GKL[g]+';margin:0 4px 0 8px"></span>'+esc(GRP[g]); }).join('')+'</div>':'')+'</td></tr>'; }
       var tag=x.bij?'<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+GKL[x.groep]+';margin-right:6px" title="'+esc(GRP[x.groep])+'"></span>':'';
-      rows+='<tr><td style="padding:3px 0;'+(x.bij?'padding-left:10px;font-size:12.5px;':'font-weight:600;')+'">'+tag+esc(x.t)+(x.leert&&!x.bij?'<div style="font-weight:400;font-size:11px;color:#64748B;line-height:1.3">'+esc(x.leert)+'</div>':'')+'</td><td style="padding:3px 0;text-align:right;white-space:nowrap;color:#54617a;vertical-align:top">'+x.p+'</td></tr>';
+      rows+='<tr><td style="padding:3px 0;'+(x.bij?'padding-left:10px;font-size:12.5px;':'font-weight:600;')+'">'+tag+'<a class="toc-a" href="#'+x.id+'">'+esc(x.t)+'</a>'+(x.leert&&!x.bij?'<div style="font-weight:400;font-size:11px;color:#64748B;line-height:1.3">'+esc(x.leert)+'</div>':'')+'</td><td style="padding:3px 0;text-align:right;white-space:nowrap;color:#54617a;vertical-align:top"><a class="toc-a" href="#'+x.id+'">'+x.p+'</a></td></tr>';
     });
     // v0.74.0 (schrijfregels): korte woordenlijst — vaktermen die in het rapport blijven, in gewone taal.
     var WL=[[_T3('Dynamisch contract','Contrat dynamique','Dynamic contract'),_T3('je stroomprijs volgt de markt, per kwartier.','votre prix suit le marché, par quart d’heure.','your power price follows the market, per quarter-hour.')],
@@ -3242,10 +3261,11 @@ _krPagineer(); window._krPagineer=_krPagineer;
       if(!pas(0.80)){ var w=box.lastElementChild; if(w && w.tagName!=='TABLE'){ w.remove(); } pas(0.72); }
     }catch(e){} })();
   }catch(e){ try{console.warn('toc',e);}catch(_){} }
+  try{ _krTocVoet(); }catch(e){}
 })();
 // v0.75.3: vangnet — na het laden (late vertalingen, lettertypes) nog één keer passen; daarna klaar-vlag voor de server-PDF.
 (function(){ function klaar(){ window.__KR_KLAAR=true; }
-  if(window.EC_LANG && window.EC_LANG!=='nl'){ var go=function(){ setTimeout(function(){ try{ _krPagineer(); }catch(e){} klaar(); }, 400); }; if(document.readyState==='complete') go(); else window.addEventListener('load', go); }
+  if(window.EC_LANG && window.EC_LANG!=='nl'){ var go=function(){ setTimeout(function(){ try{ _krPagineer(); }catch(e){} try{ _krTocVoet(); }catch(e){} klaar(); }, 400); }; if(document.readyState==='complete') go(); else window.addEventListener('load', go); }
   else klaar(); })();
 
 // Bij ECHTE data met een e-mailadres: EK laat het rapport als PDF naar de klant mailen (fire-and-forget, 1×).
