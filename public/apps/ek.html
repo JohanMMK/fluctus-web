@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.128.0 (2026-10-30, Johan): knop «📈 Uw profiel op de markt» naast het rapport → POST /api/energiekompas/markt-edu (server 15.361.0) voor de gekozen combinatie of offerte → deelbare pagina markt.html?mid=… + PDF-inleiding (&pdf=1). -->
 <!-- ek.html v0.127.1 (2026-10-29, Johan): een bewaarde aansluiting/toegangsvermogen hoger dan de gemeten piek blijft bij heropenen staan (het gemeten profiel overschreef ze altijd met de gemeten piek, bv. 55 → 40 kW). -->
 <!-- ek.html v0.127.0 (2026-10-29, Johan): (A) laadsessie-besparing t.o.v. het GOEDKOOPSTE alternatief per voertuigtype — laden elders (gezonde mix) of diesel (server per_type.diesel_eur_mwh, 15.359.0); (B) offerte: DC-laadbuffer kW/kWh (batterij op de DC-bus van de lader, enkel voor de voertuigen) → bedrijf-cel/rapport-body dc_buffer_kw/kwh; «Batterij» = enkel de AC-batterij. -->
 <!-- ek.html v0.126.0 (2026-10-29, Johan): EIGEN LAADVENSTER PER VOERTUIGRIJ — laadmoment «eigen venster …» met van/tot (uur, per kwartier, over middernacht mag); gaat als venster_start/venster_eind naar de sweep (server + simulator ondersteunden dat al) en wordt op het dossier bewaard (ev_rows vs/ve, server 15.358.0). Rapport toont het venster via per_type.laadmoment. -->
@@ -4728,6 +4729,28 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     _ekPnrKnop();
   };
   try{ document.addEventListener('input', function(e){ if(e.target && e.target.id==='i-klant') _ekPnrKnop(); }); setInterval(_ekPnrKnop, 1500); }catch(e){}
+  // v0.128.0 (Johan 30-10): «UW PROFIEL OP DE MARKT» — educatieve, deelbare pagina (markt.html?mid=…) voor de gekozen combinatie/offerte.
+  //   Server 15.361.0 draait dezelfde 4 simulaties als het rapport en kiest per voordeel de beste dag; de link blijft bewaard op het dossier.
+  window._ekMarktEdu=async function(opt){
+    var st=$('rapport-status');
+    if(!window._RAP_PAYLOAD){ if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
+    if(!TOKEN){ if(st){ st.style.color='var(--muted)'; st.textContent='Rond eerst de intake af (dossier ontbreekt).'; } return; }
+    var sel=(opt&&opt.sel)?opt.sel:((HM&&(HM.sel||HM.best))||null);
+    if(!sel){ if(st){ st.style.color='var(--muted)'; st.textContent='Kies eerst een combinatie in de heatmap.'; } return; }
+    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, (opt&&opt.body)||{},
+      { token:TOKEN, klant:(STATE_KLANT||''), project_id:(STATE_CODE||undefined), lang:(window.EC_LANG||'nl') });
+    if(!(body.pv_kwp>0||body.batt_kw>0)){ if(st){ st.style.color='var(--muted)'; st.textContent='Kies een combinatie met zonnepanelen of een batterij.'; } return; }
+    var win=null; try{ win=window.open('','_blank'); if(win){ win.document.title='Uw profiel op de markt…'; win.document.body.innerHTML='<p style="font:16px/1.5 -apple-system,Segoe UI,Arial,sans-serif;color:#003A5D;padding:40px">⏳ Uw profiel op de markt wordt opgebouwd (± 1 à 3 minuten)…</p>'; } }catch(eW){}
+    if(st){ _ekBusy(st, _ekL3('«Uw profiel op de markt» wordt opgebouwd…','«Votre profil sur le marché» est en cours…','«Your profile on the market» is being built…')); }
+    try{
+      var r=await fetch(API+'/api/energiekompas/markt-edu',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      var j=await r.json().catch(function(){return{};});
+      if(!j||!j.ok||!j.url) throw new Error((j&&j.error)||'opbouwen faalde');
+      window._EK_MARKT_URL=j.url;
+      if(win && !win.closed){ try{ win.location.href=j.url; }catch(eL){ win=null; } }
+      if(st){ st.style.color='var(--green)'; st.innerHTML='✔ «Uw profiel op de markt» klaar — <a href="'+j.url+'" target="_blank" rel="noopener">open</a> · <a href="'+j.url+'&pdf=1" target="_blank" rel="noopener">PDF-inleiding</a> · <a href="#" onclick="try{navigator.clipboard.writeText(\''+j.url+'\');this.textContent=\'link gekopieerd\';}catch(e){};return false;">kopieer de link</a>'; }
+    }catch(e){ try{ if(win&&!win.closed) win.close(); }catch(x){} if(st){ st.style.color='var(--muted)'; st.textContent='«Uw profiel op de markt» lukte niet: '+e.message; } }
+  };
   async function toonKlantrapport(opt){
     opt=(opt&&opt.sel)?opt:null; var _zip=!!(opt&&opt.zip); if(!_zip && !(opt&&opt.offerte)) window._EK_RAP_GEZIEN=true;   // v0.99.0: kompas fase 2   // v0.94.0: zip → geen tabblad, geeft de rapport-URL terug (ZIP per project)   // v0.83.0: {sel, body, offerte, st} = rapport voor een opgeladen offerte
     try{ if(window._ekVersieCheck) window._ekVersieCheck(true); }catch(eV){}   // v0.41.2: versiewacht (balk bij nieuwere versie)
@@ -7344,7 +7367,7 @@ var _simVoortgang=(function(){
     var h='<div class="ek-kop2"><span class="nx-nr" style="'+(K.st.advies?'background:#05803C':'')+'">'+nr2+'</span><h2>'+e(titel)+'</h2>'+pill+'</div>'+
       '<div style="font-size:15px;font-weight:600;color:var(--navy)">'+e(combo||'—')+'</div>'+
       '<div class="kp"><div><small>'+e(L3('Besparing per jaar','Économie par an','Savings per year'))+'</small><b>'+e(besp||'—')+'</b></div><div><small>'+e(_pl&&_pl.netInv>0?L3('Investering incl. laadpalen','Investissement bornes incluses','Investment incl. chargers'):L3('Investering','Investissement','Investment'))+'</small><b>'+e(inv||'—')+'</b></div><div><small>'+e(L3('Rendement','Rendement','Return'))+(tvt?' · '+e(L3('terugverdientijd','temps de retour','payback'))+' '+e(tvt)+' j':'')+'</small><b>'+e(rend||'—')+'</b></div></div>'+
-      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="btn sm'+(gezien?' ghost':'')+'" type="button" id="ek-antw-rap">📄 '+e(knopT)+'</button>'+terug+vgl+'<span id="ek-scen-plek" style="flex:1 1 220px;display:flex;justify-content:flex-end"></span></div>'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="btn sm'+(gezien?' ghost':'')+'" type="button" id="ek-antw-rap">📄 '+e(knopT)+'</button>'+(((typeof _ekIsPart==='function')&&_ekIsPart())?'':'<button class="btn ghost sm" type="button" id="ek-antw-markt" title="Educatieve pagina: hoe uw profiel beter kan inspelen op de markt (deelbare link + PDF-inleiding)">📈 '+e(L3('Uw profiel op de markt','Votre profil sur le marché','Your profile on the market'))+'</button>')+terug+vgl+'<span id="ek-scen-plek" style="flex:1 1 220px;display:flex;justify-content:flex-end"></span></div>'+
       /* v0.101.4 (Johan): vanaf fase 4 geen kompas meer in blok 2 — de bovenbalk en de blauwe knop in het blok wijzen de weg */
       (!kort&&(A.p||K.fase!==2)?'<div class="kmp-wijst"><div class="kt">🧭 '+e(L3('Het kompas wijst','La boussole indique','The compass points'))+'</div><div class="kz">'+e(A.z)+'</div><div class="ka">'+
         (A.p?'<button class="btn sm" type="button" id="kmp-p">'+e(A.p[0])+'</button>':'')+(A.s?'<a id="kmp-s">'+e(A.s[0])+'</a>':'')+'</div></div>'
@@ -7355,6 +7378,7 @@ var _simVoortgang=(function(){
     kop.innerHTML=h; k.style.display='';
     var plek=el('ek-scen-plek'); if(scn && plek){ scn.style.margin='0'; scn.style.maxWidth='340px'; plek.appendChild(scn); }   // scenarionaam in blok 2, naast «Bekijk je …»
     var b;
+    if((b=el('ek-antw-markt'))) b.onclick=function(){ var S2=selectie(); try{ window._ekMarktEdu(S2.modus==='offerte'?window._ekOffOpt(S2.offerte.id):null); }catch(x){} };   // v0.128.0
     if((b=el('ek-antw-rap'))) b.onclick=function(){ var S2=selectie(); gzZet(gzKey(S2)); if(S2.modus==='offerte'){ try{ toonKlantrapport(window._ekOffOpt(S2.offerte.id)); }catch(x){} } else { (window.toonKlantrapport||function(){})(); } _laatste=''; setTimeout(render,300); setTimeout(render,1200); };
     try{ window._ekBlokkenPas&&window._ekBlokkenPas(); }catch(xb){}   // v0.101.4: pijl + inklappen blok 2
     if((b=el('ek-antw-terug'))) b.onclick=terugNaarVast;
