@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- markt.html v0.2.0 (2026-10-30, Johan): afspelen vloeiend en rustiger (requestAnimationFrame, ± 30 s per dag); «Pauze» reageert meteen (de knop wordt tijdens het spelen niet meer herbouwd); enkel cursor + tooltip bewegen. -->
 <!-- markt.html v0.1.2 (2026-10-30): Poppins/Inter via Google Fonts (huisstijl). v0.1.1: logo zonder dubbele naam; onbalanslijn binnen de prijsgrafiek geknipt. -->
 <!-- markt.html v0.1.0 (2026-10-30, Johan): «Uw profiel op de markt verdient beter» — educatieve, deelbare pagina per dossier (klant + adviseur).
      Data: GET /api/markt-edu/:mid (server ≥ 15.361.0, simulator ≥ 1.24.0) + zon/wind België via /elia-renewable. Per voordeel één echte dag,
@@ -168,7 +169,15 @@ function rond(v,up){var s=[1,2,5,10,20,25,50,100,200,250,500,1000,2000,5000];var
 function as(lo,hi,t,b,ticks,unit){var s='';ticks.forEach(function(v){var yy=y(v,lo,hi,t,b);s+='<line x1="'+L+'" x2="'+R+'" y1="'+yy+'" y2="'+yy+'" stroke="'+(v===0?'#9AA6B8':'#E3E8EF')+'" stroke-width="'+(v===0?1.2:1)+'"/><text x="'+(L-6)+'" y="'+(yy+4)+'" text-anchor="end" font-size="11" fill="#7a869a">'+nf(v,0)+unit+'</text>';});
   for(var u=0;u<=24;u+=3)s+='<text x="'+(L+W*u/24)+'" y="'+(b+15)+'" text-anchor="middle" font-size="11" fill="#7a869a">'+u+'u</text>';return s;}
 function ticks(lo,hi,n){var st=rond((hi-lo)/n);var a=[];for(var v=Math.ceil(lo/st)*st;v<=hi+1e-9;v+=st)a.push(Math.round(v*100)/100);return a;}
-function cursor(t,b,q){return q==null?'':'<line x1="'+X(q)+'" x2="'+X(q)+'" y1="'+(t-4)+'" y2="'+b+'" stroke="#003A5D" stroke-width="1.5" stroke-dasharray="3 3"/>';}
+function cursor(t,b,q,id,extra){return q==null?'':'<g class="cur" id="'+id+'" transform="translate('+X(q).toFixed(1)+',0)"><line x1="0" x2="0" y1="'+(t-4)+'" y2="'+b+'" stroke="#003A5D" stroke-width="1.5" stroke-dasharray="3 3"/>'+(extra||'')+'</g>';}
+// v0.2.0: cursor + tooltip verschuiven zonder de grafieken opnieuw te tekenen (vloeiend afspelen)
+function zetCursor(qf){
+  var x=X(qf).toFixed(1); ['cur1','cur2','cur3'].forEach(function(id){var g=document.getElementById(id); if(g) g.setAttribute('transform','translate('+x+',0)');});
+  var h=D&&KEY&&H(); if(!h) return; var q=Math.max(0,Math.min(95,Math.round(qf)));
+  var tt=document.getElementById('tt1'); if(tt){ tt.setAttribute('transform','translate('+(qf>66?-182:6)+',0)');
+    var a=document.getElementById('tt1a'),b=document.getElementById('tt1b'),c=document.getElementById('tt1c'),v0=h.voor[q]||0,v1=h.met[q]||0;
+    if(a) a.textContent=uur(q); if(b) b.textContent=lblVoor(KEY)+': '+(v0>=0?'afname ':'injectie ')+nf(Math.abs(v0),0)+' kW'; if(c) c.textContent='met: '+(v1>=0?'afname ':'injectie ')+nf(Math.abs(v1),0)+' kW'; }
+}
 function g1(h,toonMet,q){
   var all=h.voor.concat(toonMet?h.met:[]),mx=Math.max(5,Math.max.apply(null,all)),mn=Math.min(0,Math.min.apply(null,all));
   var hi=rond(mx*1.15),lo=mn<0?rond(mn*1.15):0,t=10,b=168,s=as(lo,hi,t,b,ticks(lo,hi,4),'');
@@ -178,11 +187,10 @@ function g1(h,toonMet,q){
       var kleur=(KEY==='cu')?'rgba(232,147,12,.35)':(d>0?'rgba(106,175,66,.32)':'rgba(93,169,233,.35)');
       var y1=y(h.voor[i],lo,hi,t,b),y2=y(h.met[i],lo,hi,t,b);s+='<rect x="'+(X(i)-bw/2)+'" y="'+Math.min(y1,y2)+'" width="'+bw+'" height="'+Math.abs(y2-y1)+'" fill="'+kleur+'"/>';}
     s+='<path d="'+lijn(h.met,lo,hi,t,b)+'" fill="none" stroke="#6AAF42" stroke-width="2.4"/>';}
-  s+=cursor(t,b,q);
-  if(q!=null){var v0=h.voor[q]||0,v1=h.met[q]||0;var tx=q>66?X(q)-182:X(q)+6;
-    s+='<rect x="'+tx+'" y="'+t+'" width="176" height="'+(toonMet?50:36)+'" rx="6" fill="#003A5D"/><text x="'+(tx+8)+'" y="'+(t+15)+'" fill="#fff" font-size="11" font-weight="700">'+uur(q)+'</text>'+
-      '<text x="'+(tx+8)+'" y="'+(t+29)+'" fill="#fff" font-size="11">'+lblVoor(KEY)+': '+(v0>=0?'afname ':'injectie ')+nf(Math.abs(v0),0)+' kW</text>'+
-      (toonMet?'<text x="'+(tx+8)+'" y="'+(t+43)+'" fill="#B9E29F" font-size="11">met: '+(v1>=0?'afname ':'injectie ')+nf(Math.abs(v1),0)+' kW</text>':'');}
+  if(q!=null){ var tip='<g id="tt1" transform="translate('+(q>66?-182:6)+',0)"><rect x="0" y="'+t+'" width="176" height="'+(toonMet?50:36)+'" rx="6" fill="#003A5D"/>'+
+      '<text id="tt1a" x="8" y="'+(t+15)+'" fill="#fff" font-size="11" font-weight="700"></text><text id="tt1b" x="8" y="'+(t+29)+'" fill="#fff" font-size="11"></text>'+
+      (toonMet?'<text id="tt1c" x="8" y="'+(t+43)+'" fill="#B9E29F" font-size="11"></text>':'')+'</g>';
+    s+=cursor(t,b,q,'cur1',tip); }
   return s;}
 function g2(h,q){
   var all=h.spot.concat(KEY==='on'?h.imb:[]).filter(function(v){return isFinite(v);});var mx=Math.max(50,Math.max.apply(null,all)),mn=Math.min(0,Math.min.apply(null,all));
@@ -191,7 +199,7 @@ function g2(h,q){
   s+='<clipPath id="c2"><rect x="'+L+'" y="'+t+'" width="'+W+'" height="'+(b-t)+'"/></clipPath>';
   if(h.imb&&h.imb.length)s+='<path clip-path="url(#c2)" d="'+lijn(h.imb.map(function(v){return v/10;}),lo/10,hi/10,t,b)+'" fill="none" stroke="#9AA6B8" stroke-width="'+(KEY==='on'?1.6:1.1)+'"/>';
   s+='<path d="'+lijn(h.spot.map(function(v){return v/10;}),lo/10,hi/10,t,b)+'" fill="none" stroke="#003A5D" stroke-width="2.4"/>';
-  s+=cursor(t,b,q);return s;}
+  s+=cursor(t,b,q,'cur2');return s;}
 function g3(h,q){
   var e=ELIA[h.datum],t=8,b=112;
   if(!e) return '<text x="'+(L+W/2)+'" y="60" text-anchor="middle" font-size="13" fill="#7a869a">⏳ zon en wind in België worden opgehaald…</text>';
@@ -199,7 +207,7 @@ function g3(h,q){
   var tot=e.zon.map(function(z,i){return (z||0)+(e.wind[i]||0);}),hi=Math.max(2,rond(Math.max.apply(null,tot)*1.1)),s=as(0,hi,t,b,ticks(0,hi,2),'');
   s+='<path d="'+vlak(e.wind,0,hi,t,b)+'" fill="#5DA9E9" opacity=".85"/>';
   var top=lijn(tot,0,hi,t,b),back=e.wind.map(function(w,i){return 'L'+X(95-i).toFixed(1)+','+y(e.wind[95-i]||0,0,hi,t,b).toFixed(1);}).join('');
-  s+='<path d="'+top+back+'Z" fill="#F2B705" opacity=".85"/>';s+=cursor(t,b,q);return s;}
+  s+='<path d="'+top+back+'Z" fill="#F2B705" opacity=".85"/>';s+=cursor(t,b,q,'cur3');return s;}
 // ---------- Elia ----------
 function brusselsQ(ms,datum){try{var f=new Intl.DateTimeFormat('nl-BE',{timeZone:'Europe/Brussels',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   var p={};f.formatToParts(new Date(ms)).forEach(function(x){p[x.type]=x.value;});if((p.year+'-'+p.month+'-'+p.day)!==datum)return -1;return (+p.hour)*4+Math.floor((+p.minute)/15);}catch(e){return -1;}}
@@ -243,20 +251,34 @@ function teken(){
   var toonMet=STAP>=4;
   document.getElementById('d1').textContent=dagTxt(h.datum)+' · kW per kwartier';
   document.getElementById('l1').innerHTML='<span><i style="background:#C9D3DF"></i>'+lblVoor(KEY)+': afname ↑ / injectie ↓</span>'+(toonMet?('<span><i style="background:var(--groen)"></i>met '+(KEY==='cu'?'sturing':'batterij')+'</span>'+(KEY==='cu'?'<span><i style="background:rgba(232,147,12,.45)"></i>panelen even af</span>':'<span><i style="background:rgba(106,175,66,.4)"></i>batterij laadt</span><span><i style="background:rgba(93,169,233,.45)"></i>batterij levert</span>')):'');
-  var q=(STAP>=2)?CUR:null;
+  var q=(STAP>=2)?Math.round(CUR):null;
   document.getElementById('g1').innerHTML=g1(h,toonMet,q);
   document.getElementById('g2').innerHTML=g2(h,q);
   document.getElementById('g3').innerHTML=g3(h,q);
+  if(q!=null) zetCursor(CUR);
   ['p1','p2','p3'].forEach(function(id,i){document.getElementById(id).classList.toggle('focus',(STAP===2&&i===0)||(STAP===3&&i>0)||(STAP===4&&i===0));});
   var t=tekst(KEY,h,STAP), lijst=VOLG.map(function(k,i){var ok=!!D.hefbomen[k];return '<div class="'+(k===KEY?'a':'')+(ok?'':' nvt')+'" data-k="'+k+'"><span>'+(i+1)+' · '+esc(NAAM[k])+'</span><span>'+(k===KEY?'✓':'')+'</span></div>';}).join('');
   document.getElementById('uitleg').innerHTML='<span class="tag">Stap '+STAP+' · '+STAPPEN[STAP-1]+'</span><h2>'+t.h+'</h2>'+t.p.map(function(x){return '<p>'+x+'</p>';}).join('')+
     (STAP===5?resultaat(KEY,h):'')+
     '<div class="knop noprint"><button class="k1" id="speel">'+(SPEEL?'⏸ Pauze':'▶ Speel de dag af')+'</button><button class="k2" id="volg">'+(STAP<5?'Volgende stap →':'Volgend voordeel →')+'</button></div><div class="lijst">'+lijst+'</div>';
-  document.getElementById('speel').onclick=function(){ if(SPEEL){stopSpeel();teken();return;} if(STAP<2)STAP=2; CUR=0; SPEEL=setInterval(function(){CUR++; if(CUR>95){stopSpeel();CUR=moment(KEY,h);} teken();},90); teken(); };
+  document.getElementById('speel').onclick=function(){ if(SPEEL){ stopSpeel(); knopSpeel(); return; } speel(); };
   document.getElementById('volg').onclick=function(){stopSpeel(); if(STAP<5){STAP++;CUR=moment(KEY,h);} else { var ks=beschikbaar(); KEY=ks[(ks.indexOf(KEY)+1)%ks.length]; STAP=1; CUR=null; var se=document.getElementById('kies'); if(se) se.value=KEY; } teken();};
   Array.prototype.forEach.call(document.querySelectorAll('.lijst div'),function(e){var k=e.getAttribute('data-k'); if(!D.hefbomen[k]) return; e.onclick=function(){KEY=k;STAP=1;CUR=null;stopSpeel();var se=document.getElementById('kies');if(se)se.value=k;teken();};});
 }
-function stopSpeel(){ if(SPEEL){clearInterval(SPEEL);SPEEL=null;} }
+// v0.2.0 (Johan 30-10): vloeiend en rustiger afspelen — requestAnimationFrame, ± 30 s voor een volledige dag (± 1,25 s per uur),
+//   de cursor glijdt continu; enkel cursor en tooltip bewegen (geen herbouw van de knoppen → «Pauze» reageert meteen).
+var DAG_MS=30000;
+function knopSpeel(){ var b=document.getElementById('speel'); if(b) b.textContent=SPEEL?'⏸ Pauze':((CUR!=null&&CUR>0&&CUR<95)?'▶ Verder afspelen':'▶ Speel de dag af'); }
+function speel(){
+  if(!D||!KEY) return;
+  if(STAP<2){ STAP=2; CUR=0; teken(); }
+  if(CUR==null||CUR>=95) CUR=0;
+  var start=null, van=CUR;
+  function stap(ts){ if(!SPEEL) return; if(start==null) start=ts; CUR=Math.min(95, van+(ts-start)/DAG_MS*96); zetCursor(CUR);
+    if(CUR>=95){ SPEEL=null; knopSpeel(); return; } SPEEL=requestAnimationFrame(stap); }
+  SPEEL=requestAnimationFrame(stap); knopSpeel();
+}
+function stopSpeel(){ if(SPEEL){ cancelAnimationFrame(SPEEL); SPEEL=null; } }
 // ---------- PDF-inleiding (A4) ----------
 function miniSvg(k,h){var a=h.voor.concat(h.met),mx=Math.max(1,Math.max.apply(null,a)),mn=Math.min(0,Math.min.apply(null,a)),t=6,b=44;
   function P(arr){return arr.map(function(v,i){return (i?'L':'M')+(4+i*102/95).toFixed(1)+','+(b-((v||0)-mn)/(mx-mn)*(b-t)).toFixed(1);}).join('');}
