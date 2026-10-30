@@ -1,4 +1,4 @@
-/* ec-iconen.js v1.1.0 (documenticonen doc/markt/off/bank/aftrek, klikbare tegels id/dim/title) · v1.0.0 (2026-10-30, Johan) — VISUELE BOUWSTENEN voor rapporten en EK: iconen (zonnepanelen, batterij,
+/* ec-iconen.js v1.1.1 (gsm: tegels lopen door naar een volgende rij, lange woorden breken af) · v1.1.0 (documenticonen doc/markt/off/bank/aftrek, klikbare tegels id/dim/title) · v1.0.0 (2026-10-30, Johan) — VISUELE BOUWSTENEN voor rapporten en EK: iconen (zonnepanelen, batterij,
    laadplein, EMS), kerncijfer-tegels en een terugverdienbalk. Eén bron voor klantrapport, offerte-, bank- en studierapport,
    «Je profiel verdient meer» (markt.html) en EK.
    Kleuren via CSS-variabelen, zodat white-label vanzelf meegaat:
@@ -29,7 +29,7 @@
   '.eci-klein .eci-t{padding:7px 6px 6px;border-radius:12px}.eci-klein .eci-t svg{width:44px;height:44px;margin-bottom:2px}.eci-klein .eci-t b{font-size:12.5px}.eci-klein .eci-t>span{font-size:10.5px}'+
   '.eci-klik{cursor:pointer;transition:transform .12s,box-shadow .12s}.eci-klik:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(15,23,42,.10)}.eci-dim{opacity:.55}.eci-dim.eci-klik:hover{transform:none;box-shadow:none}'+
   '.eci-slot{position:relative}.eci-slot:after{content:"🔒";position:absolute;top:6px;right:8px;font-size:14px}'+
-  '@media (max-width:560px){.eci-t svg{width:52px;height:52px}.eci-t b{font-size:12px}.eci-t>span{font-size:10.5px}.eci-k .v{font-size:18px}.eci-k .k{font-size:9px;letter-spacing:.04em}.eci-tg,.eci-kp{gap:6px}}';
+  '@media (max-width:560px){.eci-t svg{width:52px;height:52px}.eci-t b{font-size:12px}.eci-t>span{font-size:10.5px}.eci-k .v{font-size:18px}.eci-k .k{font-size:9px;letter-spacing:.04em}.eci-tg,.eci-kp{gap:6px}.eci-tg{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}.eci-t b,.eci-t>span{overflow-wrap:anywhere;hyphens:auto}.eci-klein .eci-t svg{width:40px;height:40px}}';   /* v1.1.1: op de gsm loopt een rij met veel tegels door naar een volgende rij */
   function zorgCss(){ try{ if(document.getElementById('eci-css')) return; var s=document.createElement('style'); s.id='eci-css'; s.textContent=CSS; (document.head||document.documentElement).appendChild(s); }catch(e){} }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   var I={
@@ -68,5 +68,5 @@
     return '<div class="eci-pb"'+(o.style?' style="'+o.style+'"':'')+'>'+((o.kop||o.rechts)?'<div class="t"><span>'+(o.kop||'')+'</span><span>'+(o.rechts||'')+'</span></div>':'')+
       '<div class="eci-bar">'+D.map(function(x){ return '<i class="'+(x.kleur||'g')+'" style="width:'+(x.w/tot*100).toFixed(1)+'%"></i>'; }).join('')+'</div>'+
       '<div class="lg">'+D.map(function(x){ return '<span style="--c:'+({g:'var(--eci-acc,#05B050)',b:'#7FB3E8',r:'#F3B4AE'}[x.kleur||'g'])+'">'+x.lbl+'</span>'; }).join('')+'</div></div>'; }
-  window.ECI={ versie:'1.1.0', icoon:I, tegels:tegels, kpis:kpis, terugverdien:terugverdien, verdeling:verdeling, css:zorgCss };
+  window.ECI={ versie:'1.1.1', icoon:I, tegels:tegels, kpis:kpis, terugverdien:terugverdien, verdeling:verdeling, css:zorgCss };
 })();
