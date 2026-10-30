@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.134.0 (2026-10-30, Johan): «KIES DEZE OFFERTE» → de offerte wordt de selectie: haar exacte combinatie (PV, batterij kW/kWh) komt als eigen rij/kolom in het rooster (oranje kader O1…), wordt geselecteerd, en het hele resultatenscherm (kerncijfers, detail, blok 2, rapport, bank, studie, markt) rekent op de offerte-cel (offerteprijs, rendement/DoD, DC-buffer). Een andere cel aanklikken = terug naar je eigen keuze (zoals voorheen). -->
 <!-- ek.html v0.133.0 (2026-10-30, Johan): BANKDOSSIER en ENERGIESTUDIE (investeringsaftrek) gebruiken dezelfde configuratie als de gekozen offerte (bevestigde offerte in blok 2, anders de laatst aanvaarde, anders de laatst bevestigde) — PV, batterij, rendement/DoD, DC-buffer, grootte en afschrijving van de offerte — i.p.v. de cel in het rooster. Geen offerte → zoals vroeger de gekozen cel. -->
 <!-- ek.html v0.132.0 (2026-10-30, Johan): BETALEND LAADPLEIN — het laadmoment (aankomstvenster van de passanten, incl. «eigen venster») is weer aanpasbaar (stond sinds v0.25 uitgeschakeld, terwijl de server het venster sinds v0.67 wél gebruikt); onder het paalvermogen staat de duur van één volle laadbeurt (energie per laadbeurt ÷ paalvermogen). -->
 <!-- ek.html v0.131.1 (2026-10-30, Johan): bovenbalk op één regel — klantnaam max. 160 px, partnermerk: «← Mijn dossiers». -->
@@ -2592,6 +2593,26 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       _voegCustomToe(pv,bkw,bkwh);
     }
   }
+  // v0.134.0 (Johan 30-10): gekozen offerte → eigen rij/kolom in het rooster + selectie; het resultatenscherm volgt de offerte-cel.
+  window._ekOffInRooster=function(id){
+    try{
+      var H=HM; if(!H || !H.rows || !H.cols || !window._ekOffOpt) return false;
+      var op=window._ekOffOpt(id); if(!op || !op.sel) return false;
+      var c=op.sel, kw=Math.round(+c.battKw||0), kwh=Math.round(+c.battKwh||0), cx=Math.round(+c.pvKwp||0);
+      var ry=(kw>0)?_ekBattKey(kw,kwh):(H.rows.indexOf(0)>=0?0:H.rows[0]);
+      H.battMap=H.battMap||{}; if(kw>0 && !H.battMap[ry]) H.battMap[ry]={kw:kw,kwh:kwh};
+      if(H.rows.indexOf(ry)<0){ H.rows.push(ry); H.rows.sort(function(a,b){return a-b;}); }
+      if(H.cols.indexOf(cx)<0){ H.cols.push(cx); H.cols.sort(function(a,b){return a-b;}); }
+      c._ry=ry; c._cx=cx; c._exact=true; c._offerte=true; c._offId=id;
+      var k=ry+'|'+cx; H.offCells=H.offCells||{}; H.offCells[k]=id;
+      if(!H.computed[k] && !(H.realFind && H.realFind(ry,cx))) H.computed[k]=c;   // nieuwe plek → de offerte-cel; bestaande standaardcel blijft ongemoeid
+      H.sel=c;
+      try{ if(window._ekSelKeySync) window._ekSelKeySync(); }catch(eS){}   // anders ziet markeer() een «andere cel» en wist ze de offertekeuze
+      try{ renderRapport(c); }catch(eR){} try{ _hmDetail(c); }catch(eD){} try{ renderHeatmap(); }catch(eH){}
+      try{ if(window._ekSelKeySync) window._ekSelKeySync(); }catch(eS2){}
+      return true;
+    }catch(e){ return false; }
+  };
   // #1: de custom (pv, batt-kW) combinatie als eigen rij+kolom aan de heatmap toevoegen, exact doorrekenen + selecteren/markeren.
   function _voegCustomToe(pv, bkw, bkwh){
     var H=HM;
@@ -5225,7 +5246,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         '<td style="white-space:nowrap">'+(window._EK_OFF_KEUZE===o.id?'<span class="sub" style="margin:0 6px 0 0;color:#B45309;font-weight:700">● '+e(L3('Gekozen','Choisie','Chosen'))+'</span>':'<button class="btn sm" type="button" data-ofkies="'+e(o.id)+'"'+(c?'':' disabled')+' title="'+e(L3('Deze offerte wordt je keuze — bovenaan, in het rooster en in het bank- en aftrekblok','Cette offre devient votre choix','This quote becomes your choice'))+'">☝️ '+e(L3('Kies','Choisir','Choose'))+'</button> ')+'<button class="btn ghost sm" type="button" data-ofrap="'+e(o.id)+'"'+(c?'':' disabled')+'>📄 '+e(L3('Rapport','Rapport','Report'))+'</button> <button class="btn ghost sm" type="button" data-ofedit="'+e(o.id)+'" title="'+e(L3('Aanpassen','Modifier','Edit'))+'">✏️</button>'+tekenKnop(o,c)+'</td></tr>'; });
     T.innerHTML=h+'</tbody>';
     Array.prototype.forEach.call(T.querySelectorAll('[data-ofrap]'),function(b){ b.onclick=function(){ rapport(b.getAttribute('data-ofrap')); }; });
-    Array.prototype.forEach.call(T.querySelectorAll('[data-ofkies]'),function(b){ b.onclick=function(){ window._EK_OFF_KEUZE=b.getAttribute('data-ofkies'); tabel(); try{ window._ekKaartHerteken&&window._ekKaartHerteken(); var k=document.getElementById('ek-antw'); if(k) k.scrollIntoView({behavior:'smooth',block:'start'}); }catch(x){} }; });   // v0.100.0: offerte kiezen → «je offerte»
+    Array.prototype.forEach.call(T.querySelectorAll('[data-ofkies]'),function(b){ b.onclick=function(){ window._EK_OFF_KEUZE=b.getAttribute('data-ofkies'); tabel(); try{ if(window._ekOffInRooster) window._ekOffInRooster(window._EK_OFF_KEUZE); }catch(eOr){} try{ window._ekKaartHerteken&&window._ekKaartHerteken(); var k=document.getElementById('ek-antw'); if(k) k.scrollIntoView({behavior:'smooth',block:'start'}); }catch(x){} }; });   // v0.100.0: offerte kiezen → «je offerte»
     Array.prototype.forEach.call(T.querySelectorAll('[data-ofbank]'),function(b){ b.onclick=function(){ dossier(b.getAttribute('data-ofbank'), 'bank'); }; });   // v0.86.0 · v0.89.0: via aanvaarding
     Array.prototype.forEach.call(T.querySelectorAll('[data-ofstudie]'),function(b){ b.onclick=function(){ dossier(b.getAttribute('data-ofstudie'), 'studie'); }; });
     Array.prototype.forEach.call(T.querySelectorAll('[data-ofedit]'),function(b){ b.onclick=function(){ EDIT=b.getAttribute('data-ofedit'); window._ekOffRender(); }; });
@@ -5558,6 +5579,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   window._ekStuOpen=function(){ window._ekBlokOpen(6); };
   // ── v0.100.0: opgeladen offertes als combinaties in het rooster (dichtste cel, oranje kader + label O1, O2 …) ──
   var _selKey='';
+  window._ekSelKeySync=function(){ try{ _selKey=(typeof HM!=='undefined'&&HM&&HM.sel)?(HM.sel._ry+'|'+HM.sel._cx):''; }catch(e){} };   // v0.134.0
   function markeer(){
     try{
       if(typeof HM==='undefined' || !HM) return;
