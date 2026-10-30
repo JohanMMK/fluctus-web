@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- markt.html v0.3.0 (2026-10-30, Johan): zelf door de dag — tijdlijn onder de grafieken + de grafieken zelf vastnemen en slepen (muis en touch), op het tempo van de gebruiker; afspelen blijft. -->
 <!-- markt.html v0.2.0 (2026-10-30, Johan): afspelen vloeiend en rustiger (requestAnimationFrame, ± 30 s per dag); «Pauze» reageert meteen (de knop wordt tijdens het spelen niet meer herbouwd); enkel cursor + tooltip bewegen. -->
 <!-- markt.html v0.1.2 (2026-10-30): Poppins/Inter via Google Fonts (huisstijl). v0.1.1: logo zonder dubbele naam; onbalanslijn binnen de prijsgrafiek geknipt. -->
 <!-- markt.html v0.1.0 (2026-10-30, Johan): «Uw profiel op de markt verdient beter» — educatieve, deelbare pagina per dossier (klant + adviseur).
@@ -51,6 +52,11 @@ svg{display:block;width:100%;height:auto}
 .voet{font-size:11.5px;color:var(--grijs);margin-top:14px;line-height:1.5}
 .pdfknop{background:#fff;border:1px solid var(--lijn);border-radius:10px;padding:8px 12px;font:600 13px Inter,Arial,sans-serif;color:var(--navy);cursor:pointer;text-decoration:none}
 .laden{padding:60px 20px;text-align:center;color:var(--grijs);font-size:16px}
+#g1,#g2,#g3{cursor:ew-resize;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.tijdlijn{margin:8px 0 2px;padding:0 1.6% 0 6.3%}
+.tijdlijn input{width:100%;accent-color:var(--navy);height:22px;cursor:pointer}
+.tijdlijn b{color:var(--navy);font-family:Poppins,Arial,sans-serif;font-size:14px;min-width:46px;text-align:right}
+.hint{font-size:12px;color:var(--grijs);margin:2px 4px 0}
 /* ---- PDF-inleiding (A4) ---- */
 @page{size:A4;margin:0}
 .pag{width:794px;min-height:1123px;margin:0 auto;background:#fff;padding:44px 52px 60px;position:relative}
@@ -172,6 +178,8 @@ function ticks(lo,hi,n){var st=rond((hi-lo)/n);var a=[];for(var v=Math.ceil(lo/s
 function cursor(t,b,q,id,extra){return q==null?'':'<g class="cur" id="'+id+'" transform="translate('+X(q).toFixed(1)+',0)"><line x1="0" x2="0" y1="'+(t-4)+'" y2="'+b+'" stroke="#003A5D" stroke-width="1.5" stroke-dasharray="3 3"/>'+(extra||'')+'</g>';}
 // v0.2.0: cursor + tooltip verschuiven zonder de grafieken opnieuw te tekenen (vloeiend afspelen)
 function zetCursor(qf){
+  var sl=document.getElementById('tijd'); if(sl && document.activeElement!==sl) sl.value=qf;
+  var tx=document.getElementById('tijdtxt'); if(tx) tx.textContent=uur(Math.max(0,Math.min(95,Math.round(qf))));
   var x=X(qf).toFixed(1); ['cur1','cur2','cur3'].forEach(function(id){var g=document.getElementById(id); if(g) g.setAttribute('transform','translate('+x+',0)');});
   var h=D&&KEY&&H(); if(!h) return; var q=Math.max(0,Math.min(95,Math.round(qf)));
   var tt=document.getElementById('tt1'); if(tt){ tt.setAttribute('transform','translate('+(qf>66?-182:6)+',0)');
@@ -238,9 +246,12 @@ function bouw(){
      '<div class="paneel" id="p1"><div class="kop"><b>① Uw stroom</b><span id="d1"></span></div><div class="leg" id="l1"></div><svg id="g1" viewBox="0 0 760 190"></svg></div>'+
      '<div class="paneel" id="p2" style="margin-top:6px"><div class="kop"><b>② De prijzen</b><span>c/kWh</span></div><div class="leg"><span><i style="background:var(--navy)"></i>spotprijs (day-ahead)</span><span><i style="background:#9AA6B8"></i>onbalansprijs</span><span><i style="background:rgba(214,69,69,.2)"></i>negatieve prijs</span></div><svg id="g2" viewBox="0 0 760 145"></svg></div>'+
      '<div class="paneel" id="p3" style="margin-top:6px"><div class="kop"><b>③ België</b><span>productie in GW (Elia)</span></div><div class="leg"><span><i style="background:var(--geel)"></i>zon</span><span><i style="background:var(--blauw)"></i>wind</span></div><svg id="g3" viewBox="0 0 760 135"></svg></div>'+
+     '<div class="tijdlijn noprint"><input type="range" id="tijd" min="0" max="95" step="0.05" value="0" aria-label="Tijdstip van de dag"></div>'+
+     '<div class="hint noprint">Sleep de tijdlijn (of over de grafieken) om zelf door de dag te gaan: <b id="tijdtxt">—</b></div>'+
    '</div><div class="kaart uitleg" id="uitleg"></div></div>'+
    '<div class="voet">Echte marktdag (spot en onbalans: Elia/EPEX; zon en wind: Elia). Uw stroom komt uit de simulatie van uw dossier'+(D.gemeten?' op uw gemeten kwartierdata':' op een standaardprofiel')+'. Bedragen zijn voorbeelden voor één dag; uw energierapport rekent het volledige jaar uit. Energie-Compas · Fluctus.net CVSO.</div></div>';
   document.getElementById('kies').onchange=function(){KEY=this.value;STAP=1;stopSpeel();CUR=null;teken();};
+  bindSlepen();
   teken();
 }
 function teken(){
@@ -264,6 +275,18 @@ function teken(){
   document.getElementById('speel').onclick=function(){ if(SPEEL){ stopSpeel(); knopSpeel(); return; } speel(); };
   document.getElementById('volg').onclick=function(){stopSpeel(); if(STAP<5){STAP++;CUR=moment(KEY,h);} else { var ks=beschikbaar(); KEY=ks[(ks.indexOf(KEY)+1)%ks.length]; STAP=1; CUR=null; var se=document.getElementById('kies'); if(se) se.value=KEY; } teken();};
   Array.prototype.forEach.call(document.querySelectorAll('.lijst div'),function(e){var k=e.getAttribute('data-k'); if(!D.hefbomen[k]) return; e.onclick=function(){KEY=k;STAP=1;CUR=null;stopSpeel();var se=document.getElementById('kies');if(se)se.value=k;teken();};});
+}
+// v0.3.0 (Johan 30-10): ZELF DOOR DE DAG — de tijdlijn (schuifbalk) of de grafieken zelf vastnemen en heen en weer slepen;
+//   op het tempo van de gebruiker. Stopt het afspelen. Vóór stap 2 springt de uitleg naar stap 2 (zodat de cursor zichtbaar is).
+function naarTijd(qf){ qf=Math.max(0,Math.min(95,qf)); stopSpeel(); knopSpeel(); if(STAP<2){ STAP=2; CUR=qf; teken(); } CUR=qf; zetCursor(qf); }
+function bindSlepen(){
+  var sl=document.getElementById('tijd'); if(sl) sl.oninput=function(){ naarTijd(+sl.value); };
+  ['g1','g2','g3'].forEach(function(id){ var g=document.getElementById(id); if(!g) return; var neer=false;
+    function qVan(ev){ var r=g.getBoundingClientRect(); var vx=(ev.clientX-r.left)/r.width*760; return (vx-L)/W*95; }
+    g.addEventListener('pointerdown',function(ev){ neer=true; try{ g.setPointerCapture(ev.pointerId); }catch(e){} naarTijd(qVan(ev)); });
+    g.addEventListener('pointermove',function(ev){ if(neer) naarTijd(qVan(ev)); });
+    ['pointerup','pointercancel','lostpointercapture'].forEach(function(t){ g.addEventListener(t,function(){ neer=false; }); });
+  });
 }
 // v0.2.0 (Johan 30-10): vloeiend en rustiger afspelen — requestAnimationFrame, ± 30 s voor een volledige dag (± 1,25 s per uur),
 //   de cursor glijdt continu; enkel cursor en tooltip bewegen (geen herbouw van de knoppen → «Pauze» reageert meteen).
