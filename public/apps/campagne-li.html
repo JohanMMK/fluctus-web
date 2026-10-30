@@ -6,6 +6,7 @@
 <title>Campagne LinkedIn · Energie-Compas</title>
 <link rel="icon" href="/favicon-ec.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-ec-32.png">
+<!-- campagne-li.html v1.2.0 (2026-10-30, Johan): tab «Bereik» — webstatistiek energie-compas.eu zonder cookies (bezoekers, herkomst, knopkliks per pagina en per post; server ≥ 15.365.0). Eigen posts linken naar de blog met ?s=li-<post-id>. -->
 <!-- campagne-li.html v1.1.1 (2026-10-26, Johan): knop «✔ Gepost» → «Markeer als gepost» (het is een actie, geen status). -->
 <!-- campagne-li.html v1.1.0 (2026-10-24, Johan): posts standaard 11:00; knop «← Naar MijnEC»; instelling «ambassadeurs automatisch elke week» (server ≥ 15.352.0).
      campagne-li.html v1.0.0 (2026-10-24, Johan): CAMPAGNE LINKEDIN «Bedankt om het net beter te gebruiken» — campagnedashboard.
@@ -78,7 +79,7 @@
   async function api(pad, body){ var r=await fetch(PROXY+pad,{ method:body?'POST':'GET', headers:await hdr(), body:body?JSON.stringify(body):undefined, cache:'no-store' }); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('HTTP '+r.status)); return j; }
   async function zet(pad, body, melding){ try{ var j=await api(pad, body); if(j.posts) D=j; render(); if(melding) toast(melding); return j; }catch(e){ toast('Fout: '+e.message); throw e; } }
   function blogUrl(slug){ return WWW+'/blog/'+encodeURIComponent(slug||''); }
-  function vul(t,p){ return String(t||'').replace(/\{blog\}/g, p&&p.blog?blogUrl(p.blog):WWW+'/blog'); }
+  function vul(t,p){ return String(t||'').replace(/\{blog\}/g, p&&p.blog?blogUrl(p.blog)+(p.id?'?s=li-'+encodeURIComponent(p.id):''):WWW+'/blog'); }
   function absB(b){ return b||''; }   // relatief pad: zelfde server (www. of app.)
   async function kopieer(t,m){ try{ await navigator.clipboard.writeText(t); toast(m||'Gekopieerd'); }catch(e){ prompt('Kopieer:',t); } }
   async function kopieerFoto(url){
@@ -90,7 +91,7 @@
   function posts(){ return Object.values(D.posts||{}).sort(function(a,b){ return String(a.datum||'9').localeCompare(String(b.datum||'9'))||String(a.uur||'').localeCompare(String(b.uur||''))||String(a.id).localeCompare(String(b.id)); }); }
   function openActies(){ return (D.acties||[]).filter(function(a){ return !a.afgehandeld; }); }
   function nieuweBronnen(){ return (D.bronnen||[]).filter(function(b){ return b.status==='nieuw'; }); }
-  var TABS=[['vandaag','Vandaag'],['kalender','Kalender'],['blogs','Blogs'],['amb','Ambassadeurs'],['bronnen','Bronnen'],['acties','Acties'],['inst','Instellingen']];
+  var TABS=[['vandaag','Vandaag'],['kalender','Kalender'],['blogs','Blogs'],['amb','Ambassadeurs'],['bronnen','Bronnen'],['acties','Acties'],['bereik','Bereik'],['inst','Instellingen']];
   function renderTabs(){
     var na=openActies().length, nb=nieuweBronnen().length;
     $('tabs').innerHTML=TABS.map(function(t){ var n=t[0]==='acties'?na:(t[0]==='bronnen'?nb:0); return '<button data-tab="'+t[0]+'" class="'+(TAB===t[0]?'on':'')+'">'+t[1]+(n?'<span class="tel">'+n+'</span>':'')+'</button>'; }).join('');
@@ -100,7 +101,7 @@
     renderTabs();
     if(!D.posts||!Object.keys(D.posts).length){ $('root').innerHTML='<div class="card"><h3>Nog geen campagne-inhoud</h3><p>Laad de startinhoud: 26 berichten (2 basisberichten + 24 uit de planning) met datum, tekst, eerste reactie en ambassadeurstekst, en 26 blogs (2 uitgeschreven, 24 als concept).</p><button class="groen" id="seed">Startinhoud laden</button><div class="msg" id="seed-msg"></div></div>';
       $('seed').onclick=laadSeed; return; }
-    var f={vandaag:rVandaag,kalender:rKalender,blogs:rBlogs,amb:rAmb,bronnen:rBronnen,acties:rActies,inst:rInst}[TAB]||rVandaag; f();
+    var f={vandaag:rVandaag,kalender:rKalender,blogs:rBlogs,amb:rAmb,bronnen:rBronnen,acties:rActies,bereik:rBereik,inst:rInst}[TAB]||rVandaag; f();
   }
   async function laadSeed(){ this.disabled=true; try{ var r=await fetch('/apps/campagne-li-seed.json',{cache:'no-store'}); var data=await r.json(); await zet('/api/campagne/li/seed',{data:data},'Startinhoud geladen'); }catch(e){ $('seed-msg').textContent='Fout: '+e.message; this.disabled=false; } }
 
@@ -292,6 +293,33 @@
   }
 
   // ── Acties ──
+  var BER={dagen:7,data:null,bezig:false,fout:''};
+  var BRONNAAM={direct:'rechtstreeks',intern:'binnen de site',linkedin:'LinkedIn',google:'Google',zoekmachine:'andere zoekmachine',sociaal:'andere sociale media',mail:'mail',amb:'ambassadeurslink'};
+  function bronLabel(b){ if(/^li-/.test(b)){ var p=D.posts[b.slice(3)]; return 'post: '+(p?(p.titel||p.id):b.slice(3)); } return BRONNAAM[b]||b; }
+  var KNOPNAAM={contact:'naar contact / factuur bezorgen','mail-dossier':'mail naar dossier@',formulier:'formulier verstuurd',ambassadeur:'naar ambassadeur',login:'naar MijnEC',blog:'naar een blog'};
+  async function laadBereik(){ BER.bezig=true; BER.fout=''; render(); try{ BER.data=await api('/api/stat/overzicht?dagen='+BER.dagen); }catch(e){ BER.fout=e.message; } BER.bezig=false; render(); }
+  function rBereik(){
+    if(!BER.data&&!BER.bezig&&!BER.fout){ laadBereik(); }
+    var S=BER.data, h='<div class="card"><h3>Bereik van energie-compas.eu</h3><p class="sub">Geteld zonder cookies: bezoek per pagina, waar bezoekers vandaan komen en op welke knoppen ze klikken. Unieke bezoekers zijn per dag geteld. Bots tellen niet mee. Het bereik op LinkedIn zelf (weergaven, reacties) staat in de statistieken van de bedrijfspagina.</p>'+
+      '<div class="knoppen">'+[7,30,90].map(function(n){ return '<button class="klein'+(BER.dagen===n?' groen':'')+'" data-dg="'+n+'">'+n+' dagen</button>'; }).join('')+'<button class="klein" id="ber-ver">Vernieuwen</button></div></div>';
+    if(BER.bezig&&!S) h+='<div class="card">Laden…</div>';
+    if(BER.fout) h+='<div class="card"><span class="st st-fout">Fout: '+esc(BER.fout)+'</span></div>';
+    if(S){
+      var tb=0,tw=0,tk=0; S.dagen.forEach(function(d){ tb+=d.bezoekers; tw+=d.weergaven; tk+=d.kliks; });
+      var li=0; Object.keys(S.bronnen).forEach(function(b){ if(b==='linkedin'||/^li-/.test(b)) li+=S.bronnen[b]; });
+      h+='<div class="card"><div style="display:flex;gap:24px;flex-wrap:wrap">'+[[tb,'bezoekers (som per dag)'],[tw,'paginaweergaven'],[li,'weergaven via LinkedIn'],[tk,'knopkliks']].map(function(x){ return '<div><div style="font-size:26px;font-weight:700">'+x[0]+'</div><div class="sub">'+x[1]+'</div></div>'; }).join('')+'</div></div>';
+      var mx=Math.max(1,Math.max.apply(null,S.dagen.map(function(d){return d.bezoekers;})));
+      h+='<div class="card"><h3>Per dag</h3><table><tr><th>Dag</th><th>Bezoekers</th><th style="width:45%"></th><th>Weergaven</th><th>Kliks</th></tr>'+S.dagen.slice().reverse().map(function(d){ return '<tr><td>'+dagLabel(d.datum)+'</td><td>'+d.bezoekers+'</td><td><div style="background:var(--green-bg);height:10px;border-radius:5px;width:'+Math.round(d.bezoekers/mx*100)+'%"></div></td><td>'+d.weergaven+'</td><td>'+d.kliks+'</td></tr>'; }).join('')+'</table></div>';
+      var posts=Object.keys(S.bronnen).filter(function(b){ return /^li-/.test(b); }).sort(function(a,b){ return S.bronnen[b]-S.bronnen[a]; });
+      h+='<div class="card"><h3>Per LinkedIn-post</h3><p class="sub">Bezoeken via de bloglink in de eerste reactie van onze eigen posts.</p>'+(posts.length?'<table><tr><th>Post</th><th>Weergaven</th></tr>'+posts.map(function(b){ return '<tr><td>'+esc(bronLabel(b))+'</td><td>'+S.bronnen[b]+'</td></tr>'; }).join('')+'</table>':'<p class="sub">Nog geen bezoek via een postlink.</p>')+'</div>';
+      var bron=Object.keys(S.bronnen).filter(function(b){ return !/^li-/.test(b); }).sort(function(a,b){ return S.bronnen[b]-S.bronnen[a]; });
+      h+='<div class="card"><h3>Herkomst</h3>'+(bron.length?'<table><tr><th>Bron</th><th>Weergaven</th></tr>'+bron.map(function(b){ return '<tr><td>'+esc(bronLabel(b))+'</td><td>'+S.bronnen[b]+'</td></tr>'; }).join('')+'</table>':'<p class="sub">Nog geen bezoek.</p>')+'</div>';
+      h+='<div class="card"><h3>Per pagina</h3>'+(S.paginas.length?'<table><tr><th>Pagina</th><th>Weergaven</th><th>Uniek</th><th>Kliks</th><th>Belangrijkste bron</th></tr>'+S.paginas.map(function(p){ var kl=Object.keys(p.knop).map(function(k){ return esc(KNOPNAAM[k]||k)+': '+p.knop[k]; }).join('<br>'); var bb=Object.keys(p.bron).sort(function(a,b){ return p.bron[b]-p.bron[a]; })[0]; return '<tr><td><a class="klein" href="'+esc(WWW+(p.pad==='/'?'':p.pad))+'" target="_blank">'+esc(p.pad)+'</a></td><td>'+p.v+'</td><td>'+p.u+'</td><td>'+(kl||'—')+'</td><td>'+esc(bb?bronLabel(bb):'—')+'</td></tr>'; }).join('')+'</table>':'<p class="sub">Nog geen bezoek gemeten.</p>')+'</div>';
+    }
+    $('root').innerHTML=h;
+    Array.prototype.forEach.call($('root').querySelectorAll('[data-dg]'),function(b){ b.onclick=function(){ BER.dagen=+b.getAttribute('data-dg'); BER.data=null; laadBereik(); }; });
+    if($('ber-ver')) $('ber-ver').onclick=function(){ laadBereik(); };
+  }
   function rActies(){
     var A=(D.acties||[]).slice().reverse(), tag=(D.config.hashtag||'#NetBeterGebruiken');
     var zoek='https://www.linkedin.com/search/results/content/?keywords='+encodeURIComponent(tag)+'&sortBy=%22date_posted%22';
