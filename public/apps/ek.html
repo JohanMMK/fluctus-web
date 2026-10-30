@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.142.0 (2026-10-30, Johan): EK-DOSSIERLINK MET AANMELDING (server ≥ 15.374.0, env EK_CASE_LOGIN=1) — het dossier wordt pas opgehaald nadat de aanmelding vaststaat (ook via de mailknop &li=), mét Bearer; 401 → aanmeldscherm (e-mail + 6-cijfercode, NL/FR/EN), 403 → «geen toegang» + afmelden. Nieuw dossier zonder adviseursaanmelding → aanmeldscherm. Prewarm stuurt zijn sleutel (?pk=) mee; testen zonder env met ?gatetest=1. De adviseur komt ook bij de factuurflow meteen op het dossier. -->
 <!-- ek.html v0.141.1 (2026-10-30): gsm — invoerblokken schuiven niet meer horizontaal (minmax(0,1fr), tabellen scrollen binnen het blok), iconen in de antwoordkaart 2 per rij. -->
 <!-- ek.html v0.141.0 (2026-10-30, Johan): (1) partnerkleur van de iconen: een te lichte tweede kleur (bv. geel van EnergyPro) wordt vervangen door de hoofdkleur, zodat de iconen leesbaar blijven op wit; (2) het rapport krijgt D.markt_edu mee (link naar «Uw profiel op de markt»). -->
 <!-- ek.html v0.140.1 (2026-10-30): netpiek-chip enkel bij een exact doorgerekende cel (een geschatte cel interpoleerde 68 kW i.p.v. de exacte 55 kW). -->
@@ -2709,14 +2710,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
         referentie:(REF_NIETS?'niets':''),   // v0.107.0
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };
-      var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      var _hI=Object.assign({'Content-Type':'application/json'}, (await window._ekGateHdr().catch(function(){ return {}; }))||{});   // v0.142.0: adviseur meteen op het dossier
+      var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hI, body:JSON.stringify({
         token:TOKEN||undefined, naam:(STATE_KLANT||'').trim(), adres:(STATE_ADRES||''), btw:(STATE_BTW||'').trim(),
         profiel:profiel, ev:ev, afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost,
         opt_profieldata:!!($('i-optout')&&$('i-optout').checked), opt_contact:!!($('i-optcontact')&&$('i-optcontact').checked),
         is_voorschot:(typeof STATE_IS_VOORSCHOT==='boolean'?STATE_IS_VOORSCHOT:undefined),   // v0.41.3: voorschot-vlag mee op het dossier
         factuur_bestanden:(Array.isArray(STATE_FACTUUR_BESTANDEN)?STATE_FACTUUR_BESTANDEN:[]),   // v0.30.1 (Johan): factuur-bestand-pointer mee op het dossier → "Bekijk uw factuur" blijft werken na heropenen
         bevestigd:_bev })});
-      var j=await r.json().catch(function(){return{};}); if(j&&j.ok){ if(j.token) TOKEN=j.token; if(j.project_id) STATE_CODE=j.project_id; }
+      var j=await r.json().catch(function(){return{};}); if(r.status===401 && j && j.code==='aanmelden'){ try{ window._ekCaseLogin(401, { nieuw:true }); }catch(eL){} } if(j&&j.ok){ if(j.token) TOKEN=j.token; if(j.project_id) STATE_CODE=j.project_id; }
     }catch(e){}
   }
   // v0.69.1 (Johan 14-10): EIGEN TOTAALPRIJS = BEDRAG, NIET EEN FACTOR. Een "Pas aan"-combi bewaarde enkel prijsFactor = eigen totaal ÷
@@ -3461,7 +3463,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var url = TOKEN
         ? (API+'/api/inbound-case/'+encodeURIComponent(TOKEN)+'/factuur?pad='+encodeURIComponent(b.pad))
         : (API+'/api/factuur-bestand?pad='+encodeURIComponent(b.pad));
-      fetch(url).then(function(r){ return r.json().catch(function(){return{};}); }).then(function(j){
+      window._ekGateHdr().then(function(h){ return fetch(url,{ headers:h }); }).then(function(r){ return r.json().catch(function(){return{};}); }).then(function(j){   // v0.142.0
         if(j&&j.url){ window.open(j.url,'_blank','noopener'); }
         else { alert('De factuur kon niet opgehaald worden'+(j&&j.error?(': '+j.error):'')+'.'); }
       }).catch(function(){ alert('De factuur kon niet opgehaald worden.'); });
@@ -3596,7 +3598,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{
       var tk=new URLSearchParams(location.search).get('case'); if(!tk) return;
       TOKEN=tk;
-      fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(j){ return _ekGateKlaar().then(function(){ return j; }); }).then(function(j){   // v0.97.0: eerst vaststellen wie er aangemeld is, dan pas het dossier tonen/doorrekenen
+      // v0.142.0 (Johan 30-10): eerst vaststellen wie er aangemeld is (incl. aanmelden via de mailknop), dan het dossier ophalen MET aanmelding;
+      //   server ≥ 15.374.0 met EK_CASE_LOGIN aan → 401/403 = aanmeldscherm (e-mail + 6-cijfercode).
+      _ekGateKlaar().then(function(){ return window._ekGateHdr(); }).then(function(h){ return fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store', headers:h}); })
+      .then(function(r){ if(r.status===401||r.status===403){ return r.json().catch(function(){ return {}; }).then(function(e){ try{ window._ekCaseLogin(r.status, e||{}); }catch(eL){} return null; }); } return r.ok?r.json():null; }).then(function(j){
         if(!j||!j.ok) return;
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
         try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
@@ -3931,6 +3936,45 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekGateKlaar(){ if(!_EK_GATE_P) _EK_GATE_P=new Promise(function(r){ _EK_GATE_OK=r; }); return Promise.race([_EK_GATE_P, new Promise(function(r){ setTimeout(r, 8000); })]); }
   function _ekGateGedaan(){ if(!_EK_GATE_P) _EK_GATE_P=Promise.resolve(); else if(_EK_GATE_OK) _EK_GATE_OK(); }
   function _ekLaadScript(src){ return new Promise(function(ok,nok){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=function(){ nok(new Error('kon script niet laden')); }; document.head.appendChild(s); }); }
+  // v0.142.0 (Johan 30-10): headers voor het ophalen van een dossier — aanmelding (Bearer), prewarm-sleutel (?pk=), testvlag (?gatetest=1)
+  window._ekGateHdr=async function(){ var h={}; try{ var a=await _ekAuthHeaders(); if(a&&a.Authorization) h.Authorization=a.Authorization; }catch(e){}
+    try{ var q=new URLSearchParams(location.search); if(q.get('pk')) h['X-EK-Pw']=q.get('pk'); if(q.get('gatetest')==='1') h['X-EK-Gate-Test']='1'; }catch(e){} return h; };
+  // AANMELDSCHERM: 401 = nog niet aangemeld → e-mail + code van 6 cijfers (zoals MijnEC/markt); 403 = ander adres → afmelden en opnieuw
+  window._ekCaseLogin=function(st, e){ try{
+    if(document.getElementById('ek-aanm')) return; e=e||{};
+    var L=(e.lang==='fr'||e.lang==='en')?e.lang:(window.EC_LANG||'nl'), T=function(nl,fr,en){ return L==='fr'?fr:(L==='en'?en:nl); };
+    var es=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
+    var ov=document.createElement('div'); ov.id='ek-aanm'; ov.setAttribute('data-i18n-skip','1');
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(15,28,48,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    var kader='background:#fff;border-radius:16px;max-width:440px;width:100%;padding:22px 22px 18px;box-shadow:0 20px 60px rgba(0,0,0,.25);font:15px/1.5 -apple-system,Segoe UI,Arial,sans-serif;color:#14203a';
+    var inp='width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #c9d4e3;border-radius:10px;font-size:15px;margin:0 0 10px';
+    var btn='width:100%;padding:11px;border:0;border-radius:10px;background:#05B050;color:#fff;font-weight:700;font-size:15px;cursor:pointer';
+    if(st===403){
+      ov.innerHTML='<div style="'+kader+'"><h2 style="margin:0 0 8px;font-size:20px">'+T('Geen toegang','Pas d’accès','No access')+'</h2><p>'+T('Je bent aangemeld als ','Vous êtes connecté en tant que ','You are signed in as ')+'<b>'+es(e.mail||'')+'</b>'+T(', maar dat adres staat niet als klant of adviseur op dit dossier.',', mais cette adresse ne figure pas comme client ou conseiller sur ce dossier.',', but that address is not the client or adviser on this file.')+'</p><button id="ek-aanm-af" style="'+btn+'">'+T('Afmelden en ander e-mailadres gebruiken','Se déconnecter et utiliser une autre adresse','Sign out and use another address')+'</button></div>';
+      document.body.appendChild(ov);
+      document.getElementById('ek-aanm-af').onclick=async function(){ try{ await _ekAuthHeaders(); if(_EK_SB) await _EK_SB.auth.signOut(); }catch(x){} ov.remove(); window._ekCaseLogin(401, e); };
+      return; }
+    ov.innerHTML='<div style="'+kader+'"><h2 style="margin:0 0 8px;font-size:20px">🔒 '+T('Aanmelden','Connexion','Sign in')+'</h2><p style="margin:0 0 12px">'+
+      (e.nieuw?T('Een nieuw dossier start je als adviseur. Meld je aan met je e-mailadres: we mailen je een code van 6 cijfers.','Un nouveau dossier se démarre en tant que conseiller. Connectez-vous avec votre e-mail : nous vous envoyons un code à 6 chiffres.','A new file is started as an adviser. Sign in with your e-mail: we send you a 6-digit code.')
+        :T('Dit dossier opent enkel voor de klant en de adviseur die erop staan. Vul je e-mailadres in: we mailen je een code van 6 cijfers. Op dit toestel hoeft dat daarna niet opnieuw.','Ce dossier ne s’ouvre que pour le client et le conseiller concernés. Indiquez votre e-mail : nous vous envoyons un code à 6 chiffres. Ensuite, plus besoin sur cet appareil.','This file only opens for its client and adviser. Enter your e-mail: we send you a 6-digit code. After that, not needed again on this device.'))+'</p>'+
+      '<div id="ek-aanm-1"><input id="ek-aanm-mail" type="email" autocomplete="email" placeholder="'+T('je e-mailadres','votre e-mail','your e-mail')+'" style="'+inp+'"><button id="ek-aanm-stuur" style="'+btn+'">'+T('Stuur mij de code','Envoyer le code','Send me the code')+'</button></div>'+
+      '<div id="ek-aanm-2" style="display:none"><input id="ek-aanm-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="'+T('code van 6 cijfers','code à 6 chiffres','6-digit code')+'" style="'+inp+'"><button id="ek-aanm-ok" style="'+btn+'">'+T('Aanmelden','Se connecter','Sign in')+'</button></div>'+
+      '<div id="ek-aanm-msg" style="font-size:13px;color:#5A6577;min-height:18px;margin-top:8px"></div></div>';
+    document.body.appendChild(ov);
+    var $m=function(i){ return document.getElementById(i); }, msg=function(t,c){ var m=$m('ek-aanm-msg'); m.style.color=c||'#5A6577'; m.textContent=t||''; };
+    $m('ek-aanm-stuur').onclick=async function(){ var m=($m('ek-aanm-mail').value||'').trim().toLowerCase(); if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)){ msg(T('Vul een geldig e-mailadres in.','Indiquez une adresse e-mail valide.','Enter a valid e-mail address.'),'#b23'); return; }
+      this.disabled=true; msg(T('Bezig met versturen…','Envoi en cours…','Sending…')); var ok=false;
+      try{ var r=await fetch(API+'/api/auth/otp-request',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email:m, lang:L }) }); ok=r.ok||r.status===429; }catch(x){}
+      this.disabled=false; if(!ok){ msg(T('De code kon niet verstuurd worden. Probeer straks opnieuw.','Le code n’a pas pu être envoyé. Réessayez plus tard.','The code could not be sent. Try again later.'),'#b23'); return; }
+      $m('ek-aanm-1').style.display='none'; $m('ek-aanm-2').style.display=''; msg(T('We mailden je een code van 6 cijfers (kijk ook bij ongewenste mail).','Nous vous avons envoyé un code à 6 chiffres (vérifiez aussi les indésirables).','We e-mailed you a 6-digit code (check your spam too).'),'#05803C'); $m('ek-aanm-code').focus(); };
+    $m('ek-aanm-ok').onclick=async function(){ var m=($m('ek-aanm-mail').value||'').trim().toLowerCase(), c=($m('ek-aanm-code').value||'').trim();
+      if(!/^[0-9]{6}$/.test(c)){ msg(T('Vul de code van 6 cijfers in.','Indiquez le code à 6 chiffres.','Enter the 6-digit code.'),'#b23'); return; }
+      this.disabled=true; msg(T('Bezig met aanmelden…','Connexion…','Signing in…'));
+      try{ await _ekAuthHeaders(); var v=await _EK_SB.auth.verifyOtp({ email:m, token:c, type:'email' }); if(v&&v.error) v=await _EK_SB.auth.verifyOtp({ email:m, token:c, type:'magiclink' }); if(v&&v.error) v=await _EK_SB.auth.verifyOtp({ email:m, token:c, type:'signup' });
+        if(v&&v.error){ this.disabled=false; msg(T('De code klopt niet of is verlopen.','Le code est incorrect ou expiré.','The code is wrong or expired.'),'#b23'); return; } }
+      catch(x){ this.disabled=false; msg(T('Aanmelden lukte niet. Probeer opnieuw.','La connexion a échoué. Réessayez.','Sign-in failed. Try again.'),'#b23'); return; }
+      location.reload(); };
+  }catch(eX){} };
   async function _ekAuthHeaders(){
     try{
       if(!_EK_SB_CFG){ var rc=await fetch('/api/config'); _EK_SB_CFG=await rc.json(); }
@@ -4120,11 +4164,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
       profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
       ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze (rec.bevestigd.ev_rows)
-    var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+    var _hI2=Object.assign({'Content-Type':'application/json'}, (await window._ekGateHdr().catch(function(){ return {}; }))||{});   // v0.142.0
+    var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hI2, body:JSON.stringify({
       token:TOKEN||undefined, mail:mail, naam:klant, adres:adres,
       profiel:profiel, ev:ev, afname_mwh:afnameMwh, injectie_mwh:injMwh, toegang_kw:toegangKw, kost:kost,
       opt_profieldata:false, opt_contact:false, bevestigd:_bevestigd }) });
     var j=await r.json().catch(function(){return{};});
+    if(r.status===401 && j && j.code==='aanmelden'){ try{ window._ekCaseLogin(401, { nieuw:true }); }catch(eL){} }   // v0.142.0
     if(!r.ok||!j||!j.ok||!j.project_id) throw new Error((j&&j.error)||('dossier aanmaken faalde ('+r.status+')'));
     STATE_CODE=j.project_id; if(j.token) TOKEN=j.token;
     STATE_KLANT=klant; STATE_BTW=btw; STATE_ADRES=adres;
@@ -4167,13 +4213,14 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
         profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
         ev_rows:_ekEvRowsBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze
-      var _hdD={'Content-Type':'application/json'}; try{ var _ah=await _ekAuthHeaders(); if(_ah&&_ah.Authorization) _hdD.Authorization=_ah.Authorization; }catch(eA){}
+      var _hdD={'Content-Type':'application/json'}; try{ var _ah=await _ekAuthHeaders(); if(_ah&&_ah.Authorization) _hdD.Authorization=_ah.Authorization; }catch(eA){} try{ if(new URLSearchParams(location.search).get('gatetest')==='1') _hdD['X-EK-Gate-Test']='1'; }catch(eG){}
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hdD, body:JSON.stringify({
         token:TOKEN||undefined, mail:mail, naam:klant, adres:adres, adviseur_email:(window._EK_ADV_PENDING||undefined),   // v0.78.3
         profiel:profiel, ev:ev, afname_mwh:afnameMwh, injectie_mwh:injMwh, toegang_kw:toegangKw, kost:kost,
         opt_profieldata:false, opt_contact:false, bevestigd:_bevestigd }) });
       var j=await r.json().catch(function(){return{};});
-      if(!r.ok||!j||!j.ok||!j.project_id) throw new Error((j&&j.error)||('dossier aanmaken faalde ('+r.status+')'));
+      if(r.status===401 && j && j.code==='aanmelden'){ try{ window._ekCaseLogin(401, { nieuw:true }); }catch(eL){} }   // v0.142.0
+    if(!r.ok||!j||!j.ok||!j.project_id) throw new Error((j&&j.error)||('dossier aanmaken faalde ('+r.status+')'));
       STATE_CODE=j.project_id; if(j.token) TOKEN=j.token;
       STATE_KLANT=klant; STATE_BTW=btw; STATE_ADRES=adres;
       var _idz=$('intake-doss');
