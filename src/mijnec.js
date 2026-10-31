@@ -1,3 +1,4 @@
+// mijnec.js v1.19.0 — 2026-10-31 — white-label: is het contract van de partner van de aangemelde adviseur op «merk aan» gezet, dan krijgt MijnEC het logo en de kleuren van die partner (proxy ≥ 15.376.0, GET /api/merk/ik).
 // mijnec.js v1.18.0 — 2026-10-24 — tegel «Campagne LinkedIn» voor alle managers (managerOnly; vlag alleenVoor blijft beschikbaar).
 // mijnec.js v1.17.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
 // mijnec.js v1.16.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
@@ -304,6 +305,33 @@ function naarPad() {
   try { const n = new URLSearchParams(location.search).get('naar') || '';
     return (/^\/apps\/[A-Za-z0-9_.\-\/]+\.html(\?[^#\s]*)?$/.test(n) && n.indexOf('//') < 0) ? n : null; } catch (e) { return null; }
 }
+// v1.19.0 (Johan 31-10): look & feel van de partner (logo + kleuren) als het contract het merk aanzet. Zelfde regel als EK:
+//   accent = kleur2, tenzij die te licht is op wit → dan de hoofdkleur. Afmelden → terug naar Energie-Compas.
+const _MERK_OUD = { src: null, title: null };
+function _lum(h) { try { let x = String(h || '').replace('#', ''); if (x.length === 3) x = x.split('').map((c) => c + c).join(''); const n = parseInt(x, 16);
+  const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(n >> 16 & 255) + 0.7152 * f(n >> 8 & 255) + 0.0722 * f(n & 255); } catch (e) { return 0; } }
+function merkUit() {
+  const r = document.documentElement.style; ['--green', '--green-d', '--green-bg', '--ink'].forEach((k) => r.removeProperty(k));
+  const img = document.querySelector('header .brand img'); if (img && _MERK_OUD.src) { img.src = _MERK_OUD.src; img.alt = 'Energie-Compas'; }
+  if (_MERK_OUD.title) document.title = _MERK_OUD.title;
+}
+async function merkToepassen(token) {
+  try {
+    const base = CFG.fluctusProxyUrl || '';
+    const r = await fetch(`${base}/api/merk/ik`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!r.ok) return; const j = await r.json(); const M = j && j.merk;
+    if (!M || !M.aan || !SESSION) { merkUit(); return; }
+    const root = document.documentElement.style;
+    if (M.kleur) {
+      const acc = (M.kleur2 && _lum(M.kleur2) < 0.45) ? M.kleur2 : M.kleur;
+      root.setProperty('--green', acc); root.setProperty('--green-d', M.kleur);
+      root.setProperty('--green-bg', `color-mix(in srgb, ${acc} 10%, #fff)`); root.setProperty('--ink', M.ink || M.kleur);
+    }
+    const img = document.querySelector('header .brand img');
+    if (img && M.logo) { if (!_MERK_OUD.src) _MERK_OUD.src = img.getAttribute('src'); img.src = M.logo; img.alt = M.naam || ''; img.style.objectFit = 'contain'; img.style.maxHeight = '48px'; img.style.width = 'auto'; }
+    if (M.naam) { if (!_MERK_OUD.title) _MERK_OUD.title = document.title; document.title = 'MijnEC — ' + M.naam; }
+  } catch (e) { /* geen merk → Energie-Compas */ }
+}
 async function render() {
   const loggedIn = !!SESSION;
   const naar = naarPad();
@@ -312,10 +340,11 @@ async function render() {
   $('gate').classList.toggle('hidden', loggedIn);
   $('app').classList.toggle('hidden', !loggedIn);
   $('portal-logout').classList.toggle('hidden', !loggedIn);
-  if (!loggedIn) { _renderUid = null; _renderNr++; $('portal-user').textContent = ''; return; }
+  if (!loggedIn) { _renderUid = null; _renderNr++; $('portal-user').textContent = ''; merkUit(); return; }
   const user = SESSION.user || {};
   $('portal-user').textContent = user.email || '';
   $('hi-naam').textContent = user.email ? (', ' + user.email.split('@')[0]) : '';
+  merkToepassen(SESSION.access_token);   // v1.19.0
   // v1.9.0: tegels van de vorige keer meteen tonen, daarna bijwerken met de echte toegang.
   const uid = user.id || '';
   _renderUid = uid;
