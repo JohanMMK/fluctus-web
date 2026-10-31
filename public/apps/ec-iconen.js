@@ -1,4 +1,4 @@
-/* ec-iconen.js v1.1.1 (gsm: tegels lopen door naar een volgende rij, lange woorden breken af) · v1.1.0 (documenticonen doc/markt/off/bank/aftrek, klikbare tegels id/dim/title) · v1.0.0 (2026-10-30, Johan) — VISUELE BOUWSTENEN voor rapporten en EK: iconen (zonnepanelen, batterij,
+/* ec-iconen.js v1.1.2 (CSS meteen bij het laden — losse iconen waren zwart) · v1.1.1 (gsm: tegels lopen door naar een volgende rij, lange woorden breken af) · v1.1.0 (documenticonen doc/markt/off/bank/aftrek, klikbare tegels id/dim/title) · v1.0.0 (2026-10-30, Johan) — VISUELE BOUWSTENEN voor rapporten en EK: iconen (zonnepanelen, batterij,
    laadplein, EMS), kerncijfer-tegels en een terugverdienbalk. Eén bron voor klantrapport, offerte-, bank- en studierapport,
    «Je profiel verdient meer» (markt.html) en EK.
    Kleuren via CSS-variabelen, zodat white-label vanzelf meegaat:
@@ -68,5 +68,6 @@
     return '<div class="eci-pb"'+(o.style?' style="'+o.style+'"':'')+'>'+((o.kop||o.rechts)?'<div class="t"><span>'+(o.kop||'')+'</span><span>'+(o.rechts||'')+'</span></div>':'')+
       '<div class="eci-bar">'+D.map(function(x){ return '<i class="'+(x.kleur||'g')+'" style="width:'+(x.w/tot*100).toFixed(1)+'%"></i>'; }).join('')+'</div>'+
       '<div class="lg">'+D.map(function(x){ return '<span style="--c:'+({g:'var(--eci-acc,#05B050)',b:'#7FB3E8',r:'#F3B4AE'}[x.kleur||'g'])+'">'+x.lbl+'</span>'; }).join('')+'</div></div>'; }
-  window.ECI={ versie:'1.1.1', icoon:I, tegels:tegels, kpis:kpis, terugverdien:terugverdien, verdeling:verdeling, css:zorgCss };
+  window.ECI={ versie:'1.1.2', icoon:I, tegels:tegels, kpis:kpis, terugverdien:terugverdien, verdeling:verdeling, css:zorgCss };
+  zorgCss();   // v1.1.2: CSS meteen laden (losse iconen zonder tegels waren zwart)
 })();
