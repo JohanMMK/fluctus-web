@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.150.0 (2026-10-31, Johan): TAB OFFERTES — knoppen «Offertes evalueren», «Offerte indienen» en de tweede «Offerte opladen» weg; «📨 Offerte aanvragen» = mail met de gekozen configuratie (PV, batterij, laadpunten + standaard kabellengtes) en een code EC-XXXXXX (vandaag enkel naar oekene, server ≥ 15.378.0); de installateur antwoordt naar dossier@ met de code in het onderwerp → de offerte verschijnt bij dit dossier; lopende aanvragen met code en aantal offertes binnen. -->
 <!-- ek.html v0.149.0 (2026-10-31, Johan): (1) DC-laadbuffer van de gekozen offerte = tweede batterij-icoon in de hero + vermeld in het keuzepaneel; (2) laatste keuze in het rooster wordt automatisch op het dossier bewaard (offerte-vakje = gekozen offerte, ander vakje = je keuze) en komt terug bij het heropenen; de gekozen offerte wordt als eerste doorgerekend zodat ze meteen de selectie is. -->
 <!-- ek.html v0.148.3 (2026-10-31, Johan): VANGNET VOERTUIGEN — heeft het dossier bewaarde voertuigen en staat er bij het doorrekenen 0 zonder dat iemand de voertuigen of het klanttype wijzigde, dan worden de bewaarde voertuigen eerst teruggezet (ACOM-IB verloor bij herladen zijn 22 personenwagens); projectlog 'ev_hersteld'. -->
 <!-- ek.html v0.148.2 (2026-10-31, Johan): na «Toon mijn resultaat» scrolt EK zodat «Je simulatie draait» met de blog en de ambassadeursuitnodiging volledig zichtbaar is; «Word dé energie-expert / in jouw buurt» op twee regels. -->
@@ -1321,14 +1322,13 @@
     <div class="card ek-sec" id="sec-off">
       <div class="nx-stap" id="nx-stap2" style="border-top:0;padding-top:0;margin-top:0"><span class="nx-nr">4</span><b data-i18n-skip="1" id="nx-t2">Offertes</b><span class="nx-uit" data-i18n-skip="1" id="nx-u2">Vraag offertes aan bij onze installateurs of laad een offerte op die je al hebt — wij rekenen ze door met hun eigen prijs.</span></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn sm" type="button" id="btn-off-opvragen" onclick="offertesOpvragen()">📨 Offertes opvragen</button>
-        <button class="btn ghost sm" type="button" id="btn-off-evalueren" onclick="_ekOffToon()" data-i18n-skip="1" style="display:none">📊 Offertes evalueren</button>
+        <button class="btn sm" type="button" id="btn-off-opvragen" onclick="offertesOpvragen()" data-i18n-skip="1">📨 Offerte aanvragen</button>   <!-- v0.150.0: gekozen configuratie → mail met code -->
         <button class="btn ghost sm" type="button" id="btn-off-opladen" onclick="_ekOfferteOpladen()" data-i18n-skip="1">⬆️ Offerte opladen</button>
-        <button class="btn ghost sm" type="button" id="btn-off-indienen" onclick="offerteIndienen()">📝 Offerte indienen</button>
         <button class="btn ghost sm" type="button" id="ek-hulp-knop" onclick="ekHulpVragen()" data-i18n-skip="1">🙋 Hulp vragen</button>
         <button class="btn ghost sm" type="button" id="btn-off-volgen" style="display:none" onclick="offertesVolgen()">📋 Offertes volgen</button>
       </div>
       <div class="sub" id="offerte-status" style="margin-top:8px"></div>
+      <div class="sub" id="off-aanvr" data-i18n-skip="1" style="margin-top:4px"></div>   <!-- v0.150.0: lopende aanvragen met code -->
       <!-- v0.83.0 (Johan 17-10): offertes opladen → doorrekenen → rapport per offerte (iedereen met een dossier) -->
       <div class="card hidden" id="off-card" data-i18n-skip="1" style="display:none">
       <h2 style="color:var(--navy);margin-bottom:4px" id="off-titel"></h2>
@@ -3749,6 +3749,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         try{ window._EK_ADV=j.adviseur||null; if(window._ekAdvRender) window._ekAdvRender(); }catch(eAdv){}   // v0.77.0: adviseur van het project
         try{ window._EK_ADV_PARTNER=j.adviseur_partner||null; _ekOffKnopRender(); }catch(eAp){}   // v0.85.0
         try{ window._EK_PROCES=j.proces||null; }catch(ePr){}   // v0.86.0: stappenbalk
+        try{ window._EK_OFF_AANVR=Array.isArray(j.offerte_aanvragen)?j.offerte_aanvragen:[]; setTimeout(function(){ try{ window._offAanvrRender&&window._offAanvrRender(); }catch(x){} }, 0); }catch(eAv){}   // v0.150.0
         try{ window._EK_KOMPAS=j.kompas||null; window._EK_STURING=j.sturing||null; window._EK_KEUZE=j.keuze||null; if(j.offerte_keuze&&j.offerte_keuze.id) window._EK_OFF_KEUZE=j.offerte_keuze.id; }catch(eKo){}   // v0.101.0: + vastgelegde keuze (server ≥ 15.338.0)   // v0.99.0: het kompas (server ≥ 15.337.0)
         try{ if(window._ekVraagAdvRender) window._ekVraagAdvRender(); }catch(eVa){}   // v0.82.0: klant kan een adviseur vragen
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
@@ -5316,22 +5317,30 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.98.0: offertekader tonen (ook voor de klant) + meteen het bestand kiezen
   window._ekOffToon=function(){ window._EK_OFF_OPEN=true; var c=$('off-card'); if(!c) return; c.classList.remove('hidden'); c.style.display=''; try{ if(window._ekOffRender) window._ekOffRender(); }catch(e){} try{ c.scrollIntoView({ behavior:'smooth', block:'start' }); }catch(e){} };
   window._ekOfferteOpladen=function(){ window._ekOffToon(); var f=$('off-file'); if(f){ try{ f.click(); }catch(e){} } };
-  function _ekOffKnopRender(){ var b=$('btn-off-opvragen'); if(b) b.style.display=window._EK_ADV_PARTNER?'none':''; }
+  function _ekOffKnopRender(){ var b=$('btn-off-opvragen'), _oek=false; try{ _oek=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); }catch(x){} if(b) b.style.display=(window._EK_ADV_PARTNER&&!_oek)?'none':''; }
+  // v0.150.0 (Johan 31-10): OFFERTE AANVRAGEN voor de gekozen configuratie uit het rooster — mail met een code (vandaag enkel naar
+  //   oekene). De installateur antwoordt naar dossier@energie-compas.eu met de code in het onderwerp → de offerte komt bij dit dossier.
+  function _offAanvrRender(){ var el=$('off-aanvr'); if(!el) return; var L=window._EK_OFF_AANVR||[];
+    if(!L.length){ el.innerHTML=''; return; }
+    el.innerHTML=L.slice(-5).reverse().map(function(a){ var d=new Date(+a.ts); return '📨 <b>'+_ekEsc(a.code)+'</b> · '+('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+' · '+_ekEsc(a.scope||'')+' · '+(a.antwoorden?('<b>'+a.antwoorden+' offerte'+(a.antwoorden===1?'':'s')+' binnen</b>'):'nog geen offerte binnen'); }).join('<br>'); }
+  window._offAanvrRender=_offAanvrRender;
   async function offertesOpvragen(){
-    if(window._EK_ADV_PARTNER) return;   // v0.85.0
-    var st=$('offerte-status'), btn=$('btn-off-opvragen');
+    var st=$('offerte-status'), btn=$('btn-off-opvragen'), lbl='📨 Offerte aanvragen';
     if(!LAST){ if(st){ st.style.color='var(--muted)'; st.textContent='Kies eerst een combinatie in het rooster.'; } return; }
     if(btn){ btn.disabled=true; btn.textContent='⏳ Aanvragen…'; }
     var tk=await _offToken();
-    if(!tk){ if(btn){ btn.disabled=false; btn.textContent='📨 Offertes opvragen'; } if(st){ st.style.color='var(--muted)'; st.textContent='Rond eerst de intake af (dossier ontbreekt).'; } return; }
+    if(!tk){ if(btn){ btn.disabled=false; btn.textContent=lbl; } if(st){ st.style.color='var(--muted)'; st.textContent='Rond eerst de intake af (dossier ontbreekt).'; } return; }
     try{
-      var r=await fetch(API+'/api/offerte/klaarzetten',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:tk, scope:_offScope(), notify:true, beschrijving:_offBeschrijving() }) });
+      var hd=await _ekHdrOpt();
+      var r=await fetch(API+'/api/ek/offerte-aanvragen',{ method:'POST', headers:hd, body:JSON.stringify({ token:tk, scope:_offScope() }) });
       var j=await r.json().catch(function(){return{};});
-      if(!j||!j.ok) throw new Error((j&&j.error)||'mislukt');
-      if(btn){ btn.disabled=false; btn.textContent='📨 Offertes opvragen'; }
-      window._EK_OFF_GEVRAAGD=true;   // v0.99.0: kompas → «Laad je offerte op»
-      if(st){ var ok=!!(j.mail&&j.mail.sent); st.style.color=ok?'var(--green)':'var(--muted)'; st.textContent= ok ? '✔ Offerte-aanvraag verstuurd — je hoort van ons zodra de offertes binnen zijn.' : 'De aanvraag staat klaar, maar de mail kon niet vertrekken — probeer later opnieuw.'; }
-    }catch(e){ if(btn){ btn.disabled=false; btn.textContent='📨 Offertes opvragen'; } if(st){ st.style.color='var(--muted)'; st.textContent='Aanvraag lukte niet — probeer later opnieuw.'; } }
+      if(!r.ok||!j.ok) throw new Error((j&&j.error)||('status '+r.status));
+      if(btn){ btn.disabled=false; btn.textContent=lbl; }
+      window._EK_OFF_GEVRAAGD=true; window._EK_OFF_AANVR=j.aanvragen||window._EK_OFF_AANVR||[]; _offAanvrRender();
+      if(st){ st.style.color=j.mail_sent?'var(--green)':'var(--muted)'; st.innerHTML=j.mail_sent
+        ? ('✔ Offerte aangevraagd met code <b>'+_ekEsc(j.code)+'</b> ('+_ekEsc(j.scope||'')+'). De installateur antwoordt naar dossier@energie-compas.eu met die code in het onderwerp — de offerte verschijnt dan hier.')
+        : ('De aanvraag '+_ekEsc(j.code)+' staat klaar, maar de mail kon niet vertrekken — probeer later opnieuw.'); }
+    }catch(e){ if(btn){ btn.disabled=false; btn.textContent=lbl; } if(st){ st.style.color='#8a1f1f'; st.textContent='Aanvraag lukte niet: '+e.message; } }
   }
   async function offerteIndienen(){
     var st=$('offerte-status');
@@ -5630,7 +5639,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     el('off-uitleg').textContent=L3('Laad één of meer offertes op (PDF of foto). We lezen ze in, je kijkt de gegevens na, en we rekenen de zonnepanelen en batterij van elke offerte door met haar eigen prijs. Per offerte maak je een rapport.',
       'Chargez une ou plusieurs offres (PDF ou photo). Nous les lisons, vous vérifiez les données, puis nous calculons les panneaux et la batterie de chaque offre à son propre prix. Un rapport par offre.',
       'Upload one or more quotes (PDF or photo). We read them, you check the data, and we calculate each quote’s solar panels and battery at its own price. One report per quote.');
-    el('off-knop').textContent='⬆️ '+L3('Offerte opladen','Charger une offre','Upload a quote');
+    el('off-knop').textContent='⬆️ '+L3('Offerte opladen','Charger une offre','Upload a quote'); try{ var _ok=el('off-knop').closest('label'); if(_ok) _ok.style.display='none'; }catch(xK){}   // v0.150.0: één knop «Offerte opladen» (bovenaan)
     var open=(window._EK_OFF||[]).filter(function(o){ return !o.bevestigd || o.id===EDIT; })[0];
     el('off-edit').innerHTML=open?editHtml(open):'';
     Array.prototype.forEach.call(document.querySelectorAll('#off-edit [data-ofok]'),function(b){ b.onclick=function(){ bevestig(b.getAttribute('data-ofok'), b); }; });
@@ -8123,7 +8132,7 @@ window._ekAmb=(function(){
       if(ex._h!==hx){ ex._h=hx; ex.innerHTML=hx; var bp=el('exa-prof'); if(bp) bp.onclick=function(){ try{ terugNaarInput(); window._ekLuik&&window._ekLuik('dossier',true); el('prof-file').click(); }catch(x){} }; } }
     var advRij=false; try{ advRij=(EK_PREPADV||EK_IS_OEKENE||EK_IS_ADV) && !EK_KLANTVIEW; }catch(x){} zet('adv-rij', advRij); zet('sec-adv', advRij);
     // offertes: opvragen enkel zonder adviseur op het project (en niet bij een partneradviseur); evalueren zodra er offertes zijn
-    var heeftAdv=!!(window._EK_ADV&&window._EK_ADV.email), ob=el('btn-off-opvragen'); if(ob) ob.style.display=(heeftAdv||window._EK_ADV_PARTNER)?'none':'';
+    var heeftAdv=!!(window._EK_ADV&&window._EK_ADV.email), ob=el('btn-off-opvragen'), _oek=false; try{ _oek=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); }catch(xo){} if(ob) ob.style.display=((heeftAdv||window._EK_ADV_PARTNER)&&!_oek)?'none':'';   // v0.150.0: oekene kan altijd aanvragen
     var offN=(window._EK_OFF||[]).filter(function(o){ return o&&o.bevestigd; }).length; zet('btn-off-evalueren', offN>0);
     var r2=el('btn-off-opladen'); if(r2&&r2.parentNode) r2.parentNode.style.display=K.st.bevestigd?'none':'';
     window._EK_TOON_DOSSIERS=true;
@@ -8266,7 +8275,7 @@ window._ekAmb=(function(){
     var S=(window._ekSelectie?window._ekSelectie():{modus:'advies'});
     Z('nx-u3',L3('De cijfers voor ','Les chiffres pour ','The figures for ')+(S.modus==='offerte'?L3('je offerte','votre offre','your quote'):(S.modus==='keuze'?L3('je keuze','votre choix','your choice'):L3('ons advies','notre conseil','our advice')))+' — '+L3('de dossiers gratis zodra je offerte bevestigd is.','les dossiers gratuits dès que votre offre est confirmée.','the files free once your quote is confirmed.'));
     Z('nx-t6',L3('Sturing','Pilotage','Control')); Z('nx-u6',L3('Haal het maximum uit je installatie met een slimme sturing.','Tirez le maximum de votre installation avec un pilotage intelligent.','Get the most out of your installation with smart control.'));
-    Z('btn-off-opladen','⬆️ '+L3('Offerte opladen','Charger une offre','Upload a quote')); Z('btn-off-evalueren','📊 '+L3('Offertes evalueren','Évaluer les offres','Evaluate quotes'));
+    Z('btn-off-opladen','⬆️ '+L3('Offerte opladen','Charger une offre','Upload a quote')); 
   }
   var _sig='';
   function tick(){
