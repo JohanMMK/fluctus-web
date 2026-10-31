@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.149.0 (2026-10-31, Johan): (1) DC-laadbuffer van de gekozen offerte = tweede batterij-icoon in de hero + vermeld in het keuzepaneel; (2) laatste keuze in het rooster wordt automatisch op het dossier bewaard (offerte-vakje = gekozen offerte, ander vakje = je keuze) en komt terug bij het heropenen; de gekozen offerte wordt als eerste doorgerekend zodat ze meteen de selectie is. -->
 <!-- ek.html v0.148.3 (2026-10-31, Johan): VANGNET VOERTUIGEN — heeft het dossier bewaarde voertuigen en staat er bij het doorrekenen 0 zonder dat iemand de voertuigen of het klanttype wijzigde, dan worden de bewaarde voertuigen eerst teruggezet (ACOM-IB verloor bij herladen zijn 22 personenwagens); projectlog 'ev_hersteld'. -->
 <!-- ek.html v0.148.2 (2026-10-31, Johan): na «Toon mijn resultaat» scrolt EK zodat «Je simulatie draait» met de blog en de ambassadeursuitnodiging volledig zichtbaar is; «Word dé energie-expert / in jouw buurt» op twee regels. -->
 <!-- ek.html v0.148.1 (2026-10-31, Johan): keuzepaneel boven het rooster in de donkere merkkleur met witte letters (zoals het resultaatvak); gekozen vakje krijgt in beide roosters dezelfde omlijning (de rand hing af van het kengetal). -->
@@ -2318,7 +2319,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{ var H=(typeof HM!=='undefined')?HM:null, sel=H&&(H.sel||H.best), zelf=function(x,y){ return !!(x&&y&&x._ry===y._ry&&x._cx===y._cx); };
       var isSel=zelf(a,sel), isBest=!!(H&&zelf(a,H.best)), nf=function(v){ return (typeof _ekNf==='function')?_ekNf(v):Math.round(v); };
       var combo=function(c){ var pv=_anchorKwp(c)||0, bk=+c.battKwh||0, bw=+c.battKw||0;
-        return (pv>0?nf(pv)+' kWp zonnepanelen':'geen nieuwe zonnepanelen')+' + '+(bk>0?nf(bk)+' kWh batterij'+(bw>0?' ('+nf(bw)+' kW)':''):'geen batterij'); };
+        var db=window._ekDcBuf?window._ekDcBuf(c,null):null;   // v0.149.0
+        return (pv>0?nf(pv)+' kWp zonnepanelen':'geen nieuwe zonnepanelen')+' + '+(bk>0?nf(bk)+' kWh batterij'+(bw>0?' ('+nf(bw)+' kW)':''):'geen batterij')+(db?' + '+nf(db.kwh)+' kWh DC-buffer':'')+(c._offerte?' · offerte':''); };
       var kpi=function(c){ var M=HM_METRICS, p=[], b=M.besparing.val(c), i=M.investering.val(c), t=M.tvt.val(c);
         if(b!=null&&isFinite(b)) p.push('besparing '+M.besparing.fmt(b)+'/jaar'); if(i!=null&&isFinite(i)) p.push('investering '+M.investering.fmt(i)); if(t!=null&&isFinite(t)&&t<99) p.push('terug in '+M.tvt.fmt(t)+' jaar'); return p.join(' · '); };
       var st=(a._exact||!a._interp)?'<span class="hk-ex">✔ exact doorgerekend</span>':'<span class="hk-est">± geschat</span>';
@@ -2522,13 +2524,22 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     }
     Array.prototype.forEach.call(T.querySelectorAll('td.cell'), function(td){ var ry=+td.getAttribute('data-ry'), cx=+td.getAttribute('data-cx');
       td.onmouseenter=function(){ var a=_cellAt(H,ry,cx); _hmHovMark(ry,cx); if(a) _hmHoverRender(T, a, ry+'|'+cx); };   // v0.148.0: zelfde vakje in beide roosters oplichten
-      td.onclick=function(){ _hmKies(ry,cx); };
-      td.ondblclick=function(e){ try{ e.preventDefault(); var g=window.getSelection&&window.getSelection(); if(g) g.removeAllRanges(); }catch(x){} _hmKiesDbl(ry,cx); }; });   // v0.74.0
+      td.onclick=function(){ _hmKies(ry,cx); _hmKeuzeAuto(); };   // v0.149.0: laatste keuze bewaren
+      td.ondblclick=function(e){ try{ e.preventDefault(); var g=window.getSelection&&window.getSelection(); if(g) g.removeAllRanges(); }catch(x){} _hmKiesDbl(ry,cx); _hmKeuzeAuto(); }; });   // v0.74.0 · v0.149.0
     T.onmouseleave=function(){ _hmHovMark(null); var a=H.sel||H.best; if(a) _hmHoverRender(T, a, 'sel'); };
   }
   // v0.67.2 (Johan): hover-render zonder schermsprong — enkel bij een andere cel, en het rooster blijft op dezelfde schermhoogte
   //   (verandert de inhoud erboven van hoogte, dan scrollen we evenveel mee) → geen flikker-lus meer onder de muis.
   var _hmHovKey=null;
+  // v0.149.0 (Johan 31-10): de LAATSTE keuze in het rooster wordt op het dossier bewaard en komt terug bij het heropenen —
+  //   een offerte-vakje (O1…) = gekozen offerte, elk ander vakje = je keuze (de offertekeuze vervalt dan).
+  var _hmKzT=null;
+  function _hmKeuzeAuto(){ if(_hmKzT) clearTimeout(_hmKzT); _hmKzT=setTimeout(function(){ try{
+    var c=(typeof HM!=='undefined'&&HM)?HM.sel:null; if(!c) return;
+    if(c._offerte && c._offId){ window._EK_OFF_KEUZE=c._offId; try{ window._ekSelKeySync&&window._ekSelKeySync(); }catch(e1){} if(window._ekOffKeuzeBewaar) window._ekOffKeuzeBewaar(c._offId); try{ window._ekOffTabel&&window._ekOffTabel(); }catch(e2){} }
+    else if(window._ekKeuzeAuto) window._ekKeuzeAuto(c);
+    try{ window._ekKaartHerteken&&window._ekKaartHerteken(); }catch(e3){}
+  }catch(e){} }, 700); }
   function _hmHovMark(ry,cx){ ['hm-tabel-L','hm-tabel-R'].forEach(function(id){ var T=$(id); if(!T) return;
     Array.prototype.forEach.call(T.querySelectorAll('td.cell.hov'), function(td){ td.classList.remove('hov'); });
     if(ry!=null){ var td=T.querySelector('td.cell[data-ry="'+ry+'"][data-cx="'+cx+'"]'); if(td) td.classList.add('hov'); } }); }
@@ -5195,11 +5206,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(bet.length){ var nb=bet.reduce(function(a,r){ return a+(+r.aantal||0); },0); return { titel:(L==='fr'?'Recharge payante':(L==='en'?'Paid charging':'Betalend laden')), sub:nb+' '+(L==='fr'?'sessions/jour':(L==='en'?'sessions/day':'laadbeurten/dag')) }; }
     return null; }catch(e){ return null; } };
   // v0.140.0: DONKERE ANTWOORDKAART (zoals de mockup) — besparing groot, terugverdientijd + investering + rendement, iconen; daaronder de netpiek als chip
+  // v0.149.0 (Johan 31-10): DC-laadbuffer van de gekozen offerte = tweede batterij-icoon naast de (AC-)batterij
+  window._ekDcBuf=function(c, SEL){ try{ var d=(c&&c._offData)||null;
+    if(!d && c && c._offId) d=((window._EK_OFF||[]).filter(function(o){ return o&&o.id===c._offId; })[0]||{}).data||null;
+    if(!d && SEL && SEL.offerte) d=SEL.offerte.data||null;
+    var kwh=+(d&&d.dc_buffer_kwh)||0; return kwh>0?{ kwh:kwh, kw:(+d.dc_buffer_kw||0) }:null; }catch(e){ return null; } };
   window._ekHero=function(c, SEL, besp, inv, rend, tvt, _pl){ try{
     var Lx=function(nl,fr,en){ var L=window.EC_LANG; return L==='fr'?fr:(L==='en'?en:nl); }, es=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
     var T=[]; if(c){ var nf=function(v){ return (window._ekNf?_ekNf(v):Math.round(v)); };
       if(+c.pvKwp>0) T.push({ soort:'pv', titel:nf(c.pvKwp)+' kWp', sub:Lx('zonnepanelen','panneaux solaires','solar panels') });
       if(+c.battKw>0||+c.battKwh>0) T.push({ soort:'bat', pct:75, titel:nf(+c.battKwh||0)+' kWh', sub:(+c.battKw>0?nf(c.battKw)+' kW · ':'')+Lx('batterij','batterie','battery') });
+      var _dcb=window._ekDcBuf(c, SEL); if(_dcb) T.push({ soort:'bat', pct:55, titel:nf(_dcb.kwh)+' kWh', sub:(_dcb.kw>0?nf(_dcb.kw)+' kW · ':'')+Lx('DC-buffer laadpalen','tampon DC bornes','DC buffer chargers') });   // v0.149.0
       var ev=window._ekEvLabel(); if(ev) T.push({ soort:'lp', titel:ev.titel, sub:ev.sub });
       T.push({ soort:'ems', titel:Lx('Slimme sturing','Pilotage intelligent','Smart control'), sub:Lx('EMS op de spotmarkt','EMS sur le marché spot','EMS on the spot market') }); }
     var sub=[]; if(tvt) sub.push(Lx('terugverdiend in ','rentabilisé en ','paid back in ')+tvt+' '+Lx('jaar','ans','years'));
@@ -5513,6 +5530,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function lees(){ var d={}; Array.prototype.forEach.call(document.querySelectorAll('#off-edit [data-of]'),function(i){ d[i.getAttribute('data-of')]=i.value; }); return d; }
   async function rekenen(){
     if(BEZIG) return; var L=(window._EK_OFF||[]).filter(function(o){ return o.bevestigd; }); if(!L.length||!window._RAP_PAYLOAD||typeof _offSimCel!=='function') return;
+    var _gk=window._EK_OFF_KEUZE; if(_gk) L.sort(function(a,b){ return (b.id===_gk)-(a.id===_gk); });   // v0.149.0: de gekozen offerte eerst — zij is de selectie bij het openen
     BEZIG=true;
     for(var i=0;i<L.length;i++){ var k=sleutel(L[i]); if(CEL[k]!==undefined) continue; st('⏳ '+L3('Offerte ','Offre ','Offer ')+(i+1)+'/'+L.length+L3(' wordt doorgerekend…',' en calcul…',' being calculated…'));
       var c=await _offSimCel(pr(L[i].data||{})); if(c){ c._offData=L[i].data; c._offId=L[i].id; } CEL[k]=c||null; tabel(); }
@@ -7996,6 +8014,11 @@ window._ekAmb=(function(){
     }catch(e){ meld(L3('Vastleggen lukte niet: ','L’enregistrement a échoué : ','Saving failed: ')+e.message,'err'); }
     _laatste=''; render();
   }
+  // v0.149.0: stil bewaren van de laatste rooster-keuze (zonder melding)
+  window._ekKeuzeAuto=async function(c){ try{ var tk=''; try{ tk=TOKEN||''; }catch(x){} if(!tk||!c) return;
+    var pv=0; try{ pv=+_anchorKwp(c)||0; }catch(x){} if(!pv) pv=+c._cx||0; var S2=selectie();
+    var hd=await _ekHdrOpt(); var r=await fetch(API+'/api/ek/keuze',{ method:'POST', headers:hd, body:JSON.stringify({ token:tk, rol:klant()?'klant':'adviseur', keuze:{ ry:c._ry, cx:c._cx, pv_kwp:pv, batt_kw:+c.battKw||0, batt_kwh:+c.battKwh||0, advies:!!S2.isBest } }) });
+    var j=await r.json().catch(function(){ return {}; }); if(r.ok&&j.ok){ window._EK_KEUZE=j.keuze||null; if(HM) HM._kzOk=true; _laatste=''; render(); } }catch(e){} };
   function terugNaarVast(){ if(window._EK_OFF_KEUZE){ try{ window._ekOffKeuzeBewaar&&window._ekOffKeuzeBewaar(null); }catch(eW){} } window._EK_OFF_KEUZE=null; if(window._EK_KEUZE){ kzToepassen(true); } else { try{ if(HM&&HM.best){ HM.sel=HM.best; renderRapport(HM.best); _hmDetail(HM.best); renderHeatmap(); } }catch(x){} } _laatste=''; render(); }
   function roosterOpen(){ var hm=el('heatmap-card'); if(hm){ hm.classList.remove('ek-dicht'); hm.classList.add('ek-klap'); } naar('heatmap-card'); }
   function gzKey(SEL){ if(SEL.modus==='offerte') return 'o:'+(SEL.offerte&&SEL.offerte.id); var c=SEL.cel; return c?('c:'+c._ry+'|'+c._cx):''; }
