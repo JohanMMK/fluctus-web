@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.159.0 (2026-11-01, Johan): FIX «Pas aan»-combinatie — eigen palen (AC/DC), prijs en exploitatiekost gelden nu ook na heropenen en na een herberekening (Veranda: 1 DC i.p.v. 2, € 185k i.p.v. € 225k); laadtegel op Resultaat toont het aantal laadpunten. -->
 <!-- ek.html v0.158.0 (2026-10-31, Johan): tab «Investering» heet nu «Pas aan» (zelf een combinatie PV/batterij/laadpalen + prijs maken, vóór echte offertes); externe vergelijking volledig weg uit de tab Sturing (manueel als iemand erom vraagt); keuzelijst sturing verborgen, dossiers rekenen met onze sturing. -->
 <!-- ek.html v0.157.0 (2026-10-31, Johan): VERGELIJKING MET extern programma herwerkt — de knop rekent de keuze van het dossier (offerte / keuze / advies) door met onze sturing én zoals extern programma en zet besparing, terugverdientijd en cycli naast elkaar. Er wordt niets bewaard (0.155–0.156 zette het dossier op «volledig»); keuzelijst verborgen; melding + «Terug naar onze sturing» als een dossier toch op «volledig» staat. -->
 <!-- ek.html v0.156.2 (2026-10-31, Johan): box Sturing (was «Batterijsturing») — knop rekent de andere sturing door en toont beide besparingen (ons advies) naast elkaar; één pijl in de opgeplooide boxen. -->
@@ -2495,10 +2496,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.74.0 (Johan): klik = selecteren; dubbelklik (_hmKiesExact) = de cel exact herberekenen.
   var _hmKiesExact=false;
   function _hmKiesDbl(ry,cx){ _hmKiesExact=true; try{ _hmKies(ry,cx); } finally { _hmKiesExact=false; } }
+  // v0.159.0 (Johan 01-11): een «Pas aan»-cel draagt haar eigen palen (AC/DC), prijs en exploitatiekost. Dat werd enkel toegepast bij een klik
+  //   in het rooster — bij heropenen (keuze hersteld) of na een herberekening bleven de standaardpalen en -prijs staan (Veranda: 2 DC i.p.v. 1,
+  //   € 225k i.p.v. € 185k). Nu bij ELKE weergave van een Pas aan-cel (renderRapport).
+  function _ekCustomCtx(a){ if(!a || !a._custom) return; PRIJS_ALLIN=!!a._allIn; PRIJS_FACTOR=(+a._prijsFactor>0?a._prijsFactor:1); OPEX_JAAR=(+a._opex||0); OPEX_RATIO=(+a._opexRatio||0);
+    INV_OV={ pvKwp:(+a.pvKwp||0), battKw:(+a.battKw||0), battKwh:(+a.battKwh||0), ac:(a._ac!=null?a._ac:0), dc:(a._dc!=null?a._dc:0) }; }
   function _hmKies(ry,cx){ var H=HM; if(!H) return; var a=_cellAt(H,ry,cx); if(!a) return;
     // v0.24.26 (Johan): kies je een manuele combi in de tabel → herstel ZIJN prijs, exploitatiekost en palen (INV_OV) → paycards + "toon rapport" kloppen voor die combi.
     PRIJS_ALLIN=!!(a._custom && a._allIn);   // v0.122.0
-    if(a._custom){ PRIJS_FACTOR=(+a._prijsFactor>0?a._prijsFactor:1); OPEX_JAAR=(+a._opex||0); OPEX_RATIO=(+a._opexRatio||0); INV_OV={ pvKwp:(+a.pvKwp||0), battKw:(+a.battKw||0), battKwh:(+a.battKwh||0), ac:(a._ac!=null?a._ac:0), dc:(a._dc!=null?a._dc:0) }; }
+    _ekCustomCtx(a);
     H.sel=a; renderRapport(a); _hmDetail(a); renderHeatmap();
     if(_hmKiesExact && a._interp && !a._exact && H.compute){ var d=$('hm-detail'); if(d) d.innerHTML='± geschat — ⏳ exacte berekening…';
       H.compute(ry,cx,function(ex){ if(ex){ H.sel=ex; renderRapport(ex); _hmDetail(ex); renderHeatmap(); } else _hmDetail(a); }); } }
@@ -2912,6 +2918,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
 
   function renderRapport(a){
     var C=CTX; if(!C) return;
+    try{ _ekCustomCtx(a); }catch(eCc){}   // v0.159.0
     var ev=C.ev, particulier=C.particulier, afnameMwh=C.afnameMwh, toegangKw=C.toegangKw, profiel=C.profiel;
     var _pk=(C.piekKw!=null?C.piekKw:toegangKw), _an=(C.aansluitingKw||toegangKw);
     var _vermTxt = (particulier && Math.abs(_an-_pk)>0.2)
@@ -5216,15 +5223,24 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return '<div class="ek-docs" style="margin:12px 0 10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">'+_L3d('Je documenten','Vos documents','Your documents')+'</div>'+ECI.tegels(L,{klein:true})+'</div>';
   }catch(e){ return ''; } };
   // v0.140.0: voertuigen als «2 vrachtwagens» (één type) of «5 EV's» (gemengd); betalend plein apart
-  window._ekEvLabel=function(){ try{
+  // v0.159.0 (Johan 01-11): aantal laadpunten in de laadtegel (Pas aan-cel / offerte / Pas aan / automatisch)
+  window._ekPalen=function(c){ try{ var d=(c&&c._offData)||null;
+    if(c&&c._custom) return { ac:+c._ac||0, dc:+c._dc||0 };
+    if(d&&(d.ac!=null||d.dc!=null)) return { ac:+d.ac||0, dc:+d.dc||0 };
+    if(typeof INV_OV!=='undefined' && INV_OV) return { ac:+INV_OV.ac||0, dc:+INV_OV.dc||0 };
+    return { ac:+_acDefault()||0, dc:+_dcDefault()||0 }; }catch(e){ return null; } };
+  function _ekPalenTxt(P){ if(!P) return ''; var n=P.ac+P.dc; if(!(n>0)) return ''; var L=window.EC_LANG;
+    var w=(P.ac&&P.dc)?(P.ac+' AC + '+P.dc+' DC'):(P.ac?P.ac+' AC':P.dc+' DC');
+    return w+' '+(L==='fr'?(n===1?'borne':'bornes'):(L==='en'?(n===1?'charger':'chargers'):(n===1?'laadpunt':'laadpunten'))); }
+  window._ekEvLabel=function(c){ try{ var _pt=_ekPalenTxt(window._ekPalen(c));
     var R=(window._ekEvRows?window._ekEvRows():[]).filter(function(r){ return r && +r.aantal>0; }), eig=R.filter(function(r){ return !r.betalend; }), bet=R.filter(function(r){ return r.betalend; });
     var NM={ personenwagen:['personenwagen','personenwagens','voiture','voitures','car','cars'], bestelwagen:['bestelwagen','bestelwagens','camionnette','camionnettes','van','vans'],
       lichte_vracht:['lichte vrachtwagen','lichte vrachtwagens','camion léger','camions légers','light truck','light trucks'], vrachtwagen:['vrachtwagen','vrachtwagens','camion','camions','truck','trucks'], bus:['bus','bussen','bus','bus','bus','buses'] };
     var L=window.EC_LANG, ix=(L==='fr'?2:(L==='en'?4:0));
     if(eig.length){ var n=eig.reduce(function(a,r){ return a+(+r.aantal||0); },0), ty=eig.map(function(r){ return r.type; }).filter(function(t,i,a){ return a.indexOf(t)===i; });
       var t=(ty.length===1&&NM[ty[0]])?(n+' '+NM[ty[0]][ix+(n===1?0:1)]):(n+' '+(L==='fr'?'VE':(L==='en'?'EVs':'EV\u2019s')));
-      return { titel:t, sub:(L==='fr'?'recharge intelligente':(L==='en'?'smart charging':'slim laden')) }; }
-    if(bet.length){ var nb=bet.reduce(function(a,r){ return a+(+r.aantal||0); },0); return { titel:(L==='fr'?'Recharge payante':(L==='en'?'Paid charging':'Betalend laden')), sub:nb+' '+(L==='fr'?'sessions/jour':(L==='en'?'sessions/day':'laadbeurten/dag')) }; }
+      return { titel:t, sub:(L==='fr'?'recharge intelligente':(L==='en'?'smart charging':'slim laden'))+(_pt?' · '+_pt:'') }; }
+    if(bet.length){ var nb=bet.reduce(function(a,r){ return a+(+r.aantal||0); },0); return { titel:(L==='fr'?'Recharge payante':(L==='en'?'Paid charging':'Betalend laden')), sub:(_pt?_pt+' · ':'')+nb+' '+(L==='fr'?'sessions/jour':(L==='en'?'sessions/day':'laadbeurten/dag')) }; }
     return null; }catch(e){ return null; } };
   // v0.140.0: DONKERE ANTWOORDKAART (zoals de mockup) — besparing groot, terugverdientijd + investering + rendement, iconen; daaronder de netpiek als chip
   // v0.149.0 (Johan 31-10): DC-laadbuffer van de gekozen offerte = tweede batterij-icoon naast de (AC-)batterij
@@ -5238,7 +5254,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(+c.pvKwp>0) T.push({ soort:'pv', titel:nf(c.pvKwp)+' kWp', sub:Lx('zonnepanelen','panneaux solaires','solar panels') });
       if(+c.battKw>0||+c.battKwh>0) T.push({ soort:'bat', pct:75, titel:nf(+c.battKwh||0)+' kWh', sub:(+c.battKw>0?nf(c.battKw)+' kW · ':'')+Lx('batterij','batterie','battery') });
       var _dcb=window._ekDcBuf(c, SEL); if(_dcb) T.push({ soort:'bat', pct:55, titel:nf(_dcb.kwh)+' kWh', sub:(_dcb.kw>0?nf(_dcb.kw)+' kW · ':'')+Lx('DC-buffer laadpalen','tampon DC bornes','DC buffer chargers') });   // v0.149.0
-      var ev=window._ekEvLabel(); if(ev) T.push({ soort:'lp', titel:ev.titel, sub:ev.sub });
+      var ev=window._ekEvLabel(c); if(ev) T.push({ soort:'lp', titel:ev.titel, sub:ev.sub });
       T.push({ soort:'ems', titel:Lx('Slimme sturing','Pilotage intelligent','Smart control'), sub:Lx('EMS op de spotmarkt','EMS sur le marché spot','EMS on the spot market') }); }
     var sub=[]; if(tvt) sub.push(Lx('terugverdiend in ','rentabilisé en ','paid back in ')+tvt+' '+Lx('jaar','ans','years'));
     if(inv&&inv!=='—') sub.push(Lx('investering ','investissement ','investment ')+inv+(_pl&&_pl.netInv>0?Lx(' incl. laadpalen',' bornes incluses',' incl. chargers'):''));
@@ -8148,7 +8164,7 @@ window._ekAmb=(function(){
     knopKleur('btn-off-opvragen', K.fase===4 && kzOk && !K.gevraagd && !offs.length);
     knopKleur('btn-off-opladen', K.fase===4 && kzOk && (K.gevraagd || !vraagKan) && !offN);
     knopKleur('btn-off-evalueren', K.fase===5);
-    var sig=[JSON.stringify(K),kl,SEL.modus,SEL.vast,SEL.isBest,SEL.afwijk,JSON.stringify(SEL.kz),gezien,A.k,SEL.offerte&&SEL.offerte.id,combo,besp,inv,!!_pl,rend,tvt,fact,ev,inj,window.EC_LANG,A.z,offN,adv&&adv.email,!!(el('pd-blok')&&!el('pd-blok').classList.contains('hidden')),JSON.stringify(window._EK_GEN_RES&&window._EK_GEN_RES.diesel_vermeden_eur_jaar)].join('|'); if(sig===_laatste) return; _laatste=sig;
+    var sig=[JSON.stringify(K),kl,SEL.modus,SEL.vast,SEL.isBest,SEL.afwijk,JSON.stringify(SEL.kz),gezien,A.k,(function(){ try{ return JSON.stringify(window._ekPalen(c)); }catch(x){ return ''; } })(),SEL.offerte&&SEL.offerte.id,combo,besp,inv,!!_pl,rend,tvt,fact,ev,inj,window.EC_LANG,A.z,offN,adv&&adv.email,!!(el('pd-blok')&&!el('pd-blok').classList.contains('hidden')),JSON.stringify(window._EK_GEN_RES&&window._EK_GEN_RES.diesel_vermeden_eur_jaar)].join('|'); if(sig===_laatste) return; _laatste=sig;
     // blok 1 «Je data»
     var weet=[];
     if(window.STATE_HEEFT_FACTUUR) weet.push('✓ '+L3('factuur','facture','bill'));
