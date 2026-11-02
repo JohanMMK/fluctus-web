@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.163.0 (2026-11-02, Johan): tab Adviseur — blok «Deel deze analyse op één A4»: «Bekijk de A4» (ek-a4.html, anoniem: geen klantnaam of adres) en «Mail me de A4» (server 15.380.0 maakt de PDF en mailt de aangemelde adviseur: PDF, foto zonder tekst, mail voor de klant, LinkedIn-post met #NetBeterGebruiken, eerste reactie, uitleg). Fix: «Wat slimme sturing oplevert» volgt nu dezelfde combinatie als de antwoordkaart (ons advies = de exacte adviescel, niet de rooster-kolom). -->
 <!-- ek.html v0.162.0 (2026-11-02, Johan): tab Sturing — bovenaan een blok «Wat slimme sturing oplevert»: besparing + terugverdientijd ZONDER onbalans (= de cijfers van je keuze) en MET onbalans (passieve respons, netto extra uit het server-rapport van die combinatie; enkel bedrijf). -->
 <!-- ek.html v0.161.0 (2026-11-02, Johan): rooster — (1) het aangeklikte vakje blijft onder de muis staan (geen schermsprong meer bij klik/dubbelklik: de inhoud erboven verandert van hoogte, we scrollen evenveel mee); (2) een vakje dat exact berekend wordt krijgt bewegende stippellijnen (ook bij «Reken het volledige rooster exact»). -->
 <!-- ek.html v0.160.0 (2026-11-01, Johan): tab Adviseur — promotie ambassadeurschap boven «Meer detail» (wervende tekst links, dezelfde uitnodiging + blogbanners als tijdens de berekening rechts, daaronder uitleg over delen en «Je profiel verdient meer»); «Hoe we dit berekenen» is een eigen blok (niet meer in «Berekening»). -->
@@ -2619,20 +2620,30 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekOnbKey(pv,kw,kwh){ return Math.round(+pv||0)+'|'+Math.round(+kw||0)+'|'+Math.round(+kwh||0); }
   window._ekOnbBewaar=function(body,j){ var m=_ekOnbMap(); if(!m||!body||!j) return; var f=j.financieel||{}, x=(f.onbalans_extra_jaar!=null)?+f.onbalans_extra_jaar:((j.factuur&&j.factuur.onbalans_extra_jaar!=null)?+j.factuur.onbalans_extra_jaar:null);
     if(x==null||!isFinite(x)) return; m[_ekOnbKey(body.pv_kwp,body.batt_kw,body.batt_kwh)]={ extra:Math.max(0,Math.round(x)) }; _ekOnbSig=''; };
+  // v0.163.0: dezelfde combinatie als de antwoordkaart (ons advies = de exacte adviescel; keuze; offerte)
+  function _ekStuCel(){ try{ var S=window._ekSelectie?window._ekSelectie():null; if(S&&S.cel) return S.cel; }catch(e){} var H=(typeof HM!=='undefined')?HM:null; return H&&(H.sel||H.best); }
+  // v0.163.0: onbalans-extra ophalen als belofte (tab Sturing + A4). Resolve → {extra} | {fout} | null (geen batterij).
+  var _ekOnbProm={};
+  function _ekOnbHaal(a){ if(!a || !window._RAP_PAYLOAD) return Promise.resolve(null);
+    var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{};
+    if(!(kwh>0)) return Promise.resolve(null); if(m[k] && m[k].extra!=null) return Promise.resolve(m[k]);
+    if(_ekOnbProm[k]) return _ekOnbProm[k];
+    var P=window._RAP_PAYLOAD; _ekOnbBezig[k]=1; _ekOnbSig='';
+    var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh });
+    _ekOnbProm[k]=fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+      .then(function(r){ return r.json().catch(function(){ return {}; }); })
+      .then(function(j){ if(j&&j.ok && window._RAP_PAYLOAD===P) window._ekOnbBewaar(body,j); else if(window._RAP_PAYLOAD===P){ var mm=_ekOnbMap(); if(mm) mm[k]={ fout:true }; } })
+      .catch(function(){ var mm=_ekOnbMap(); if(mm && window._RAP_PAYLOAD===P) mm[k]={ fout:true }; })
+      .then(function(){ delete _ekOnbBezig[k]; delete _ekOnbProm[k]; _ekOnbSig=''; try{ _ekStuBesp(); }catch(e){} var mm=_ekOnbMap(); return (mm&&mm[k])||null; });
+    return _ekOnbProm[k]; }
   function _ekStuBesp(){ var box=$('stu-besp'); if(!box) return;
-    var H=(typeof HM!=='undefined')?HM:null, a=H&&(H.sel||H.best), L=(typeof _ekL3==='function')?_ekL3:function(n){return n;};
+    var H=(typeof HM!=='undefined')?HM:null, a=_ekStuCel(), L=(typeof _ekL3==='function')?_ekL3:function(n){return n;};
     if(!a || !window._RAP_PAYLOAD || _ekIsPart()){ if(box.innerHTML){ box.innerHTML=''; _ekOnbSig=''; } return; }
     var M=HM_METRICS, b0=M.besparing.val(a), t0=M.tvt.val(a);
     if(b0==null||!isFinite(b0)){ box.innerHTML=''; return; }
     var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{}, o=m[k];
     var zicht=false; try{ var sec=$('sec-stu'); zicht=!!(sec && sec.offsetParent!==null); }catch(e){}
-    if(!o && zicht && !_ekOnbBezig[k] && kwh>0){ _ekOnbBezig[k]=1; var P=window._RAP_PAYLOAD;
-      var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh });
-      fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){ if(j&&j.ok && window._RAP_PAYLOAD===P) window._ekOnbBewaar(body,j); else if(window._RAP_PAYLOAD===P){ var mm=_ekOnbMap(); if(mm) mm[k]={ fout:true }; } })
-        .catch(function(){ var mm=_ekOnbMap(); if(mm && window._RAP_PAYLOAD===P) mm[k]={ fout:true }; })
-        .then(function(){ delete _ekOnbBezig[k]; _ekOnbSig=''; try{ _ekStuBesp(); }catch(e){} }); }
+    if(!o && zicht && !_ekOnbBezig[k] && kwh>0) _ekOnbHaal(a);
     var sig=k+'|'+Math.round(b0)+'|'+(o?JSON.stringify(o):(_ekOnbBezig[k]?'b':'-'))+'|'+(window.EC_LANG||'');
     if(sig===_ekOnbSig) return; _ekOnbSig=sig;
     var eur=function(v){ return (v<0?'− ':'')+'€ '+_ekMilDot(v); }, jr=function(t){ return (t!=null&&isFinite(t)&&t<99)?(L('terugverdiend in ','amorti en ','paid back in ')+M.tvt.fmt(t)+L(' jaar',' ans',' years')):L('niet terugverdiend binnen 15 jaar','pas amorti en 15 ans','not paid back within 15 years'); };
@@ -2647,8 +2658,69 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     else { t2='<div class="sb-t"><div class="sb-l">'+L('Met onbalans','Avec déséquilibre','With imbalance')+'</div><div class="sb-v" style="font-size:15px">⏳ '+L('wordt berekend…','calcul en cours…','being calculated…')+'</div><div class="sb-s">'+L('We rekenen deze combinatie door met sturing op het onbalanssignaal (± 30 s).','Nous calculons cette combinaison avec pilotage sur le signal de déséquilibre (± 30 s).','We calculate this combination with control on the imbalance signal (± 30 s).')+'</div></div>'; }
     box.innerHTML='<div class="sb-kop">'+L('Wat slimme sturing oplevert','Ce que rapporte un pilotage intelligent','What smart control delivers')+' · '+(pv>0?_ekMilDot(pv)+' kWp + ':'')+(kwh>0?_eUnit(kwh,'kWh'):L('geen batterij','pas de batterie','no battery'))+'</div><div class="sb-g">'+t1+t2+'</div>'
       +'<div class="sb-n">'+L('In het rooster, je resultaat en je rapport rekenen we zonder onbalans; de onbalans is een mogelijke extra bovenop.','Dans la grille, votre résultat et votre rapport, nous calculons sans déséquilibre ; le déséquilibre est un bonus possible.','In the grid, your result and your report we calculate without imbalance; imbalance is a possible extra on top.')+'</div>'; }
-  window._ekOnbOpnieuw=function(){ try{ var H=HM, a=H&&(H.sel||H.best); if(!a) return; var m=_ekOnbMap(); if(m) delete m[_ekOnbKey(_anchorKwp(a),a.battKw,a.battKwh)]; _ekOnbSig=''; _ekStuBesp(); }catch(e){} };
+  window._ekOnbOpnieuw=function(){ try{ var a=_ekStuCel(); if(!a) return; var m=_ekOnbMap(); if(m) delete m[_ekOnbKey(_anchorKwp(a),a.battKw,a.battKwh)]; _ekOnbSig=''; _ekStuBesp(); }catch(e){} };
   try{ setInterval(function(){ try{ _ekStuBesp(); }catch(e){} }, 1200); }catch(e){}
+  // ══ v0.163.0 (Johan 02-11): ANALYSE OP ÉÉN A4 — anoniem (geen klantnaam, adres of dossiercode). Bouwt de gegevens voor ek-a4.html. ══
+  function _ekA4Txt(x){ return String(x==null?'':x).replace(/<br\s*\/?>/gi,' ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim(); }
+  window._ekA4Data=function(){
+    var H=(typeof HM!=='undefined')?HM:null; if(!H || !H.real) return null;
+    var S=window._ekSelectie?window._ekSelectie():null, c=(S&&S.cel)||H.sel||H.best; if(!c) return null;
+    var hl=window._EK_HERO_LAST||{}; if(hl.c!==c){ try{ renderRapport(c); }catch(e){} hl=window._EK_HERO_LAST||{}; }
+    var M=HM_METRICS, nv=function(id){ var x=$(id); var v=x?parseFloat(String(x.value||'').replace(',','.')):NaN; return isFinite(v)?v:null; };
+    var maand=['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'], nu=new Date();
+    var exact=false; try{ exact=!!window._ekKompasNu().st.exact; }catch(e){}
+    var prof=''; try{ var ip=$('i-profiel'); prof=(ip&&ip.selectedOptions&&ip.selectedOptions[0])?ip.selectedOptions[0].text:''; }catch(e){}
+    var sp=''; try{ sp=(typeof STATE_SPANNING!=='undefined'&&STATE_SPANNING)?STATE_SPANNING:''; }catch(e){}
+    var V=[]; try{ (window._ekEvRows?window._ekEvRows():[]).forEach(function(r){ if(!r||!(+r.aantal>0)) return; var t=_evType(r.type)||{};
+      V.push({ label:(t.label||t.naam||r.type||''), aantal:+r.aantal, betalend:!!r.betalend, moment:((EV_MOMENT[r.moment]||{}).label||''), weekend:!!r.weekend, kw:(+r.laadverm_kw||+r.paal_kw||0) }); }); }catch(e){}
+    // rooster: terugverdientijd, zoals op het scherm
+    var R=null; try{ var mk=M.tvt?'tvt':HMMETRIC_L, MM=M[mk], rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;}), sel=H.sel||c, best=H.best, n=0;
+      var cel=rows.map(function(ry){ return cols.map(function(cx){ var a=_cellAt(H,ry,cx); if(!a) return null; n++; var v=MM.val(a);
+        return { v:(v!=null&&isFinite(v))?Math.round(v*100)/100:null, t:(v==null||!isFinite(v))?'':MM.fmt(v), ex:!!(a._exact||!a._interp), sel:!!(sel&&a._ry===sel._ry&&a._cx===sel._cx), best:!!(best&&a._ry===best._ry&&a._cx===best._cx) }; }); });
+      var sx=$('hm-mx-L'), titel='', kg=[]; if(sx){ Array.prototype.forEach.call(sx.options, function(o){ if(o.hidden||o.disabled) return; kg.push(o.text); if(o.value===mk) titel=o.text; }); }
+      R={ titel:titel||'Terugverdientijd (jaar)', goedHoog:!!MM.goedHoog, cols:cols.map(function(x){ return _ekA4Txt(H.colLabel?H.colLabel(x):x); }), rows:rows.map(function(x){ return _ekA4Txt(H.rowLabel?H.rowLabel(x):x); }), cel:cel, n:n, kwartieren:35040, kengetallen:kg, heeftBest:!!best }; }catch(e){ R=null; }
+    // de combinatie (zoals de antwoordkaart)
+    var bespN=null, tvtN=null; try{ bespN=M.besparing.val(c); tvtN=M.tvt.val(c); }catch(e){}
+    var pk=Math.round(+c.aansluiting_totaal_kw||+c.jaarpiek||0), tg=nv('i-toegang')||0, exC=!!(!c._interp||c._exact);
+    var titelK=(S&&S.modus==='offerte')?'De gekozen offerte':((S&&S.modus==='keuze')?'De gekozen combinatie':'Ons advies');
+    var K={ titel:titelK, besp:hl.besp||(bespN!=null?_fmtEurK(bespN):''), tvt:hl.tvt||(tvtN!=null&&tvtN<99?M.tvt.fmt(tvtN):''), inv:hl.inv||'', inv_incl:!!(hl.pl&&hl.pl.netInv>0), rend:hl.rend||'', tegels:(hl.tegels||[]),
+      netpiek_kw:(exC&&pk>0)?pk:0, aansluiting_kw:(exC&&pk>0)?tg:0, binnen:!(tg>0)||pk<=tg*1.02, verzwaring:+c.verzwaring_eenmalig>0 };
+    // sturing (zelfde cel), uit de cache
+    var St=null; try{ if(bespN!=null){ St={ zonder:{ besp:Math.round(bespN), tvt:(tvtN!=null&&tvtN<99)?M.tvt.fmt(tvtN):'' }, met:null };
+      var pv=Math.round(_anchorKwp(c)||0), mm=_ekOnbMap()||{}, o=mm[_ekOnbKey(pv,c.battKw,c.battKwh)];
+      if(o && o.extra!=null){ var a2=Object.assign({}, c, { besparing:(+c.besparing||0)+o.extra }), b1=M.besparing.val(a2), t1=M.tvt.val(a2); St.met={ besp:Math.round(b1), tvt:(t1!=null&&t1<99)?M.tvt.fmt(t1):'', extra:o.extra }; } } }catch(e){}
+    // bank + aftrek (zelfde regels als het tipje in Bankdossier)
+    var B=null; try{ var invB=+_invPvbCell(c)||0, bespB=+c.besparing||0, pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0;
+      if(invB>0&&bespB>0) B={ inv:Math.round(invB), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(bespB), dek:ann>0?Math.round(bespB/ann*100):null }; }catch(e){}
+    var A=null; try{ var T=window._ekAftrekToets?window._ekAftrekToets(c):null; if(T) A={ status:T.status, voordeel:Math.round(+T.voordeel||0), irr:T.irr }; }catch(e){}
+    // titel zonder naam
+    var evN=V.filter(function(r){ return !r.betalend; }).reduce(function(s,r){ return s+r.aantal; },0), ty=V.filter(function(r){ return !r.betalend; }).map(function(r){ return r.label.toLowerCase(); }).filter(function(t,i,a){ return a.indexOf(t)===i; });
+    var evT=evN>0?((ty.length===1)?(evN+' '+(evN===1?ty[0]:(/wagen$/.test(ty[0])?ty[0]+'s':(ty[0]==='bus'?'bussen':ty[0]+'s')))):(evN+' elektrische voertuigen')):'';
+    var wat=[]; if(+c.pvKwp>0) wat.push('zonnepanelen'); if(+c.battKwh>0) wat.push('een batterij'); wat.push(evN>0?'slim laden':'slim sturen');
+    var wie=_ekIsPart()?'een gezin':'een bedrijf';
+    var titel=wat.slice(0,-1).join(', ')+(wat.length>1?' en ':'')+wat[wat.length-1]; titel=titel.charAt(0).toUpperCase()+titel.slice(1)+' voor '+wie+(evT?' met '+evT:'');
+    return { v:1, lang:(window.EC_LANG||'nl'), datum:maand[nu.getMonth()]+' '+nu.getFullYear(), titel:titel, klanttype:(_ekIsPart()?'particulier':'bedrijf'),
+      invoer:{ factuur:!!window.STATE_HEEFT_FACTUUR, verbruik_mwh:nv('i-afname'), aansluiting_kw:nv('i-toegang'), kost_eur:nv('i-kost'), best_pv_kwp:nv('i-best-pv'), best_inj_mwh:nv('i-best-inj'), profiel:prof, gemeten:exact, spanning:sp },
+      voertuigen:V, rooster:R, keuze:K, sturing:St, bank:B, aftrek:A,
+      kern:{ pv_kwp:Math.round(+c.pvKwp||0), batt_kwh:Math.round(+c.battKwh||0), batt_kw:Math.round(+c.battKw||0), besp_eur:(bespN!=null?Math.round(bespN):null), tvt:(tvtN!=null&&tvtN<99?Math.round(tvtN*10)/10:null),
+        ev_tekst:evT, binnen:K.binnen, aansluiting_kw:tg||null, n:(R&&R.n)||null, onb_extra:(St&&St.met)?St.met.extra:null, modus:(S&&S.modus)||'advies' } };
+  };
+  window._ekA4Bekijk=function(){ var st=$('adv-a4-st'); var D=window._ekA4Data(); if(!D){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
+    try{ localStorage.setItem('EK_A4_DATA', JSON.stringify(D)); }catch(e){ if(st) st.textContent='Kon de A4 niet klaarzetten (opslag geblokkeerd).'; return; }
+    window.open('/apps/ek-a4.html?v='+Date.now(),'_blank'); };
+  window._ekA4Mail=async function(){ var st=$('adv-a4-st'), btn=$('adv-a4-mail');
+    var c0=_ekStuCel(); if(!c0){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
+    if(btn) btn.disabled=true;
+    try{ if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Onbalans wordt berekend…'; } await _ekOnbHaal(c0);
+      var D=window._ekA4Data(); if(!D) throw new Error('doe eerst een simulatie');
+      if(st) st.textContent='⏳ De A4 wordt gemaakt en gemaild… (± 20 s)';
+      var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{});
+      var r=await fetch(API+'/api/ek/a4-mail',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN||'', data:D }) });
+      var j=await r.json().catch(function(){ return {}; });
+      if(!r.ok||!j.ok) throw new Error(j.error||('HTTP '+r.status));
+      if(st){ st.style.color='var(--green)'; st.textContent='✔ Gemaild naar '+(j.aan||'je mailbox')+': de A4 als PDF, een foto, een mail voor je klant en een LinkedIn-post.'; }
+    }catch(e){ if(st){ st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; } }
+    finally{ if(btn) btn.disabled=false; } };
   // v0.73.0 (Johan): legende exact/geschat + knop «↻ Herinterpoleer» onder de roosters.
   function _hmNieuweExact(H){ var n=0; Object.keys(H.computed||{}).forEach(function(k){ var e=H.computed[k]; if(e && e._exact && !(H.herIp&&H.herIp[k])) n++; }); return n; }
   // v0.75.0 (Johan): klantnaam in de vaste bovenbalk (dossiernaam, anders het ingevulde klantveld).
@@ -5329,6 +5401,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var _dcb=window._ekDcBuf(c, SEL); if(_dcb) T.push({ soort:'bat', pct:55, titel:nf(_dcb.kwh)+' kWh', sub:(_dcb.kw>0?nf(_dcb.kw)+' kW · ':'')+Lx('DC-buffer laadpalen','tampon DC bornes','DC buffer chargers') });   // v0.149.0
       var ev=window._ekEvLabel(c); if(ev) T.push({ soort:'lp', titel:ev.titel, sub:ev.sub });
       T.push({ soort:'ems', titel:Lx('Slimme sturing','Pilotage intelligent','Smart control'), sub:Lx('EMS op de spotmarkt','EMS sur le marché spot','EMS on the spot market') }); }
+    try{ window._EK_HERO_LAST={ c:c, besp:besp, inv:inv, rend:rend, tvt:tvt, pl:_pl, tegels:T.slice() }; }catch(eHl){}   // v0.163.0: voor de A4
     var sub=[]; if(tvt) sub.push(Lx('terugverdiend in ','rentabilisé en ','paid back in ')+tvt+' '+Lx('jaar','ans','years'));
     if(inv&&inv!=='—') sub.push(Lx('investering ','investissement ','investment ')+inv+(_pl&&_pl.netInv>0?Lx(' incl. laadpalen',' bornes incluses',' incl. chargers'):''));
     if(rend&&rend!=='—') sub.push(Lx('rendement ','rendement ','return ')+rend);
@@ -6184,7 +6257,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.146.0 (Johan 31-10): Resultaat = enkel advies t.e.m. «Je documenten». Nieuwe tabs achteraan: Impact, Berekening (KPI's, aannames,
   //   «Hoe we dit berekenen») en Adviseur (enkel adviseursweergave). Bestaande zonnepanelen sturen → Sturing.
   var TAB_MAP={ 'ek-loc-card':'1', 'injstuur-card':'6', 'kpi-card':'a', 'betalend-card':'a', 'ek-antw':'2', 'heatmap-card':'r',
-    'battq-blok':'a', 'impact-blok':'a', 'ek-ber-blok':'a', 'adv-amb-blok':'a', 'sec-exa':'5', 'sec-off':'4', 'offsim-card':'4', 'sec-dos':'5', 'sec-stu':'6', 'sec-adv':'a', 'ek-meer':'a' };   // v0.152.0: impact, berekening, batterijkwaliteit onder Adviseur
+    'battq-blok':'a', 'impact-blok':'a', 'ek-ber-blok':'a', 'adv-amb-blok':'a', 'adv-a4-blok':'a', 'sec-exa':'5', 'sec-off':'4', 'offsim-card':'4', 'sec-dos':'5', 'sec-stu':'6', 'sec-adv':'a', 'ek-meer':'a' };   // v0.152.0: impact, berekening, batterijkwaliteit onder Adviseur
   var TABS=[['2','Resultaat','Résultat','Result'],['r','Rooster','Grille','Grid'],['v','Pas aan','Ajuster','Adjust'],['4','Offertes','Offres','Quotes'],['5','Dossiers','Dossiers','Files'],['6','Sturing','Pilotage','Control'],['a','Adviseur','Conseiller','Adviser']];   // v0.152.0: Locatie → invoer; Je impact, Berekening, Batterijkwaliteit → blokken onder Adviseur   // v0.147.0: + Investering, Batterijkwaliteit
   function tabZicht(t){ if(!TABS.some(function(x){ return x[0]===t; })) return false; if(t!=='a') return true; var x=el('sec-adv'); return !!(x && x.style.display!=='none' && !x.classList.contains('hidden')); }
   function tabLs(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(e){ return null; } }
@@ -6194,6 +6267,16 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.152.0 (Johan 31-10): onder de tab Adviseur drie opgevouwen blokken — Je impact, Berekening (KPI's, betalend laden, aannames), Batterijkwaliteit
   function advBlokken(d){
     var ber=el('ek-ber-blok'), mr=el('ek-meer');
+    // v0.163.0 (Johan 02-11): «Deel deze analyse op één A4» — enkel adviseur / oekene, niet in de klantweergave, niet bij particulieren
+    var a4=el('adv-a4-blok'); if(!a4 && mr && mr.parentNode===d){ a4=document.createElement('div'); a4.id='adv-a4-blok'; a4.className='card noprint'; a4.setAttribute('data-i18n-skip','1');
+      a4.innerHTML='<h2 style="margin-top:0">Deel deze analyse op één A4</h2>'+
+        '<p class="hint" style="margin-top:0">Eén blad zonder naam of adres van je klant: wat we kregen, wat we doorrekenden, wat het oplevert. Stuur het naar je klant als voorsmaakje, of zet het op LinkedIn om te tonen wat je vandaag deed.</p>'+
+        '<p class="hint">«Mail me de A4» stuurt naar jouw mailbox: de A4 als PDF, een foto zonder tekst, een mail voor je klant, een LinkedIn-post met hashtags en een eerste reactie, en hoe je dat slim post.</p>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn ghost" id="adv-a4-zie" onclick="window._ekA4Bekijk()">👁️ Bekijk de A4</button>'+
+        '<button type="button" class="btn" id="adv-a4-mail" onclick="window._ekA4Mail()">✉️ Mail me de A4 + LinkedIn-post</button></div>'+
+        '<div class="sub" id="adv-a4-st" style="margin-top:6px"></div>';
+      d.insertBefore(a4, el('adv-amb-blok')||mr); }
+    if(a4){ var _a4ok=false; try{ _a4ok=!!((EK_IS_OEKENE||EK_IS_ADV||EK_PREPADV) && !EK_KLANTVIEW && !_ekIsPart()); }catch(xa){} var _a4d=_a4ok?'':'none'; if(a4.style.display!==_a4d) a4.style.display=_a4d; }
     // v0.160.0 (Johan 01-11): promotie ambassadeurschap net boven «Meer detail»
     var am=el('adv-amb-blok'); if(!am && mr && mr.parentNode===d){ am=document.createElement('div'); am.id='adv-amb-blok'; am.className='card noprint'; am.setAttribute('data-i18n-skip','1');
       am.innerHTML='<div class="aa-grid"><div class="aa-tekst"><h2>Samen maken we het net slimmer</h2>'+
