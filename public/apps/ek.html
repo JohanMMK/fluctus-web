@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.174.0 (2026-11-02, Johan): VANGNET BIJ EEN SERVERHERSTART — lukt het laden van het dossier (?case=) niet (5xx/503/netwerk), dan blokkeert EK rekenen en bewaren (toonRapport, automatisch doorrekenen, _ekPersistBevestigd, _ekPersistIntake), toont een rode balk «Je dossier kon niet geladen worden…» met «↻ Herlaad nu» en probeert elke 8 s opnieuw; lukt het, dan herlaadt de pagina vanzelf. Voorkomt dat standaardinvoer (8 kW, particulier, geen voertuigen) over een bestaand dossier geschreven wordt. -->
 <!-- ek.html v0.173.0 (2026-11-02, Johan): TAB ADVISEUR — «Concept-mail met rapport» (oekene) krijgt drie aparte PDF's: energierapport, analyse op één A4 en «Je profiel verdient meer» (zoekt of maakt de profielpagina via /api/energiekompas/markt-edu en geeft de mid mee; server ≥ 15.388.0), met een korte uitleg per bijlage in de mail. Knop «Mail de klant-A4» heet nu «✉️ Conceptmail met analyse (A4)» (zelfde werking). -->
 <!-- ek.html v0.172.2 (2026-11-02, Johan): ambassadeursbanner (invoer tijdens het rekenen én tab Adviseur) wisselt elke 30 s i.p.v. 60 s. -->
 <!-- ek.html v0.172.1 (2026-11-02): knop «Mail de klant-A4» verscheen niet altijd (zichtbaarheid werd bepaald vóór het dossier geladen was) → controle elke seconde. -->
@@ -3062,6 +3063,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.24.36 (Johan): bewaar de VOLLEDIGE bevestigde invoer (incl. custom_combos) op het dossier — ook zonder her-sweep, zodat
   //   een manuele combi meteen persistent is en niet verloren gaat bij heropenen. Herstuurt naar /api/ek-intake (server v15.205).
   async function _ekPersistBevestigd(){
+    if(window._EK_LAAD_FOUT) return;   // v0.174.0: nooit standaardinvoer over een bestaand dossier schrijven
     try{
       if(!TOKEN && !STATE_CODE) return;
       var g=function(id){ var e=$(id); return e?e.value:''; };
@@ -3337,6 +3339,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
 
   // v0.44.3: automatisch doorrekenen (adviseur-deeplink of server-prewarm); prewarm meldt het resultaat via window.__ekPrewarm.
   function _ekAutoRun(){
+    if(window._EK_LAAD_FOUT) return;   // v0.174.0
     if(PREWARM) window.__ekPrewarm='gestart';
     // v0.44.4: eerst de server-config (RTE/DoD/voertuig-defaults) binnen — anders rekent een verse browser (of de prewarm) met
     //   ingebakken defaults en wijkt de body af van wat de klant later stuurt (geen cache-treffer).
@@ -3346,6 +3349,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     });
   }
   async function toonRapport(){
+    if(window._EK_LAAD_FOUT){ try{ window._ekLaadFoutToon(); }catch(eG){} return; }   // v0.174.0: dossier niet geladen → niets rekenen of bewaren
     // v0.23: al doorgerekend met exact deze invoer? → toon meteen het bestaande resultaat (geen herberekening).
     try{ var _sig0=_inputSig(); if(_sig0===LAST_SIG && HM){ $('intake').classList.add('hidden'); $('dash').classList.remove('hidden'); try{_advOverlay(false);}catch(e){} window.scrollTo({top:0,behavior:'smooth'}); return; } }catch(e){}
     // v0.148.3 (Johan 31-10): VANGNET — ACOM-IB verloor bij herladen soms zijn 22 personenwagens (automatische doorrekening met 0
@@ -3974,6 +3978,24 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       .catch(function(){ if(st){ st.style.color='var(--muted)'; st.textContent='Inlezen mislukte — probeer later opnieuw.'; } });
   }
 
+  // ── v0.174.0 (Johan 02-11): VANGNET BIJ EEN SERVERHERSTART — kon het dossier (?case=) niet geladen worden (5xx, 503, netwerk), dan
+  //    toont EK geen lege standaardinvoer om op verder te werken: rekenen en bewaren zijn geblokkeerd, een balk meldt het en we proberen
+  //    elke 8 s opnieuw; lukt het, dan herlaadt de pagina vanzelf. Zo kan «Toon mijn resultaat» nooit standaardwaarden over een dossier schrijven.
+  window._ekLaadFoutToon=function(){ try{
+    var b=document.getElementById('ek-laadfout');
+    if(!b){ b=document.createElement('div'); b.id='ek-laadfout'; b.setAttribute('data-i18n-skip','1');
+      b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#8a1f1f;color:#fff;padding:12px 16px;font:600 14px/1.4 Arial,sans-serif;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.25)';
+      var L=window.EC_LANG, T=function(nl,fr,en){ return L==='fr'?fr:(L==='en'?en:nl); };
+      b.innerHTML='<span>⚠️ '+T('Je dossier kon niet geladen worden — de server start waarschijnlijk net opnieuw op. We proberen het opnieuw; er wordt niets gerekend of bewaard.','Votre dossier n’a pas pu être chargé — le serveur redémarre probablement. Nous réessayons ; rien n’est calculé ni enregistré.','Your file could not be loaded — the server is probably restarting. We are retrying; nothing is calculated or saved.')+' <span id="ek-laadfout-t" style="font-weight:400;opacity:.85"></span></span>'+
+        '<button type="button" id="ek-laadfout-b" style="background:#fff;color:#8a1f1f;border:0;border-radius:999px;padding:6px 14px;font:700 13px Arial,sans-serif;cursor:pointer">↻ '+T('Herlaad nu','Recharger','Reload now')+'</button>';
+      document.body.appendChild(b); var k=document.getElementById('ek-laadfout-b'); if(k) k.onclick=function(){ location.reload(); }; }
+    b.style.display='flex'; }catch(e){} };
+  window._ekLaadFoutZet=function(code){ if(window._EK_LAAD_OK) return; window._EK_LAAD_FOUT=code||'fout'; window._ekLaadFoutToon();
+    if(window._EK_LAAD_IV) return; var n=0;
+    window._EK_LAAD_IV=setInterval(async function(){ n++; var t=document.getElementById('ek-laadfout-t'); if(t) t.textContent='('+n+')';
+      try{ var tk=new URLSearchParams(location.search).get('case'); if(!tk) return; var h=await window._ekGateHdr().catch(function(){ return {}; });
+        var r=await fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src=ek-retry&_='+Date.now(),{ cache:'no-store', headers:h||{} });
+        if(r.ok || r.status===401 || r.status===403){ clearInterval(window._EK_LAAD_IV); location.reload(); } }catch(e){} }, 8000); };
   // ── Max-CX: aankomst via de mail-link ek.html?case=<token>. De factuur is al ingelezen (Graph-intake) → we
   //    prefillen afname/toegang/kost en tonen "factuur ingelezen"; de klant vult enkel profiel + wagens aan. ──
   (function(){
@@ -3983,8 +4005,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       // v0.142.0 (Johan 30-10): eerst vaststellen wie er aangemeld is (incl. aanmelden via de mailknop), dan het dossier ophalen MET aanmelding;
       //   server ≥ 15.374.0 met EK_CASE_LOGIN aan → 401/403 = aanmeldscherm (e-mail + 6-cijfercode).
       _ekGateKlaar().then(function(){ return window._ekGateHdr(); }).then(function(h){ return fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store', headers:h}); })
-      .then(function(r){ if(r.status===401||r.status===403){ return r.json().catch(function(){ return {}; }).then(function(e){ try{ window._ekCaseLogin(r.status, e||{}); }catch(eL){} return null; }); } return r.ok?r.json():null; }).then(function(j){
+      .then(function(r){ if(r.status===401||r.status===403){ return r.json().catch(function(){ return {}; }).then(function(e){ try{ window._ekCaseLogin(r.status, e||{}); }catch(eL){} return null; }); } if(!r.ok && r.status!==404){ try{ window._ekLaadFoutZet(r.status); }catch(eLf){} return null; } return r.ok?r.json():null; }, function(eNet){ try{ window._ekLaadFoutZet('net'); }catch(eLf){} return null; }).then(function(j){
         if(!j||!j.ok) return;
+        try{ window._EK_LAAD_FOUT=null; window._EK_LAAD_OK=true; }catch(eLo){}   // v0.174.0
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
         try{ if(window._ekMailInfo) window._ekMailInfo(j.mail_info||[]); }catch(eMi){}   // v0.49.0: info uit de mail naar dossier@
         try{ if(window._ekComm) window._ekComm(j.commentaar||'', !!j.demo); }catch(eCm){}   // v0.104.0: commentaar-log
@@ -4534,6 +4557,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   aanroepbaar vanuit de resultaten-flow zodat elke doorrekening een echt, terugvindbaar project_id krijgt i.p.v.
   //   een lokale wegwerp-code. Zet STATE_CODE/TOKEN. Gooit bij falen (de caller vangt op → stub-fallback).
   async function _ekPersistIntake(){
+    if(window._EK_LAAD_FOUT) throw new Error('dossier niet geladen — herlaad de pagina');   // v0.174.0
     var afnameMwh=+($('i-afname')&&$('i-afname').value)||0;
     if(!(afnameMwh>0)) throw new Error('geen afname');
     var toegangKw=+($('i-toegang')&&$('i-toegang').value)||0;
