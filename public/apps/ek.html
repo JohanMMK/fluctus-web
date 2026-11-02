@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.164.0 (2026-11-02, Johan): «Bekijk de A4» in de branding van de partner van de aangemelde adviseur (GET /api/merk/ik) + adviseur in de voet (GET /api/ek/wie), zoals de PDF in de mail; venster opent meteen (geen pop-upblokkering). -->
 <!-- ek.html v0.163.0 (2026-11-02, Johan): tab Adviseur — blok «Deel deze analyse op één A4»: «Bekijk de A4» (ek-a4.html, anoniem: geen klantnaam of adres) en «Mail me de A4» (server 15.380.0 maakt de PDF en mailt de aangemelde adviseur: PDF, foto zonder tekst, mail voor de klant, LinkedIn-post met #NetBeterGebruiken, eerste reactie, uitleg). Fix: «Wat slimme sturing oplevert» volgt nu dezelfde combinatie als de antwoordkaart (ons advies = de exacte adviescel, niet de rooster-kolom). -->
 <!-- ek.html v0.162.0 (2026-11-02, Johan): tab Sturing — bovenaan een blok «Wat slimme sturing oplevert»: besparing + terugverdientijd ZONDER onbalans (= de cijfers van je keuze) en MET onbalans (passieve respons, netto extra uit het server-rapport van die combinatie; enkel bedrijf). -->
 <!-- ek.html v0.161.0 (2026-11-02, Johan): rooster — (1) het aangeklikte vakje blijft onder de muis staan (geen schermsprong meer bij klik/dubbelklik: de inhoud erboven verandert van hoogte, we scrollen evenveel mee); (2) een vakje dat exact berekend wordt krijgt bewegende stippellijnen (ook bij «Reken het volledige rooster exact»). -->
@@ -2705,9 +2706,16 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       kern:{ pv_kwp:Math.round(+c.pvKwp||0), batt_kwh:Math.round(+c.battKwh||0), batt_kw:Math.round(+c.battKw||0), besp_eur:(bespN!=null?Math.round(bespN):null), tvt:(tvtN!=null&&tvtN<99?Math.round(tvtN*10)/10:null),
         ev_tekst:evT, binnen:K.binnen, aansluiting_kw:tg||null, n:(R&&R.n)||null, onb_extra:(St&&St.met)?St.met.extra:null, modus:(S&&S.modus)||'advies' } };
   };
-  window._ekA4Bekijk=function(){ var st=$('adv-a4-st'); var D=window._ekA4Data(); if(!D){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
-    try{ localStorage.setItem('EK_A4_DATA', JSON.stringify(D)); }catch(e){ if(st) st.textContent='Kon de A4 niet klaarzetten (opslag geblokkeerd).'; return; }
-    window.open('/apps/ek-a4.html?v='+Date.now(),'_blank'); };
+  window._ekA4Bekijk=async function(){ var st=$('adv-a4-st'); var D=window._ekA4Data(); if(!D){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
+    var win=null; try{ win=window.open('','_blank'); if(win) win.document.body.innerHTML='<p style="font:16px/1.5 Arial,sans-serif;color:#1F3864;padding:40px">De A4 wordt klaargezet…</p>'; }catch(eW){ win=null; }
+    // v0.164.0: zelfde merk + adviseur als de PDF in de mail (aangemelde adviseur)
+    try{ var hd=(await _ekAuthHeaders())||{}; delete hd['Content-Type'];
+      var rs=await Promise.all([ fetch(API+'/api/merk/ik',{ headers:hd, cache:'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return null; }),
+        fetch(API+'/api/ek/wie',{ headers:hd, cache:'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return null; }) ]);
+      var mk=rs[0]&&rs[0].merk; D.merk=(mk&&mk.aan&&mk.logo)?{ aan:true, naam:mk.naam||'', logo:mk.logo, kleur:mk.kleur, kleur2:mk.kleur2, ink:mk.ink, font:mk.font||'', web:mk.web||'' }:null;
+      var w=rs[1]; if(w&&w.ingelogd&&w.email) D.adviseur={ naam:w.naam||'', mail:w.email }; }catch(eM){}
+    try{ localStorage.setItem('EK_A4_DATA', JSON.stringify(D)); }catch(e){ try{ if(win) win.close(); }catch(x){} if(st) st.textContent='Kon de A4 niet klaarzetten (opslag geblokkeerd).'; return; }
+    var u='/apps/ek-a4.html?v='+Date.now(); if(win && !win.closed){ try{ win.location.href=u; }catch(eL){ window.open(u,'_blank'); } } else window.open(u,'_blank'); };
   window._ekA4Mail=async function(){ var st=$('adv-a4-st'), btn=$('adv-a4-mail');
     var c0=_ekStuCel(); if(!c0){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
     if(btn) btn.disabled=true;
