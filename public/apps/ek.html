@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.177.0 (2026-11-02, Johan): ONBEHEERSTE REFERENTIE BIJ «LADEN MET VERZWARING» — zonder sturing laden de palen van de eigen vloot op vol vermogen bij aankomst. De sweep (server ≥ 15.390.0) geeft onbeheerst_ref: extra capaciteitstarief/jaar op de domme maandpieken + de verzwaring tot de onbeheerste piek. _battValue(a, vgl) telt die in de verzwaring-modus bij de besparing (netkosten-deel → volgt het netpad + 2029-verdubbeling) en bij de vermeden verzwaring (_vzRefV). Rapport-aanvragen dragen vgl_laden + onb_ref → klantrapport = rooster/A4. -->
 <!-- ek.html v0.176.0 (2026-11-02, Johan): BETALEND LAADPLEIN TELT ALTIJD MEE — ook bij «laden op de site met verzwaring» is de netto marge (omzet − elektriciteit) extra inkomen en horen de laadpalen van het betalende deel (aandeel in het laadvolume) bij de investering (_planVerzwRaw); eigen vloot blijft in beide situaties. Kaart, rooster, keuzeblok en labels volgen. -->
 <!-- ek.html v0.175.2 (2026-11-02, Johan): vergelijkingsblok bij een BETALEND laadplein — eerste keuze heet «Met de inkomsten van je laadplein» (zonder eigen vloot) en beide uitlegzinnen noemen de netto marge van het laadplein. -->
 <!-- ek.html v0.175.1 (2026-11-02, Johan): laadplein-tabel — cellen bovenaan uitgelijnd; de laadduur onder het kW-veld (betalend) duwde de andere velden scheef. -->
@@ -1616,6 +1617,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return Math.round(k);
   }catch(e){ return 0; } }
   function _vzMetPiek(c, lp){ return Math.max(+(c&&c.verzwaring_eenmalig)||0, _vzPiekKost(c, lp)); }
+  function _onbRefV(vgl){ try{ var v=vgl||EK_VGL; if(v!=='verzwaring' || REF_NIETS || _ekIsPart() || typeof HM==='undefined' || !HM || !HM.onbRef) return null; var o=HM.onbRef; return (+o.piek_kw>0)?o:null; }catch(e){ return null; } }   // v0.177.0: onbeheerste referentie (enkel «laden met verzwaring»)
+  function _vzRefV(a, vgl){ var o=_onbRefV(vgl), b=_vzRef(a); return o ? Math.max(b, Math.max(0,+o.verzwaring_eenmalig||0)) : b; }   // v0.177.0: verzwaring tot de onbeheerste piek
   function _vzRef(a){ return REF_NIETS ? Math.max(0,+(a&&a.verzwaring_eenmalig)||0) : Math.max(0,(typeof HM!=='undefined'&&HM&&+HM.verzwVoor)||0); }   // v0.107.0: referentie-verzwaring voor cel a
   var CABINE_KVA=0;   // v0.34 (Johan): kVA van de bestaande cabine (per PROJECT, adviseur-input). >0 → overschrijding = cabine-upgradekost server-side
   var PROJ_EV_CFG=null;   // v0.34 (Johan): per-PROJECT voertuigdefaults-override {ev_types:[{key,kwhkm,kmjaar,fullload_kwh}]} — valt terug op de globale standaard
@@ -2049,13 +2052,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   //   ENKEL voor bedrijven en enkel als de toets op de voorzichtige basis gunstig is (alle / enkel KO). Particulier: nooit.
   function _ekAftrekV(a, inv){ try{ if(_ekIsPart() || !(inv>0) || typeof window._ekAftrekToets!=='function') return 0; var T=window._ekAftrekToets(a); return (T && (T.status==='alle'||T.status==='klein')) ? Math.round(inv*0.4*0.25) : 0; }catch(x){ return 0; } }
   function _aftrekBump(cf, v){ if(!(v>0) || !cf || !cf.rows || !cf.rows.length) return cf; cf.rows[0].s+=v;   /* v0.109.0 (Johan 21-10): cash in jaar 1 */ var c=0; for(var i=0;i<cf.rows.length;i++){ c+=cf.rows[i].s; cf.rows[i].cum=c; } cf.som+=v; return cf; }
-  function _battValue(a){
+  function _battValue(a, vgl){
     if(!a) return null;
     var battKw=(+a.battKw||((+a.battKwh||0)/2)||0);
     var energie=Math.round(+a.besparing||0);                          // totale factuurbesparing jaar 1 (base − scenario)
+    var _onbR=_onbRefV(vgl), _onbX=_onbR?Math.max(0,Math.round(+_onbR.extra_cap_jaar||0)):0;   // v0.177.0: domme maandpieken → extra capaciteitstarief in de referentie
     // v0.20 (Johan): splits de factuurbesparing in het netkosten-deel (besp_net) en de rest (commodity/heffingen).
     var bespNet=Math.round(+a.besp_net||0); bespNet=Math.max(0, Math.min(bespNet, energie));
     var bespRest=energie-bespNet;
+    if(_onbX>0){ energie+=_onbX; bespNet+=_onbX; }   // v0.177.0: netkosten → netpad + 2029-verdubbeling
     var pCharge=_pChargeKva();
     var shaved=Math.min(battKw, Math.max(0,pCharge));                 // batterij shaaft tot ZIJN vermogen
     var capRate=(NET_TARIEF&&+NET_TARIEF.cap_eur_kw_jaar)||0;
@@ -2064,7 +2069,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.24.53 (Johan): VERMEDEN eenmalige aansluitingskost = referentie (voor, zonder PV/batt) − deze combi (na).
     //   De aansluiting stijgt "om aan de km's te komen"; PV+batterij verkleinen die → kleinere LS→MS/verzwaringskost.
     //   Zonder laadplein → beide 0 → €0 (geen regressie). Vervangt de oude shaved×€/kVA-proxy.
-    var _verzwVoor=_vzRef(a);   // v0.107.0: 'niets doen' → = na → vermeden 0
+    var _verzwVoor=_vzRefV(a, vgl);   // v0.177.0: + onbeheerste piek (laden met verzwaring) · v0.107.0: 'niets doen' → = na → vermeden 0
     var _verzwNa=(+a.verzwaring_eenmalig||0);
     var verzwaring=Math.max(0, _verzwVoor - _verzwNa);
     var invTot=_invVan(a);   // all-in (PV+batt+palen) — voor weergave en opex-basis
@@ -2092,6 +2097,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   De piekshaving telt dus enkel mee voor zover de sim ze in OPT.netkosten verwerkt (zit in NUL−OPT). verzwaring blijft
     //   een aparte EENMALIGE post (in mindering op de investering), niet in de jaarbesparing.
     var cf=_escCashflow(bespRest, bespNet, _opexJaar);   // jaarlijkse exploitatiekost in mindering (geïndexeerd)
+    var _cfB=_escCashflow(bespRest, bespNet, 0);   // v0.177.0: bruto besparing over de horizon (KPI «gemiddeld per jaar», bank)
     var _aftV=_ekAftrekV(a, _invPvb); _aftrekBump(cf, _aftV);   // v0.92.0: enkel bedrijven
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
@@ -2099,7 +2105,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.33 (Johan): capex_laadpalen (elektrificatie) ook meegeven — voor het "twee beslissingen"-hoofdstuk en de gesplitste KPI.
     var _invLp=(a && a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0;
     return { energie:energie, besp_net:bespNet, besp_rest:bespRest, cap:0, cap_info:capJ, verzwaring:verzwaring, shaved:Math.round(shaved), pCharge:Math.round(pCharge),
-             invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), tvt:tvt, rend:rend, aftrek:_aftV };
+             invTot:invTot, netInv:netInv, invPvBatt:_invPvb, invLaadpalen:_invLp, sturPvb:_sturPvb, sturLp:_sturLp, opex_jaar:Math.round(_opexJaar||0), bespJaar1:energie, som15:Math.round(cf.som), gem15:Math.round(cf.som/cf.N), gem15b:Math.round(_cfB.som/_cfB.N), cfB:_cfB.rows.map(function(r){ return Math.round(r.s); }), tvt:tvt, rend:rend, aftrek:_aftV,
+             onb_extra:_onbX, onb_piek:(_onbR?Math.round(+_onbR.piek_kw||0):0), onb_ref_piek:(_onbR?Math.round(+_onbR.ref_piek_kw||0):0) };   // v0.177.0
   }
   // v0.61.0 (Johan): LAADSESSIES NAAR HET BEDRIJF — zelfde rekenregel als klantrapport v0.40+: per voertuigtype (eigen vloot) de MWh
   //   die de cel op de parking laadt × (gezonde mix thuis@CREG-gewest Q4 2026 / publiek 400 / snel 550 €/MWh − kost laden op het
@@ -2148,23 +2155,25 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capZ=Math.round(palen*ad);
     var netInv=Math.max(0,(+BV.netInv||0)+capZ);
     var cf=_escCashflow((+BV.besp_rest||0)+Z.marge*(1-_zs), (+BV.besp_net||0)+Z.marge*_zs, (+BV.opex_jaar||0)+(+BV.sturLp||0)*ad);
+    var cfB=_escCashflow((+BV.besp_rest||0)+Z.marge*(1-_zs), (+BV.besp_net||0)+Z.marge*_zs, 0);   // v0.177.0
     _aftrekBump(cf, +BV.aftrek||0);
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
-    return { laad:_zm, laadses:0, plaza:_zm, besp:(+BV.bespJaar1||0)+_zm, tvt:tvt, rend:rend, netInv:netInv, capL:capZ };
+    return { laad:_zm, laadses:0, plaza:_zm, besp:(+BV.bespJaar1||0)+_zm, gem15b:Math.round(cfB.som/cfB.N), tvt:tvt, rend:rend, netInv:netInv, capL:capZ };
   }
   function _planLadenRaw(a, BV, m){
     var L=_laadsesVan(a), Z=_plazaVan(a); if((!L && !Z) || !BV) return null;   // v0.67.5: ook bij enkel een betalend laadplein
     var _zs=(Z&&Z.kost>0)?Math.max(0,Math.min(1,Z.net/Z.kost)):0, _lb=L?L.besparing:0, _zr=Z?(Z.marge*(1-_zs)):0, _zn=Z?(Z.marge*_zs):0, _zm=Z?Math.round(Z.marge):0;   // v0.108.0 (Johan 21-10): verkoopprijs volgt de reële aankoopkost (alle kosten) → de marge volgt dezelfde index als de laadkost (energie → inflatie, net → netpad)
     var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capL=palen+_vzRef(a);   /* v0.107.0 */   // v0.64.0: + varia naar de laadpalen
     var netInv=Math.max(0,(+BV.netInv||0)+capL);
+    var cfB=_escCashflow((+BV.besp_rest||0)+_lb+_zr, (+BV.besp_net||0)+_zn, 0);   // v0.177.0: bruto gemiddelde over de horizon
     var cf=_escCashflow((+BV.besp_rest||0)+_lb+_zr, (+BV.besp_net||0)+_zn, (+BV.opex_jaar||0)+(+BV.sturLp||0));   // v0.67.5: + plaza (omzet & commodity → inflatie, netdeel → netpad)
     _aftrekBump(cf, +BV.aftrek||0);   // v0.92.0: investeringsaftrek (enkel bedrijven)
     var tvt=null, cum0=0;
     for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
     var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
-    return { laad:_lb+_zm, laadses:_lb, plaza:_zm, besp:(+BV.bespJaar1||0)+_lb+_zm, tvt:tvt, rend:rend, netInv:netInv, capL:capL };
+    return { laad:_lb+_zm, laadses:_lb, plaza:_zm, besp:(+BV.bespJaar1||0)+_lb+_zm, gem15b:Math.round(cfB.som/cfB.N), tvt:tvt, rend:rend, netInv:netInv, capL:capL };
   }
   // v0.63.0 (Johan): plan mét laadpalen voor een ROOSTER-cel (standaard palen-sizing, zoals de rooster-investering) — null zonder laadplein.
   function _plCelM(a){
@@ -2175,8 +2184,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(a._offerte && +a.capex_laadpalen>0) m=Object.assign({}, m, { acE:0, dcE:+a.capex_laadpalen, variaLaden:0 });
     return m; }
   function _planLadenCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planLaden(a, bv, _plCelM(a)); }
-  function _planLadenCelRaw(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planLadenRaw(a, bv, _plCelM(a)); }
-  function _planVerzwCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planVerzwRaw(a, bv, _plCelM(a)); }   // v0.176.0   // v0.171.0: plan «t.o.v. laden elders», los van de keuze
+  function _planLadenCelRaw(a){ if(!a) return null; var bv=_battValue(a,'elders'); if(!bv) return null; return _planLadenRaw(a, bv, _plCelM(a)); }
+  function _planVerzwCel(a){ if(!a) return null; var bv=_battValue(a,'verzwaring'); if(!bv) return null; return _planVerzwRaw(a, bv, _plCelM(a)); }   // v0.176.0   // v0.171.0: plan «t.o.v. laden elders», los van de keuze
   function _hmLabelsLaden(){   // v0.63.0: rooster-labels zeggen of het plan mét laadpalen/laadsessies rekent
     var on=!!(typeof HM!=='undefined' && HM && ((EK_VGL!=='verzwaring' && _laadsesVan(HM.sel||HM.best)) || _plazaVan(HM.sel||HM.best)));   // v0.176.0: betalend telt altijd mee   // v0.171.0   // v0.67.5: + betalend
     var T={ tvt:on?'Terugverdientijd incl. laadpalen (j)':'Terugverdientijd PV+batterij (j)', rendement:on?'Rendement incl. laadpalen (%)':'Rendement PV+batterij (%)', besparing:on?'Besparing/jaar incl. laadsessies (€)':'Besparing/jaar (€)' };
@@ -2463,6 +2472,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       kmVoor:(sw.km_dekking_voor!=null?sw.km_dekking_voor:null),   // v0.24.46 §6c: km-dekking ZONDER installatie (0,0-cel)
       verzwVoor:Math.max((sw.verzwaring_voor_eenmalig!=null?+sw.verzwaring_voor_eenmalig:0), _vzPiekKost(A.filter(function(x){ return !(+x.battKw>0) && !(+x.pvKwp>0); })[0], _lpVz)),   // v0.109.0: + piekregel   // v0.24.53 (Johan): eenmalige aansluitingskost VOOR (referentie, zonder PV/batt)
       aansluitingVoorKw:(sw.aansluiting_voor_kw!=null?+sw.aansluiting_voor_kw:0),
+      onbRef:(sw.onbeheerst_ref&&+sw.onbeheerst_ref.piek_kw>0)?sw.onbeheerst_ref:null,   // v0.177.0 (server ≥ 15.390.0): onbeheerste referentie (laden met verzwaring)
       gebouwSaldo:(sw.gebouw_saldo!=null?+sw.gebouw_saldo:null), gebouwNetk:(sw.gebouw_netk!=null?+sw.gebouw_netk:null),   // v0.108.0   // v0.24.59 (Johan, punt 1): gebouw-only factuur (geen laden) → €/100 km = (cel.kost − gebouwSaldo)/km, consistent met bijlage 4
       lpMwh:((sw.dimensionering&&sw.dimensionering.laadplein_mwh)||0),   // v0.24.46: laadplein-jaarverbruik (MWh) → km-dekking enkel relevant met laadplein
       rowLabel:function(v){ var m=battMap[v]; return (m&&m.kw>0)?(_eUnit(m.kw,'kW')+'<br>'+_eUnit(m.kwh,'kWh')):'geen batt'; }, colLabel:function(v){ return v>0?(v+' kWp'):'geen PV'; },   // v0.124.0: vanaf 1.000 → MW / MWh (geen «2,5k kW»)   // v0.24.61 (Johan punt 6): kW/kWh onder elkaar + k-notatie → smaller rooster
@@ -2514,7 +2524,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(a.capex_pvbatt!=null) return Math.round((+a.capex_pvbatt||0)+_customExtra(a));   // v0.67.4: + eigen meerprijs (custom combi)
     var pvKwp=Math.round(_anchorKwp(a)*10)/10, battKwh=(+a.battKwh||0); return Math.round(_invTotMajor(pvKwp, battKwh, 0, 0, (a._custom?a._prijsFactor:undefined)).tot); }
   // v0.33 (Johan): elektrificatie-investering = laadpalen + de aansluiting/verzwaring die het laden sowieso vraagt (referentie, zonder PV/batt).
-  function _invElekCell(a){ if(!a) return null; var lp=(a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0; var vzVoor=_vzRef(a); return Math.round(lp+vzVoor); }   /* v0.107.0 */
+  function _invElekCell(a){ if(!a) return null; var lp=(a.capex_laadpalen!=null)?(+a.capex_laadpalen||0):0; var vzVoor=_vzRefV(a); return Math.round(lp+vzVoor); }   /* v0.107.0 */
   function _tvtVan(a){ var v=_battValue(a); return v?v.tvt:null; }   // v0.19: 15-jaar break-even (escalerende netkosten)
   function _ekMilDot(n){ return String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }   // v0.24.50 (Johan): duizendpunt, geen decimalen (1.305)
   function _ekBattKey(kw,kwh){ return (Math.round(+kw||0))*100000+(Math.round(+kwh||0)); }   // v0.24.50: unieke rooster-rij-sleutel per (kW/kWh)-staffel
@@ -2691,12 +2701,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekStuCel(){ try{ var hl=window._EK_HERO_LAST; if(hl&&hl.c) return hl.c; }catch(e0){} try{ var S=window._ekSelectie?window._ekSelectie():null; if(S&&S.cel) return S.cel; }catch(e){} var H=(typeof HM!=='undefined')?HM:null; return H&&(H.sel||H.best); }   // v0.168.0: eerst de cel van de antwoordkaart
   // v0.163.0: onbalans-extra ophalen als belofte (tab Sturing + A4). Resolve → {extra} | {fout} | null (geen batterij).
   var _ekOnbProm={};
+  function _ekVglBody(){ try{ var o=_onbRefV(); return o ? { vgl_laden:'verzwaring', onb_ref:o } : { vgl_laden:(EK_VGL==='verzwaring'?'verzwaring':'') }; }catch(e){ return {}; } }   // v0.177.0: rapport = rooster (onbeheerste referentie)
   function _ekOnbHaal(a){ if(!a || !window._RAP_PAYLOAD) return Promise.resolve(null);
     var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{};
     if(!(kwh>0)) return Promise.resolve(null); if(m[k] && m[k].extra!=null) return Promise.resolve(m[k]);
     if(_ekOnbProm[k]) return _ekOnbProm[k];
     var P=window._RAP_PAYLOAD; _ekOnbBezig[k]=1; _ekOnbSig='';
-    var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh });
+    var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh }, _ekVglBody());
     _ekOnbProm[k]=fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
       .then(function(r){ return r.json().catch(function(){ return {}; }); })
       .then(function(j){ if(j&&j.ok && window._RAP_PAYLOAD===P) window._ekOnbBewaar(body,j); else if(window._RAP_PAYLOAD===P){ var mm=_ekOnbMap(); if(mm) mm[k]={ fout:true }; } })
@@ -2763,15 +2774,21 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var bespN=null, tvtN=null; try{ bespN=M.besparing.val(c); tvtN=M.tvt.val(c); }catch(e){}
     var pk=Math.round(+c.aansluiting_totaal_kw||+c.jaarpiek||0), tg=nv('i-toegang')||0, exC=!!(!c._interp||c._exact);
     var titelK=(S&&S.modus==='offerte')?'De gekozen offerte':((S&&S.modus==='keuze')?'De gekozen combinatie':'Ons advies');
+    var PLk=null; try{ var _pl=_planLadenCel(c), _bvk=_battValue(c), _g=_pl&&_pl.gem15b!=null?_pl.gem15b:(_bvk?_bvk.gem15b:null);   // v0.177.0: KPI's uit het meerjarenmodel
+      PLk={ jaren:Math.max(1,Math.round(+NET_CFG.horizon_jaar||15)), inflatie:+NET_CFG.inflatie_pct||0, net_extra:+NET_CFG.net_extra_pct||0, dubbel_jaar:+NET_CFG.net_dubbel_jaar||0, dubbel_factor:+NET_CFG.net_dubbel_factor||1,
+        gem:(_g!=null&&isFinite(_g))?Math.round(_g):null, onb_extra:_bvk?(+_bvk.onb_extra||0):0, onb_piek:_bvk?(+_bvk.onb_piek||0):0 }; }catch(eP){ PLk=null; }
     var K={ titel:titelK, besp:hl.besp||(bespN!=null?_fmtEurK(bespN):''), tvt:hl.tvt||(tvtN!=null&&tvtN<99?M.tvt.fmt(tvtN):''), inv:hl.inv||'', inv_incl:!!(hl.pl&&hl.pl.netInv>0), rend:hl.rend||'', tegels:(hl.tegels||[]), vgl:(window._ekVglTxt?window._ekVglTxt(c):''),   /* v0.171.0 */
-      netpiek_kw:(exC&&pk>0)?pk:0, aansluiting_kw:(exC&&pk>0)?tg:0, binnen:!(tg>0)||pk<=tg*1.02, verzwaring:+c.verzwaring_eenmalig>0 };
+      netpiek_kw:(exC&&pk>0)?pk:0, aansluiting_kw:(exC&&pk>0)?tg:0, binnen:!(tg>0)||pk<=tg*1.02, verzwaring:+c.verzwaring_eenmalig>0, plan:PLk };   // v0.177.0: + plan
     // sturing (zelfde cel), uit de cache
     var St=null; try{ if(bespN!=null){ St={ zonder:{ besp:Math.round(bespN), tvt:(tvtN!=null&&tvtN<99)?M.tvt.fmt(tvtN):'' }, met:null };
       var pv=Math.round(_anchorKwp(c)||0), mm=_ekOnbMap()||{}, o=mm[_ekOnbKey(pv,c.battKw,c.battKwh)];
       if(o && o.extra!=null){ var a2=Object.assign({}, c, { besparing:(+c.besparing||0)+o.extra }), b1=M.besparing.val(a2), t1=M.tvt.val(a2); St.met={ besp:Math.round(b1), tvt:(t1!=null&&t1<99)?M.tvt.fmt(t1):'', extra:o.extra }; } } }catch(e){}
     // bank + aftrek (zelfde regels als het tipje in Bankdossier)
-    var B=null; try{ var invB=+_invPvbCell(c)||0, bespB=+c.besparing||0, pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0;
-      if(invB>0&&bespB>0) B={ inv:Math.round(invB), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(bespB), dek:ann>0?Math.round(bespB/ann*100):null }; }catch(e){}
+    // v0.177.0 (Johan 02-11): bank uit het MEERJARENMODEL (zelfde besparing als het plan: netkosten op het netpad + 2029-verdubbeling;
+    //   bij «laden met verzwaring» incl. de vermeden domme pieken) — dekking jaar 1 én gemiddeld over de looptijd van de lening.
+    var B=null; try{ var bvB=_battValue(c), invB=+_invPvbCell(c)||0, bespB=bvB?(+bvB.bespJaar1||0):(+c.besparing||0), pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0;
+      var rB=(bvB&&bvB.cfB)?bvB.cfB.slice(0,pj):[], gB=rB.length?(rB.reduce(function(x,y){ return x+y; },0)/rB.length):bespB;
+      if(invB>0&&bespB>0) B={ inv:Math.round(invB), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(bespB), besp_gem:Math.round(gB), dek:ann>0?Math.round(bespB/ann*100):null, dek_gem:ann>0?Math.round(gB/ann*100):null }; }catch(e){}
     var A=null; try{ var T=window._ekAftrekToets?window._ekAftrekToets(c):null; if(T) A={ status:T.status, voordeel:Math.round(+T.voordeel||0), irr:T.irr }; }catch(e){}
     // titel zonder naam
     var evN=V.filter(function(r){ return !r.betalend; }).reduce(function(s,r){ return s+r.aantal; },0), ty=V.filter(function(r){ return !r.betalend; }).map(function(r){ return r.label.toLowerCase(); }).filter(function(t,i,a){ return a.indexOf(t)===i; });
@@ -5143,10 +5160,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         elektrificatie: {
           laadpalen_eur: Math.round((+_mfull.acE||0)+(+_mfull.dcE||0)),
           ac_aantal: acAantal, dc_aantal: dcAantal,
-          aansluiting_eur: Math.round(_vzRef(sel)),   // v0.107.0
+          aansluiting_eur: Math.round(_vzRefV(sel)),   // v0.177.0 · v0.107.0
           aansluiting_kw: (REF_NIETS?0:Math.round((typeof HM!=='undefined'&&HM&&+HM.aansluitingVoorKw)||0)),   // v0.67.1: kVA-verhoging zonder eigen infrastructuur
           varia_eur: Math.round(+_mfull.variaLaden||0),   // v0.64.0: extra kabel naar de laadpalen (varia)
-          subtotaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + _vzRef(sel)),
+          subtotaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + _vzRefV(sel)),
           diesel_eur_100km: (j&&+j.diesel_eur_100km>0)?+j.diesel_eur_100km:null
         },
         pvbatterij: {
@@ -5157,7 +5174,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           investering_netto_eur: Math.round(_bv.netInv),
           besparing_jaar_eur: Math.round(_bespF||0)
         },
-        totaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + _vzRef(sel) + _bv.netInv)
+        totaal_eur: Math.round(((+_mfull.acE||0)+(+_mfull.dcE||0)+(+_mfull.variaLaden||0)) + _vzRefV(sel) + _bv.netInv)
       } }),
       diesel_eur_100km: (j&&+j.diesel_eur_100km>0)?+j.diesel_eur_100km:null,   // v0.33.2 (Johan): top-level → de cover-€/100km leest D.diesel_eur_100km (vlootgewogen i.p.v. de €9-fallback)
       aansluiting: {
@@ -5387,7 +5404,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.37.0 (Johan): het tabblad SYNCHROON openen binnen de klik (anders ziet de browser het na de await als pop-up en blokkeert hij het).
     var win=null; if(!_zip) try{ win=window.open('','_blank'); if(win){ var _tT=(window.EC_T?EC_T:function(x){return x;}); win.document.title=_tT('Rapport wordt opgebouwd…'); win.document.body.innerHTML='<p style="font:16px/1.5 -apple-system,Segoe UI,Arial,sans-serif;color:#1F3864;padding:40px">'+_tT('⏳ Je rapport wordt opgebouwd…')+'</p>'; /* v0.42.2: ook in FR */ } }catch(eW){}
     function _sluitWin(){ try{ if(win && !win.closed) win.close(); }catch(e){} }
-    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, (opt&&opt.body)||{});
+    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, _ekVglBody(), (opt&&opt.body)||{});
     try{
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
@@ -5561,7 +5578,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var pz=null, ls=null; try{ pz=_plazaVan(c); ls=_laadsesVan(c); }catch(eP){}   // v0.175.2: betalend laadplein → tekst met de marge
     var mz=(pz&&pz.marge>0)?_fmtEurK(pz.marge):'';
     var pv=_planVerzwCel(c);   // v0.176.0: met betalend laadplein telt de marge ook hier mee
-    var vB=pv?pv.besp:bv.bespJaar1, vT=pv?pv.tvt:bv.tvt, vI=pv?pv.netInv:bv.netInv;
+    var bvV=_battValue(c,'verzwaring')||bv, vB=pv?pv.besp:bvV.bespJaar1, vT=pv?pv.tvt:bvV.tvt, vI=pv?pv.netInv:bvV.netInv;   // v0.177.0: onbeheerste referentie
     var Lx=function(nl,fr,en){ var L=window.EC_LANG; return L==='fr'?fr:(L==='en'?en:nl); }, es=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
     var tj=function(v){ return (v!=null&&isFinite(v))?(String(Math.round(v*10)/10).replace('.',',')+' '+Lx('jaar','ans','years')):('> 15 '+Lx('jaar','ans','years')); };
     var opt=function(k, titel, besp, tvt, inv, uitleg){ var on=(EK_VGL===k);
@@ -5631,7 +5648,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _klaar=window._ekBtnBezig(btn, 'E-mail wordt voorbereid…');
     if(st){ st.style.color='var(--muted)'; st.textContent='⏳ Rapport en PDF worden op de server gemaakt, concept-mail wordt klaargezet… (± 30 s)'; }
     try{ window._ekAdvMeld('⏳ E-mail wordt voorbereid: rapport en PDF worden gemaakt, daarna komt het concept in Outlook… (± 30 s)'); }catch(x){}
-    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, (_rs&&_rs.body)||{});
+    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, _ekVglBody(), (_rs&&_rs.body)||{});
     try{
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
@@ -5835,7 +5852,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var mail=($('i-mail')&&$('i-mail').value||'').trim();
     if(!mail){ if(st){ st.style.color='var(--muted)'; st.textContent='Vul eerst je e-mailadres in (veld "E-mail").'; } return; }
     if(st){ _ekBusy(st, _ekL3('Rapport wordt op de server gemaakt en gemaild…','Le rapport est créé sur le serveur et envoyé…','The report is being created on the server and mailed…')); }   // v0.105.1
-    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, (_rs&&_rs.body)||{});
+    var body=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, _ekVglBody(), (_rs&&_rs.body)||{});
     try{
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});

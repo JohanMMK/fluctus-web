@@ -6,6 +6,7 @@
 <title>Energie-analyse op één blad</title>
 <link rel="icon" href="/favicon-ec-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap">
+<!-- ek-a4.html v1.5.0 (2026-11-02, Johan): KPI's UIT HET MEERJARENMODEL — de terugverdientijd kwam al uit het plan over 15 jaar; nu staat er ook het gemiddelde per jaar (energie op de inflatie, netkosten sneller + verdubbeling in 2029), de bankdekking jaar 1 én gemiddeld over de looptijd, en de voetnoot zegt hoe het gerekend is (niet langer «zonder inflatie»). Bij «laden met verzwaring» toont een pil de domme piek zonder sturing en het vermeden capaciteitstarief. -->
 <!-- ek-a4.html v1.4.3 (2026-11-02, Johan): in de browser is de tabtitel (dus de naam bij «Bewaren als PDF») YYYYMMDD_Klantnaam_Analyse-A4 (D.bestand uit EK); de server-PDF blijft zonder klantnaam. -->
 <!-- ek-a4.html v1.4.2 (2026-11-02, Johan): afdrukken in Safari = één A4 (Safari houdt eigen marges aan: het blad wordt in de browser licht verkleind, zoom .94; de server-PDF blijft exact 210 × 297 mm); foto a4-10 opnieuw uitgesneden (de man stond half buiten beeld) en per foto een focuspunt zodat mensen niet afgeknipt worden. -->
 <!-- ek-a4.html v1.4.1 (2026-11-02, Johan): afdrukken vanuit de browser — exact één A4 (geen lege tweede pagina), kleuren en achtergronden altijd mee (print-color-adjust: exact), knoppenbalk weg. -->
@@ -118,6 +119,12 @@
   function nf(v,d){ if(v==null||!isFinite(+v)) return '—'; return Number(v).toLocaleString('nl-BE',{maximumFractionDigits:(d==null?0:d)}); }
   function eur(v){ if(v==null||!isFinite(+v)) return '—'; return (v<0?'− ':'')+'€ '+nf(Math.abs(Math.round(v))); }
   function eurK(v){ if(v==null||!isFinite(+v)) return '—'; var a=Math.abs(v); return (v<0?'− ':'')+(a>=10000?'€ '+nf(Math.round(a/1000))+'k':'€ '+nf(Math.round(a))); }
+  function _voetPlan(P){   /* v1.5.0: hoe de KPI's gerekend zijn (meerjarenmodel) */
+    if(!P||!(P.jaren>0)) return 'Indicatieve cijfers op basis van de marktprijzen van de voorbije 12 maanden.';
+    var t='Besparing per jaar = jaar 1, op de marktprijzen van de voorbije 12 maanden. Terugverdientijd en gemiddelde uit het plan over '+nf(P.jaren)+' jaar: energie volgt de inflatie ('+nf(P.inflatie,1)+' %)';
+    if(P.net_extra>0) t+=', netkosten '+nf(P.net_extra,1)+' % sneller';
+    if(P.dubbel_jaar>0 && P.dubbel_factor>1) t+=(P.dubbel_factor===2?', met een verdubbeling van de netkosten in ':', netkosten × '+nf(P.dubbel_factor,1)+' in ')+P.dubbel_jaar;
+    return t+'.'; }
   function geld(x){ var m=String(x==null?'':x).replace(/\s/g,'').match(/^(-?)€(\d+(?:[.,]\d+)?)k$/i); if(!m) return x; var v=parseFloat(m[2].replace(',','.')); if(!(v>=1000)) return x;
     var M=v/1000; return (m[1]?'− ':'')+'€ '+M.toLocaleString('nl-BE',{maximumFractionDigits:(M>=10?1:2)})+' M'; }
   var I=(window.ECI&&ECI.icoon)||{};
@@ -176,11 +183,13 @@
   var K=D.keuze||{};
   h+='<h2><span class="nr">3</span>'+e(K.titel||'Ons advies')+'</h2>';
   var hs=[]; if(K.tvt) hs.push('terugverdiend in '+e(K.tvt)+' jaar'); if(K.inv) hs.push('investering '+e(geld(K.inv))+(K.inv_incl?' incl. laadpalen':'')); if(K.rend) hs.push('rendement '+e(K.rend)); if(K.vgl) hs.push(e(K.vgl));   /* v1.4.0 */
+  var PL=K.plan||null; if(PL && PL.gem>0) hs.splice(1,0,'gemiddeld '+e(eurK(PL.gem))+'/jaar over '+nf(PL.jaren)+' jaar');   /* v1.5.0 */
   h+='<div class="hero"><div class="top"><div><div class="hk">Besparing per jaar</div><div class="hv">'+e(geld(K.besp)||'—')+'</div></div>'+(K.tag?'<span class="tag">'+e(K.tag)+'</span>':'')+'</div><div class="hs">'+hs.join(' · ')+'</div>'+
     ((window.ECI&&(K.tegels||[]).length)?ECI.tegels(K.tegels,{klein:true}):'')+'</div>';
   var pil='';
   if(K.netpiek_kw>0) pil+='<span class="pil">🔌 Netpiek ± '+nf(K.netpiek_kw)+' kW</span>';
   if(K.aansluiting_kw>0) pil+=K.binnen?'<span class="pil ok">✔ binnen de aansluiting van '+nf(K.aansluiting_kw)+' kW</span>':'<span class="pil wr">⚠ boven de aansluiting van '+nf(K.aansluiting_kw)+' kW'+(K.verzwaring?' · verzwaring nodig':'')+'</span>';
+  if(PL && PL.onb_extra>0 && PL.onb_piek>0) pil+='<span class="pil">⚡ Zonder sturing laden alle palen tegelijk: piek ± '+nf(PL.onb_piek)+' kW · ± '+eur(PL.onb_extra)+'/jaar capaciteitstarief vermeden</span>';   /* v1.5.0 */
   if(pil) h+='<div style="margin:0 0 9px">'+pil+'</div>';
 
   // ── 4 · sturing + 5 · financiering ──
@@ -197,7 +206,8 @@
     b5+='<div class="rb"><span>Investering zonnepanelen + batterij</span><b>'+eur(B.inv)+'</b></div>'+
       '<div class="rb"><span>Aflossing per jaar <span class="sub">('+B.jaren+' j · '+String(B.rente).replace('.',',')+' %)</span></span><b>± '+eur(B.ann)+'</b></div>'+
       '<div class="rb"><span>Besparing zonnepanelen + batterij per jaar</span><b>± '+eur(B.besp)+'</b></div>'+
-      '<div class="rb"><span>Besparing dekt de aflossing</span><b style="color:'+(B.dek>=100?'var(--acc-d)':'#B45309')+'">'+(B.dek>=100?'✔ ':'')+nf(B.dek)+' %</b></div>';
+      '<div class="rb"><span>Besparing dekt de aflossing'+(B.dek_gem!=null?' <span class="sub">(jaar 1)</span>':'')+'</span><b style="color:'+(B.dek>=100?'var(--acc-d)':'#B45309')+'">'+(B.dek>=100?'✔ ':'')+nf(B.dek)+' %</b></div>'+
+      ((B.dek_gem!=null&&B.dek_gem!==B.dek)?'<div class="rb"><span>Gemiddeld over de looptijd <span class="sub">(± '+eur(B.besp_gem)+'/jaar)</span></span><b style="color:'+(B.dek_gem>=100?'var(--acc-d)':'#B45309')+'">'+(B.dek_gem>=100?'✔ ':'')+nf(B.dek_gem)+' %</b></div>':'');   /* v1.5.0 */
   }
   if(A && A.status && A.status!=='nvt'){
     var ok=(A.status==='alle'||A.status==='klein');
@@ -208,7 +218,7 @@
 
   // ── voet ──
   var ad=D.adviseur||null;
-  h+='<div class="vt"><div>'+(ad&&(ad.naam||ad.mail)?'Je adviseur: <b>'+e(ad.naam||'')+'</b>'+(ad.mail?' · '+e(ad.mail):'')+(ad.tel?' · '+e(ad.tel):''):'')+'</div><div style="text-align:right">'+(M?'<b>'+e(merkNaam)+'</b>'+(M.web?' · '+e(String(M.web).replace(/^https?:\/\//,'')):''):'Berekend met <b>Energie-Compas</b> · energie-compas.eu')+'<br>Indicatieve cijfers, zonder inflatie, op basis van de marktprijzen van de voorbije 12 maanden.</div></div>';
+  h+='<div class="vt"><div>'+(ad&&(ad.naam||ad.mail)?'Je adviseur: <b>'+e(ad.naam||'')+'</b>'+(ad.mail?' · '+e(ad.mail):'')+(ad.tel?' · '+e(ad.tel):''):'')+'</div><div style="text-align:right">'+(M?'<b>'+e(merkNaam)+'</b>'+(M.web?' · '+e(String(M.web).replace(/^https?:\/\//,'')):''):'Berekend met <b>Energie-Compas</b> · energie-compas.eu')+'<br>'+_voetPlan(PL)+'</div></div>';
 
   root.innerHTML=h;
   // past alles op één blad? Zo niet: alles iets kleiner
