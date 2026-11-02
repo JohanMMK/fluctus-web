@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.176.0 (2026-11-02, Johan): BETALEND LAADPLEIN TELT ALTIJD MEE — ook bij «laden op de site met verzwaring» is de netto marge (omzet − elektriciteit) extra inkomen en horen de laadpalen van het betalende deel (aandeel in het laadvolume) bij de investering (_planVerzwRaw); eigen vloot blijft in beide situaties. Kaart, rooster, keuzeblok en labels volgen. -->
 <!-- ek.html v0.175.2 (2026-11-02, Johan): vergelijkingsblok bij een BETALEND laadplein — eerste keuze heet «Met de inkomsten van je laadplein» (zonder eigen vloot) en beide uitlegzinnen noemen de netto marge van het laadplein. -->
 <!-- ek.html v0.175.1 (2026-11-02, Johan): laadplein-tabel — cellen bovenaan uitgelijnd; de laadduur onder het kW-veld (betalend) duwde de andere velden scheef. -->
 <!-- ek.html v0.175.0 (2026-11-02, Johan): BESTANDSNAMEN YYYYMMDD_Klantnaam_Rapporttype — ZIP (…_Projectdossier.zip met Energierapport, Offerterapport-<installateur>, Bankdossier, Energiestudie-investeringsaftrek, VEKA-sjabloon-TVT-IRR), mail «rapport» (Energierapport.pdf), A4 in de browser (tabtitel …_Analyse-A4). -->
@@ -2135,9 +2136,24 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.108.0 (Johan 21-10): netdeel van de laadkost uit de REFERENTIE zonder installatie (vroeger de verhouding van de cel mét installatie → te groot)
     var sh=null; try{ if(HM && HM.refKost!=null && HM.refNetk!=null){ if(HM.gebouwSaldo!=null && HM.gebouwNetk!=null && (+HM.refKost)>(+HM.gebouwSaldo)) sh=((+HM.refNetk)-(+HM.gebouwNetk))/((+HM.refKost)-(+HM.gebouwSaldo)); else if(+HM.refKost>0) sh=(+HM.refNetk)/(+HM.refKost); } }catch(eS){}
     var net=(sh!=null&&isFinite(sh))?(kost*Math.max(0,Math.min(1,sh))):((kC>0)?(kost*kN/kC):0);
-    return { omzet:omzet, kost:kost, net:net, marge:omzet-kost };
+    return { omzet:omzet, kost:kost, net:net, marge:omzet-kost, aandeel:aandeel };   // v0.176.0: + aandeel betalend in het laadvolume
   }catch(e){ return null; } }
-  function _planLaden(a, BV, m){ return (EK_VGL==='verzwaring') ? null : _planLadenRaw(a, BV, m); }   // v0.171.0: t.o.v. laden met verzwaring → enkel PV + batterij (_battValue)
+  function _planLaden(a, BV, m){ return (EK_VGL==='verzwaring') ? _planVerzwRaw(a, BV, m) : _planLadenRaw(a, BV, m); }   // v0.171.0 · v0.176.0
+  // v0.176.0 (Johan 02-11): BETALEND LAADPLEIN TELT ALTIJD MEE — ook t.o.v. laden met verzwaring. Het alternatief voor dat verbruik is géén
+  //   betalende laadsessies organiseren: de netto marge (omzet − elektriciteit) is extra inkomen en de laadpalen van het betalende deel
+  //   (aandeel in het laadvolume) horen bij de investering. Eigen vloot: laadpalen + verzwaring zitten in beide situaties (niet meegeteld).
+  function _planVerzwRaw(a, BV, m){
+    var Z=_plazaVan(a); if(!Z || !BV) return null;
+    var ad=(Z.aandeel>0&&Z.aandeel<=1)?Z.aandeel:1, _zs=(Z.kost>0)?Math.max(0,Math.min(1,Z.net/Z.kost)):0, _zm=Math.round(Z.marge);
+    var palen=Math.max(0,(+(m&&m.acE)||0)+(+(m&&m.dcE)||0)+(+(m&&m.variaLaden)||0)), capZ=Math.round(palen*ad);
+    var netInv=Math.max(0,(+BV.netInv||0)+capZ);
+    var cf=_escCashflow((+BV.besp_rest||0)+Z.marge*(1-_zs), (+BV.besp_net||0)+Z.marge*_zs, (+BV.opex_jaar||0)+(+BV.sturLp||0)*ad);
+    _aftrekBump(cf, +BV.aftrek||0);
+    var tvt=null, cum0=0;
+    for(var i=0;i<cf.rows.length;i++){ var prev=cum0; cum0=cf.rows[i].cum; if(tvt==null && cum0>=netInv){ tvt=Math.round((i+(cf.rows[i].s>0?((netInv-prev)/cf.rows[i].s):0))*10)/10; } }
+    var rend=(netInv>0)?Math.round(cf.som/cf.N/netInv*100*10)/10:null;
+    return { laad:_zm, laadses:0, plaza:_zm, besp:(+BV.bespJaar1||0)+_zm, tvt:tvt, rend:rend, netInv:netInv, capL:capZ };
+  }
   function _planLadenRaw(a, BV, m){
     var L=_laadsesVan(a), Z=_plazaVan(a); if((!L && !Z) || !BV) return null;   // v0.67.5: ook bij enkel een betalend laadplein
     var _zs=(Z&&Z.kost>0)?Math.max(0,Math.min(1,Z.net/Z.kost)):0, _lb=L?L.besparing:0, _zr=Z?(Z.marge*(1-_zs)):0, _zn=Z?(Z.marge*_zs):0, _zm=Z?Math.round(Z.marge):0;   // v0.108.0 (Johan 21-10): verkoopprijs volgt de reële aankoopkost (alle kosten) → de marge volgt dezelfde index als de laadkost (energie → inflatie, net → netpad)
@@ -2159,9 +2175,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(a._offerte && +a.capex_laadpalen>0) m=Object.assign({}, m, { acE:0, dcE:+a.capex_laadpalen, variaLaden:0 });
     return m; }
   function _planLadenCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planLaden(a, bv, _plCelM(a)); }
-  function _planLadenCelRaw(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planLadenRaw(a, bv, _plCelM(a)); }   // v0.171.0: plan «t.o.v. laden elders», los van de keuze
+  function _planLadenCelRaw(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planLadenRaw(a, bv, _plCelM(a)); }
+  function _planVerzwCel(a){ if(!a) return null; var bv=_battValue(a); if(!bv) return null; return _planVerzwRaw(a, bv, _plCelM(a)); }   // v0.176.0   // v0.171.0: plan «t.o.v. laden elders», los van de keuze
   function _hmLabelsLaden(){   // v0.63.0: rooster-labels zeggen of het plan mét laadpalen/laadsessies rekent
-    var on=!!(EK_VGL!=='verzwaring' && typeof HM!=='undefined' && HM && (_laadsesVan(HM.sel||HM.best) || _plazaVan(HM.sel||HM.best)));   // v0.171.0   // v0.67.5: + betalend
+    var on=!!(typeof HM!=='undefined' && HM && ((EK_VGL!=='verzwaring' && _laadsesVan(HM.sel||HM.best)) || _plazaVan(HM.sel||HM.best)));   // v0.176.0: betalend telt altijd mee   // v0.171.0   // v0.67.5: + betalend
     var T={ tvt:on?'Terugverdientijd incl. laadpalen (j)':'Terugverdientijd PV+batterij (j)', rendement:on?'Rendement incl. laadpalen (%)':'Rendement PV+batterij (%)', besparing:on?'Besparing/jaar incl. laadsessies (€)':'Besparing/jaar (€)' };
     ['hm-mx-L','hm-mx-R'].forEach(function(id){ var sel=$(id); if(!sel) return; [].forEach.call(sel.options,function(o){ if(T[o.value]!=null && o.textContent!==T[o.value]) o.textContent=T[o.value]; }); });
   }
@@ -4963,7 +4980,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(_heeftLaden()) order.splice(4,0,'km100');
       if(H.lpMwh>0) order.push('kmdekking');   // v0.24.47 (Johan §6c): km-dekking-rooster in het rapport bij een laadplein
       if(H.lpMwh>0) order.push('piek');       order.push('loadfactor');   // v0.40.0 (Johan): loadfactor net na piekverbruik (kVA). v0.24.62 (Johan): piekverbruik (kVA)-rooster bij een laadplein — toont of de aansluiting moet verzwaren om de km's te laden
-      var _onL=!!(EK_VGL!=='verzwaring' && (_laadsesVan(H.sel||H.best) || _plazaVan(H.sel||H.best)));   // v0.171.0   // v0.67.5: + betalend laadplein   // v0.63.0: rooster-bijlage rekent mét laadpalen/laadsessies bij een laadplein
+      var _onL=!!((EK_VGL!=='verzwaring' && _laadsesVan(H.sel||H.best)) || _plazaVan(H.sel||H.best));   // v0.176.0   // v0.171.0   // v0.67.5: + betalend laadplein   // v0.63.0: rooster-bijlage rekent mét laadpalen/laadsessies bij een laadplein
       var titel={tvt:(_onL?'Terugverdientijd incl. laadpalen (jaar)':'Terugverdientijd PV + batterij (jaar)'),rendement:(_onL?'Rendement incl. laadpalen (%)':'Rendement PV + batterij (%)'),besparing:(_onL?'Besparing per jaar incl. laadsessies (€)':'Besparing per jaar (€)'),factuur_na:'Jaarfactuur na PV + batterij (€)',km100:'Energiekost mobiliteit (€/100 km)',investering:'Investering PV + batterij (€)',cycli:'Batterijcycli per jaar',kmdekking:'Km-dekking laadplein (%)',piek:'Piekverbruik (kVA)',loadfactor:'Loadfactor (%)'};
       var best=H.sel||H.best||{};   // v0.24.15 (Johan): de stippellijn markeert de GEKOZEN oplossing van het rapport (H.sel), niet de eerst-voorgestelde beste (H.best)
       var pv_as=cols.map(function(c){return H.colLabel?H.colLabel(c):String(c);});
@@ -5543,6 +5560,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var bv=_battValue(c), pe=_planLadenCelRaw(c); if(!bv || !pe) return '';
     var pz=null, ls=null; try{ pz=_plazaVan(c); ls=_laadsesVan(c); }catch(eP){}   // v0.175.2: betalend laadplein → tekst met de marge
     var mz=(pz&&pz.marge>0)?_fmtEurK(pz.marge):'';
+    var pv=_planVerzwCel(c);   // v0.176.0: met betalend laadplein telt de marge ook hier mee
+    var vB=pv?pv.besp:bv.bespJaar1, vT=pv?pv.tvt:bv.tvt, vI=pv?pv.netInv:bv.netInv;
     var Lx=function(nl,fr,en){ var L=window.EC_LANG; return L==='fr'?fr:(L==='en'?en:nl); }, es=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
     var tj=function(v){ return (v!=null&&isFinite(v))?(String(Math.round(v*10)/10).replace('.',',')+' '+Lx('jaar','ans','years')):('> 15 '+Lx('jaar','ans','years')); };
     var opt=function(k, titel, besp, tvt, inv, uitleg){ var on=(EK_VGL===k);
@@ -5553,8 +5572,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       opt('elders', (mz&&!ls)?Lx('Met de inkomsten van je laadplein','Avec les revenus de votre parc de recharge','With the income of your charging plaza'):Lx('Laden elders','Recharge ailleurs','Charging elsewhere'), pe.besp, pe.tvt, pe.netInv,
         (mz?Lx('De besparing telt de netto marge van je betalend laadplein mee (± '+mz+' per jaar)'+(ls?' en de vermeden kosten van elders laden':'')+'. De investering omvat ook de laadpalen en de aansluiting.','L’économie inclut la marge nette de votre parc payant (± '+mz+' par an). L’investissement comprend aussi les bornes et le raccordement.','The savings include the net margin of your paid plaza (± '+mz+' a year). The investment also covers the chargers and the connection.')
             :Lx('De besparing rekent de vermeden kosten van elders laden (of diesel) mee. De investering omvat ook de laadpalen en de aansluiting.','L’économie inclut les coûts évités de la recharge ailleurs (ou du diesel). L’investissement comprend aussi les bornes et le raccordement.','The savings include the avoided cost of charging elsewhere (or diesel). The investment also covers the chargers and the connection.')))+
-      opt('verzwaring', Lx('Laden op de site met verzwaring','Recharge sur site avec renforcement','Charging on site with a grid upgrade'), bv.bespJaar1, bv.tvt, bv.netInv,
-        Lx('De besparing houdt rekening met de investering in PV en batterij en met de vermeden kosten om de aansluiting te verzwaren. De laadpalen'+(mz?' en de marge van je laadplein (± '+mz+' per jaar)':'')+' zitten in beide situaties.','L’économie tient compte de l’investissement en PV et batterie et des coûts évités pour renforcer le raccordement. Les bornes sont présentes dans les deux cas.','The savings take into account the investment in PV and battery and the avoided cost of upgrading the connection. The chargers are in both cases.'))+
+      opt('verzwaring', Lx('Laden op de site met verzwaring','Recharge sur site avec renforcement','Charging on site with a grid upgrade'), vB, vT, vI,
+        Lx('De besparing houdt rekening met de investering in PV en batterij en met de vermeden kosten om de aansluiting te verzwaren. '+(mz?'De laadpalen van je eigen voertuigen zitten in beide situaties; de netto marge van je betalend laadplein (± '+mz+' per jaar) telt altijd mee, met de laadpalen ervan.':'De laadpalen zitten in beide situaties.')+'','L’économie tient compte de l’investissement en PV et batterie et des coûts évités pour renforcer le raccordement. Les bornes sont présentes dans les deux cas.','The savings take into account the investment in PV and battery and the avoided cost of upgrading the connection. The chargers are in both cases.'))+
       '<div class="ek-vgl-n">'+es(Lx('Geldt voor de kaart, het rooster, de A4 en het energierapport (en «Je profiel verdient meer»).','S’applique à la carte, à la grille, à l’A4 et au rapport.','Applies to the card, the grid, the A4 and the report.'))+'</div></div>';
   }catch(e){ return ''; } };
   window._ekVglZet=async function(v){ v=(v==='verzwaring')?'verzwaring':'elders'; if(v===EK_VGL) return; EK_VGL=v;
