@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.173.0 (2026-11-02, Johan): TAB ADVISEUR — «Concept-mail met rapport» (oekene) krijgt drie aparte PDF's: energierapport, analyse op één A4 en «Je profiel verdient meer» (zoekt of maakt de profielpagina via /api/energiekompas/markt-edu en geeft de mid mee; server ≥ 15.388.0), met een korte uitleg per bijlage in de mail. Knop «Mail de klant-A4» heet nu «✉️ Conceptmail met analyse (A4)» (zelfde werking). -->
 <!-- ek.html v0.172.2 (2026-11-02, Johan): ambassadeursbanner (invoer tijdens het rekenen én tab Adviseur) wisselt elke 30 s i.p.v. 60 s. -->
 <!-- ek.html v0.172.1 (2026-11-02): knop «Mail de klant-A4» verscheen niet altijd (zichtbaarheid werd bepaald vóór het dossier geladen was) → controle elke seconde. -->
 <!-- ek.html v0.172.0 (2026-11-02, Johan): TAB ADVISEUR — «📣 Klant verwittigen» vervangen door «✉️ Mail de klant-A4» (adviseur en oekene, niet in de klantweergave, niet bij particulieren): mailt namens Johan de A4 aan de adviseur van het dossier (server ≥ 15.387.0, aanspreking met voornaam; wie anders op de knop drukt krijgt een kopie). Het blok «Deel deze analyse op één A4» met uitleg is weg. «Concept-mail met rapport» blijft enkel voor oekene. RESULTAAT · JE DOCUMENTEN: zesde tegel «Analyse» (de A4, ondertitel zoals het energierapport: ons advies / je keuze / je offerte · installateur) tussen «Je profiel verdient meer» en «Energierapport»; «Gekozen offerte», «Bankrapport» en «Investeringsaftrek» op een tweede lijn. «Samen maken we het net slimmer» spreekt de aangemelde adviseur aan met zijn voornaam (GET /api/ek/wie) en is persoonlijker geschreven («wij…», afsluiting Johan). -->
@@ -1466,7 +1467,7 @@
             <button class="btn ghost sm" type="button" id="btn-bank" onclick="toonBankdossier()" title="Financieringsdossier voor de bank: lening, aflossing en kasstroom per jaar">🏦 Bankdossier opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-studie" onclick="toonEnergiestudie()" title="Energiestudie voor de verhoogde (thematische) investeringsaftrek — enkel voor ondernemingen">📑 Energiestudie investeringsaftrek opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-concept" style="display:none" onclick="conceptMailRapport()" title="Zet in Outlook een concept-mail klaar met een samenvatting en het rapport als PDF — nakijken en zelf verzenden">✉️ Concept-mail met rapport</button>
-            <span id="ek-verwittig-blok" class="hidden"><button class="btn ghost sm" type="button" id="btn-a4-klant" onclick="window._ekA4Mail()" data-nolog="1" title="Mailt de adviseur van dit dossier (namens Johan): de A4 zonder naam of adres van de klant, een mail voor de klant, een LinkedIn-post en een banner">✉️ Mail de klant-A4</button></span>
+            <span id="ek-verwittig-blok" class="hidden"><button class="btn ghost sm" type="button" id="btn-a4-klant" onclick="window._ekA4Mail()" data-nolog="1" title="Mailt de adviseur van dit dossier (namens Johan): de A4 zonder naam of adres van de klant, een mail voor de klant, een LinkedIn-post en een banner">✉️ Conceptmail met analyse (A4)</button></span>
           </div>
           <div class="sub" id="verwittig-status" style="margin-top:6px"></div>
       <!-- v0.52.0 (Johan): oekene — hulpvragen van deze klant beantwoorden -->
@@ -5585,14 +5586,23 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(!payload) throw new Error('rapportgegevens onvolledig');
       var hdr=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{});
       var mail=($('i-mail')&&$('i-mail').value||'').trim();
+      // v0.173.0 (Johan 02-11): ook de analyse op één A4 en «Je profiel verdient meer» als aparte PDF in het concept
+      var a4D=null; try{ var c4=_ekStuCel(); if(c4){ try{ await _ekOnbHaal(c4); }catch(eO4){} a4D=window._ekA4Data(); if(a4D) a4D.foto=_ekA4Foto(); } }catch(eA4){ a4D=null; }
+      var mid=null; if(TOKEN && !_ekIsPart()){ try{
+        if(st) st.textContent='⏳ «Je profiel verdient meer» wordt opgezocht of aangemaakt (de eerste keer ± 1 à 3 min)…';
+        var mb=Object.assign({}, window._RAP_PAYLOAD, { pv_kwp:Math.round(_anchorKwp(sel)||0), batt_kw:Math.round(sel.battKw||0), batt_kwh:Math.round(sel.battKwh||0) }, (_rs&&_rs.body)||{}, { token:TOKEN, klant:(STATE_KLANT||''), project_id:(STATE_CODE||undefined), lang:(window.EC_LANG||'nl') });
+        var me=await fetch(API+'/api/energiekompas/markt-edu',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(mb) }); var mjE=await me.json().catch(function(){ return {}; });
+        if(mjE && mjE.ok){ mid=mjE.mid||((String(mjE.url||'').match(/mid=([0-9a-f]{20})/)||[])[1])||null; window._EK_MARKT_URL=mjE.url||window._EK_MARKT_URL; }
+      }catch(eMe){ mid=null; } }
+      if(st) st.textContent='⏳ Rapport, A4 en profielpagina worden als PDF gemaakt en in een concept-mail gezet… (± 1 min)';
       var mr=await fetch(API+'/api/ek-rapport-concept',{ method:'POST', headers:hdr,
-        body:JSON.stringify({ token:TOKEN||undefined, mail:mail||undefined, project_id:STATE_CODE||'', payload:payload }) });
+        body:JSON.stringify({ token:TOKEN||undefined, mail:mail||undefined, project_id:STATE_CODE||'', payload:payload, a4:a4D||undefined, markt_mid:mid||undefined }) });
       var mj=await mr.json().catch(function(){return{};});
       if(!mr.ok||!mj||!mj.ok) throw new Error((mj&&mj.error)||('HTTP '+mr.status));
       if(st){
         st.style.color='var(--green)';
         st.innerHTML='✔ Concept-mail klaargezet in '+_cmEsc(mj.mailbox||'Outlook')+(mj.aan?(' (aan '+(mj.aan_adviseur?'de adviseur ':'')+_cmEsc(mj.aan)+')'):' (nog geen ontvanger)')+
-          (mj.attached?(' met het rapport als PDF ('+(mj.pdf_kb||'?')+' kB)'):' — <b>zonder</b> bijlage'+(mj.attach_error?(': '+_cmEsc(mj.attach_error)):''))+'. '+
+          (mj.attached?(' met '+((mj.bijlagen&&mj.bijlagen.length)||1)+' PDF'+(((mj.bijlagen&&mj.bijlagen.length)||1)>1?'\'s':'')+': '+_cmEsc((mj.bijlagen||[]).join(', ')||'rapport')):' — <b>zonder</b> bijlage'+(mj.attach_error?(': '+_cmEsc(mj.attach_error)):''))+(mj.a4_fout?' · A4 lukte niet ('+_cmEsc(mj.a4_fout)+')':'')+(mj.markt_fout?' · profielpagina lukte niet ('+_cmEsc(mj.markt_fout)+')':'')+'. '+
           (mj.webLink?('<a href="'+_cmEsc(mj.webLink)+'" target="_blank" rel="noopener">Open het concept</a> — nakijken en verzenden.'):'Je vindt het bij Concepten.')+
           (mj.fallback_reden?('<br><span style="font-size:11px">Doel-mailbox lukte niet ('+_cmEsc(mj.fallback_reden)+'), concept staat in de dossier-mailbox.</span>'):'');
         try{ window._ekAdvMeld(st.innerHTML, 'var(--green)', true); }catch(x){}
