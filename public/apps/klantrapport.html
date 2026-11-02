@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.101.1 (2026-11-02, Johan): onbeheerste piek overal dezelfde (die van de referentie in de factuurvergelijking, factuur.onbeheerst_ref.piek_kw) bij «laden met verzwaring». -->
 <!-- klantrapport.html v0.101.0 (2026-11-02, Johan): ONBEHEERSTE REFERENTIE bij «laden met verzwaring» (server ≥ 15.390.0, ek ≥ 0.177.0): de situatie zonder installatie laadt op vol vermogen bij aankomst → het advies «aansluiting» noemt naast de verzwaring ook het capaciteitstarief/jaar op die domme pieken, en de piek zonder installatie heet «onbeheerst laden». De factuurvergelijking en het financieel plan volgen vanzelf (factuur.nul van de server, battwaarde van EK). -->
 <!-- klantrapport.html v0.100.0 (2026-11-02, Johan): BETALEND LAADPLEIN TELT ALTIJD MEE — ook bij de vergelijking «met verzwaring» is de netto marge extra inkomen en zitten de laadpalen van het betalende deel (aandeel in het laadvolume) in de investering (plan mét laadplein); eigen vloot blijft buiten. -->
 <!-- klantrapport.html v0.99.1 (2026-11-02, Johan): vergelijking «met verzwaring» bij een BETALEND laadplein — voorblad en rendement vermelden de netto marge (en omzet) van het laadplein, die in beide situaties zit (GIAX: inkomsten waren enkel in hoofdstuk 3 te zien). -->
@@ -672,7 +673,8 @@ var _BZK=(function(){ if(!HAS_BZ) return null;
 var HAS_INJ  = HAS_PV || !!(D.aansluiting&&D.aansluiting.injectie);
 // v0.27.0 (Johan): PARTICULIER-pad — geen recurrente kosten, geen enkele verwijzing naar onbalans/windfall (EK v0.36 zet D.particulier).
 var IS_PART  = !!(D.particulier===true || D.klanttype==='particulier');
-var KR_VGL_VERZW = !IS_PART && D.vgl_laden==='verzwaring';   // v0.98.0: vergelijking met laden op de site mét verzwaring (adviseur in EK)
+var KR_VGL_VERZW = !IS_PART && D.vgl_laden==='verzwaring';
+function _krOnbPiek(fb){ try{ var o=KR_VGL_VERZW&&D.factuur&&D.factuur.onbeheerst_ref; return (o&&+o.piek_kw>0)?Math.round(+o.piek_kw):fb; }catch(e){ return fb; } }   // v0.101.1   // v0.98.0: vergelijking met laden op de site mét verzwaring (adviseur in EK)
 // v0.72.0 (Johan 24-10): GEWEST VAN DE INSTALLATIE (postcode verbruiksadres; ?gewest=vl|wal|bru) — het VEKA en het VEKA-sjabloon
 //   enkel noemen bij een dossier in Vlaanderen; elders het bevoegde gewest en het «sjabloon TVT/IRR». Geen postcode → neutraal.
 var GEWEST=(function(){ try{ var q=(new URLSearchParams(location.search).get('gewest')||'').toLowerCase(); if(/^(vl|wal|bru)$/.test(q)) return q; }catch(e){}
@@ -1038,7 +1040,7 @@ function _eciTvtBalk(K){
     var _af=((D.aansluiting||{}).afname)||{}, _best=Math.round(+_af.piek_kw||(D.piek&&+D.piek.input_kw)||0);
     if(HAS_LP){
       var HTv=D.heat||{};
-      var onb=_piekVan(HTv.afname_laden_onbeheerst)||_piekVan(HTv.afname_laden_zonder), na=_piekVan(HTv.afname_met_sturing);
+      var onb=_krOnbPiek(_piekVan(HTv.afname_laden_onbeheerst)||_piekVan(HTv.afname_laden_zonder)), na=_piekVan(HTv.afname_met_sturing);
       if(!IS_PART && D.piek && +D.piek.sim_na_kw>na) na=Math.round(+D.piek.sim_na_kw);
       if(!(onb>0 && na>0)) return;
       var binnen=(_best<=0)||(na<=_best*1.02), vz=Math.round(+BW0.verzwaring||0);
@@ -1322,7 +1324,7 @@ function _locatieFoto(){
     var _HTv=D.heat||{}, _A2=D.aansluiting||{}, _af2=_A2.afname||{}, _BWv=D.battwaarde||{};
     function _piekVan(hh){ if(!hh) return 0; var m=hh.mat||hh, p=0; (m||[]).forEach(function(r){ (r||[]).forEach(function(v){ if(+v>p) p=+v; }); }); return Math.round(p); }
     var _vBest=Math.round(+_af2.piek_kw||(D.piek&&+D.piek.input_kw)||0);
-    var _vOnb=_piekVan(_HTv.afname_laden_onbeheerst)||_piekVan(_HTv.afname_laden_zonder);
+    var _vOnb=_krOnbPiek(_piekVan(_HTv.afname_laden_onbeheerst)||_piekVan(_HTv.afname_laden_zonder));
     var _vNa=_piekVan(_HTv.afname_met_sturing);
     if(!IS_PART && D.piek && +D.piek.sim_na_kw>_vNa) _vNa=Math.round(+D.piek.sim_na_kw);   // v0.38.0: gefactureerde (realistische) piek is leidend
     // v0.27.0 (Johan): particulier — piek-vloer (server v15.256): laden zonder batterij doet de piek minstens +6 kW stijgen
@@ -2861,7 +2863,7 @@ function _kr15Aannames(K, extraZin){
   // v0.15.5 (Johan, punt 5): ONBEHEERST laden (dom laden, vol fysiek vermogen bij aankomst) vs slim laden — beide pieken (b vs c).
   if(HAS_LP && HT.afname_laden_onbeheerst){
     var _onbTxt='Alle voertuigen laden op vol laadvermogen zodra ze aankomen (dom laden), zonder sturing. ';
-    if(+_PK.onbeheerst_kw>0){ _onbTxt+='Piek ≈ <b>'+_num(_PK.onbeheerst_kw,0)+' kW</b>'; if(+_PK.input_kw>0){ _onbTxt+=', ruim boven je aansluiting van '+_num(_PK.input_kw,0)+' kW'; } _onbTxt+='. '; }
+    if(+_PK.onbeheerst_kw>0){ _onbTxt+='Piek ≈ <b>'+_num(_krOnbPiek(_PK.onbeheerst_kw),0)+' kW</b>'; if(+_PK.input_kw>0){ _onbTxt+=', ruim boven je aansluiting van '+_num(_PK.input_kw,0)+' kW'; } _onbTxt+='. '; }
     _onbTxt+='Dit is wat je zonder batterij/sturing zou moeten opvangen.';
     // v0.15.6 (Johan): toon de gebruikte aanname voor het laadvermogen (config-gestuurd, geen gok) zodat niemand het als gemeten leest.
     var _lv=_PK.onbeheerst_laadverm_kw||null;
