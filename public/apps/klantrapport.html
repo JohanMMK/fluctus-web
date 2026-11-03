@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.105.0 (2026-11-03, Johan): BANKDOSSIER — lening op de BRUTO investering (zoals de A4 en EK): investering bruto, lening en aflossing daarop; rij «netto na vermeden verzwaring» erbij; terugverdientijd zonder lening blijft netto (= financieel plan). Controle vergelijkt het voorzichtig scenario met de bankcijfers van EK. -->
 <!-- klantrapport.html v0.104.2 (2026-11-03, Johan): PDF via ZIP/«Alles voor dit project» toonde de invoerkaders van bankdossier en energiestudie («dit kader verschijnt niet in de PDF») — nu weggelaten (html2canvas ignoreElements). -->
 <!-- klantrapport.html v0.104.1 (2026-11-03, Johan): combinatie-check leest batterijvermogen ook uit het voorstel (combi.batt_kw ontbreekt soms). -->
 <!-- klantrapport.html v0.104.0 (2026-11-03, Johan): FINANCIËLE PLANNEN UIT EK — het financieel plan (PV + batterij en volledig project), het onbalans-scenario, het voorzichtig plan, de aftrektoets, het bankdossier en de energiestudie nemen de jaar-per-jaar-rijen, investering, besparing en kosten over uit kern_ek.plannen. Geen passend EK-plan → eigen berekening; de controle meldt dat. -->
@@ -3894,21 +3895,24 @@ function _demo(){
    Lening (%, looptijd, rente) aanpasbaar op het scherm (niet in de print), annuïteit per scenario op de eigen investering.
    Indicatief, geen financieel advies. */
 function _bankAnnu(P,r,n){ if(!(P>0)||!(n>0)) return 0; var i=r/100; return i>0 ? P*i/(1-Math.pow(1+i,-n)) : P/n; }
+// v0.105.0 (Johan 03-11): LENING OP DE BRUTO INVESTERING (zoals de A4 en EK) — inv = bruto (vóór de vermeden verzwaring), netInv = netto
+//   (enkel voor de terugverdientijd zonder lening, zodat die gelijk blijft aan het financieel plan).
+function _bankBruto(P){ if(!P) return 0; var b=+P.invBruto||0, n=+P.netInv||0; return b>n?b:n; }
 function _bankScenarios(){
   var S=[], F2=D.factuur||{};
-  if(_PLAN_HOOFD) S.push({ k:'basis', naam:'Basisscenario', sub:'alles uit het rapport, zonder onbalans-opbrengst'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:+_PLAN_HOOFD.netInv||0, rows:_PLAN_HOOFD.rows||[] });
+  if(_PLAN_HOOFD) S.push({ k:'basis', naam:'Basisscenario', sub:'alles uit het rapport, zonder onbalans-opbrengst'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:_bankBruto(_PLAN_HOOFD), netInv:+_PLAN_HOOFD.netInv||0, rows:_PLAN_HOOFD.rows||[] });
   var onb=(+F2.onbalans_extra_jaar)||0, bespOnb=(+F2.besparing_onbalans_jaar)||0;
-  if(!IS_PART && onb>0 && bespOnb>0){ try{ var G=financieelPagina(bespOnb,null,null,_optLadenPlan(),true); if(G) S.push({ k:'gunstig', naam:'Gunstig scenario', sub:'basisscenario mét onbalans-opbrengst (potentieel, in samenspraak met je leverancier)'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:+G.netInv||0, rows:G.rows||[] }); }catch(e){} }
+  if(!IS_PART && onb>0 && bespOnb>0){ try{ var G=financieelPagina(bespOnb,null,null,_optLadenPlan(),true); if(G) S.push({ k:'gunstig', naam:'Gunstig scenario', sub:'basisscenario mét onbalans-opbrengst (potentieel, in samenspraak met je leverancier)'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:_bankBruto(G), netInv:+G.netInv||0, rows:G.rows||[] }); }catch(e){} }
   var V=_voorzichtigePlan(_PLAN_B, KR_VOORZICHTIG.levensduur);
-  if(V) S.push({ k:'voorzichtig', naam:'Voorzichtig scenario', sub:'rekenregels van de verhoogde investeringsaftrek (zonder het belastingvoordeel zelf)', inv:+V.netInv||0, rows:V.rows||[] });
+  if(V) S.push({ k:'voorzichtig', naam:'Voorzichtig scenario', sub:'rekenregels van de verhoogde investeringsaftrek (zonder het belastingvoordeel zelf)', inv:_bankBruto(_PLAN_B)||(+V.netInv||0), netInv:+V.netInv||0, rows:V.rows||[] });
   return S;
 }
 function _bankReken(sc, par){
-  var inv=Math.round(sc.inv||0), lening=Math.round(inv*Math.min(100,Math.max(0,par.pct))/100), eigen=inv-lening, a=_bankAnnu(lening,par.rente,par.jaren);
+  var inv=Math.round(sc.inv||0), netInv=Math.round(sc.netInv!=null?sc.netInv:inv), lening=Math.round(inv*Math.min(100,Math.max(0,par.pct))/100), eigen=inv-lening, a=_bankAnnu(lening,par.rente,par.jaren);
   var cum=-eigen, eerstePos=null, cumLoop=null, tab=[];
   sc.rows.forEach(function(r){ var afl=(r.jaar<=par.jaren)?a:0, net=r.besparing-afl; cum+=net; if(eerstePos==null && cum>=0) eerstePos=r.jaar; if(r.jaar===par.jaren) cumLoop=cum; tab.push({ jaar:r.jaar, besparing:r.besparing, afl:afl, net:net, cum:cum }); });
   var r1=sc.rows[0]?sc.rows[0].besparing:0;
-  return { inv:inv, lening:lening, eigen:eigen, a:a, r1:r1, dekking:a>0?(r1/a*100):null, eerstePos:eerstePos, cumLoop:cumLoop, cumEind:cum, n:sc.rows.length, tab:tab, rente:Math.max(0,a*par.jaren-lening) };
+  return { inv:inv, netInv:netInv, lening:lening, eigen:eigen, a:a, r1:r1, dekking:a>0?(r1/a*100):null, eerstePos:eerstePos, cumLoop:cumLoop, cumEind:cum, n:sc.rows.length, tab:tab, rente:Math.max(0,a*par.jaren-lening) };
 }
 function _bankJaartabel(R){
   return '<table class="f f-compact jpj"><thead><tr><th>Jaar</th><th>Besparing</th><th>Aflossing</th><th>Netto kasstroom</th><th>Cumulatief</th></tr></thead><tbody>'+
@@ -3928,7 +3932,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
     function bouw(){
       var RR=SC.map(function(sc){ return _bankReken(sc, par); });
       var kol=function(f){ return SC.map(function(sc,i){ return '<td>'+f(RR[i],sc)+'</td>'; }).join(''); };
-      var tvtS=function(R){ var c=-R.inv, t=null; R.tab.forEach(function(x){ var p=c; c+=x.besparing; if(t==null&&c>=0) t=(x.jaar-1)+(p<0&&x.besparing>0?(-p/x.besparing):0); }); return t==null?('> '+R.n+' j'):(_num(t,1)+' j'); };
+      var tvtS=function(R){ var c=-(R.netInv!=null?R.netInv:R.inv), t=null;   /* v0.105.0: zonder lening = netto (zoals het financieel plan) */ R.tab.forEach(function(x){ var p=c; c+=x.besparing; if(t==null&&c>=0) t=(x.jaar-1)+(p<0&&x.besparing>0?(-p/x.besparing):0); }); return t==null?('> '+R.n+' j'):(_num(t,1)+' j'); };
       var h=kop('Financieringsdossier')+
         '<p class="lead">Samenvatting voor de bank of de leasingmaatschappij: wat de installatie kost, wat ze per jaar bespaart en hoe die besparing zich verhoudt tot de aflossing van een lening — in drie scenario’s.</p>'+
         '<table class="f f-compact"><tbody>'+
@@ -3940,7 +3944,8 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
         (_ECI?'<div style="margin:8px 0 10px">'+ECI.tegels(_eciTegels(),{klein:true})+'</div>':'')+
         '<div class="bk-in"><label>Lening (% van de investering)<input id="bk-pct" type="number" min="0" max="100" step="5" value="'+par.pct+'"></label><label>Looptijd (jaar)<input id="bk-j" type="number" min="1" max="20" step="1" value="'+par.jaren+'"></label><label>Rente (% per jaar)<input id="bk-r" type="number" min="0" max="15" step="0.1" value="'+par.rente+'"></label><span style="font-size:11px;color:#5A6577">Pas aan en alle scenario’s volgen; dit kader verschijnt niet in de PDF.</span></div>'+
         '<table class="f f-compact bk-sc"><thead><tr><th></th>'+SC.map(function(sc){ return '<th>'+esc(sc.naam)+'</th>'; }).join('')+'</tr></thead><tbody>'+
-          '<tr><td>Investering (excl. btw)</td>'+kol(function(R){ return eur(R.inv); })+'</tr>'+
+          '<tr><td>Investering (excl. btw, bruto)</td>'+kol(function(R){ return eur(R.inv); })+'</tr>'+
+          (RR.some(function(R){ return R.inv-R.netInv>0; })?'<tr><td>Netto na vermeden verzwaring</td>'+kol(function(R){ return eur(R.netInv); })+'</tr>':'')+
           '<tr><td>Lening ('+_num(par.pct,0)+' %)</td>'+kol(function(R){ return eur(R.lening); })+'</tr>'+
           '<tr><td>Aflossing per jaar ('+par.jaren+' j aan '+_num(par.rente,1)+' %)</td>'+kol(function(R){ return eur(R.a); })+'</tr>'+
           '<tr><td>Besparing jaar 1</td>'+kol(function(R){ return eur(R.r1); })+'</tr>'+
@@ -3951,7 +3956,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
           '<tr><td>Horizon</td>'+kol(function(R){ return R.n+' jaar'; })+'</tr>'+
         '</tbody></table>'+
         '<ul class="bk-dl">'+SC.map(function(sc){ return '<li><b>'+esc(sc.naam)+'</b> — '+esc(sc.sub)+'.</li>'; }).join('')+'</ul>'+
-        '<p class="note" style="margin-top:8px">Annuïteitenlening op het geleende bedrag; de cumulatieve kasstroom start bij de eigen inbreng. Basis- en gunstig scenario: 15 jaar met de prijsevolutie van het rapport'+(_AFTREK_V>0?(', inclusief het geschatte voordeel van de verhoogde investeringsaftrek in jaar 1 ('+eur(_AFTREK_V)+' = 25 % × 40 % × investering zonnepanelen en batterij; onder voorbehoud van het attest)'):'')+'. Voorzichtig scenario (zonder aftrek): '+esc(_voorzichtigeTekst().replace(/^Voorzichtige basis: /,''))+' Bedragen excl. btw, indicatief; geen persoonlijk financieel advies.</p>';
+        '<p class="note" style="margin-top:8px">Annuïteitenlening op het geleende bedrag; de lening rekent op de <b>bruto investering</b> (wat je effectief betaalt; de vermeden verzwaring verlaagt de terugverdientijd zonder lening, niet het te financieren bedrag); de cumulatieve kasstroom start bij de eigen inbreng. Basis- en gunstig scenario: 15 jaar met de prijsevolutie van het rapport'+(_AFTREK_V>0?(', inclusief het geschatte voordeel van de verhoogde investeringsaftrek in jaar 1 ('+eur(_AFTREK_V)+' = 25 % × 40 % × investering zonnepanelen en batterij; onder voorbehoud van het attest)'):'')+'. Voorzichtig scenario (zonder aftrek): '+esc(_voorzichtigeTekst().replace(/^Voorzichtige basis: /,''))+' Bedragen excl. btw, indicatief; geen persoonlijk financieel advies.</p>';
       var h2=kop('Kasstroom per jaar')+'<p class="lead">Besparing min aflossing, jaar per jaar, per scenario. De cumulatieve kasstroom start bij de eigen inbreng.</p>'+
         '<table class="f f-compact jpj"><thead><tr><th>Jaar</th>'+SC.map(function(sc){ return '<th colspan="2" style="text-align:center">'+esc(sc.naam)+'</th>'; }).join('')+'</tr><tr><th></th>'+SC.map(function(){ return '<th>Netto</th><th>Cumulatief</th>'; }).join('')+'</tr></thead><tbody>';
       var N=Math.max.apply(null, RR.map(function(R){ return R.tab.length; }));
@@ -4457,6 +4462,8 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
     if(_PL && _PL.bron!=='ek') L.push('Plan met laadpalen rekent zelf i.p.v. het EK-plan'+(_KR_BRON.reden?(' ('+_KR_BRON.reden+')'):'')+'.');
     if(!_PL && KE.plannen.project) L.push('EK heeft een plan met laadpalen, het rapport toont het niet.');
   }
+  try{ if(KE.bank && typeof _bankScenarios==='function'){ var _vs=_bankScenarios().filter(function(x){ return x.k==='voorzichtig'; })[0];
+      if(_vs){ var _br=_bankReken(_vs,{ pct:100, jaren:+KE.bank.jaren||7, rente:+KE.bank.rente||4.5 }); eurV('Bank · lening (bruto PV + batterij)', _br.inv, KE.bank.inv); eurV('Bank · aflossing per jaar', _br.a, KE.bank.ann); eurV('Bank · besparing jaar 1', _br.r1, KE.bank.besp); } } }catch(eBk){}   // v0.105.0
   if((AV>0)!==(+KE.aftrek>0)) L.push('Investeringsaftrek: rapport '+(AV>0?eu(AV):'niet meegerekend')+' · EK '+(+KE.aftrek>0?eu(KE.aftrek):'niet meegerekend'));
   else if(AV>0) eurV('Investeringsaftrek', AV, KE.aftrek);
   var st=document.createElement('style'); st.textContent='@media print{#kr-ctl{display:none!important}}'; document.head.appendChild(st);
