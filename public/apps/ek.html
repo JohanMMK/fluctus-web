@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.179.0 (2026-11-03, Johan): KERNCIJFERS + CONTROLE. (1) _ekKern(c) = één set cijfers per combinatie (besparing, terugverdientijd, rendement, netto-investering, gemiddelde over 15 jaar, PV+batterij-deel, aftrek, bank). Antwoordkaart, Pas aan-tegels, A4 en bank lezen enkel nog die set; het energierapport krijgt ze mee (kern_ek) en vergelijkt. (2) Controlebalk (enkel oekene, niet in klantweergave): rood als schermen onderling of met de kerncijfers verschillen, als een prijs/palen van een andere combinatie actief is, of als een eigen «Pas aan»-prijs sterk afwijkt van de standaardprijs. -->
 <!-- ek.html v0.178.0 (2026-11-03, Johan): COHERENTIE (Transport Demets). (1) Pas aan toonde de prijs van een eerder gekozen eigen combi (PRIJS_FACTOR/INV_OV/opex bleven hangen na het kiezen van een standaardcel: € 158.658 naast TVT 2,7 j van de standaardcel) → _ekCustomCtx zet bij een standaardcel alles terug. (2) Bankcijfers op één plek (_ekBankCijfers): besparing = jaar 1 uit het plan NA sturingskost (zoals energierapport en «Je profiel verdient meer»), incl. domme pieken bij «laden met verzwaring»; A4 én tab Dossiers gebruiken dezelfde cijfers. -->
 <!-- ek.html v0.177.3 (2026-11-03, Johan): BENAMING — de twee netposten heten «capaciteitstarief» (maandpiek) en «vergoeding voor het toegangsvermogen». De A4 krijgt beide bedragen van de onbeheerste referentie apart (plan.onb_cap / plan.onb_tv). -->
 <!-- ek.html v0.177.2 (2026-11-02, Johan): de aftrek-toets volgt de vergelijking waarvoor _battValue rekent (_EK_VGL_CUR) → «laden elders» in het keuzeblok blijft gelijk aan de elders-modus (ACOM 8,1 j), ook als «met verzwaring» gekozen is. -->
@@ -2709,14 +2710,77 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.178.0 (Johan 03-11): BANKCIJFERS — één bron voor A4 en tab Dossiers. Lening = investering PV + batterij (bruto, 100 %),
   //   bedrijf 7 j · 4,5 %, particulier 10 j · 3,5 %. Besparing = jaar 1 van het plan NA sturingskost/exploitatie (zoals het energierapport
   //   en «Je profiel verdient meer»), mét de domme pieken bij «laden met verzwaring»; gemiddelde over de looptijd uit het meerjarenmodel.
-  function _ekBankCijfers(c){ if(!c) return null;
-    var bv=_battValue(c), inv=+_invPvbCell(c)||0; if(!bv || !(inv>0)) return null;
+  function _ekBankCijfers(c, vgl){ if(!c) return null;
+    var bv=_battValue(c, vgl), inv=+_invPvbCell(c)||0; if(!bv || !(inv>0)) return null;
     var opex=Math.max(0,+bv.opex_jaar||0), infl=(+NET_CFG.inflatie_pct||0)/100, b1=(+bv.bespJaar1||0)-opex;
     var pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=inv*ii/(1-Math.pow(1+ii,-pj));
     var rows=(bv.cfB||[]).slice(0,pj).map(function(s,t){ return (+s||0)-opex*Math.pow(1+infl,t); }), gem=rows.length?(rows.reduce(function(x,y){ return x+y; },0)/rows.length):b1;
     if(!(b1>0)) return null;
     return { inv:Math.round(inv), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(b1), besp_gem:Math.round(gem), opex:Math.round(opex), dek:ann>0?Math.round(b1/ann*100):null, dek_gem:ann>0?Math.round(gem/ann*100):null }; }
   window._ekBankCijfers=_ekBankCijfers;
+  // v0.179.0 (Johan 03-11): KERNCIJFERS — één bron per combinatie (en per vergelijking). Alles wat besparing/terugverdientijd/
+  //   rendement/investering toont, leest dit; het energierapport krijgt het mee (kern_ek) en meldt verschillen aan oekene.
+  function _ekKern(c, vgl){ if(!c) return null; var v=(vgl==='verzwaring'||vgl==='elders')?vgl:EK_VGL;
+    var bv=_battValue(c, v); if(!bv) return null;
+    var pl=null; try{ pl=(v==='verzwaring')?_planVerzwCel(c):_planLadenCelRaw(c); }catch(e){ pl=null; }
+    var src=pl||bv, r1=function(x){ return (x!=null&&isFinite(+x))?Math.round(+x*10)/10:null; };
+    return { v:1, vgl:v, plan:(pl?'project':'pvbatt'),
+      besp:Math.round(pl?pl.besp:bv.bespJaar1), tvt:r1(src.tvt), rend:r1(src.rend), inv:Math.round(+src.netInv||0),
+      gem15:Math.round(+(pl&&pl.gem15b!=null?pl.gem15b:bv.gem15b)||0), laad:Math.round(+(pl&&pl.laad)||0),
+      pvb:{ inv_bruto:Math.round(+_invPvbCell(c)||0), verzw:Math.round(+bv.verzwaring||0), inv:Math.round(+bv.netInv||0), besp:Math.round(+bv.bespJaar1||0),
+        opex:Math.round(+bv.opex_jaar||0), besp_na:Math.round((+bv.bespJaar1||0)-(+bv.opex_jaar||0)), tvt:r1(bv.tvt), rend:r1(bv.rend) },
+      aftrek:Math.round(+bv.aftrek||0), onb:{ extra:Math.round(+bv.onb_extra||0), piek:Math.round(+bv.onb_piek||0) },
+      bank:_ekBankCijfers(c, v),
+      combi:{ pv:Math.round(_anchorKwp(c)||0), kw:Math.round(+c.battKw||0), kwh:Math.round(+c.battKwh||0), custom:!!c._custom, offerte:!!(c._offerte||c._offId) } }; }
+  window._ekKern=_ekKern;
+  // v0.179.0 (Johan 03-11): CONTROLE (enkel oekene, niet in klantweergave) — vergelijkt wat de schermen tonen met de kerncijfers
+  //   en meldt toestanden die eerder tot incoherenties leidden. Rood kader linksonder; verdwijnt vanzelf als alles klopt.
+  function _ekCtlChecks(){
+    var L=[]; if(typeof HM==='undefined' || !HM) return L;
+    var c=null; try{ c=_ekStuCel(); }catch(e){ c=null; } if(!c) return L;
+    var K=null; try{ K=_ekKern(c); }catch(e){ K=null; } if(!K) return L;
+    var sel=HM.sel||c, num=function(t){ var x=String(t==null?'':t).replace(/[^0-9,\-]/g,'').replace(',','.'); return x===''?null:+x; };
+    var verschil=function(a,b,rel,abs){ if(a==null||b==null||!isFinite(a)||!isFinite(b)) return false; return Math.abs(a-b)>Math.max(abs||0, Math.abs(b)*(rel||0)); };
+    var eurT=function(v){ return '€ '+String(Math.round(+v||0)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); };
+    // 1 · toestand: prijs/palen van een andere combinatie actief
+    var expF=(sel&&sel._custom)?(+sel._prijsFactor||1):1;
+    if(Math.abs((+PRIJS_FACTOR||1)-expF)>1e-6) L.push('Pas aan rekent met de prijsfactor van een andere combinatie ('+(Math.round((+PRIJS_FACTOR||1)*100)/100)+' i.p.v. '+(Math.round(expF*100)/100)+').');
+    if(sel && !sel._custom && !sel._offerte && typeof INV_OV!=='undefined' && INV_OV) L.push('Pas aan rekent met de laadpalen van een eigen combinatie ('+(+INV_OV.ac||0)+' AC / '+(+INV_OV.dc||0)+' DC).');
+    // 2 · antwoordkaart = kerncijfers
+    var hl=window._EK_HERO_LAST;
+    if(hl && hl.c===c){
+      if(hl.besp && hl.besp!==_fmtEurK(K.besp)) L.push('Antwoordkaart: besparing '+hl.besp+' ≠ kerncijfer '+_fmtEurK(K.besp)+'.');
+      if(hl.tvt && K.tvt!=null && verschil(num(hl.tvt), K.tvt, 0, 0.05)) L.push('Antwoordkaart: terugverdientijd '+hl.tvt+' j ≠ kerncijfer '+String(K.tvt).replace('.',',')+' j.');
+      if(hl.inv && K.inv>0 && hl.inv!==_fmtEurK(K.inv)) L.push('Antwoordkaart: investering '+hl.inv+' ≠ kerncijfer '+_fmtEurK(K.inv)+'.');
+    }
+    // 3 · Pas aan-tegels en investeringsblok (enkel als Pas aan dezelfde cel toont)
+    if(sel===c){
+      var pc=$('pay-cap-all'), pt=$('pay-tvt-all');
+      if(pc && pc.textContent && pc.textContent!=='—' && verschil(num(pc.textContent), K.inv, 0.005, 50)) L.push('Pas aan: totale investering '+pc.textContent+' ≠ kerncijfer '+eurT(K.inv)+'.');
+      if(pt && pt.textContent && K.tvt!=null && /\d/.test(pt.textContent) && verschil(num(pt.textContent), K.tvt, 0, 0.05)) L.push('Pas aan: terugverdientijd '+pt.textContent+' ≠ kerncijfer '+String(K.tvt).replace('.',',')+' j.');
+      var it=$('inv-tot');
+      if(it && it.textContent && K.plan==='project' && K.vgl==='elders' && !REF_NIETS && !c._offerte && verschil(num(it.textContent), K.inv, 0.01, 100)) L.push('Pas aan: installatie + aansluiting '+it.textContent+' ≠ netto-investering van het plan '+eurT(K.inv)+'.');
+    }
+    // 4 · eigen «Pas aan»-prijzen die sterk afwijken van de standaardprijs
+    (CUSTOM_COMBOS||[]).forEach(function(cb){ var f=+cb.prijsFactor; if(!(f>0) || (f>=0.75 && f<=1.5)) return;
+      L.push('Eigen prijs «Pas aan» '+(+cb.pv||0)+' kWp + '+(+cb.battKw||0)+' kW/'+Math.round(+cb.battKwh||0)+' kWh'+((+cb.dc||0)?' + '+cb.dc+' DC':'')+((+cb.ac||0)?' + '+cb.ac+' AC':'')+': '+(+cb.prijsTot>0?eurT(cb.prijsTot)+' = ':'')+Math.round(f*100)+' % van de standaardprijs.'); });
+    return L;
+  }
+  window._ekCtlChecks=_ekCtlChecks;
+  var _ekCtlSig='', _ekCtlDicht='';
+  function _ekCtlToon(){ try{
+    if(!(typeof EK_IS_OEKENE!=='undefined' && EK_IS_OEKENE) || (typeof EK_KLANTVIEW!=='undefined' && EK_KLANTVIEW)){ var o=document.getElementById('ek-ctl'); if(o) o.style.display='none'; return; }
+    var L=_ekCtlChecks(), sig=L.join('|'), box=document.getElementById('ek-ctl');
+    if(!L.length || sig===_ekCtlDicht){ if(box) box.style.display='none'; _ekCtlSig=sig; return; }
+    if(sig===_ekCtlSig && box && box.style.display!=='none') return; _ekCtlSig=sig;
+    if(!box){ box=document.createElement('div'); box.id='ek-ctl'; box.setAttribute('style','position:fixed;left:12px;bottom:12px;max-width:440px;z-index:99999;background:#FEF2F2;border:2px solid #DC2626;border-radius:10px;padding:9px 12px 9px 12px;font:12.5px/1.45 -apple-system,Segoe UI,Arial,sans-serif;color:#7F1D1D;box-shadow:0 6px 22px rgba(0,0,0,.18)'); document.body.appendChild(box); }
+    var es=function(x){ return String(x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
+    box.innerHTML='<div style="display:flex;justify-content:space-between;gap:10px;font-weight:800;margin-bottom:4px">⚠ Controle cijfers <span id="ek-ctl-x" style="cursor:pointer;font-weight:400" title="Verbergen tot er iets wijzigt">✕</span></div>'+
+      '<ul style="margin:0;padding-left:18px">'+L.map(function(t){ return '<li>'+es(t)+'</li>'; }).join('')+'</ul><div style="margin-top:4px;font-size:11px;color:#991B1B">Enkel zichtbaar voor jou (oekene).</div>';
+    box.style.display='';
+    var x=document.getElementById('ek-ctl-x'); if(x) x.onclick=function(){ _ekCtlDicht=sig; box.style.display='none'; };
+  }catch(e){} }
+  setInterval(_ekCtlToon, 4000);
   function _ekVglBody(){ try{ var o=_onbRefV(); return o ? { vgl_laden:'verzwaring', onb_ref:o } : { vgl_laden:(EK_VGL==='verzwaring'?'verzwaring':'') }; }catch(e){ return {}; } }   // v0.177.0: rapport = rooster (onbeheerste referentie)
   function _ekOnbHaal(a){ if(!a || !window._RAP_PAYLOAD) return Promise.resolve(null);
     var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{};
@@ -2790,7 +2854,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var bespN=null, tvtN=null; try{ bespN=M.besparing.val(c); tvtN=M.tvt.val(c); }catch(e){}
     var pk=Math.round(+c.aansluiting_totaal_kw||+c.jaarpiek||0), tg=nv('i-toegang')||0, exC=!!(!c._interp||c._exact);
     var titelK=(S&&S.modus==='offerte')?'De gekozen offerte':((S&&S.modus==='keuze')?'De gekozen combinatie':'Ons advies');
-    var PLk=null; try{ var _pl=_planLadenCel(c), _bvk=_battValue(c), _g=_pl&&_pl.gem15b!=null?_pl.gem15b:(_bvk?_bvk.gem15b:null);   // v0.177.0: KPI's uit het meerjarenmodel
+    var PLk=null; try{ var _KA=window._ekKern?window._ekKern(c):null, _bvk=_battValue(c), _g=_KA?_KA.gem15:null;   // v0.179.0: kerncijfers   // v0.177.0: KPI's uit het meerjarenmodel
       PLk={ jaren:Math.max(1,Math.round(+NET_CFG.horizon_jaar||15)), inflatie:+NET_CFG.inflatie_pct||0, net_extra:+NET_CFG.net_extra_pct||0, dubbel_jaar:+NET_CFG.net_dubbel_jaar||0, dubbel_factor:+NET_CFG.net_dubbel_factor||1,
         gem:(_g!=null&&isFinite(_g))?Math.round(_g):null, onb_extra:_bvk?(+_bvk.onb_extra||0):0, onb_piek:_bvk?(+_bvk.onb_piek||0):0 };
       var _oA=_onbRefV(); if(_oA && PLk.onb_extra>0){ PLk.onb_cap=Math.round(+_oA.extra_maandpiek_jaar||0); PLk.onb_tv=Math.round(+_oA.extra_toegang_jaar||0); } }catch(eP){ PLk=null; }   // v0.177.3: capaciteitstarief + vergoeding toegangsvermogen apart
@@ -3289,7 +3353,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!INV_EDIT) _invBlok(pvKwp, battKwh, acN, dcN, (a&&+a.battKw)||0);
     $('inv-foot').textContent='Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op je echte meetgegevens.';
     // v0.19 (Johan): batterijwaarde over 15 jaar (escalerende netkosten). TVT/rendement op de netto-investering (na vermeden verzwaring).
-    if($('pay-cap-all')) $('pay-cap-all').textContent = eur(invTot + Math.max(0,+(a&&a.verzwaring_eenmalig)||0));   // v0.107.0: + aansluiting die mét installatie nog nodig is (= blok 2 en rapport)
+    var _KNp=null; try{ _KNp=window._ekKern?window._ekKern(a):null; }catch(xKp){ _KNp=null; }   // v0.179.0: zelfde kerncijfers als de antwoordkaart
+    if(_KNp){ tvtKpi=_KNp.tvt; _rendCell=(_KNp.rend!=null?Math.round(_KNp.rend):null); try{ var _uC=$('pay-cap-all')&&$('pay-cap-all').parentNode.querySelector('.u'); if(_uC) _uC.textContent=(_KNp.plan==='project')?'netto · PV + batterij + laadpalen':'netto · PV + batterij'; }catch(xU){} }
+    if($('pay-cap-all')) $('pay-cap-all').textContent = _KNp ? eur(_KNp.inv) : eur(invTot + Math.max(0,+(a&&a.verzwaring_eenmalig)||0));   // v0.107.0: + aansluiting die mét installatie nog nodig is (= blok 2 en rapport)
     if($('pay-tvt-all')) $('pay-tvt-all').textContent = (tvtKpi!=null?(String(tvtKpi).replace('.',',')+' j'):'> 15 j');   // v0.61.0: plan mét laadpalen + laadsessies
     if($('pay-rend-all')) $('pay-rend-all').textContent = (_rendCell!=null?(_rendCell+'%'):'—');
     if($('pay-foot')){ var _bf=''; if(BV && (BV.cap>0 || BV.verzwaring>0)){ _bf='Batterijwaarde: energiebesparing '+eur(BV.energie)+'/j'+(BV.cap>0?(' · vermeden capaciteitstarief '+eur(BV.cap)+'/j'):'')+(BV.verzwaring>0?(' · vermeden aansluitingsverzwaring '+eur(BV.verzwaring)+' eenmalig'):'')+'. '; }
@@ -5160,6 +5226,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       advies_ref: (function(){ try{ if(!(sel&&sel._offId)||typeof HM==='undefined'||!HM) return null; var r=HM.sel||HM.best; if(!r) return null; var V=function(k){ var M=HM_METRICS[k], v=M?M.val(r):null; return (v!=null&&isFinite(v))?Math.round(v*10)/10:null; };
         return { pv_kwp:(typeof _anchorKwp==='function'?_anchorKwp(r):0)||0, batt_kw:+r.battKw||0, batt_kwh:+r.battKwh||0, investering:V('investering'), besparing:V('besparing'), rendement:V('rendement'), tvt:V('tvt') }; }catch(eA){ return null; } })(),   // v0.87.0: offerte vs advies (p. 2)
       referentie: (REF_NIETS?'niets':''),   // v0.107.0
+      kern_ek: (function(){ try{ var k=window._ekKern?window._ekKern(sel):null; if(k){ k.controle=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); } return k; }catch(eK){ return null; } })(),   // v0.179.0: kerncijfers + controle in het energierapport
       vgl_laden: EK_VGL,   // v0.171.0: klantrapport kiest het hoofdplan (laden elders = mét laadpalen + laadsessies; verzwaring = PV + batterij)
       huidig_all_in_jaar: Math.round(+C.kostNu||0),   // v0.24.9 (Johan): de ECHTE all-in jaarfactuur (excl btw) → "uw huidige contract" = dit bedrag
       factuur: j.factuur, heat: j.heat, combi: j.combi, battwaarde: battwaarde, certificaten: (j.certificaten||null),   // v0.123.0
@@ -8559,6 +8626,7 @@ window._ekAmb=(function(){
     // v0.100.1: met een laadplein volgen besparing/TVT het plan MÉT laadpalen → investering dan ook (netto, incl. laadpalen) zodat besparing × TVT ≈ investering
     var _pl=null; try{ _pl=(c&&typeof _planLadenCel==='function')?_planLadenCel(c):null; }catch(x){ _pl=null; } if(_pl&&_pl.netInv>0){ try{ inv=_fmtEurK(_pl.netInv); }catch(x){} }
     else if(window.EK_VGL==='verzwaring' && window._ekVglLp && window._ekVglLp(c)){ try{ var _bvV=_battValue(c); if(_bvV&&_bvV.netInv>0) inv=_fmtEurK(_bvV.netInv); }catch(x){} }   // v0.171.1: netto (min vermeden verzwaring), zoals de terugverdientijd
+    try{ var _KN=window._ekKern?window._ekKern(c):null; if(_KN){ besp=_fmtEurK(_KN.besp); if(_KN.inv>0) inv=_fmtEurK(_KN.inv); if(_KN.rend!=null) rend=Math.round(_KN.rend)+'%'; if(_KN.tvt!=null) tvt=String(_KN.tvt).replace('.',','); } }catch(xKn){}   // v0.179.0: kerncijfers
     if(!fact||fact==='—'){ try{ var _af=+((el('i-afname')||{}).value||0), _pk=+((el('i-toegang')||{}).value||0), _ko=+((el('i-kost')||{}).value||0); fact=[_af>0?_ekNf(_af)+' MWh afname':'', _pk>0?_ekNf(_pk)+' kW piek':'', _ko>0?'€ '+_ekNf(_ko,0)+'/j':''].filter(Boolean).join(' · '); }catch(x){} }
     var ev=0; ['ev-p-nacht','ev-p-dag','ev-p-24'].forEach(function(i){ ev+=+((el(i)||{}).value||0); }); try{ var rr=document.querySelectorAll('#ev-tab tbody tr'); if(rr.length&&!el('ev-bedr').classList.contains('hidden')){ ev=0; rr.forEach(function(r){ var a=r.querySelector('input[type=number]'); ev+=+(a&&a.value||0); }); } }catch(x){}
     var inj=(!el('injstuur-card')||el('injstuur-card').classList.contains('hidden'))?'':txt('is-mwh');
