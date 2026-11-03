@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.178.0 (2026-11-03, Johan): COHERENTIE (Transport Demets). (1) Pas aan toonde de prijs van een eerder gekozen eigen combi (PRIJS_FACTOR/INV_OV/opex bleven hangen na het kiezen van een standaardcel: € 158.658 naast TVT 2,7 j van de standaardcel) → _ekCustomCtx zet bij een standaardcel alles terug. (2) Bankcijfers op één plek (_ekBankCijfers): besparing = jaar 1 uit het plan NA sturingskost (zoals energierapport en «Je profiel verdient meer»), incl. domme pieken bij «laden met verzwaring»; A4 én tab Dossiers gebruiken dezelfde cijfers. -->
 <!-- ek.html v0.177.3 (2026-11-03, Johan): BENAMING — de twee netposten heten «capaciteitstarief» (maandpiek) en «vergoeding voor het toegangsvermogen». De A4 krijgt beide bedragen van de onbeheerste referentie apart (plan.onb_cap / plan.onb_tv). -->
 <!-- ek.html v0.177.2 (2026-11-02, Johan): de aftrek-toets volgt de vergelijking waarvoor _battValue rekent (_EK_VGL_CUR) → «laden elders» in het keuzeblok blijft gelijk aan de elders-modus (ACOM 8,1 j), ook als «met verzwaring» gekozen is. -->
 <!-- ek.html v0.177.1 (2026-11-02, Johan): TOETS INVESTERINGSAFTREK = KLANTRAPPORT — op de netto-investering (na vermeden verzwaring) en, bij «laden met verzwaring», met het vermeden capaciteitstarief van de domme pieken in de besparing (zoals het klantrapport/energiestudie). Zo tonen rooster/A4 en rapport dezelfde aftrek en terugverdientijd. -->
@@ -2608,7 +2609,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.159.0 (Johan 01-11): een «Pas aan»-cel draagt haar eigen palen (AC/DC), prijs en exploitatiekost. Dat werd enkel toegepast bij een klik
   //   in het rooster — bij heropenen (keuze hersteld) of na een herberekening bleven de standaardpalen en -prijs staan (Veranda: 2 DC i.p.v. 1,
   //   € 225k i.p.v. € 185k). Nu bij ELKE weergave van een Pas aan-cel (renderRapport).
-  function _ekCustomCtx(a){ if(!a || !a._custom) return; PRIJS_ALLIN=!!a._allIn; PRIJS_FACTOR=(+a._prijsFactor>0?a._prijsFactor:1); OPEX_JAAR=(+a._opex||0); OPEX_RATIO=(+a._opexRatio||0);
+  function _ekCustomCtx(a){ if(!a) return; if(!a._custom){ PRIJS_ALLIN=false; PRIJS_FACTOR=1; OPEX_JAAR=0; OPEX_RATIO=0; INV_OV=null; return; }   // v0.178.0: standaardcel → geen prijs/palen/opex van een eigen combi meer
+    PRIJS_ALLIN=!!a._allIn; PRIJS_FACTOR=(+a._prijsFactor>0?a._prijsFactor:1); OPEX_JAAR=(+a._opex||0); OPEX_RATIO=(+a._opexRatio||0);
     INV_OV={ pvKwp:(+a.pvKwp||0), battKw:(+a.battKw||0), battKwh:(+a.battKwh||0), ac:(a._ac!=null?a._ac:0), dc:(a._dc!=null?a._dc:0) }; }
   function _hmKies(ry,cx){ var H=HM; if(!H) return; var a=_cellAt(H,ry,cx); if(!a) return;
     // v0.24.26 (Johan): kies je een manuele combi in de tabel → herstel ZIJN prijs, exploitatiekost en palen (INV_OV) → paycards + "toon rapport" kloppen voor die combi.
@@ -2704,6 +2706,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekStuCel(){ try{ var hl=window._EK_HERO_LAST; if(hl&&hl.c) return hl.c; }catch(e0){} try{ var S=window._ekSelectie?window._ekSelectie():null; if(S&&S.cel) return S.cel; }catch(e){} var H=(typeof HM!=='undefined')?HM:null; return H&&(H.sel||H.best); }   // v0.168.0: eerst de cel van de antwoordkaart
   // v0.163.0: onbalans-extra ophalen als belofte (tab Sturing + A4). Resolve → {extra} | {fout} | null (geen batterij).
   var _ekOnbProm={};
+  // v0.178.0 (Johan 03-11): BANKCIJFERS — één bron voor A4 en tab Dossiers. Lening = investering PV + batterij (bruto, 100 %),
+  //   bedrijf 7 j · 4,5 %, particulier 10 j · 3,5 %. Besparing = jaar 1 van het plan NA sturingskost/exploitatie (zoals het energierapport
+  //   en «Je profiel verdient meer»), mét de domme pieken bij «laden met verzwaring»; gemiddelde over de looptijd uit het meerjarenmodel.
+  function _ekBankCijfers(c){ if(!c) return null;
+    var bv=_battValue(c), inv=+_invPvbCell(c)||0; if(!bv || !(inv>0)) return null;
+    var opex=Math.max(0,+bv.opex_jaar||0), infl=(+NET_CFG.inflatie_pct||0)/100, b1=(+bv.bespJaar1||0)-opex;
+    var pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=inv*ii/(1-Math.pow(1+ii,-pj));
+    var rows=(bv.cfB||[]).slice(0,pj).map(function(s,t){ return (+s||0)-opex*Math.pow(1+infl,t); }), gem=rows.length?(rows.reduce(function(x,y){ return x+y; },0)/rows.length):b1;
+    if(!(b1>0)) return null;
+    return { inv:Math.round(inv), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(b1), besp_gem:Math.round(gem), opex:Math.round(opex), dek:ann>0?Math.round(b1/ann*100):null, dek_gem:ann>0?Math.round(gem/ann*100):null }; }
+  window._ekBankCijfers=_ekBankCijfers;
   function _ekVglBody(){ try{ var o=_onbRefV(); return o ? { vgl_laden:'verzwaring', onb_ref:o } : { vgl_laden:(EK_VGL==='verzwaring'?'verzwaring':'') }; }catch(e){ return {}; } }   // v0.177.0: rapport = rooster (onbeheerste referentie)
   function _ekOnbHaal(a){ if(!a || !window._RAP_PAYLOAD) return Promise.resolve(null);
     var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{};
@@ -2790,9 +2803,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // bank + aftrek (zelfde regels als het tipje in Bankdossier)
     // v0.177.0 (Johan 02-11): bank uit het MEERJARENMODEL (zelfde besparing als het plan: netkosten op het netpad + 2029-verdubbeling;
     //   bij «laden met verzwaring» incl. de vermeden domme pieken) — dekking jaar 1 én gemiddeld over de looptijd van de lening.
-    var B=null; try{ var bvB=_battValue(c), invB=+_invPvbCell(c)||0, bespB=bvB?(+bvB.bespJaar1||0):(+c.besparing||0), pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0;
-      var rB=(bvB&&bvB.cfB)?bvB.cfB.slice(0,pj):[], gB=rB.length?(rB.reduce(function(x,y){ return x+y; },0)/rB.length):bespB;
-      if(invB>0&&bespB>0) B={ inv:Math.round(invB), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(bespB), besp_gem:Math.round(gB), dek:ann>0?Math.round(bespB/ann*100):null, dek_gem:ann>0?Math.round(gB/ann*100):null }; }catch(e){}
+    var B=null; try{ B=_ekBankCijfers(c); }catch(e){ B=null; }   // v0.178.0: zelfde bankcijfers als de tab Dossiers
     var A=null; try{ var T=window._ekAftrekToets?window._ekAftrekToets(c):null; if(T) A={ status:T.status, voordeel:Math.round(+T.voordeel||0), irr:T.irr }; }catch(e){}
     // titel zonder naam
     var evN=V.filter(function(r){ return !r.betalend; }).reduce(function(s,r){ return s+r.aantal; },0), ty=V.filter(function(r){ return !r.betalend; }).map(function(r){ return r.label.toLowerCase(); }).filter(function(t,i,a){ return a.indexOf(t)===i; });
@@ -8733,8 +8744,7 @@ window._ekAmb=(function(){
   //   tot een offerte bevestigd is als verkocht (aanvaard/getekend). Staat als stap ③ onderaan het kader «Dimensionering».
   function teaser(T, cel){
     // v0.99.3: cijfers die aantonen dat het kan — bank: aflossing vs besparing (zelfde leningsparameters als het bankdossier: 100 %, bedrijf 7 j aan 4,5 %, particulier 10 j aan 3,5 %)
-    var invB=0, bespB=0; try{ invB=(typeof _invPvbCell==='function'&&cel)?(+_invPvbCell(cel)||0):0; bespB=cel?(+cel.besparing||0):0; }catch(x){}
-    var pj=part()?10:7, pr=part()?3.5:4.5, ii=pr/100, ann=invB>0?(invB*ii/(1-Math.pow(1+ii,-pj))):0, dek=ann>0?Math.round(bespB/ann*100):null;
+    var invB=0, bespB=0, ann=0, dek=null, pj=part()?10:7, pr=part()?3.5:4.5; try{ var _BC=window._ekBankCijfers?window._ekBankCijfers(cel):null; if(_BC){ invB=_BC.inv; bespB=_BC.besp; ann=_BC.ann; dek=_BC.dek; pj=_BC.jaren; pr=_BC.rente; } }catch(x){}   // v0.178.0: zelfde bankcijfers als de A4
     var offs=window._EK_OFF||[], open=offs.some(function(o){ return o&&(o.aanvaard||o.getekend); }), bev=offs.some(function(o){ return o&&o.bevestigd; });
     var aftOk=!!(T && (T.status==='alle'||T.status==='klein'));
     var slotR='<div style="margin-top:6px;font-size:12.5px;color:#5A6577">🔒 '+e(L3('Komt vrij na je bevestigde bestelling (tab Offertes)','Se débloque après la commande confirmée (onglet Offres)','Unlocks after your confirmed order (Quotes tab)'))+'</div>';
@@ -8745,7 +8755,7 @@ window._ekAmb=(function(){
     var rijB=function(a,b,kl){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:2px 0;border-bottom:1px dashed #E6ECF3"><span>'+a+'</span><b style="color:'+(kl||'var(--navy)')+'">'+b+'</b></div>'; };
     var bankCijfers=(invB>0&&bespB>0)?(rijB(e(L3('Investering PV + batterij','Investissement PV + batterie','Investment PV + battery')),eurK(invB))+
       rijB(e(L3('Aflossing per jaar','Remboursement par an','Repayment per year'))+' <span style="color:#8A94A6">('+pj+' j · '+String(pr).replace('.',',')+' %)</span>','± '+eurK(ann))+
-      rijB(e(L3('Besparing per jaar','Économie par an','Savings per year')),'± '+eurK(bespB))+
+      rijB(e(L3('Besparing per jaar','Économie par an','Savings per year'))+' <span style="color:#8A94A6">('+e(L3('na sturingskost','après frais de pilotage','after control cost'))+')</span>','± '+eurK(bespB))+
       rijB(e(L3('Besparing dekt de aflossing','L’économie couvre le remboursement','Savings cover the repayment')),(dek>=100?'✔ ':'')+dek+' %',dek>=100?'#05803C':'#B45309')):'';
     var bank=tile('🏦 '+e(L3('Bankdossier','Dossier bancaire','Bank file')),
       '<div style="font-size:12.5px;color:#5A6577;margin-bottom:4px">'+e(L3('Lening, aflossing en kasstroom per jaar — in drie scenario\'s.','Prêt, remboursement et flux de trésorerie par an — trois scénarios.','Loan, repayment and cash flow per year — three scenarios.'))+'</div>'+bankCijfers+
