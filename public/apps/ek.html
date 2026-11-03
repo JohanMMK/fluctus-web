@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.179.1 (2026-11-03, Johan): AFTREK op de netto-investering (zoals het energierapport: Demets € 23.700 i.p.v. € 24.360) + VANGNET bij een TRAAG ladend dossier — zolang het dossier nog geladen wordt (ophalen loopt nog), rekent of bewaart «Toon mijn resultaat» niets (vroeger: standaardinvoer 3,5 MWh / 8 kW kon het dossier overschrijven als de server traag antwoordde). -->
 <!-- ek.html v0.179.0 (2026-11-03, Johan): KERNCIJFERS + CONTROLE. (1) _ekKern(c) = één set cijfers per combinatie (besparing, terugverdientijd, rendement, netto-investering, gemiddelde over 15 jaar, PV+batterij-deel, aftrek, bank). Antwoordkaart, Pas aan-tegels, A4 en bank lezen enkel nog die set; het energierapport krijgt ze mee (kern_ek) en vergelijkt. (2) Controlebalk (enkel oekene, niet in klantweergave): rood als schermen onderling of met de kerncijfers verschillen, als een prijs/palen van een andere combinatie actief is, of als een eigen «Pas aan»-prijs sterk afwijkt van de standaardprijs. -->
 <!-- ek.html v0.178.0 (2026-11-03, Johan): COHERENTIE (Transport Demets). (1) Pas aan toonde de prijs van een eerder gekozen eigen combi (PRIJS_FACTOR/INV_OV/opex bleven hangen na het kiezen van een standaardcel: € 158.658 naast TVT 2,7 j van de standaardcel) → _ekCustomCtx zet bij een standaardcel alles terug. (2) Bankcijfers op één plek (_ekBankCijfers): besparing = jaar 1 uit het plan NA sturingskost (zoals energierapport en «Je profiel verdient meer»), incl. domme pieken bij «laden met verzwaring»; A4 én tab Dossiers gebruiken dezelfde cijfers. -->
 <!-- ek.html v0.177.3 (2026-11-03, Johan): BENAMING — de twee netposten heten «capaciteitstarief» (maandpiek) en «vergoeding voor het toegangsvermogen». De A4 krijgt beide bedragen van de onbeheerste referentie apart (plan.onb_cap / plan.onb_tv). -->
@@ -2055,7 +2056,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   // v0.92.0 (Johan 17-10): geschat voordeel verhoogde investeringsaftrek (25 % VenB × 40 % × investering PV+batterij) — v0.109.0: in jaar 1 (cash) —
   //   ENKEL voor bedrijven en enkel als de toets op de voorzichtige basis gunstig is (alle / enkel KO). Particulier: nooit.
-  function _ekAftrekV(a, inv){ try{ if(_ekIsPart() || !(inv>0) || typeof window._ekAftrekToets!=='function') return 0; var T=window._ekAftrekToets(a); return (T && (T.status==='alle'||T.status==='klein')) ? Math.round(inv*0.4*0.25) : 0; }catch(x){ return 0; } }
+  function _ekAftrekV(a, inv){ try{ if(_ekIsPart() || !(inv>0) || typeof window._ekAftrekToets!=='function') return 0; var T=window._ekAftrekToets(a); return (T && (T.status==='alle'||T.status==='klein')) ? Math.round((+T.voordeel>0)?+T.voordeel:inv*0.4*0.25) : 0;   /* v0.179.1: voordeel op de netto-investering (na vermeden verzwaring), zoals het energierapport */ }catch(x){ return 0; } }
   function _aftrekBump(cf, v){ if(!(v>0) || !cf || !cf.rows || !cf.rows.length) return cf; cf.rows[0].s+=v;   /* v0.109.0 (Johan 21-10): cash in jaar 1 */ var c=0; for(var i=0;i<cf.rows.length;i++){ c+=cf.rows[i].s; cf.rows[i].cum=c; } cf.som+=v; return cf; }
   function _battValue(a, vgl){
     if(!a) return null;
@@ -3469,6 +3470,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   async function toonRapport(){
     if(window._EK_LAAD_FOUT){ try{ window._ekLaadFoutToon(); }catch(eG){} return; }   // v0.174.0: dossier niet geladen → niets rekenen of bewaren
+    if(window._EK_LAAD_BEZIG){ try{ var _bs=$('btn-start'); if(_bs){ var _bo=_bs.textContent; _bs.textContent='⏳ Je dossier wordt nog geladen…'; setTimeout(function(){ _bs.textContent=_bo; }, 3000); } }catch(eLb){} return; }   // v0.179.1: nog aan het laden → niets rekenen of bewaren
     // v0.23: al doorgerekend met exact deze invoer? → toon meteen het bestaande resultaat (geen herberekening).
     try{ var _sig0=_inputSig(); if(_sig0===LAST_SIG && HM){ $('intake').classList.add('hidden'); $('dash').classList.remove('hidden'); try{_advOverlay(false);}catch(e){} window.scrollTo({top:0,behavior:'smooth'}); return; } }catch(e){}
     // v0.148.3 (Johan 31-10): VANGNET — ACOM-IB verloor bij herladen soms zijn 22 personenwagens (automatische doorrekening met 0
@@ -4123,8 +4125,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       TOKEN=tk;
       // v0.142.0 (Johan 30-10): eerst vaststellen wie er aangemeld is (incl. aanmelden via de mailknop), dan het dossier ophalen MET aanmelding;
       //   server ≥ 15.374.0 met EK_CASE_LOGIN aan → 401/403 = aanmeldscherm (e-mail + 6-cijfercode).
+      window._EK_LAAD_BEZIG=true;   // v0.179.1: dossier wordt geladen → nog niets rekenen of bewaren
       _ekGateKlaar().then(function(){ return window._ekGateHdr(); }).then(function(h){ return fetch(API+'/api/inbound-case/'+encodeURIComponent(tk)+'?src='+(PREWARM?'prewarm':'ek')+'&_='+Date.now(),{cache:'no-store', headers:h}); })
       .then(function(r){ if(r.status===401||r.status===403){ return r.json().catch(function(){ return {}; }).then(function(e){ try{ window._ekCaseLogin(r.status, e||{}); }catch(eL){} return null; }); } if(!r.ok && r.status!==404){ try{ window._ekLaadFoutZet(r.status); }catch(eLf){} return null; } return r.ok?r.json():null; }, function(eNet){ try{ window._ekLaadFoutZet('net'); }catch(eLf){} return null; }).then(function(j){
+        window._EK_LAAD_BEZIG=false;   // v0.179.1
         if(!j||!j.ok) return;
         try{ window._EK_LAAD_FOUT=null; window._EK_LAAD_OK=true; }catch(eLo){}   // v0.174.0
         try{ if(j.demo && window._ekDemo) window._ekDemo.init(j); else if(window._ekDemo && window._ekDemo.initKlant) window._ekDemo.initKlant(j); }catch(eDm){}
