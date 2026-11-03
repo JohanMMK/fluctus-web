@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.104.0 (2026-11-03, Johan): FINANCIËLE PLANNEN UIT EK — het financieel plan (PV + batterij en volledig project), het onbalans-scenario, het voorzichtig plan, de aftrektoets, het bankdossier en de energiestudie nemen de jaar-per-jaar-rijen, investering, besparing en kosten over uit kern_ek.plannen. Geen passend EK-plan → eigen berekening; de controle meldt dat. -->
 <!-- klantrapport.html v0.103.0 (2026-11-03, Johan): CONTROLE T.O.V. DE KERNCIJFERS VAN EK — EK geeft kern_ek mee (besparing, terugverdientijd, rendement, netto-investering, PV+batterij-deel, aftrek). Is kern_ek.controle aan (oekene, niet in klantweergave), dan toont het rapport bovenaan een kader (scherm, nooit in print/PDF): rood met elk cijfer dat afwijkt, anders groen «cijfers gelijk aan EK». -->
 <!-- klantrapport.html v0.102.0 (2026-11-03, Johan): «Je investering in twee beslissingen» — geen «eenvoudige terugverdientijd» (investering ÷ besparing, Demets ± 7,3 j) meer naast het plan (6,2 j): de terugverdientijd van het PV/batterij-deel komt uit het financieel plan (stijgende netkosten, sturingskost, investeringsaftrek). -->
 <!-- klantrapport.html v0.101.2 (2026-11-03, Johan): benaming netposten — bij de onbeheerste pieken apart «capaciteitstarief» (maandpiek) en «vergoeding voor het toegangsvermogen». -->
@@ -791,6 +792,19 @@ function _bespPctTot(){ var v=_vandaagTot(); return v>0?(_bespTot()/v*100):0; }
 function _variaPvb(){ var TB=(D.financieel&&D.financieel.twee_beslissingen)||{}; return Math.max(0,+((TB.pvbatterij||{}).varia_eur)||0); }
 function _variaLaden(){ var TB=(D.financieel&&D.financieel.twee_beslissingen)||{}; return Math.max(0,+((TB.elektrificatie||{}).varia_eur)||0); }
 function _capLaden(){ var TB=(D.financieel&&D.financieel.twee_beslissingen)||null, E=(TB&&TB.elektrificatie)||{}; return Math.max(0,+E.subtotaal_eur||0); }
+// v0.104.0 (Johan 03-11): FINANCIËLE PLANNEN UIT EK — EK geeft per combinatie de plannen jaar per jaar mee (kern_ek.plannen: PV + batterij
+//   en het volledige project). Komen combinatie en vergelijking overeen, dan neemt het rapport die rijen, investering, besparing en kosten
+//   over en rekent het niet meer zelf; enkel de investeringsaftrek (jaar 1) en, voor het onbalans-scenario, het verschil in jaarbesparing
+//   (geïndexeerd met de inflatie) komen erbij. Geen (passend) EK-plan → de eigen berekening zoals vroeger; de controle meldt dat aan oekene.
+var _KR_BRON={ ek:0, zelf:0, reden:'' };
+function _krEkPlan(mL){ try{
+  var K=D.kern_ek; if(!K || !K.plannen){ _KR_BRON.reden='geen plannen van EK meegekregen'; return null; }
+  if(_GEN){ _KR_BRON.reden='dieselgenerator: rapport rekent zelf'; return null; }
+  var c=D.combi||{}, kc=K.combi||{}, af=function(a,b){ a=+a||0; b=+b||0; return Math.abs(a-b)>Math.max(1.5, Math.abs(b)*0.02); };
+  if(af(c.pv_kwp,kc.pv) || af(c.batt_kw,kc.kw) || af(c.batt_kwh,kc.kwh)){ _KR_BRON.reden='combinatie rapport ('+Math.round(+c.pv_kwp||0)+' kWp · '+Math.round(+c.batt_kw||0)+'/'+Math.round(+c.batt_kwh||0)+') ≠ EK ('+kc.pv+' kWp · '+kc.kw+'/'+kc.kwh+')'; return null; }
+  if((K.vgl==='verzwaring')!==!!KR_VGL_VERZW){ _KR_BRON.reden='vergelijking rapport ≠ EK'; return null; }
+  var P=mL?K.plannen.project:K.plannen.pvb; if(!P || !Array.isArray(P.rows) || !P.rows.length){ _KR_BRON.reden=mL?'EK heeft geen plan met laadpalen voor deze combinatie':'EK-plan PV + batterij ontbreekt'; return null; }
+  return P; }catch(e){ _KR_BRON.reden='fout: '+(e&&e.message); return null; } }
 var _PLAN_L=null, _PLAN_B=null;
 try{ _PLAN_B=financieelPagina(null,null,null,null,true)||null; }catch(e){ _PLAN_B=null; }
 // v0.47.0 (Johan): plan MET laadpalen ook bij een betalend laadplein (plaza-marge + investering laadplein).
@@ -2111,12 +2125,28 @@ function financieelPagina(energieOverride, titelArg, extraNote, optLaden, dry){ 
     if(tvt===null && cum>=0) tvt=(t-1)+(prev<0?(-prev/b):0);
     rows.push({ jaar:t, besparing:b, cumulatief:cum, omzet:omzetT, kostE:kostET, aftrek:aftT });
   }
+  // v0.104.0: plannen uit EK (zie _krEkPlan). Niet voor het hypothetische Voltmasters-plan (energieOverride ≠ onbalans).
+  var _EKP=null, _F2o=D.factuur||{}, _bOnb=(+_F2o.besparing_onbalans_jaar)||0;
+  if(energieOverride==null || (_bOnb>0 && +energieOverride===_bOnb)) _EKP=_krEkPlan(_mL);
+  if(_EKP){
+    var _rL=rows, _e0=energie, _dE=(energieOverride!=null)?((+energieOverride)-(+_EKP.energie||0)):0;
+    netInv=+_EKP.netInv||0; _capL=+_EKP.capL||0; invBruto=(+_EKP.invBruto||0); invPvB=invBruto-_capL; verzw=+_EKP.verzw||0;
+    energie=(+_EKP.energie||0)+_dE; _opexTot=+_EKP.opex||0; _sturingskost=Math.min(_opexTot, +_EKP.stur||0); opexJ=Math.max(0,_opexTot-_sturingskost); laadS0=+_EKP.laadses||0;
+    var _iE=(_EKP.infl!=null?+_EKP.infl:((D.kern_ek.plannen.infl!=null)?+D.kern_ek.plannen.infl:infl*100))/100;
+    rows=[]; cum=-netInv; tvt=null; som=0; HOR=_EKP.rows.length;
+    for(var tE=1;tE<=HOR;tE++){ var aftE=(tE===1 && !IS_PART && (+_AFTREK_V||0)>0)?(+_AFTREK_V):0;
+      var bE=(+_EKP.rows[tE-1]||0) + _dE*Math.pow(1+_iE,tE-1) + aftE; som+=bE; var pvE=cum; cum+=bE;
+      if(tvt===null && cum>=0) tvt=(tE-1)+(pvE<0&&bE>0?(-pvE/bE):0);
+      var rl=_rL[tE-1]||{}; rows.push({ jaar:tE, besparing:bE, cumulatief:cum, omzet:+rl.omzet||0, kostE:+rl.kostE||0, aftrek:aftE }); }
+    besp1=Math.max(0,(+_EKP.rows[0]||0)+_dE);
+    _KR_BRON.ek++;
+  } else if(energieOverride==null) _KR_BRON.zelf++;
   var meerwaarde=som-netInv;
   var roi15=netInv>0?(meerwaarde/netInv*100):0;
   var rendGem=netInv>0?(som/HOR/netInv*100):0;
   // v0.16.0 (Johan, Fase 2): bewaar de KPI's van het BASISplan (spot-sturing, geen override) op moduleniveau, zodat de
   //   kwaliteitscontrole-bijlage EXACT dezelfde cijfers scoort als het financieel plan (coherentie by construction).
-  if(dry) return { tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, invBruto:invBruto, laadS0:laadS0, energie:energie, opex:_opexTot, capL:_capL, rows:rows };   // v0.53.0: rows voor het bankdossier
+  if(dry) return { tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, invBruto:invBruto, laadS0:laadS0, energie:energie, opex:_opexTot, capL:_capL, rows:rows, bron:(_EKP?'ek':'rapport') };   // v0.53.0: rows voor het bankdossier
   if(energieOverride==null && !_mL){ _FINKPI={ tvt:tvt, meerwaarde:meerwaarde, roi15:roi15, rendGem:rendGem, besp1:besp1, netInv:netInv, horizon:HOR }; }
 
   var h=hoofdstuk(titelArg||'Financieel plan over 15 jaar');
@@ -4416,6 +4446,11 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
   var pctV=function(lbl,a,b){ if(a==null||b==null||!isFinite(+a)||!isFinite(+b)) return; if(Math.abs(a-b)>1.5) L.push(lbl+': rapport '+Math.round(a)+' % · EK '+Math.round(b)+' %'); };
   if(R){ eurV('Besparing per jaar (kernblok)', R.besp, KE.besp); tvtV('Terugverdientijd (kernblok)', R.tvt, KE.tvt); eurV('Netto-investering (kernblok)', R.inv, KE.inv); pctV('Rendement (kernblok)', R.rend, KE.rend); }
   if(PB && KE.pvb){ eurV('PV + batterij · netto-investering', PB.netInv, KE.pvb.inv); eurV('PV + batterij · besparing jaar 1 na sturingskost', PB.besp1, KE.pvb.besp_na); tvtV('PV + batterij · terugverdientijd', PB.tvt, KE.pvb.tvt); }
+  if(KE.plannen){ var _PL=(typeof _PLAN_L!=='undefined')?_PLAN_L:null;
+    if(PB && PB.bron!=='ek') L.push('Plan PV + batterij rekent zelf i.p.v. het EK-plan'+(_KR_BRON.reden?(' ('+_KR_BRON.reden+')'):'')+'.');
+    if(_PL && _PL.bron!=='ek') L.push('Plan met laadpalen rekent zelf i.p.v. het EK-plan'+(_KR_BRON.reden?(' ('+_KR_BRON.reden+')'):'')+'.');
+    if(!_PL && KE.plannen.project) L.push('EK heeft een plan met laadpalen, het rapport toont het niet.');
+  }
   if((AV>0)!==(+KE.aftrek>0)) L.push('Investeringsaftrek: rapport '+(AV>0?eu(AV):'niet meegerekend')+' · EK '+(+KE.aftrek>0?eu(KE.aftrek):'niet meegerekend'));
   else if(AV>0) eurV('Investeringsaftrek', AV, KE.aftrek);
   var st=document.createElement('style'); st.textContent='@media print{#kr-ctl{display:none!important}}'; document.head.appendChild(st);
@@ -4423,7 +4458,7 @@ var _BANK_CSS='table.f td.neg{color:#b91c1c} .bk-in{display:flex;gap:10px;flex-w
   var ok=!L.length;
   b.setAttribute('style','position:fixed;right:12px;bottom:12px;max-width:460px;z-index:99999;border-radius:10px;padding:9px 12px;font:12.5px/1.45 -apple-system,Segoe UI,Arial,sans-serif;box-shadow:0 6px 22px rgba(0,0,0,.18);'+(ok?'background:#ECFDF5;border:2px solid #059669;color:#065F46':'background:#FEF2F2;border:2px solid #DC2626;color:#7F1D1D'));
   var es=function(x){ return String(x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
-  b.innerHTML='<div style="display:flex;justify-content:space-between;gap:10px;font-weight:800">'+(ok?'✓ Cijfers gelijk aan EK':'⚠ Rapport wijkt af van EK')+'<span style="cursor:pointer;font-weight:400" onclick="this.parentNode.parentNode.style.display=\'none\'">✕</span></div>'+
+  b.innerHTML='<div style="display:flex;justify-content:space-between;gap:10px;font-weight:800">'+(ok?('✓ Cijfers gelijk aan EK'+((_KR_BRON.ek>0&&!_KR_BRON.zelf)?' · plannen uit EK':'')):'⚠ Rapport wijkt af van EK')+'<span style="cursor:pointer;font-weight:400" onclick="this.parentNode.parentNode.style.display=\'none\'">✕</span></div>'+
     (ok?'':'<ul style="margin:4px 0 0;padding-left:18px">'+L.map(function(t){ return '<li>'+es(t)+'</li>'; }).join('')+'</ul>')+
     '<div style="margin-top:3px;font-size:11px;opacity:.8">Enkel zichtbaar voor jou (oekene) · niet in print of PDF.</div>';
   document.body.appendChild(b);
