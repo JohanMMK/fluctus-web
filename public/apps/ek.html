@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.184.0 (2026-11-04, Johan): (1) LENING OP HET HELE PROJECT — bankcijfers (tab Dossiers, A4, kern_ek.bank) lenen bij een plan met laadpalen op PV + batterij + laadpalen/aansluiting, besparing jaar 1 van het hele plan; (2) aftrektoets gebruikt dezelfde besparing en exploitatiekost als het plan (één bron met energierapport/studie); (3) offerte-cel: totale capex = offerteprijzen.
+-->
 <!-- ek.html v0.183.3 (2026-11-04, Johan): hero hertekent als de exacte cel klaar is (handtekening + exact/piek/maximumtarief/tv). v0.183.2: + hero/A4 gebruiken de exacte cel zodra die klaar is (Demets: A4 zonder netpiek). Tegel «Investeringsaftrek» toont «niet van toepassing» (en maakt geen studie) als de aftrektoets «niet»/«nvt» geeft — Microtherm (TVT < 3 j), Kiemkracht (enkel laadpalen: VEKA-sjabloon gaf een foutmelding).
 -->
 <!-- ek.html v0.183.1 (2026-11-04, Johan): FIX — exact doorgerekende cellen (dubbelklik, auto-exact, eigen combi, offerte) nemen tv_opt (verlaagd toegangsvermogen) en het maximumtarief van de server over; vielen weg → A4/rapport/hero misten de verlaging.
@@ -2731,8 +2733,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var opex=Math.max(0,+bv.opex_jaar||0), infl=(+NET_CFG.inflatie_pct||0)/100, b1=(+bv.bespJaar1||0)-opex;
     var pj=_ekIsPart()?10:7, pr=_ekIsPart()?3.5:4.5, ii=pr/100, ann=inv*ii/(1-Math.pow(1+ii,-pj));
     var rows=(bv.cfB||[]).slice(0,pj).map(function(s,t){ return (+s||0)-opex*Math.pow(1+infl,t); }), gem=rows.length?(rows.reduce(function(x,y){ return x+y; },0)/rows.length):b1;
+    // v0.184.0 (Johan 04-11): DE LENING STAAT OP HET HELE PROJECT — bij een plan met laadpalen: investering = zonnepanelen + batterij
+    //   + laadpalen/aansluiting (bruto), besparing jaar 1 = die van het hele plan (incl. laadsessies) na exploitatie — zoals het
+    //   voorzichtig scenario van het bankdossier (klantrapport ≥ 0.109.0).
+    var proj=false; try{ var _v=(vgl==='verzwaring'||vgl==='elders')?vgl:EK_VGL, pl=(_v==='verzwaring')?_planVerzwCel(c):_planLadenCelRaw(c);
+      if(pl && +pl.capL>0 && +pl.besp>0){ proj=true; inv=inv+(+pl.capL||0); opex=Math.max(0,+pl.opex||0); b1=(+pl.besp||0)-opex; ann=inv*ii/(1-Math.pow(1+ii,-pj)); gem=b1; } }catch(ePl){}
     if(!(b1>0)) return null;
-    return { inv:Math.round(inv), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(b1), besp_gem:Math.round(gem), opex:Math.round(opex), dek:ann>0?Math.round(b1/ann*100):null, dek_gem:ann>0?Math.round(gem/ann*100):null }; }
+    return { inv:Math.round(inv), ann:Math.round(ann), jaren:pj, rente:pr, besp:Math.round(b1), besp_gem:Math.round(gem), opex:Math.round(opex), dek:ann>0?Math.round(b1/ann*100):null, dek_gem:ann>0?Math.round(gem/ann*100):null, project:proj }; }
   window._ekBankCijfers=_ekBankCijfers;
   // v0.179.0 (Johan 03-11): KERNCIJFERS — één bron per combinatie (en per vergelijking). Alles wat besparing/terugverdientijd/
   //   rendement/investering toont, leest dit; het energierapport krijgt het mee (kern_ek) en meldt verschillen aan oekene.
@@ -2756,6 +2763,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         return { pvb:pvb, project:pr, infl:(+NET_CFG.inflatie_pct||0) }; })(),
       combi:{ pv:Math.round(_anchorKwp(c)||0), kw:Math.round(+c.battKw||0), kwh:Math.round(+c.battKwh||0), custom:!!c._custom, offerte:!!(c._offerte||c._offId) } }; }
   window._ekKern=_ekKern;
+  window._battValue=_battValue;   // v0.184.0: voor de aftrektoets (één bron)
   // v0.183.0 (Johan 04-11): MAXIMUMTARIEF — hoeveel maanden de netkost aan het plafond per MWh zit (jaarfactuur van de cel, server ≥ 15.395.0;
   //   anders de maanden waarin de sturing ermee rekende). > 0 → overal vermelden (hero, A4, rapport, profiel): een lagere piek levert dan weinig op.
   window._ekMtMaanden=function(c){ try{ if(!c) return 0; var a=(c.mt&&+c.mt.maanden)||0, b=+c.mt_maanden||0; return Math.max(a,b); }catch(e){ return 0; } };
@@ -5918,7 +5926,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return _post('/api/energiekompas/bedrijf-cel', body).then(function(j){
       if(!(j&&j.ok&&j.cel)) return null;
       var c=j.cel, besp=(HM&&HM.refKost!=null)?(HM.refKost-c.kost):null, bespNet=(HM&&HM.refNetk!=null&&c.netk!=null)?(HM.refNetk-c.netk):null;
-      return { _offerte:true, _exact:true, pvKwp:c.pvKwp, battKw:c.battKw, battKwh:c.battKwh, kost:c.kost, capex:c.capex,
+      return { _offerte:true, _exact:true, pvKwp:c.pvKwp, battKw:c.battKw, battKwh:c.battKwh, kost:c.kost, capex:((pr.prijsPvBatt>0||pr.prijsLp>0)?Math.round((+pr.prijsPvBatt||+c.capex_pvbatt||0)+(+pr.prijsLp||+c.capex_laadpalen||0)):c.capex),   // v0.184.0: totale capex = offerteprijzen (Schreurs: was de standaardprijs € 313k i.p.v. € 522.849)
         capex_pvbatt:(pr.prijsPvBatt>0?pr.prijsPvBatt:(c.capex_pvbatt!=null?+c.capex_pvbatt:null)),   // offerteprijs = investering PV+batterij
         capex_laadpalen:(pr.prijsLp>0?pr.prijsLp:(c.capex_laadpalen!=null?+c.capex_laadpalen:null)), ref_kost:(HM?HM.refKost:null),
         besparing:(besp!=null?Math.round(besp):null), besp_net:(bespNet!=null?Math.round(bespNet):null), cycli:(c.cycli!=null?+c.cycli:null),
@@ -8850,7 +8858,9 @@ window._ekAmb=(function(){
       var _vgC=window._EK_VGL_CUR||undefined;   // v0.177.2
       // v0.182.0 (Johan 04-11): BRUTO investering (zoals bankdossier, energiestudie en VEKA-sjabloon) en dezelfde exploitatiekost als het plan
       try{ opex+=(OPEX_RATIO>0)?(OPEX_RATIO*inv):((cel._custom&&cel._opex!=null)?(+cel._opex||0):(+OPEX_JAAR||0)); }catch(eOx){}
-      try{ var _oR=(typeof _onbRefV==='function')?_onbRefV(_vgC):null; if(_oR) bruto+=Math.max(0,+_oR.extra_cap_jaar||0); }catch(eV){}   // v0.177.1: domme pieken (laden met verzwaring)
+      var _bvT=null; try{ _bvT=window._battValue?window._battValue(cel,_vgC):null; }catch(eBv){ _bvT=null; }
+      if(_bvT && +_bvT.energie>0){ bruto=+_bvT.energie; opex=Math.max(0,+_bvT.opex_jaar||0); }   // v0.184.0 (Johan 04-11): ÉÉN BRON — dezelfde besparing en exploitatiekost als het plan dat het energierapport en de studie krijgen (Deca: A4 5,5 % ↔ studie 5,0 %)
+      else { try{ var _oR=(typeof _onbRefV==='function')?_onbRefV(_vgC):null; if(_oR) bruto+=Math.max(0,+_oR.extra_cap_jaar||0); }catch(eV){} }   // v0.177.1: domme pieken (laden met verzwaring)
       if(!(inv>0)) return { status:'nvt' };
       var ck=Math.round(inv)+'|'+Math.round(bruto)+'|'+Math.round(opex); if(_AC[ck]) return _AC[ck];   // memo (rooster roept dit vaak op)
       var rij=[]; for(var t=1;t<=10;t++) rij.push(bruto*1.00*Math.pow(0.98,t-1)-opex);   // v0.182.0: realisatie 100 % (zoals klantrapport ≥ 0.89.0)

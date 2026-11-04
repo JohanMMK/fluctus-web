@@ -5,6 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.109.0 (2026-11-04, Johan): LENING OP HET HELE PROJECT — ook het voorzichtig bankscenario leent op het hoofdplan (incl. laadpalen) en telt dan de laadbesparing mee; zelfde cijfers als EK/A4 (ek ≥ 0.184.0).
+-->
 <!-- klantrapport.html v0.108.0 (2026-11-04, Johan): MAXIMUMTARIEF telkens het een rol speelt — «Ons advies» punt 1 ook zonder batterij en als het enkel zonder installatie bindt; «(maximumtarief meegerekend)» bij het toegangsvermogen (factuur.mt_opt/mt_nul, server ≥ 15.395.0).
 -->
 <!-- klantrapport.html v0.107.3 (2026-11-04, Johan): kernblok-besparing = EK-besparing als het plan uit EK komt (Schreurs 40.718 ↔ 54.223).
@@ -839,10 +841,10 @@ var _PLAN_HOOFD=_PLAN_L||_PLAN_B;   // het plan dat voorblad + advies tonen
    geen besparing t.o.v. elders laden (laadsessies naar het bedrijf) en geen marge van een betalend laadplein; exploitatiekost
    (sturing, onderhoud) jaarlijks in mindering. Levensduur 10 jaar (standaard VEKA-sjabloon). */
 var KR_VOORZICHTIG={ realisatie:1.00, degradatie:0.02, levensduur:10 };   // v0.89.0 (Johan 30-10): realisatie 85 % → 100 % (bank + investeringsaftrek); veroudering, geen prijsstijging/onbalans/laadsessies/plaza-marge, opex en 10 jaar blijven
-function _voorzichtigePlan(A, jaren){
+function _voorzichtigePlan(A, jaren, metLaad){   // v0.109.0: metLaad = laadsessies meetellen (bankdossier op het hele project)
   if(!A) return null;
   var R=KR_VOORZICHTIG.realisatie, g=KR_VOORZICHTIG.degradatie, n=Math.max(1,Math.round(jaren||KR_VOORZICHTIG.levensduur));
-  var opex=Math.max(0,+A.opex||0), bruto=Math.max(0,(+A.besp1||0)+opex-(+A.laadS0||0)), inv=+A.netInv||0;
+  var opex=Math.max(0,+A.opex||0), bruto=Math.max(0,(+A.besp1||0)+opex-(metLaad?0:(+A.laadS0||0))), inv=+A.netInv||0;
   var rows=[], cum=-inv, tvt=null, som=0;
   for(var t=1;t<=n;t++){ var b=bruto*R*Math.pow(1-g,t-1)-opex; som+=b; var prev=cum; cum+=b; if(tvt===null&&cum>=0) tvt=(t-1)+(prev<0&&b>0?(-prev/b):0); rows.push({ jaar:t, besparing:b, cumulatief:cum }); }
   return { rows:rows, besp1:rows[0].besparing, bruto1:bruto, opex:opex, netInv:inv, som:som, tvt:tvt, rendGem:inv>0?(som/n/inv*100):null, n:n, realisatie:R, degradatie:g };
@@ -3953,8 +3955,12 @@ function _bankScenarios(){
   if(_PLAN_HOOFD) S.push({ k:'basis', naam:'Basisscenario', sub:'alles uit het rapport, zonder onbalans-opbrengst'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:_bankBruto(_PLAN_HOOFD), netInv:+_PLAN_HOOFD.netInv||0, rows:_PLAN_HOOFD.rows||[] });
   var onb=(+F2.onbalans_extra_jaar)||0, bespOnb=(+F2.besparing_onbalans_jaar)||0;
   if(!IS_PART && onb>0 && bespOnb>0){ try{ var G=financieelPagina(bespOnb,null,null,_optLadenPlan(),true); if(G) S.push({ k:'gunstig', naam:'Gunstig scenario', sub:'basisscenario mét onbalans-opbrengst (potentieel, in samenspraak met je leverancier)'+(_AFTREK_V>0?', incl. geschatte investeringsaftrek':''), inv:_bankBruto(G), netInv:+G.netInv||0, rows:G.rows||[] }); }catch(e){} }
-  var V=_voorzichtigePlan(_PLAN_B, KR_VOORZICHTIG.levensduur);
-  if(V) S.push({ k:'voorzichtig', naam:'Voorzichtig scenario', sub:'rekenregels van de verhoogde investeringsaftrek (zonder het belastingvoordeel zelf)', inv:_bankBruto(_PLAN_B)||(+V.netInv||0), netInv:+V.netInv||0, rows:V.rows||[] });
+  // v0.109.0 (Johan 04-11): DE LENING STAAT OP HET HELE PROJECT — ook het voorzichtig scenario leent op het hoofdplan (incl. laadpalen
+  //   en aansluiting) en telt dan ook de besparing van die laadpalen mee (laadsessies, plaza-marge). Verder dezelfde voorzichtige
+  //   rekenregels (100 %, −2 %/jaar, geen prijsstijging, geen onbalans, geen aftrek). Zonder laadplan = zonnepanelen + batterij (ongewijzigd).
+  var _VH=_PLAN_HOOFD||_PLAN_B, _VL=!!(_PLAN_L && _VH===_PLAN_L);
+  var V=_voorzichtigePlan(_VH, KR_VOORZICHTIG.levensduur, _VL);
+  if(V) S.push({ k:'voorzichtig', naam:'Voorzichtig scenario', sub:(_VL?'hele project (incl. laadpalen), voorzichtige rekenregels: veroudering, geen prijsstijging, geen onbalans, zonder belastingvoordeel':'rekenregels van de verhoogde investeringsaftrek (zonder het belastingvoordeel zelf)'), inv:_bankBruto(_VH)||(+V.netInv||0), netInv:+V.netInv||0, rows:V.rows||[] });
   return S;
 }
 function _bankReken(sc, par){
