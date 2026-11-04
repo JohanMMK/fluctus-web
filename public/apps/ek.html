@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
-<!-- ek.html v0.185.1 (2026-11-04, Johan): FIX — de bewaarde keuze werd niet hersteld als haar rij een «Pas aan»-rij is die pas na het rooster verschijnt (GIAX 100/200, ACOM 125/261): EK gaf meteen op en toonde ons advies. Nu blijft EK ± 80 s proberen.
+<!-- ek.html v0.185.2 (2026-11-04, Johan): + wacht ook tot de CEL van die rij bestaat (ACOM: rij 125/261 was er na 6 s, de cel nog niet → keuze viel terug op ons advies). v0.185.1: FIX — de bewaarde keuze werd niet hersteld als haar rij een «Pas aan»-rij is die pas na het rooster verschijnt (GIAX 100/200, ACOM 125/261): EK gaf meteen op en toonde ons advies. Nu blijft EK ± 80 s proberen.
 -->
 <!-- ek.html v0.185.0 (2026-11-04, Johan): (1) VELD JAARKOST WEG — geen invoer «Wat betaal je per jaar voor stroom?» meer en nooit meer ingevuld (factuur, demo, link, dossier); de huidige kost volgt uit het factuurtarief (onderhandel) × verbruik, zoals al bij een leeg veld. (2) STUKKEN OPENEN — tab Dossiers toont «📎 Stukken in dit dossier»: de factuur en elk opgeladen offertebestand; in de tab Offertes staat bij elke offerte «📄 Originele offerte» (server ≥ 15.396.0). Oudere dossiers zonder verwijzing naar de factuur: de server zoekt ze terug in de bucket (GET /api/ek/factuur-zoek, server ≥ 15.397.0). «Bekijk je factuur» opent het venster meteen (geen pop-upblokker). (3) Banktegel: «Investering hele project (incl. laadpalen)» als de lening op het hele project staat.
 -->
@@ -8665,11 +8665,14 @@ window._ekAmb=(function(){
     if(window._EK_OFF_KEUZE && !force){ H._kzOk=true; return false; }
     var ry=null; try{ var kk=_ekBattKey(k.batt_kw,k.batt_kwh); if(H.rows.indexOf(kk)>=0) ry=kk; }catch(x){}
     if(ry==null && H.rows.indexOf(+k.ry)>=0) ry=+k.ry;
-    if(ry==null){ H._kzN=(H._kzN||0)+1; if(H._kzN>=90) H._kzOk=true; return false; }   // v0.185.1 (Johan 04-11): een «Pas aan»-rij komt pas na het rooster → blijven proberen (± 80 s) i.p.v. meteen opgeven (GIAX 100/200, ACOM 125/261)
-    H._kzOk=true;
+    var nog=function(){ H._kzN=(H._kzN||0)+1; if(H._kzN>=90) H._kzOk=true; return false; };   // v0.185.1/.2 (Johan 04-11): een «Pas aan»-rij/-cel komt pas na het rooster → blijven proberen (± 80 s) i.p.v. meteen opgeven (GIAX 100/200, ACOM 125/261)
+    if(ry==null) return nog();
     var want=(k.cx!=null?+k.cx:(+k.pv_kwp||0)), cx=H.cols[0], bd=Infinity; H.cols.forEach(function(c){ if(want>0 && !(c>0)) return; var d=Math.abs(c-want); if(d<bd){ bd=d; cx=c; } });   // v0.142.2
-    if(H.sel && String(H.sel._ry)===String(ry) && H.sel._cx===cx) return false;
-    try{ _hmKiesDbl(ry,cx); }catch(x){ try{ _hmKies(ry,cx); }catch(y){} } return true;
+    if(H.sel && String(H.sel._ry)===String(ry) && H.sel._cx===cx){ H._kzOk=true; return false; }
+    var cel=null; try{ cel=_cellAt(H,ry,cx); }catch(xc){} if(!cel) return nog();   // v0.185.2: de rij bestaat al, de cel nog niet
+    try{ _hmKiesDbl(ry,cx); }catch(x){ try{ _hmKies(ry,cx); }catch(y){} }
+    if(H.sel && String(H.sel._ry)===String(ry)) H._kzOk=true; else return nog();
+    return true;
   }
   async function kzVastleggen(){
     var S2=selectie(), c=S2.cel, st=el('rapport-status'); if(!c) return; var tk=''; try{ tk=TOKEN||''; }catch(x){}
