@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.183.2 (2026-11-04, Johan): + hero/A4 gebruiken de exacte cel zodra die klaar is (Demets: A4 zonder netpiek). Tegel «Investeringsaftrek» toont «niet van toepassing» (en maakt geen studie) als de aftrektoets «niet»/«nvt» geeft — Microtherm (TVT < 3 j), Kiemkracht (enkel laadpalen: VEKA-sjabloon gaf een foutmelding).
+-->
 <!-- ek.html v0.183.1 (2026-11-04, Johan): FIX — exact doorgerekende cellen (dubbelklik, auto-exact, eigen combi, offerte) nemen tv_opt (verlaagd toegangsvermogen) en het maximumtarief van de server over; vielen weg → A4/rapport/hero misten de verlaging.
 -->
 <!-- ek.html v0.183.0 (2026-11-04, Johan): MAXIMUMTARIEF telkens het een rol speelt — hero-chip «⚖ Maximumtarief: … maanden aan het plafond», «maximumtarief meegerekend» bij het toegangsvermogen, A4-data keuze.mt (server ≥ 15.395.0: cel.mt).
@@ -2859,7 +2861,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   window._ekA4Data=function(){
     var H=(typeof HM!=='undefined')?HM:null; if(!H || !H.real) return null;
     // v0.168.0: exact de combinatie van de antwoordkaart (geen herberekening of hertekening van het scherm)
+    try{ if(window._ekHeroVers) window._ekHeroVers(); }catch(eHv){}   // v0.183.2
     var hl=window._EK_HERO_LAST||{}, S=hl.sel||(window._ekSelectie?window._ekSelectie():null), c=hl.c||(S&&S.cel)||H.sel||H.best; if(!c) return null;
+    try{ if(c._interp && !c._exact && H.sel && H.sel._exact && String(H.sel._ry)===String(c._ry) && +H.sel._cx===+c._cx) c=H.sel; }catch(eEx){}   // v0.183.2: exacte cel van hetzelfde vakje
     if(hl.c!==c) hl={};
     var M=HM_METRICS, nv=function(id){ var x=$(id); var v=x?parseFloat(String(x.value||'').replace(',','.')):NaN; return isFinite(v)?v:null; };
     var maand=['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'], nu=new Date();
@@ -5519,6 +5523,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         res(ex); });
     }catch(e){ res(c); } }); };
   window._ekExactSel=async function(){ try{ var S=window._ekSelectie?window._ekSelectie():null; return await window._ekExactCel(S&&S.cel); }catch(e){ return null; } };
+  // v0.183.2: verouderde hero — toont nog de geschatte cel terwijl de exacte (zelfde vakje) al klaarstaat (Demets: keuze → A4 zonder netpiek/maximumtarief)
+  window._ekHeroVers=function(){ try{ var hl=window._EK_HERO_LAST, hs=(typeof HM!=='undefined'&&HM)?HM.sel:null; if(hl&&hl.c&&hs&&hl.c!==hs&&hl.c._interp&&!hl.c._exact&&hs._exact&&String(hl.c._ry)===String(hs._ry)&&+hl.c._cx===+hs._cx){ renderRapport(hs); _hmDetail(hs); return true; } }catch(e){} return false; };
+  setInterval(function(){ try{ window._ekHeroVers(); }catch(eHv){} }, 2000);
   setInterval(function(){ try{ if(typeof HM==='undefined' || !HM || !HM.compute) return; var S=window._ekSelectie?window._ekSelectie():null, c=S&&S.cel;
       if(!c || !(c._interp && !c._exact) || c._offerte || c._custom) return; var k=c._ry+'|'+c._cx; if(window.__ekExBezig) return;
       window.__ekExBezig=k; window._ekExactCel(c).then(function(){ window.__ekExBezig=null; }, function(){ window.__ekExBezig=null; }); }catch(e){} }, 2000);
@@ -5646,7 +5653,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var L2=[];   // v0.172.0: tweede lijn — gekozen offerte, bank, aftrek horen bij elkaar
     L2.push({ soort:'off', id:'ek-doc-off', dim:!offId, titel:_L3d('Gekozen offerte','Offre choisie','Chosen quote'), sub:offId?(offN||_L3d('rapport van de offerte','rapport de l’offre','quote report')):_L3d('kies eerst een offerte','choisissez d’abord une offre','choose a quote first') });
     L2.push({ soort:'bank', id:'ek-doc-bank', slot:!open, dim:!open&&!oek, titel:_L3d('Bankrapport','Rapport bancaire','Bank report'), sub:open?_L3d('lening en kasstroom','prêt et trésorerie','loan and cash flow'):slotSub });
-    if(!isP) L2.push({ soort:'aftrek', id:'ek-doc-aftrek', slot:!open, dim:!open&&!oek, titel:_L3d('Investeringsaftrek','Déduction pour investissement','Investment deduction'), sub:open?_L3d('energiestudie + VEKA-sjabloon','étude énergétique + modèle VEKA','energy study + VEKA template'):slotSub });
+    var _afNvt=false; try{ var _afT=(window._ekAftrekToets&&SEL&&SEL.cel)?window._ekAftrekToets(SEL.cel):null; _afNvt=!!(_afT&&(_afT.status==='niet'||_afT.status==='nvt')); }catch(eAf){}   // v0.183.2: aftrek niet van toepassing (bv. terugverdiend < 3 jaar, enkel laadpalen)
+    window._EK_AFTREK_NVT=_afNvt;
+    if(!isP && _afNvt) L2.push({ soort:'aftrek', id:'ek-doc-aftrek', dim:true, titel:_L3d('Investeringsaftrek','Déduction pour investissement','Investment deduction'), sub:_L3d('niet van toepassing','non applicable','not applicable') });
+    else if(!isP) L2.push({ soort:'aftrek', id:'ek-doc-aftrek', slot:!open, dim:!open&&!oek, titel:_L3d('Investeringsaftrek','Déduction pour investissement','Investment deduction'), sub:open?_L3d('energiestudie + VEKA-sjabloon','étude énergétique + modèle VEKA','energy study + VEKA template'):slotSub });
     window._EK_DOC_OFF=offId;
     return '<div class="ek-docs" style="margin:12px 0 10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">'+_L3d('Je documenten','Vos documents','Your documents')+'</div>'+ECI.tegels(L,{klein:true})+ECI.tegels(L2,{klein:true, style:'margin-top:12px'})+'</div>';
   }catch(e){ return ''; } };
@@ -5744,7 +5754,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     bind('ek-doc-off', function(){ var id=window._EK_DOC_OFF; if(!id){ try{ window._ekOffToon(); }catch(e){} return; }
       try{ (window.toonKlantrapport||toonKlantrapport)(window._ekOffOpt(id)); }catch(e){} });
     bind('ek-doc-bank', function(){ window.toonBankdossier(); });
-    bind('ek-doc-aftrek', function(){ window.toonEnergiestudie(); });
+    bind('ek-doc-aftrek', function(){ if(window._EK_AFTREK_NVT){ var st=$('rapport-status'); if(st){ st.style.color='var(--muted)'; st.textContent='De verhoogde investeringsaftrek is hier niet van toepassing (bv. terugverdiend in minder dan 3 jaar, of geen zonnepanelen of batterij). Daarom is er geen energiestudie.'; } return; } window.toonEnergiestudie(); });   // v0.183.2
   };
   // v0.133.0 (Johan 30-10): opties van de GEKOZEN offerte (bevestigd in blok 2, anders de laatst aanvaarde) voor bank/studie; null = geen offerte
   function _ekOffVoorDossier(soort){ try{
