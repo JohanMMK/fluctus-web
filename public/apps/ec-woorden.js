@@ -1,4 +1,4 @@
-/* ec-woorden.js v1.0.0 (2026-11-04, Johan): WOORDENLIJST + (i)-UITLEG — gedeeld door het energierapport, EK en «Je profiel verdient meer».
+/* ec-woorden.js v1.0.1 (2026-11-04, Johan; 1.0.1: (i) pas NA het hele woord, niet midden in «terugverdiend»): WOORDENLIJST + (i)-UITLEG — gedeeld door het energierapport, EK en «Je profiel verdient meer».
    ECW.markeer(root)  → zet bij het EERSTE voorkomen van elke vakterm een klein (i)-knopje (enkel op het scherm, nooit in print/PDF);
                          een klik opent een venster met de uitleg in eenvoudige taal.
    ECW.gebruikt(root) → de vaktermen die in de tekst voorkomen (voor de woordenlijst achteraan).
@@ -59,7 +59,7 @@
     var tw=document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), nodes=[], x; while((x=tw.nextNode())) nodes.push(x);
     nodes.forEach(function(tn){ if(!tn.nodeValue || tn.nodeValue.length<3) return; var p=tn.parentNode; if(!p || magNiet(p)) return;
       for(var i=0;i<W.length;i++){ var w=W[i]; if(gedaan[w.k]) continue; var m=w.re.exec(tn.nodeValue); if(!m) continue;
-        var eind=m.index+m[0].length, rest=tn.splitText(eind);
+        var eind=m.index+m[0].length; eind+=(tn.nodeValue.slice(eind).match(/^[A-Za-z\u00C0-\u017F\-]*/)||[''])[0].length; var rest=tn.splitText(eind);
         var b=document.createElement('button'); b.type='button'; b.className='ecw-i noprint'; b.setAttribute('data-ecw',w.k); b.setAttribute('aria-label','Uitleg: '+w.t); b.title='Wat is '+w.t+'?'; b.textContent='i';
         b.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); open(this.getAttribute('data-ecw')); };
         p.insertBefore(b, rest); gedaan[w.k]=1; n++; break; } });
