@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.187.1 (2026-11-05, Johan): (1) ZIP-energierapport volgt de vastgelegde keuze/offerte (niet meer altijd ons advies); (2) EK haalt voor de gekozen combinatie zelf de rapport-besparing op na het laden (rooster, Pas aan en tab Dossiers = rapport, ook na herladen); (3) Pas aan: KPI heet «Netto-investering» met (i). -->
 <!-- ek.html v0.187.0 (2026-11-05, Johan): A4 krijgt keuze.km100 (eigen vloot met laadpalen: €/100 km rechts in de antwoordkaart) en keuze.cf (cumulatieve kasstroom van het plan, zelfde als het energierapport) voor de terugverdiengrafiek in blok 5. -->
 <!-- ek.html v0.186.1 (2026-11-05, Johan): FIX «Met onbalans» (tab Sturing, A4) toonde dezelfde besparing als zonder onbalans zodra de rapport-besparing gekend was — nu rapport + onbalans-extra. -->
 <!-- ek.html v0.186.0 (2026-11-05, Johan): COHERENTIE ACOM → ALLE DOSSIERS. (1) ÉÉN SIMULATIE: is het rapport van een combinatie (en vergelijking) gedraaid, dan is zijn factuurvergelijking (nul − opt) de besparing van die cel in rooster, antwoordkaart, A4, bank, kern_ek en profiel (_ekRapBesp); A4, profiel en mail halen die eerst op. Ook de €/100 km komt dan uit het rapport (laadplein.meerkost_na / km). (2) CAPEX PER VERGELIJKINGSBASIS: «laden met verzwaring» = netto na vermeden verzwaring, terugverdientijd enkel PV + batterij; «laden elders» = geen vermeden verzwaring (zonder project geen laden op de site), investering = hele project. Fix: het plan «elders» telde laadpalen + verzwaring vóór i.p.v. na (vergelijkblok ACOM € 85k). _ekCapex(c) = één toelichting ((i) + venster) bij antwoordkaart, rooster, tab Dossiers, A4 (*) en energierapport/profiel (kern_ek.capex). (3) LENING ALTIJD OP HET HELE PROJECT (PV + batterij + laadpalen + verzwaring na), ook bij «verzwaring». (4) Kleinere teksten: maximumtarief «in die maanden», kVA van de verzwaring op dezelfde basis als het bedrag (onbeheerste piek), rooster-KPI «Investering PV+batterij, bruto», «verbruik + laden · t.o.v. <vergelijking>». -->
@@ -3483,7 +3484,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     $('inv-foot').textContent='Richtprijzen — geen tracé getekend. Overige = kabel naar de aansluiting + ontkoppelbord + toebehoren. De exacte kostprijs volgt uit de studie op je echte meetgegevens.';
     // v0.19 (Johan): batterijwaarde over 15 jaar (escalerende netkosten). TVT/rendement op de netto-investering (na vermeden verzwaring).
     var _KNp=null; try{ _KNp=window._ekKern?window._ekKern(a):null; }catch(xKp){ _KNp=null; }   // v0.179.0: zelfde kerncijfers als de antwoordkaart
-    if(_KNp){ tvtKpi=_KNp.tvt; _rendCell=(_KNp.rend!=null?Math.round(_KNp.rend):null); try{ var _uC=$('pay-cap-all')&&$('pay-cap-all').parentNode.querySelector('.u'); if(_uC) _uC.textContent=(_KNp.plan==='project')?'netto · PV + batterij + laadpalen':'netto · PV + batterij'; }catch(xU){} }
+    if(_KNp){ tvtKpi=_KNp.tvt; _rendCell=(_KNp.rend!=null?Math.round(_KNp.rend):null); try{ var _uC=$('pay-cap-all')&&$('pay-cap-all').parentNode.querySelector('.u'); if(_uC) _uC.textContent=(_KNp.plan==='project')?'netto · PV + batterij + laadpalen':'netto · PV + batterij';
+      var _kC=$('pay-cap-all').parentNode.querySelector('.k'); if(_kC){ var _cxP=_ekCapex(a); _kC.innerHTML=(_KNp.plan==='project'?'Investering hele project':'Netto-investering')+((_cxP&&window.ECW&&ECW.noot)?ECW.noot('ek-capex-p',_cxP.titel,_cxP.tekst):''); } }catch(xU){} }   // v0.187.1: geen tweede «Totale investering» (stond onder «Totale investering (indicatief) € 85.489»)
     if($('pay-cap-all')) $('pay-cap-all').textContent = _KNp ? eur(_KNp.inv) : eur(invTot + Math.max(0,+(a&&a.verzwaring_eenmalig)||0));   // v0.107.0: + aansluiting die mét installatie nog nodig is (= blok 2 en rapport)
     if($('pay-tvt-all')) $('pay-tvt-all').textContent = (tvtKpi!=null?(String(tvtKpi).replace('.',',')+' j'):'> 15 j');   // v0.61.0: plan mét laadpalen + laadsessies
     if($('pay-rend-all')) $('pay-rend-all').textContent = (_rendCell!=null?(_rendCell+'%'):'—');
@@ -5649,6 +5651,18 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   setInterval(function(){ try{ if(typeof HM==='undefined' || !HM || !HM.compute) return; var S=window._ekSelectie?window._ekSelectie():null, c=S&&S.cel;
       if(!c || !(c._interp && !c._exact) || c._offerte || c._custom) return; var k=c._ry+'|'+c._cx; if(window.__ekExBezig) return;
       window.__ekExBezig=k; window._ekExactCel(c).then(function(){ window.__ekExBezig=null; }, function(){ window.__ekExBezig=null; }); }catch(e){} }, 2000);
+  // v0.187.1 (Johan 05-11): ÉÉN SIMULATIE OOK NA HERLADEN — haal voor de gekozen combinatie (de cel van de antwoordkaart) eenmaal de
+  //   rapport-besparing op (± 15–30 s, op de achtergrond, enkel adviseur/oekene en zichtbaar tabblad). Daarna tonen rooster, antwoordkaart,
+  //   Pas aan en tab Dossiers dezelfde cijfers als het rapport (ACOM: 23.291 / 22.791 na herladen ↔ 23.356 / 22.856 in de documenten).
+  var _ekRapAutoGedaan={};
+  setInterval(function(){ try{
+    if(document.visibilityState!=='visible' || !window._RAP_PAYLOAD || typeof HM==='undefined' || !HM) return;
+    if(!((typeof EK_IS_OEKENE!=='undefined'&&EK_IS_OEKENE)||(typeof EK_IS_ADV!=='undefined'&&EK_IS_ADV)||(typeof EK_PREPADV!=='undefined'&&EK_PREPADV))) return;
+    var c=_ekStuCel(); if(!c || (c._interp && !c._exact) || c._offerte || c._offId) return;
+    if(_ekRapBesp(c)) return;
+    var k=_ekOnbKey(_anchorKwp(c),c.battKw,c.battKwh)+'|'+EK_VGL, P=window._RAP_PAYLOAD; if(_ekRapAutoGedaan[k]===P) return; _ekRapAutoGedaan[k]=P;
+    _ekOnbHaal(c).then(function(){ try{ if(_ekRapBesp(c) && HM){ renderRapport(HM.sel||c); _hmDetail(HM.sel||c); renderHeatmap(); } }catch(eR){} });
+  }catch(e){} }, 3000);
   async function toonKlantrapport(opt){
     opt=(opt&&opt.sel)?opt:null; var _zip=!!(opt&&opt.zip); if(!_zip && !(opt&&opt.offerte)) window._EK_RAP_GEZIEN=true;   // v0.99.0: kompas fase 2   // v0.94.0: zip → geen tabblad, geeft de rapport-URL terug (ZIP per project)   // v0.83.0: {sel, body, offerte, st} = rapport voor een opgeladen offerte
     try{ if(window._ekVersieCheck) window._ekVersieCheck(true); }catch(eV){}   // v0.41.2: versiewacht (balk bij nieuwere versie)
@@ -5713,7 +5727,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var naam=(String(($('i-klant')||{}).value||'').trim()||String(STATE_CODE||'').trim()||(window._ekMerkNaam?window._ekMerkNaam():'Energie-Compas')).replace(/[\\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
     var a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0];
     var _l=(window.EC_LANG==='fr'||window.EC_LANG==='en')?window.EC_LANG:'nl', T3=function(nl,fr,en){ return _l==='fr'?fr:(_l==='en'?en:nl); };   // FR/EN: geen VEKA/Fluvius in bestandsnamen
-    var jobs=[{ titel:T3('Energierapport','Rapport énergétique','Energy report'), opt:{ sel:((HM&&HM.best)||sel) } }], noot='', BN=function(t,e){ return window._ekBestand(t,e); };   // v0.175.0   // v0.169.0: energierapport = ons advies (zoals de tegel)
+    // v0.187.1 (Johan 05-11): het energierapport in de ZIP volgt de VASTGELEGDE keuze of offerte (ACOM: zip toonde ons advies 125/250, A4/bank de keuze 125/261)
+    var _zOpt={ sel:((HM&&HM.best)||sel) }; try{ var _zS=window._ekSelectie?window._ekSelectie():null; if(_zS && (_zS.modus==='keuze'||_zS.modus==='offerte')){ var _zr=_ekRapSel(); if(_zr && _zr.sel) _zOpt=Object.assign({}, _zr); } }catch(eZs){}
+    var jobs=[{ titel:T3('Energierapport','Rapport énergétique','Energy report'), opt:_zOpt }], noot='', BN=function(t,e){ return window._ekBestand(t,e); };   // v0.175.0   // v0.169.0: energierapport = ons advies (zoals de tegel)
     if(a){ var inst=String((a.data&&a.data.installateur)||a.naam||'offerte').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40), oR=window._ekOffOpt&&window._ekOffOpt(a.id,'');
       if(!oR){ meld('Even geduld, de aanvaarde offerte wordt nog doorgerekend — probeer zo opnieuw.'); return; }
       jobs.push({ titel:T3('Offerterapport-','Rapport-offre-','Quote-report-')+inst, opt:oR });
