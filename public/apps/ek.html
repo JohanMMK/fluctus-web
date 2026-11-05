@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.186.1 (2026-11-05, Johan): FIX «Met onbalans» (tab Sturing, A4) toonde dezelfde besparing als zonder onbalans zodra de rapport-besparing gekend was — nu rapport + onbalans-extra. -->
 <!-- ek.html v0.186.0 (2026-11-05, Johan): COHERENTIE ACOM → ALLE DOSSIERS. (1) ÉÉN SIMULATIE: is het rapport van een combinatie (en vergelijking) gedraaid, dan is zijn factuurvergelijking (nul − opt) de besparing van die cel in rooster, antwoordkaart, A4, bank, kern_ek en profiel (_ekRapBesp); A4, profiel en mail halen die eerst op. Ook de €/100 km komt dan uit het rapport (laadplein.meerkost_na / km). (2) CAPEX PER VERGELIJKINGSBASIS: «laden met verzwaring» = netto na vermeden verzwaring, terugverdientijd enkel PV + batterij; «laden elders» = geen vermeden verzwaring (zonder project geen laden op de site), investering = hele project. Fix: het plan «elders» telde laadpalen + verzwaring vóór i.p.v. na (vergelijkblok ACOM € 85k). _ekCapex(c) = één toelichting ((i) + venster) bij antwoordkaart, rooster, tab Dossiers, A4 (*) en energierapport/profiel (kern_ek.capex). (3) LENING ALTIJD OP HET HELE PROJECT (PV + batterij + laadpalen + verzwaring na), ook bij «verzwaring». (4) Kleinere teksten: maximumtarief «in die maanden», kVA van de verzwaring op dezelfde basis als het bedrag (onbeheerste piek), rooster-KPI «Investering PV+batterij, bruto», «verbruik + laden · t.o.v. <vergelijking>». -->
 <!-- ek.html v0.185.3 (2026-11-04, Johan): FIX «Bekijk je factuur» deed niets — een wrapper uit 0.185.0 overschreef de globale functie en riep zichzelf eindeloos op (stack overflow). Mijn fout, nu weg.
 -->
@@ -2760,6 +2761,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekRapBesp(a, vgl){ try{ if(!a) return null; var M=_ekRapBespMap(); if(!M) return null; var v=vgl||EK_VGL;
     var vz=(v==='verzwaring');   // body.vgl_laden = 'verzwaring' bij die vergelijking (_ekVglBody)
     var r=M[_ekRapBespKey(Math.round(_anchorKwp(a)||0), Math.round(+a.battKw||0), Math.round(+a.battKwh||0), vz, !!(a._offerte||a._offId))];
+    if(r && isFinite(+r.besp) && +a._plusExtra>0) return { besp:(+r.besp)+(+a._plusExtra), net:r.net, onb:r.onb, km100:null, diesel100:r.diesel100, ts:r.ts };   // v0.186.1: «met onbalans» = rapport + onbalans-extra (was: extra viel weg)
     return (r && isFinite(+r.besp)) ? r : null; }catch(e){ return null; } }
   window._ekRapBesp=_ekRapBesp;
   // v0.163.0: dezelfde combinatie als de antwoordkaart (ons advies = de exacte adviescel; keuze; offerte)
@@ -2925,7 +2927,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       +'<div class="sb-s">'+L('Slim in- en verkopen op de spotmarkt (day-ahead en intraday), meer eigen verbruik en lagere pieken. Dit zijn de cijfers van je keuze.','Achat et vente intelligents sur le marché spot (day-ahead et intraday), plus d’autoconsommation et des pointes plus basses. Ce sont les chiffres de votre choix.','Smart buying and selling on the spot market (day-ahead and intraday), more self-consumption and lower peaks. These are the figures of your choice.')+'</div></div>';
     var t2;
     if(kwh<=0){ t2='<div class="sb-t"><div class="sb-l">'+L('Met onbalans','Avec déséquilibre','With imbalance')+'</div><div class="sb-s">'+L('Zonder batterij is er geen extra uit de onbalans.','Sans batterie, le déséquilibre ne rapporte rien de plus.','Without a battery, imbalance adds nothing.')+'</div></div>'; }
-    else if(o && o.extra!=null){ var a2=Object.assign({}, a, { besparing:(+a.besparing||0)+o.extra }), b1=M.besparing.val(a2), t1b=M.tvt.val(a2);
+    else if(o && o.extra!=null){ var a2=Object.assign({}, a, { besparing:(+a.besparing||0)+o.extra, _plusExtra:o.extra }), b1=M.besparing.val(a2), t1b=M.tvt.val(a2);
       t2='<div class="sb-t on"><div class="sb-l">'+L('Met onbalans','Avec déséquilibre','With imbalance')+'</div><div class="sb-v">'+eur(b1)+' <small>'+L('per jaar','par an','per year')+'</small></div><div class="sb-tvt">'+jr(t1b)+'</div>'
         +'<div class="sb-s">+ '+eur(o.extra)+L(' per jaar door je batterij ook passief mee te laten sturen op het onbalanssignaal van het net (netto, na heffingen en de vergoeding van je leverancier).',' par an en laissant aussi votre batterie suivre passivement le signal de déséquilibre du réseau (net, après taxes et frais du fournisseur).',' per year by letting your battery also follow the grid imbalance signal passively (net, after levies and your supplier’s fee).')+'</div></div>'; }
     else if(o && o.fout){ t2='<div class="sb-t"><div class="sb-l">'+L('Met onbalans','Avec déséquilibre','With imbalance')+'</div><div class="sb-s">'+L('De berekening lukte niet. ','Le calcul a échoué. ','The calculation failed. ')+'<a href="#" onclick="window._ekOnbOpnieuw();return false;">'+L('Opnieuw proberen','Réessayer','Try again')+'</a></div></div>'; }
@@ -2982,7 +2984,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // sturing (zelfde cel), uit de cache
     var St=null; try{ if(bespN!=null){ St={ zonder:{ besp:Math.round(bespN), tvt:(tvtN!=null&&tvtN<99)?M.tvt.fmt(tvtN):'' }, met:null };
       var pv=Math.round(_anchorKwp(c)||0), mm=_ekOnbMap()||{}, o=mm[_ekOnbKey(pv,c.battKw,c.battKwh)];
-      if(o && o.extra!=null){ var a2=Object.assign({}, c, { besparing:(+c.besparing||0)+o.extra }), b1=M.besparing.val(a2), t1=M.tvt.val(a2); St.met={ besp:Math.round(b1), tvt:(t1!=null&&t1<99)?M.tvt.fmt(t1):'', extra:o.extra }; } } }catch(e){}
+      if(o && o.extra!=null){ var a2=Object.assign({}, c, { besparing:(+c.besparing||0)+o.extra, _plusExtra:o.extra }), b1=M.besparing.val(a2), t1=M.tvt.val(a2); St.met={ besp:Math.round(b1), tvt:(t1!=null&&t1<99)?M.tvt.fmt(t1):'', extra:o.extra }; } } }catch(e){}
     // bank + aftrek (zelfde regels als het tipje in Bankdossier)
     // v0.177.0 (Johan 02-11): bank uit het MEERJARENMODEL (zelfde besparing als het plan: netkosten op het netpad + 2029-verdubbeling;
     //   bij «laden met verzwaring» incl. de vermeden domme pieken) — dekking jaar 1 én gemiddeld over de looptijd van de lening.
