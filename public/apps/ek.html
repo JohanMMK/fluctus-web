@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.188.0 (2026-11-05, Johan): ZIP «Alles voor dit project» = analyse op één A4 + energierapport (keuze) + offerterapport(en) + bankdossier + energiestudie met VEKA-sjabloon; alle PDF's op de SERVER gemaakt (POST /api/ek/doc-pdf en /api/ek/a4-mail alleen_pdf, server ≥ 15.400.0) → zelfde opmaak als de afzonderlijke documenten. Zonder aanvaarde offerte: bank en studie op advies-niveau (enkel oekene, zoals de losse knoppen). Terugval op de browser-opbouw als de server faalt. -->
 <!-- ek.html v0.187.1 (2026-11-05, Johan): (1) ZIP-energierapport volgt de vastgelegde keuze/offerte (niet meer altijd ons advies); (2) EK haalt voor de gekozen combinatie zelf de rapport-besparing op na het laden (rooster, Pas aan en tab Dossiers = rapport, ook na herladen); (3) Pas aan: KPI heet «Netto-investering» met (i). -->
 <!-- ek.html v0.187.0 (2026-11-05, Johan): A4 krijgt keuze.km100 (eigen vloot met laadpalen: €/100 km rechts in de antwoordkaart) en keuze.cf (cumulatieve kasstroom van het plan, zelfde als het energierapport) voor de terugverdiengrafiek in blok 5. -->
 <!-- ek.html v0.186.1 (2026-11-05, Johan): FIX «Met onbalans» (tab Sturing, A4) toonde dezelfde besparing als zonder onbalans zodra de rapport-besparing gekend was — nu rapport + onbalans-extra. -->
@@ -5664,7 +5665,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     _ekOnbHaal(c).then(function(){ try{ if(_ekRapBesp(c) && HM){ renderRapport(HM.sel||c); _hmDetail(HM.sel||c); renderHeatmap(); } }catch(eR){} });
   }catch(e){} }, 3000);
   async function toonKlantrapport(opt){
-    opt=(opt&&opt.sel)?opt:null; var _zip=!!(opt&&opt.zip); if(!_zip && !(opt&&opt.offerte)) window._EK_RAP_GEZIEN=true;   // v0.99.0: kompas fase 2   // v0.94.0: zip → geen tabblad, geeft de rapport-URL terug (ZIP per project)   // v0.83.0: {sel, body, offerte, st} = rapport voor een opgeladen offerte
+    opt=(opt&&opt.sel)?opt:null; var _zip=!!(opt&&(opt.zip||opt.serverPdf));   // v0.188.0: serverPdf → payload + parameters voor de server-PDF (ZIP) if(!_zip && !(opt&&opt.offerte)) window._EK_RAP_GEZIEN=true;   // v0.99.0: kompas fase 2   // v0.94.0: zip → geen tabblad, geeft de rapport-URL terug (ZIP per project)   // v0.83.0: {sel, body, offerte, st} = rapport voor een opgeladen offerte
     try{ if(window._ekVersieCheck) window._ekVersieCheck(true); }catch(eV){}   // v0.41.2: versiewacht (balk bij nieuwere versie)
     var st=$((opt&&opt.st)||'rapport-status');
     if(!window._RAP_PAYLOAD){ if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
@@ -5693,6 +5694,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       // v0.33.1 (Johan): cache-bust op de rapport-URL → de browser laadt ALTIJD de verse klantrapport.html (anders bleef een
       //   oude gecachte versie hangen: €9-diesel i.p.v. vlootgewogen, en geen "twee beslissingen"-hoofdstuk).
       var _kru='/apps/klantrapport.html?v=0330-'+Date.now()+'&rid='+_rid+((opt&&opt.bank)?'&mode=bank':((opt&&opt.studie)?'&mode=studie'+(opt.grootte?'&grootte='+encodeURIComponent(opt.grootte):'')+(opt.afschrijving?'&afschrijving='+(+opt.afschrijving===3?3:5):''):''))+((window.EC_LANG==='fr'||window.EC_LANG==='en')?'&lang='+window.EC_LANG:'');   // v0.42.0/v0.44.0: rapporttaal volgt de EK-taal
+      if(opt && opt.serverPdf){ var _qs=String(_kru.split('&rid='+_rid)[1]||''); return { payload:_po, qs:_qs }; }   // v0.188.0
       if(_zip) return _kru+'&zip=1';
       if(win && !win.closed){ try{ win.location.href=_kru; }catch(eL){ win=null; } }
       try{ _ekRapportBekeken({ pv_kwp:body.pv_kwp, batt_kw:body.batt_kw, batt_kwh:body.batt_kwh, lang:(window.EC_LANG||'nl'), offerte:(opt&&opt.offerte)?(opt.offerte.installateur||'offerte'):undefined }); }catch(eB){}   // v0.43.0: rapport bekeken → profieldata-knop kan verschijnen · v0.44.0: + combi in de projectlog
@@ -5739,16 +5741,40 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     } else { noot=' Bankdossier en dossier verhoogde investeringsaftrek komen erbij zodra de offerte opgeladen en bevestigd is als verkocht.';
       try{ var _gk=window._EK_OFF_KEUZE, _go=_gk?(window._EK_OFF||[]).filter(function(o){ return o&&o.id===_gk&&o.bevestigd; })[0]:null, _gr=_go&&window._ekOffOpt?window._ekOffOpt(_go.id,''):null;   // v0.169.0: gekozen (nog niet aanvaarde) offerte
         if(_gr) jobs.push({ titel:T3('Offerterapport-','Rapport-offre-','Quote-report-')+String((_go.data&&_go.data.installateur)||'offerte').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40), opt:_gr }); }catch(eGk){} }
+    // v0.188.0 (Johan 05-11): ALLES IN ÉÉN ZIP — ook de analyse op één A4, en (oekene, advies-niveau) bankdossier + energiestudie met het
+    //   VEKA-sjabloon voor de vastgelegde keuze als er nog geen aanvaarde offerte is. Alle PDF's komen van de SERVER (zelfde engine en opmaak als
+    //   de mail-PDF en de afzonderlijke documenten); lukt dat niet, dan valt EK terug op de oude opbouw in de browser.
+    var _oekZ=false; try{ _oekZ=!!EK_IS_OEKENE; }catch(xo){}
+    if(!a && _oekZ){ var _kt2=(document.querySelector('input[name=ktype]:checked')||{}).value||'';
+      var _bO=_ekOffVoorDossier('bank')||Object.assign({}, _zOpt, { bank:true, studie:false }); jobs.push({ titel:T3('Bankdossier','Dossier-bancaire','Bank-file'), opt:_bO });
+      var _T2=null; try{ _T2=window._ekAftrekToets?window._ekAftrekToets(_zOpt.sel):null; }catch(eT2){}
+      if(_kt2!=='particulier' && _T2 && (_T2.status==='alle'||_T2.status==='klein')){ var _sO=_ekOffVoorDossier('studie')||Object.assign({}, _zOpt, { studie:true, bank:false }); jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:_sO, xlsx:true }); }
+      noot=''; }
+    var _isPartZ=false; try{ _isPartZ=_ekIsPart(); }catch(xp){}
+    if(!_isPartZ) jobs.unshift({ titel:T3('Analyse-A4','Analyse-A4','Analysis-A4'), a4:true });
     var _klaar=window._ekBtnBezig(btn, 'Download wordt voorbereid…'); meld('⏳ Download wordt voorbereid…');
+    var _b64Blob=function(b64, type){ var bin=atob(b64), n=bin.length, u8=new Uint8Array(n); for(var q=0;q<n;q++) u8[q]=bin.charCodeAt(q); return new Blob([u8],{ type:type }); };
+    var _srv=async function(path, body){ var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{}); var r=await fetch(API+path,{ method:'POST', headers:hd, body:JSON.stringify(body) }); var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('HTTP '+r.status)); return j; };
     try{
-      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam);
+      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam), _fout=[];
+      try{ await window._ekExactSel(); }catch(eEx){}
       for(var i=0;i<jobs.length;i++){ var J=jobs[i];
-        meld('⏳ '+(i+1)+'/'+jobs.length+' — '+J.titel+' wordt opgebouwd… (dit kan even duren)');
-        var url=await toonKlantrapport(Object.assign({}, J.opt, { zip:true })); if(!url) throw new Error(J.titel+' opbouwen lukte niet');
-        var R=await _ekZipFrame(url);
-        map.file(BN(J.titel,'pdf'), R.pdf);
-        if(J.xlsx && R.xlsx) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx);
+        meld('⏳ '+(i+1)+'/'+jobs.length+' — '+J.titel+' wordt opgebouwd op de server… (± 20–40 s per document)');
+        if(J.a4){ try{ var c4=_ekStuCel(); if(c4){ try{ await _ekOnbHaal(c4); }catch(eO4){} var D4=window._ekA4Data(); if(D4){ D4.foto=_ekA4Foto(); try{ delete D4.meta; }catch(eM){}
+              var j4=await _srv('/api/ek/a4-mail', { token:TOKEN, data:D4, alleen_pdf:true }); map.file(BN(J.titel,'pdf'), _b64Blob(j4.pdf_b64,'application/pdf')); } } }
+            catch(eA4){ _fout.push(J.titel+' ('+(eA4.message||eA4)+')'); } continue; }
+        var gedaan=false;
+        try{ var PQ=await toonKlantrapport(Object.assign({}, J.opt, { serverPdf:true })); if(!PQ||!PQ.payload) throw new Error('geen rapportgegevens');
+          var jr=await _srv('/api/ek/doc-pdf', { token:TOKEN, payload:PQ.payload, qs:PQ.qs });
+          map.file(BN(J.titel,'pdf'), _b64Blob(jr.pdf_b64,'application/pdf'));
+          if(J.xlsx && jr.xlsx_b64) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), _b64Blob(jr.xlsx_b64,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
+          gedaan=true; }catch(eS){ console.warn('[zip] server-PDF faalde, terugval in de browser:', eS); }
+        if(!gedaan){ var url=await toonKlantrapport(Object.assign({}, J.opt, { zip:true })); if(!url) throw new Error(J.titel+' opbouwen lukte niet');
+          var R=await _ekZipFrame(url);
+          map.file(BN(J.titel,'pdf'), R.pdf);
+          if(J.xlsx && R.xlsx) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx); }
       }
+      if(_fout.length) noot+=' Niet gelukt: '+_fout.join(', ')+'.';
       meld('⏳ ZIP wordt gemaakt…');
       var blob=await z.generateAsync({ type:'blob', compression:'DEFLATE' });
       var l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download=naam+'.zip'; document.body.appendChild(l); l.click(); setTimeout(function(){ URL.revokeObjectURL(l.href); l.remove(); }, 4000);
