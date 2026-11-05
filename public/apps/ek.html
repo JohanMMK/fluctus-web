@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.188.1 (2026-11-05): ZIP wacht tot de vastgelegde keuze hersteld is (één combinatie voor alle documenten); A4 neemt besparing, terugverdientijd, investering en rendement uit de kerncijfers (niet uit een nog niet hertekende antwoordkaart). -->
 <!-- ek.html v0.188.0 (2026-11-05, Johan): ZIP «Alles voor dit project» = analyse op één A4 + energierapport (keuze) + offerterapport(en) + bankdossier + energiestudie met VEKA-sjabloon; alle PDF's op de SERVER gemaakt (POST /api/ek/doc-pdf en /api/ek/a4-mail alleen_pdf, server ≥ 15.400.0) → zelfde opmaak als de afzonderlijke documenten. Zonder aanvaarde offerte: bank en studie op advies-niveau (enkel oekene, zoals de losse knoppen). Terugval op de browser-opbouw als de server faalt. -->
 <!-- ek.html v0.187.1 (2026-11-05, Johan): (1) ZIP-energierapport volgt de vastgelegde keuze/offerte (niet meer altijd ons advies); (2) EK haalt voor de gekozen combinatie zelf de rapport-besparing op na het laden (rooster, Pas aan en tab Dossiers = rapport, ook na herladen); (3) Pas aan: KPI heet «Netto-investering» met (i). -->
 <!-- ek.html v0.187.0 (2026-11-05, Johan): A4 krijgt keuze.km100 (eigen vloot met laadpalen: €/100 km rechts in de antwoordkaart) en keuze.cf (cumulatieve kasstroom van het plan, zelfde als het energierapport) voor de terugverdiengrafiek in blok 5. -->
@@ -2982,7 +2983,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       PLk={ jaren:Math.max(1,Math.round(+NET_CFG.horizon_jaar||15)), inflatie:+NET_CFG.inflatie_pct||0, net_extra:+NET_CFG.net_extra_pct||0, dubbel_jaar:+NET_CFG.net_dubbel_jaar||0, dubbel_factor:+NET_CFG.net_dubbel_factor||1,
         gem:(_g!=null&&isFinite(_g))?Math.round(_g):null, onb_extra:_bvk?(+_bvk.onb_extra||0):0, onb_piek:_bvk?(+_bvk.onb_piek||0):0 };
       var _oA=_onbRefV(); if(_oA && PLk.onb_extra>0){ PLk.onb_cap=Math.round(+_oA.extra_maandpiek_jaar||0); PLk.onb_tv=Math.round(+_oA.extra_toegang_jaar||0); } }catch(eP){ PLk=null; }   // v0.177.3: capaciteitstarief + vergoeding toegangsvermogen apart
-    var K={ titel:titelK, besp:hl.besp||(bespN!=null?_fmtEurK(bespN):''), tvt:hl.tvt||(tvtN!=null&&tvtN<99?M.tvt.fmt(tvtN):''), inv:hl.inv||'', inv_incl:!!(hl.pl&&hl.pl.netInv>0), rend:hl.rend||'', tegels:(hl.tegels||[]), vgl:(window._ekVglTxt?window._ekVglTxt(c):''),   /* v0.171.0 */
+    // v0.188.1: besparing/terugverdientijd/rendement altijd vers uit de kerncijfers (de antwoordkaart kan nog de roostercijfers tonen tot ze hertekent)
+    var _KAa=null; try{ _KAa=_ekKern(c); }catch(eKa){}
+    var K={ titel:titelK, besp:(_KAa&&_KAa.besp>0)?_fmtEurK(_KAa.besp):(hl.besp||(bespN!=null?_fmtEurK(bespN):'')), tvt:(_KAa&&_KAa.tvt!=null&&_KAa.tvt<99)?M.tvt.fmt(_KAa.tvt):(hl.tvt||(tvtN!=null&&tvtN<99?M.tvt.fmt(tvtN):'')), inv:(_KAa&&_KAa.inv>0)?_fmtEurK(_KAa.inv):(hl.inv||''), inv_incl:!!(hl.pl&&hl.pl.netInv>0), rend:(_KAa&&_KAa.rend!=null)?(Math.round(_KAa.rend)+'%'):(hl.rend||''), tegels:(hl.tegels||[]), vgl:(window._ekVglTxt?window._ekVglTxt(c):''),   /* v0.171.0 */
       netpiek_kw:(exC&&pk>0)?pk:0, aansluiting_kw:(exC&&pk>0)?tg:0, binnen:!(tg>0)||Math.max(pk,anT)<=tg*1.02, tv:tvA, mt:(window._ekMtMaanden(c)>0?{ maanden:window._ekMtMaanden(c), eur_mwh:(c.mt&&c.mt.eur_mwh)||null }:null), verzwaring:+c.verzwaring_eenmalig>0, plan:PLk, inv_noot:(function(){ try{ var x=_ekCapex(c); return x?x.tekst:''; }catch(eN){ return ''; } })() };
     // v0.187.0 (Johan 05-11): A4 — €/100 km rechts in de antwoordkaart (eigen vloot met laadpalen) en de terugverdiengrafiek in blok 5
     try{ var _KA4=_ekKern(c); if(_KA4){
@@ -5726,6 +5729,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   window.ekProjectZip=async function(){
     var st=$('rapport-status'), btn=$('btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
     var sel=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; if(!sel || !window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
+    // v0.188.1: eerst wachten tot de vastgelegde keuze hersteld is (na het openen ± 1 min) — anders bevatte de ZIP deels ons advies, deels de keuze
+    for(var _w=0; _w<120 && window._EK_KEUZE && !window._EK_OFF_KEUZE && !(HM && HM._kzOk); _w++){ meld('⏳ Je vastgelegde keuze wordt nog geladen…'); await new Promise(function(r){ setTimeout(r,1000); }); }
     var naam=(String(($('i-klant')||{}).value||'').trim()||String(STATE_CODE||'').trim()||(window._ekMerkNaam?window._ekMerkNaam():'Energie-Compas')).replace(/[\\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
     var a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0];
     var _l=(window.EC_LANG==='fr'||window.EC_LANG==='en')?window.EC_LANG:'nl', T3=function(nl,fr,en){ return _l==='fr'?fr:(_l==='en'?en:nl); };   // FR/EN: geen VEKA/Fluvius in bestandsnamen
