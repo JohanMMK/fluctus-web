@@ -1,4 +1,4 @@
-/* ec-woorden.js v1.0.1 (2026-11-04, Johan; 1.0.1: (i) pas NA het hele woord, niet midden in «terugverdiend»): WOORDENLIJST + (i)-UITLEG — gedeeld door het energierapport, EK en «Je profiel verdient meer».
+/* ec-woorden.js v1.1.0 (2026-11-05, Johan: + ECW.noot/ECW.voet — (i) + venster op het scherm, * + voetnoot in print/PDF, voor afwijkende cijfers zoals een netto-investering na vermeden verzwaring) · v1.0.1 (2026-11-04, Johan; 1.0.1: (i) pas NA het hele woord, niet midden in «terugverdiend»): WOORDENLIJST + (i)-UITLEG — gedeeld door het energierapport, EK en «Je profiel verdient meer».
    ECW.markeer(root)  → zet bij het EERSTE voorkomen van elke vakterm een klein (i)-knopje (enkel op het scherm, nooit in print/PDF);
                          een klik opent een venster met de uitleg in eenvoudige taal.
    ECW.gebruikt(root) → de vaktermen die in de tekst voorkomen (voor de woordenlijst achteraan).
@@ -40,12 +40,15 @@
     '#ecw-box{background:#fff;border-radius:12px;max-width:420px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);font:15px/1.55 -apple-system,Segoe UI,Arial,sans-serif;color:#1E2B37}'+
     '#ecw-box h3{margin:0 0 8px;font-size:17px;color:#003A5D}#ecw-box button{margin-top:12px;border:0;background:#003A5D;color:#fff;border-radius:8px;padding:8px 14px;font:600 14px Arial,sans-serif;cursor:pointer}'+
     '.ecw-lijst{width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}.ecw-lijst td{padding:6px 8px;border-bottom:1px solid #E2E8F0;vertical-align:top}.ecw-lijst td:first-child{font-weight:700;color:#003A5D;width:32%}'+
-    '@media print{.ecw-i,#ecw-bg{display:none!important}}';
+    '.ecw-ster,.ecw-voet{display:none}.ecw-voet{font-size:10.5px;line-height:1.45;color:#5A6577;margin:6px 0 0}.ecw-voet b{color:#1E2B37}'+
+    '@media print{.ecw-i,#ecw-bg{display:none!important}.ecw-ster{display:inline!important}.ecw-voet{display:block!important}}'+
+    'html.ecw-pdf .ecw-i{display:none!important}html.ecw-pdf .ecw-ster{display:inline!important}html.ecw-pdf .ecw-voet{display:block!important}';
   function css(){ if(document.getElementById('ecw-css')) return; var s=document.createElement('style'); s.id='ecw-css'; s.textContent=CSS; document.head.appendChild(s); }
   function esc(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function vind(k){ for(var i=0;i<W.length;i++) if(W[i].k===k) return W[i]; return null; }
-  function open(k){ var w=vind(k); if(!w) return; css(); sluit();
-    var bg=document.createElement('div'); bg.id='ecw-bg'; bg.innerHTML='<div id="ecw-box" role="dialog" aria-modal="true"><h3>'+esc(w.t)+'</h3><div>'+esc(w.u)+'</div><button type="button">Sluiten</button></div>';
+  var N={};   // v1.1.0: toelichtingen per id { t, u }
+  function open(k){ var w=vind(k)||N[k]; if(!w) return; css(); sluit();
+    var bg=document.createElement('div'); bg.id='ecw-bg'; bg.innerHTML='<div id="ecw-box" role="dialog" aria-modal="true"><h3>'+esc(w.t)+'</h3><div>'+esc(w.u).replace(/\n/g,'<br>')+'</div><button type="button">Sluiten</button></div>';
     bg.onclick=function(ev){ if(ev.target===bg || ev.target.tagName==='BUTTON') sluit(); }; document.body.appendChild(bg);
     try{ bg.querySelector('button').focus(); }catch(e){} }
   function sluit(){ var x=document.getElementById('ecw-bg'); if(x) x.remove(); }
@@ -66,5 +69,13 @@
     return n; }catch(e){ return 0; } }
   function gebruikt(root){ var t=((root||document.body).innerText||''); return W.filter(function(w){ return w.re.test(t); }); }
   function lijstHtml(lijst){ lijst=lijst||W; return '<table class="ecw-lijst"><tbody>'+lijst.map(function(w){ return '<tr><td>'+esc(w.t)+'</td><td>'+esc(w.u)+'</td></tr>'; }).join('')+'</tbody></table>'; }
-  window.ECW={ W:W, markeer:markeer, gebruikt:gebruikt, lijstHtml:lijstHtml, open:open, css:css };
+  // v1.1.0 (Johan 05-11): AFWIJKEND CIJFER TOELICHTEN — ECW.noot(id, titel, tekst, ster) geeft de markering achter het getal:
+  //   op het scherm een (i) die een venster opent, in print/PDF een sterretje; ECW.voet(id) geeft de voetnoot (enkel in print/PDF).
+  //   PDF via schermafdruk (zip): zet <html class="ecw-pdf">.
+  function noot(id, titel, tekst, ster){ if(!id || !tekst) return ''; css(); N[id]={ t:titel||'Toelichting', u:String(tekst), s:ster||'*' };
+    return '<button type="button" class="ecw-i noprint ecw-noot" data-ecw="'+esc(id)+'" aria-label="Toelichting: '+esc(titel||'')+'" title="'+esc(titel||'Toelichting')+'">i</button><sup class="ecw-ster">'+esc(ster||'*')+'</sup>'; }
+  function voet(id){ var w=N[id]; if(!w) return ''; return '<div class="ecw-voet"><b>'+esc(w.s)+'</b> '+esc(w.u).replace(/\n/g,' ')+'</div>'; }
+  document.addEventListener('click', function(ev){ var b=ev.target&&ev.target.closest?ev.target.closest('.ecw-noot'):null; if(!b) return; ev.preventDefault(); ev.stopPropagation(); open(b.getAttribute('data-ecw')); }, true);
+  try{ if(/[?&]zip=1/.test(location.search)) document.documentElement.classList.add('ecw-pdf'); }catch(eZ){}
+  window.ECW={ W:W, markeer:markeer, gebruikt:gebruikt, lijstHtml:lijstHtml, open:open, css:css, noot:noot, voet:voet };
 })();
