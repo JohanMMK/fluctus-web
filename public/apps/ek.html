@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.192.0 (2026-11-06): ÉÉN SIMULATIE OOK VOOR DE OFFERTE — onbalans en rapport-besparing per cel (offerte «|o» met haar eigen invoer); _ekOnbHaal rekent een offerte-cel met de offerte-body; automatische rapport-run ook voor een gekozen offerte (Schreurs: A4 met onbalans 64.394 ↔ rapport 62.824). Statusregel na de ZIP toont het resultaat van de coherentiecontrole (enkel oekene). -->
 <!-- ek.html v0.191.1 (2026-11-06): consistentiecontrole — documenten van een offerte worden enkel onderling vergeleken met de A4 als die óók de offerte toont (zelfde combinatie én offerte-prijzen); elk document blijft tegen zijn eigen EK-cijfers getoetst. -->
 <!-- ek.html v0.191.0 (2026-11-06): bankdossier open voor adviseur en oekene, DICHT voor de klant (ook klantweergave) tot de bevestigde bestelling — klik = venster «vraag het aan je adviseur» met kant-en-klare mail (geen adviseur → dossier@energie-compas.eu). -->
 <!-- ek.html v0.190.0 (2026-11-06): BANKDOSSIER = GEWOON DOSSIER — niet meer op slot tot de bevestigde bestelling (tegel, tab Dossiers, offerte, ZIP; gratis service at risk). ZIP: bank altijd, dossier investeringsaftrek enkel na bevestigde bestelling (ook oekene); extra knop «ZIP met alle dossiers» enkel voor oekene. -->
@@ -2755,15 +2756,18 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   var _ekOnbC=(typeof WeakMap!=='undefined')?new WeakMap():null, _ekOnbBezig={}, _ekOnbSig='';
   function _ekOnbMap(){ var P=window._RAP_PAYLOAD; if(!P||!_ekOnbC) return null; var m=_ekOnbC.get(P); if(!m){ m={}; _ekOnbC.set(P,m); } return m; }
   function _ekOnbKey(pv,kw,kwh){ return Math.round(+pv||0)+'|'+Math.round(+kw||0)+'|'+Math.round(+kwh||0); }
-  window._ekOnbBewaar=function(body,j){ var m=_ekOnbMap(); if(!m||!body||!j) return; var f=j.financieel||{}, x=(f.onbalans_extra_jaar!=null)?+f.onbalans_extra_jaar:((j.factuur&&j.factuur.onbalans_extra_jaar!=null)?+j.factuur.onbalans_extra_jaar:null);
+  window._ekOnbBewaar=function(body,j,cel){ var m=_ekOnbMap(); if(!m||!body||!j) return; var _eig=(cel&&(cel._offerte||cel._offId))?true:_ekBodyEigen(body);   /* v0.192.0: een offerte-cel bewaart altijd onder «|o» (eigen prijzen en parameters) */ var f=j.financieel||{}, x=(f.onbalans_extra_jaar!=null)?+f.onbalans_extra_jaar:((j.factuur&&j.factuur.onbalans_extra_jaar!=null)?+j.factuur.onbalans_extra_jaar:null);
     // v0.186.0 (Johan 05-11): ÉÉN SIMULATIE — de factuurvergelijking van dit rapport (nul − opt) wordt de besparing van die cel in EK
     //   (rooster, antwoordkaart, A4, bank, kern_ek). Zo tonen alle documenten exact dezelfde besparing (ACOM: 23.088 ↔ 23.153).
     try{ var fN=(j.factuur&&j.factuur.nul)||{}, fO=(j.factuur&&j.factuur.opt)||{};
       if(fN.saldo!=null && fO.saldo!=null && isFinite(+fN.saldo) && isFinite(+fO.saldo)){
         var bs=Math.round((+fN.saldo)-(+fO.saldo)), bn=(fN.netkosten!=null&&fO.netkosten!=null)?Math.round((+fN.netkosten||0)-(+fO.netkosten||0)):null;
         var M=_ekRapBespMap(); if(M){ var LP=j.laadplein||null, km=(LP&&+LP.gevraagde_km>0&&LP.meerkost_na!=null)?{ na:(+LP.meerkost_na)/(+LP.gevraagde_km)*100, voor:(LP.meerkost_voor!=null?(+LP.meerkost_voor)/(+LP.gevraagde_km)*100:null) }:null;
-          M[_ekRapBespKey(body.pv_kwp,body.batt_kw,body.batt_kwh,(String(body.vgl_laden||'')==='verzwaring'),_ekBodyEigen(body))]={ besp:bs, net:bn, onb:!!fN.onbeheerst, km100:km, diesel100:(+j.diesel_eur_100km>0?+j.diesel_eur_100km:null), ts:Date.now() }; window._EK_RAPV=(window._EK_RAPV||0)+1; } } }catch(eRb){}
-    if(x==null||!isFinite(x)) return; m[_ekOnbKey(body.pv_kwp,body.batt_kw,body.batt_kwh)]={ extra:Math.max(0,Math.round(x)) }; _ekOnbSig=''; };
+          M[_ekRapBespKey(body.pv_kwp,body.batt_kw,body.batt_kwh,(String(body.vgl_laden||'')==='verzwaring'),_eig)]={ besp:bs, net:bn, onb:!!fN.onbeheerst, km100:km, diesel100:(+j.diesel_eur_100km>0?+j.diesel_eur_100km:null), ts:Date.now() }; window._EK_RAPV=(window._EK_RAPV||0)+1; } } }catch(eRb){}
+    if(x==null||!isFinite(x)) return; m[_ekOnbKey(body.pv_kwp,body.batt_kw,body.batt_kwh)+(_eig?'|o':'')]={ extra:Math.max(0,Math.round(x)) }; _ekOnbSig=''; };
+  // v0.192.0 (Johan 06-11): onbalans-extra per cel — een offerte (eigen prijzen/parameters) heeft haar eigen onbalans (Schreurs: 10.171 ↔ 8.477)
+  function _ekOnbKc(a){ return a ? (_ekOnbKey(Math.round(_anchorKwp(a)||0),a.battKw,a.battKwh)+((a._offerte||a._offId)?'|o':'')) : ''; }
+  window._ekOnbKc=_ekOnbKc;
   // v0.186.0: rapport-besparing per combinatie + vergelijking (+ «o» als het rapport offerte-eigen invoer had)
   var _ekRapBespC=(typeof WeakMap!=='undefined')?new WeakMap():null;
   function _ekRapBespMap(){ var P=window._RAP_PAYLOAD; if(!P||!_ekRapBespC) return null; var m=_ekRapBespC.get(P); if(!m){ m={}; _ekRapBespC.set(P,m); } return m; }
@@ -2919,15 +2923,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   setInterval(_ekCtlToon, 4000);
   function _ekVglBody(){ try{ var o=_onbRefV(); return o ? { vgl_laden:'verzwaring', onb_ref:o } : { vgl_laden:(EK_VGL==='verzwaring'?'verzwaring':'') }; }catch(e){ return {}; } }   // v0.177.0: rapport = rooster (onbeheerste referentie)
   function _ekOnbHaal(a){ if(!a || !window._RAP_PAYLOAD) return Promise.resolve(null);
-    var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{};
+    var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKc(a), m=_ekOnbMap()||{};
     // v0.186.0: ook zonder batterij en zolang de rapport-besparing (één simulatie) van deze combinatie + vergelijking ontbreekt
-    if(!(pv>0||kwh>0)) return Promise.resolve(null); if(m[k] && m[k].extra!=null && (_ekRapBesp(a) || a._offerte || a._offId)) return Promise.resolve(m[k]);
+    // v0.192.0: ook een offerte-cel — met de invoer van de offerte (vroeger: onbalans en besparing van het advies → A4 ≠ offerterapport)
+    if(!(pv>0||kwh>0)) return Promise.resolve(null); if(m[k] && m[k].extra!=null && _ekRapBesp(a)) return Promise.resolve(m[k]);
     if(_ekOnbProm[k]) return _ekOnbProm[k];
     var P=window._RAP_PAYLOAD; _ekOnbBezig[k]=1; _ekOnbSig='';
-    var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh }, _ekVglBody());
+    var _offB=null; try{ if(a._offId && window._ekOffOpt){ var _oo=window._ekOffOpt(a._offId,''); _offB=(_oo&&_oo.body)||null; } }catch(eOb){}
+    var body=Object.assign({}, P, { pv_kwp:pv, batt_kw:kw, batt_kwh:kwh }, _ekVglBody(), _offB||{});
     _ekOnbProm[k]=fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
       .then(function(r){ return r.json().catch(function(){ return {}; }); })
-      .then(function(j){ if(j&&j.ok && window._RAP_PAYLOAD===P) window._ekOnbBewaar(body,j); else if(window._RAP_PAYLOAD===P){ var mm=_ekOnbMap(); if(mm) mm[k]={ fout:true }; } })
+      .then(function(j){ if(j&&j.ok && window._RAP_PAYLOAD===P) window._ekOnbBewaar(body,j,a); else if(window._RAP_PAYLOAD===P){ var mm=_ekOnbMap(); if(mm) mm[k]={ fout:true }; } })
       .catch(function(){ var mm=_ekOnbMap(); if(mm && window._RAP_PAYLOAD===P) mm[k]={ fout:true }; })
       .then(function(){ delete _ekOnbBezig[k]; delete _ekOnbProm[k]; _ekOnbSig=''; try{ _ekStuBesp(); }catch(e){} var mm=_ekOnbMap(); return (mm&&mm[k])||null; });
     return _ekOnbProm[k]; }
@@ -2936,7 +2942,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!a || !window._RAP_PAYLOAD || _ekIsPart()){ if(box.innerHTML){ box.innerHTML=''; _ekOnbSig=''; } return; }
     var M=HM_METRICS, b0=M.besparing.val(a), t0=M.tvt.val(a);
     if(b0==null||!isFinite(b0)){ box.innerHTML=''; return; }
-    var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKey(pv,kw,kwh), m=_ekOnbMap()||{}, o=m[k];
+    var pv=Math.round(_anchorKwp(a)||0), kw=Math.round(+a.battKw||0), kwh=Math.round(+a.battKwh||0), k=_ekOnbKc(a), m=_ekOnbMap()||{}, o=m[k];   /* v0.192.0 */
     var zicht=false; try{ var sec=$('sec-stu'), a4b=$('btn-a4-klant'); zicht=!!((sec && sec.offsetParent!==null) || (a4b && a4b.offsetParent!==null)); }catch(e){}   // v0.166.0: ook vooraf berekenen voor de A4 (tab Adviseur)
     if(!o && zicht && !_ekOnbBezig[k] && kwh>0) _ekOnbHaal(a);
     var sig=k+'|'+Math.round(b0)+'|'+(o?JSON.stringify(o):(_ekOnbBezig[k]?'b':'-'))+'|'+(window.EC_LANG||'');
@@ -2953,7 +2959,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     else { t2='<div class="sb-t"><div class="sb-l">'+L('Met onbalans','Avec déséquilibre','With imbalance')+'</div><div class="sb-v" style="font-size:15px">⏳ '+L('wordt berekend…','calcul en cours…','being calculated…')+'</div><div class="sb-s">'+L('We rekenen deze combinatie door met sturing op het onbalanssignaal (± 30 s).','Nous calculons cette combinaison avec pilotage sur le signal de déséquilibre (± 30 s).','We calculate this combination with control on the imbalance signal (± 30 s).')+'</div></div>'; }
     box.innerHTML='<div class="sb-kop">'+L('Wat slimme sturing oplevert','Ce que rapporte un pilotage intelligent','What smart control delivers')+' · '+(pv>0?_ekMilDot(pv)+' kWp + ':'')+(kwh>0?_eUnit(kwh,'kWh'):L('geen batterij','pas de batterie','no battery'))+'</div><div class="sb-g">'+t1+t2+'</div>'
       +'<div class="sb-n">'+L('In het rooster, je resultaat en je rapport rekenen we zonder onbalans; de onbalans is een mogelijke extra bovenop.','Dans la grille, votre résultat et votre rapport, nous calculons sans déséquilibre ; le déséquilibre est un bonus possible.','In the grid, your result and your report we calculate without imbalance; imbalance is a possible extra on top.')+'</div>'; }
-  window._ekOnbOpnieuw=function(){ try{ var a=_ekStuCel(); if(!a) return; var m=_ekOnbMap(); if(m) delete m[_ekOnbKey(_anchorKwp(a),a.battKw,a.battKwh)]; _ekOnbSig=''; _ekStuBesp(); }catch(e){} };
+  window._ekOnbOpnieuw=function(){ try{ var a=_ekStuCel(); if(!a) return; var m=_ekOnbMap(); if(m) delete m[_ekOnbKc(a)]; _ekOnbSig=''; _ekStuBesp(); }catch(e){} };
   try{ setInterval(function(){ try{ _ekStuBesp(); }catch(e){} try{ _ekInvOffNoot(); }catch(e2){} }, 1200); }catch(e){}
   // v0.169.0: tab Pas aan — de gekozen offerte bovenaan (de tabel eronder rekent met onze richtprijzen)
   var _invOffSig='';
@@ -3012,7 +3018,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         K.cf={ inv:Math.round(+_Pc.netInv), cum:_Pc.rows.map(function(x,t){ _cum+=(+x||0)+(t===0?_af:0); return Math.round(_cum); }), tvt:_KA4.tvt, rend:_KA4.rend, aftrek:Math.round(_af) }; } } }catch(eCf){}   // v0.186.0: toelichting investering · v0.183.0: + maximumtarief   // v0.177.0: + plan
     // sturing (zelfde cel), uit de cache
     var St=null; try{ if(bespN!=null){ St={ zonder:{ besp:Math.round(bespN), tvt:(tvtN!=null&&tvtN<99)?M.tvt.fmt(tvtN):'' }, met:null };
-      var pv=Math.round(_anchorKwp(c)||0), mm=_ekOnbMap()||{}, o=mm[_ekOnbKey(pv,c.battKw,c.battKwh)];
+      var pv=Math.round(_anchorKwp(c)||0), mm=_ekOnbMap()||{}, o=mm[_ekOnbKc(c)];   /* v0.192.0: offerte heeft haar eigen onbalans */
       if(o && o.extra!=null){ var a2=Object.assign({}, c, { besparing:(+c.besparing||0)+o.extra, _plusExtra:o.extra }), b1=M.besparing.val(a2), t1=M.tvt.val(a2); St.met={ besp:Math.round(b1), tvt:(t1!=null&&t1<99)?M.tvt.fmt(t1):'', extra:o.extra }; } } }catch(e){}
     // bank + aftrek (zelfde regels als het tipje in Bankdossier)
     // v0.177.0 (Johan 02-11): bank uit het MEERJARENMODEL (zelfde besparing als het plan: netkosten op het netpad + 2029-verdubbeling;
@@ -3057,7 +3063,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{ await window._ekExactSel(); }catch(eEx){}   // v0.182.0: eerst exact
     var c0=_ekStuCel(); if(!c0){ if(st) st.textContent='Doe eerst een simulatie.'; return; }
     if(btn) btn.disabled=true;
-    try{ var _mm=_ekOnbMap()||{}, _oo=_mm[_ekOnbKey(Math.round(_anchorKwp(c0)||0),c0.battKw,c0.battKwh)];
+    try{ var _mm=_ekOnbMap()||{}, _oo=_mm[_ekOnbKc(c0)];
       if(!(_oo && (_oo.extra!=null || _oo.fout)) && +c0.battKwh>0 && st){ st.style.color='var(--muted)'; st.textContent='⏳ Even geduld: we rekenen eerst door wat je batterij extra oplevert met de onbalans (± 20 s)…'; }
       await _ekOnbHaal(c0);
       var D=window._ekA4Data(); if(!D) throw new Error('doe eerst een simulatie'); D.foto=_ekA4Foto();
@@ -5679,9 +5685,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   setInterval(function(){ try{
     if(document.visibilityState!=='visible' || !window._RAP_PAYLOAD || typeof HM==='undefined' || !HM) return;
     if(!((typeof EK_IS_OEKENE!=='undefined'&&EK_IS_OEKENE)||(typeof EK_IS_ADV!=='undefined'&&EK_IS_ADV)||(typeof EK_PREPADV!=='undefined'&&EK_PREPADV))) return;
-    var c=_ekStuCel(); if(!c || (c._interp && !c._exact) || c._offerte || c._offId) return;
+    var c=_ekStuCel(); if(!c || (c._interp && !c._exact)) return;   // v0.192.0: ook een gekozen offerte (met haar eigen invoer)
     if(_ekRapBesp(c)) return;
-    var k=_ekOnbKey(_anchorKwp(c),c.battKw,c.battKwh)+'|'+EK_VGL, P=window._RAP_PAYLOAD; if(_ekRapAutoGedaan[k]===P) return; _ekRapAutoGedaan[k]=P;
+    var k=_ekOnbKc(c)+'|'+EK_VGL, P=window._RAP_PAYLOAD; if(_ekRapAutoGedaan[k]===P) return; _ekRapAutoGedaan[k]=P;
     _ekOnbHaal(c).then(function(){ try{ if(_ekRapBesp(c) && HM){ renderRapport(HM.sel||c); _hmDetail(HM.sel||c); renderHeatmap(); } }catch(eR){} });
   }catch(e){} }, 3000);
   async function toonKlantrapport(opt){
@@ -5701,7 +5707,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
       if(!j||!j.ok) throw new Error((j&&j.error)||'rapport faalde');
-      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing
+      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j,sel); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing · v0.192.0: + cel
       // v0.14.1: payload via localStorage (Safari kopieert sessionStorage NIET naar een window.open-tabblad → demo-fallback).
       //   Faalt het opbouwen/bewaren → NIET openen, zodat er nooit een demo-rapport wordt getoond/gemaild.
       var _rid=Date.now().toString(36)+Math.random().toString(36).slice(2,7);   // v0.41.1: uniek rapport-id → klantrapport leest exact DEZE payload
@@ -5773,6 +5779,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var info={ n:n, docs:(docs||[]).length, a4:!!D4, combi:(KE&&KE.combi)?(KE.combi.pv+' kWp · '+KE.combi.kw+' kW / '+KE.combi.kwh+' kWh'):'', vgl:KE?KE.vgl:'' };
     try{ if(window._ekLog){ if(afw.length) window._ekLog('consistentie', Object.assign(info, { afw:afw.slice(0,30) })); else window._ekLog('consistentie_ok', info); } }catch(eL){}
     try{ console.info('[consistentie]', afw.length?afw:'ok', info); }catch(eI){}
+    window._EK_CTL_LAATST={ n:n, afw:afw.slice(), ts:Date.now() };   // v0.192.0: voor de statusregel (enkel oekene)
     return afw; }
   window._ekZipControle=_ekZipControle;
   setInterval(function(){ try{ var b2=document.getElementById('btn-zip-alles'); if(!b2) return; var z=false; try{ z=!!(EK_IS_OEKENE && !EK_KLANTVIEW); }catch(x){} var d=z?'':'none'; if(b2.style.display!==d) b2.style.display=d; }catch(e){} }, 1500);   // v0.190.0: knop «ZIP met alle dossiers» enkel voor oekene
@@ -5833,11 +5840,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(J.xlsx && R.xlsx) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx); }
       }
       if(_fout.length) noot+=' Niet gelukt: '+_fout.join(', ')+'.';
-      try{ var _c4z=_c4c; if(!_c4z){ try{ _c4z=_ekStuCel(); }catch(eSc){} } if(_CT.length || _D4c) _ekZipControle(_CT, _D4c, _c4z); }catch(eCz){}   // v0.189.0: stil — enkel een mail naar oekene bij een afwijking
+      window._EK_CTL_LAATST=null; try{ var _c4z=_c4c; if(!_c4z){ try{ _c4z=_ekStuCel(); }catch(eSc){} } if(_CT.length || _D4c) _ekZipControle(_CT, _D4c, _c4z); }catch(eCz){}   // v0.189.0: stil — enkel een mail naar oekene bij een afwijking
       meld('⏳ ZIP wordt gemaakt…');
       var blob=await z.generateAsync({ type:'blob', compression:'DEFLATE' });
       var l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download=naam+'.zip'; document.body.appendChild(l); l.click(); setTimeout(function(){ URL.revokeObjectURL(l.href); l.remove(); }, 4000);
-      meld('✔ '+naam+'.zip gedownload ('+jobs.length+' document'+(jobs.length===1?'':'en')+(jobs.some(function(x){ return x.xlsx; })?' + VEKA-sjabloon':'')+').'+noot, 'var(--green)');
+      var _ctlT=''; try{ var _CL=window._EK_CTL_LAATST, _oekC=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); if(_oekC && _CL && Date.now()-_CL.ts<600000) _ctlT=_CL.afw.length?(' ⚠ Coherentie: '+_CL.afw.length+' afwijking'+(_CL.afw.length===1?'':'en')+' op '+_CL.n+' controles — details in je mail en de projectlog.'):(' ✔ Coherentie: '+_CL.n+' controles, alles gelijk.'); }catch(eCt){}   // v0.192.0: enkel oekene
+      meld('✔ '+naam+'.zip gedownload ('+jobs.length+' document'+(jobs.length===1?'':'en')+(jobs.some(function(x){ return x.xlsx; })?' + VEKA-sjabloon':'')+').'+noot+_ctlT, 'var(--green)');
     }catch(e){ meld('ZIP maken lukte niet: '+(e.message||e)+'.', '#8a1f1f'); }
     finally{ _klaar(); }
   };
@@ -6056,7 +6064,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
       if(!j||!j.ok) throw new Error((j&&j.error)||'rapport faalde');
-      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing
+      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j,sel); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing
       var payload; try{ payload=_klantrapportPayload(j,sel); if(payload && _rs && _rs.offerte && window._offRapportZet) window._offRapportZet(payload, _rs.offerte); }catch(ePl){ payload=null; }
       if(!payload) throw new Error('rapportgegevens onvolledig');
       var hdr=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{});
@@ -6260,7 +6268,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var r=await fetch(API+'/api/energiekompas/bedrijf-rapport',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       var j=await r.json().catch(function(){return{};});
       if(!j||!j.ok) throw new Error((j&&j.error)||'rapport faalde');
-      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing
+      try{ window._ekOnbBewaar&&window._ekOnbBewaar(body,j,sel); }catch(eOb){}   // v0.162.0: onbalans-extra voor de tab Sturing
       var payload; try{ payload=_klantrapportPayload(j,sel); if(payload && _rs && _rs.offerte && window._offRapportZet) window._offRapportZet(payload, _rs.offerte); }catch(ePl){ payload=null; }
       if(!payload){ if(st){ st.style.color='var(--muted)'; st.textContent='Rapportgegevens onvolledig — probeer opnieuw.'; } return; }
       var mr=await fetch(API+'/api/ek-rapport-mail',{ method:'POST', headers:{'Content-Type':'application/json'},
