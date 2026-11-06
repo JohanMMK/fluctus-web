@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.193.0 (2026-11-06): knop «ZIP + concept-mail (oekene)» — ZIP met ook de originele factuur en offerte; concept-mail in Outlook (server ≥ 15.402.0) met samenvatting, offerte zoals gebruikt, bestanden in volgorde met inhoud en beste gebruik, investeringsaftrek en afsluiting. Geen aftrekdossier vóór de bevestigde bestelling, ook niet voor oekene. -->
 <!-- ek.html v0.192.0 (2026-11-06): ÉÉN SIMULATIE OOK VOOR DE OFFERTE — onbalans en rapport-besparing per cel (offerte «|o» met haar eigen invoer); _ekOnbHaal rekent een offerte-cel met de offerte-body; automatische rapport-run ook voor een gekozen offerte (Schreurs: A4 met onbalans 64.394 ↔ rapport 62.824). Statusregel na de ZIP toont het resultaat van de coherentiecontrole (enkel oekene). -->
 <!-- ek.html v0.191.1 (2026-11-06): consistentiecontrole — documenten van een offerte worden enkel onderling vergeleken met de A4 als die óók de offerte toont (zelfde combinatie én offerte-prijzen); elk document blijft tegen zijn eigen EK-cijfers getoetst. -->
 <!-- ek.html v0.191.0 (2026-11-06): bankdossier open voor adviseur en oekene, DICHT voor de klant (ook klantweergave) tot de bevestigde bestelling — klik = venster «vraag het aan je adviseur» met kant-en-klare mail (geen adviseur → dossier@energie-compas.eu). -->
@@ -1510,7 +1511,7 @@
           </div>
           <div class="adv-lijn adv-acties">
             <button class="btn ghost sm" type="button" id="btn-zip" onclick="ekProjectZip()" title="Alle documenten van dit project in één ZIP-bestand met de projectnaam (het dossier voor de investeringsaftrek pas na de bevestigde bestelling)">⬇ Alles voor dit project (ZIP)</button>
-            <button class="btn ghost sm" type="button" id="btn-zip-alles" onclick="ekProjectZip({alles:true})" style="display:none" title="Enkel oekene: ook het dossier voor de investeringsaftrek, vóór de bevestigde bestelling">⬇ ZIP met alle dossiers (oekene)</button>
+            <button class="btn ghost sm" type="button" id="btn-zip-alles" onclick="ekProjectZip({mail:true})" style="display:none" title="Enkel oekene: de ZIP met ook de originele factuur en offerte, en een concept-mail in Outlook met de ZIP, een samenvatting en uitleg per bestand">⬇ ZIP + concept-mail (oekene)</button>
             <button class="btn ghost sm" type="button" id="btn-bank" onclick="toonBankdossier()" title="Financieringsdossier voor de bank: lening, aflossing en kasstroom per jaar">🏦 Bankdossier opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-studie" onclick="toonEnergiestudie()" title="Energiestudie voor de verhoogde (thematische) investeringsaftrek — enkel voor ondernemingen">📑 Energiestudie investeringsaftrek opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-concept" style="display:none" onclick="conceptMailRapport()" title="Zet in Outlook een concept-mail klaar met een samenvatting en het rapport als PDF — nakijken en zelf verzenden">✉️ Concept-mail met rapport</button>
@@ -5783,16 +5784,99 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return afw; }
   window._ekZipControle=_ekZipControle;
   setInterval(function(){ try{ var b2=document.getElementById('btn-zip-alles'); if(!b2) return; var z=false; try{ z=!!(EK_IS_OEKENE && !EK_KLANTVIEW); }catch(x){} var d=z?'':'none'; if(b2.style.display!==d) b2.style.display=d; }catch(e){} }, 1500);   // v0.190.0: knop «ZIP met alle dossiers» enkel voor oekene
+  // v0.193.0 (Johan 06-11): ZIP + CONCEPT-MAIL (knop enkel voor oekene) — de ZIP krijgt ook de originele factuur en offerte; daarna zet de
+  //   server (≥ 15.402.0) in Outlook een concept klaar met de ZIP als bijlage: samenvatting, offerte zoals gebruikt, bestanden in een logische
+  //   volgorde met inhoud en beste gebruik, investeringsaftrek en een afsluiting. Er wordt niets verstuurd.
+  async function _ekZipBronnen(map, BN, offU){ var uit=[], fout=[];
+    var ext=function(pad, type){ var m=String(pad||'').toLowerCase().match(/\.(pdf|jpe?g|png|heic|webp|xlsx?|docx?)$/); if(m) return m[1]==='jpeg'?'jpg':m[1]; type=String(type||''); return /pdf/.test(type)?'pdf':(/png/.test(type)?'png':(/jpe?g/.test(type)?'jpg':'pdf')); };
+    var hdr={}; try{ hdr=(await window._ekGateHdr())||{}; }catch(eH){}
+    // 1) originele factuur
+    try{ var best=(Array.isArray(STATE_FACTUUR_BESTANDEN)?STATE_FACTUUR_BESTANDEN:[]).filter(function(b){ return b&&b.pad; }).slice(0,3), viaZoek=false;
+      if(!best.length && typeof _ekFzLijst==='function'){ best=(_ekFzLijst()||[]).filter(function(b){ return b&&b.pad; }).slice(0,1); viaZoek=true; }
+      for(var i=0;i<best.length;i++){ var b=best[i];
+        var u=viaZoek?(API+'/api/ek/factuur-zoek?token='+encodeURIComponent(TOKEN)+'&pad='+encodeURIComponent(b.pad)):(TOKEN?(API+'/api/inbound-case/'+encodeURIComponent(TOKEN)+'/factuur?pad='+encodeURIComponent(b.pad)):(API+'/api/factuur-bestand?pad='+encodeURIComponent(b.pad)));
+        try{ var j=await fetch(u,{ headers:hdr }).then(function(r){ return r.json().catch(function(){ return {}; }); }); if(!j||!j.url) throw new Error((j&&j.error)||'geen link');
+          var r2=await fetch(j.url); if(!r2.ok) throw new Error('HTTP '+r2.status); var bl=await r2.blob();
+          var nm=BN('Factuur'+(best.length>1?'-'+(i+1):''), ext(b.pad, bl.type)); map.file(nm, bl); uit.push({ soort:'factuur', naam:nm }); }
+        catch(eF){ fout.push('factuur ('+(eF.message||eF)+')'); } } }catch(eFa){}
+    // 2) originele offerte (de gebruikte: aanvaard, gekozen of op de antwoordkaart)
+    try{ var B=(offU&&Array.isArray(offU.bestanden))?offU.bestanden:[];
+      var inst=String((offU&&offU.data&&offU.data.installateur)||'').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40);
+      for(var k=0;k<B.length && k<3;k++){ var ob=B[k];
+        try{ var r3=await fetch(API+'/api/ek/offerte-bestand?token='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(offU.id)+'&k='+(+ob.k||0)); if(!r3.ok) throw new Error('HTTP '+r3.status);
+          var bl3=await r3.blob(); var nm3=BN('Offerte'+(inst?'-'+inst:'')+(B.length>1?'-'+(k+1):''), ext(ob.naam, bl3.type)); map.file(nm3, bl3); uit.push({ soort:'offerte', naam:nm3 }); }
+        catch(eO){ fout.push('offerte ('+(eO.message||eO)+')'); } } }catch(eOa){}
+    return { lijst:uit, fout:fout }; }
+  function _ekZipMailHtml(I){
+    var e=function(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+    var E=function(v){ return '€ '+Math.round(+v||0).toLocaleString('nl-BE'); }, J=function(v){ return String(Math.round(+v*10)/10).replace('.',','); };
+    var K=I.KE||{}, D4=I.D4||null, td='padding:5px 10px;border-bottom:1px solid #e1e6ee;vertical-align:top', rij=function(a,b){ return '<tr><td style="'+td+';color:#4b5563">'+e(a)+'</td><td style="'+td+';font-weight:600;color:#14203a">'+b+'</td></tr>'; };
+    // 1. het project in het kort
+    var R=[], inst=[]; var C=K.combi||{};
+    if(+C.pv>0) inst.push('nieuwe zonnepanelen '+C.pv+' kWp'); if(+I.bestPv>0) inst.push('bestaande zonnepanelen '+String(I.bestPv).replace('.',',')+' kWp');
+    if(+C.kwh>0) inst.push('batterij '+C.kw+' kW / '+C.kwh+' kWh'); if(I.palen && (+I.palen.ac>0||+I.palen.dc>0)) inst.push((+I.palen.ac>0?I.palen.ac+' AC':'')+(+I.palen.ac>0&&+I.palen.dc>0?' + ':'')+(+I.palen.dc>0?I.palen.dc+' DC':'')+' laadpunt'+((+I.palen.ac||0)+(+I.palen.dc||0)>1?'en':''));
+    if(inst.length) R.push(rij('Installatie', e(inst.join(' · '))+(I.sturing?' · slimme sturing (EMS)':'')));
+    if(I.vgl) R.push(rij('Vergeleken met', e(I.vgl)));
+    if(+K.inv>0) R.push(rij('Investering in de terugverdientijd', e(E(K.inv))+(K.capex&&K.capex.kort?'<br><span style="font-weight:400;color:#4b5563;font-size:10pt">'+e(K.capex.kort)+'</span>':'')));
+    if(K.bank && +K.bank.inv>0 && Math.abs(+K.bank.inv-(+K.inv||0))>100) R.push(rij('Investering hele project (basis van de lening)', e(E(K.bank.inv))));
+    if(+K.besp>0) R.push(rij('Besparing per jaar', e(E(K.besp))+(K.tvt!=null?' · terugverdiend in '+e(J(K.tvt))+' jaar':'')+(K.rend!=null?' · rendement '+e(Math.round(K.rend))+' % per jaar':'')));
+    if(D4 && D4.sturing && D4.sturing.met && +D4.sturing.met.besp>0) R.push(rij('Met onbalans (potentieel)', e(E(D4.sturing.met.besp))+' per jaar'+(D4.sturing.met.tvt?' · terugverdiend in '+e(D4.sturing.met.tvt)+' jaar':'')));
+    if(+K.aftrek>0) R.push(rij('Belastingvoordeel investeringsaftrek (indicatief)', e(E(K.aftrek))+' in jaar 1'));
+    if(K.bank && +K.bank.ann>0) R.push(rij('Lening (indicatief)', e(E(K.bank.inv))+' over '+e(K.bank.jaren)+' jaar aan '+e(String(K.bank.rente).replace('.',','))+' % · aflossing ± '+e(E(K.bank.ann))+'/jaar · besparing dekt '+e(K.bank.dek)+' %'));
+    if(K.km100 && K.km100.na!=null) R.push(rij('Kost per 100 km', e('€ '+(+K.km100.na).toFixed(2).replace('.',','))+(K.km100.voor!=null?' (zonder installatie € '+e((+K.km100.voor).toFixed(2).replace('.',','))+')':'')+(K.km100.diesel?' · diesel ± € '+e((+K.km100.diesel).toFixed(2).replace('.',',')):'')));
+    if(D4 && D4.keuze && +D4.keuze.netpiek_kw>0 && +D4.keuze.aansluiting_kw>0) R.push(rij('Aansluiting', 'hoogste verbruik ± '+e(D4.keuze.netpiek_kw)+' kVA'+(D4.keuze.binnen?' — past op de aansluiting van '+e(D4.keuze.aansluiting_kw)+' kVA':' — boven de aansluiting van '+e(D4.keuze.aansluiting_kw)+' kVA')));
+    var h='<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;color:#1f2937;line-height:1.45">';
+    h+='<p>Beste'+(I.aanhef?' '+e(I.aanhef):'')+',</p>';
+    h+='<p>In bijlage vind je het volledige projectdossier voor <b>'+e(I.klant||'de klant')+'</b>'+(I.code?' (dossier '+e(I.code)+')':'')+', in één ZIP-bestand.</p>';
+    h+='<p style="margin-bottom:2px"><b>1. Het project in het kort</b></p>'+(D4&&D4.titel?'<p style="margin:0 0 4px 0">'+e(D4.titel)+'.'+(I.gemeten?' Gerekend op het gemeten kwartierprofiel van een volledig jaar.':'')+'</p>':'')+(R.length?'<table style="border-collapse:collapse;margin:4px 0 12px 0">'+R.join('')+'</table>':'');
+    // 2. de offerte zoals gebruikt
+    var n=3;
+    if(I.offU && I.offU.data){ var d=I.offU.data, O=[];
+      var _dt=String(d.datum||'').replace(/^(\d{4})-(\d{2})-(\d{2}).*$/,'$3/$2/$1'); O.push(rij('Installateur', e(d.installateur||'—')+(_dt?' · '+e(_dt):'')+(d.referentie?' · ref. '+e(d.referentie):'')));
+      O.push(rij('Status', I.aanv?'bestelling bevestigd':'gekozen offerte — bestelling nog niet bevestigd'));
+      var pi=[]; if(+d.pv_kwp>0) pi.push('zonnepanelen '+d.pv_kwp+' kWp'); if(+d.batt_kwh>0) pi.push('batterij '+(+d.batt_kw||Math.round(+d.batt_kwh/2))+' kW / '+d.batt_kwh+' kWh'); if(d.ac!=null&&+d.ac>0) pi.push(d.ac+' AC-laadpunt'+(+d.ac>1?'en':'')); if(d.dc!=null&&+d.dc>0) pi.push(d.dc+' DC-laadpunt'+(+d.dc>1?'en':'')); if(+d.dc_buffer_kwh>0) pi.push('DC-laadbuffer '+d.dc_buffer_kwh+' kWh');
+      if(pi.length) O.push(rij('Wat de offerte bevat', e(pi.join(' · '))));
+      var pr=[]; if(d.prijs_pv!=null&&+d.prijs_pv>0) pr.push('zonnepanelen '+E(d.prijs_pv)); if(d.prijs_batt!=null&&+d.prijs_batt>0) pr.push('batterij '+E(d.prijs_batt)); if(d.prijs_lp!=null&&+d.prijs_lp>0) pr.push('laadpalen '+E(d.prijs_lp));
+      if(d.totaal!=null) O.push(rij('Prijs (excl. btw)', e(E(d.totaal))+(pr.length?' — '+e(pr.join(' · ')):'')));
+      var tp=[]; if(+d.rte>0) tp.push('rendement laden-ontladen '+d.rte+' %'); if(+d.dod>0) tp.push('ontladingsdiepte '+d.dod+' %'); if(tp.length) O.push(rij('Batterijgegevens', e(tp.join(' · '))));
+      h+='<p style="margin-bottom:2px"><b>2. De offerte zoals we ze gebruikten</b></p><p style="margin:0 0 4px 0">We rekenden de offerte door met haar eigen prijzen en batterijgegevens, op hetzelfde verbruiksprofiel en dezelfde marktprijzen als ons advies.</p><table style="border-collapse:collapse;margin:4px 0 12px 0">'+O.join('')+'</table>';
+    } else n=2;
+    // 3. de bestanden
+    var BT={ a4:['Analyse op één A4','de kern op één blad: wat we kregen, wat we doorrekenden en wat het oplevert.','als eerste lezen; handig om door te sturen of te delen (zonder naam of adres).'],
+      rapport:['Energierapport','de volledige analyse: je factuur met en zonder installatie, investering, besparing, financieel plan over 15 jaar en de technische bijlagen.','om de beslissing te onderbouwen en alle cijfers na te lezen.'],
+      offrap:['Offerterapport','dezelfde analyse, doorgerekend met de prijzen en de batterij van de offerte.','om de offerte te toetsen en te vergelijken met ons advies.'],
+      bank:['Bankdossier','lening, aflossing en kasstroom per jaar in drie scenario’s (basis, gunstig en voorzichtig).','meegeven aan de bank of de leasingmaatschappij bij de kredietaanvraag.'],
+      studie:['Energiestudie investeringsaftrek','de studie die het VEKA vraagt, met de berekening op de voorzichtige basis.','laten ondertekenen en opladen bij de aanvraag van de verhoogde investeringsaftrek.'],
+      veka:['VEKA-sjabloon TVT/IRR (Excel)','het officiële sjabloon, ingevuld met de cijfers van de energiestudie.','samen met de studie opladen in de webtoepassing van het VEKA.'],
+      factuur:['Energiefactuur (origineel)','de factuur waarop de analyse vertrekt.','ter referentie.'],
+      offerte:['Offerte (origineel)','de offerte zoals we ze ontvingen en doorrekenden.','ter referentie.'] };
+    var VOLG=['a4','rapport','offrap','bank','studie','veka','factuur','offerte'];
+    var F=(I.files||[]).slice().sort(function(x,y){ return VOLG.indexOf(x.soort)-VOLG.indexOf(y.soort); }).filter(function(f){ return BT[f.soort]; });
+    if(F.length) h+='<p style="margin-bottom:2px"><b>'+n+'. De bestanden in de ZIP — in deze volgorde</b></p><ol style="margin-top:2px">'+F.map(function(f){ var t=BT[f.soort]; return '<li><b>'+e(t[0])+'</b> <span style="color:#6b7280;font-size:10pt">('+e(f.naam)+')</span><br>'+e(t[1])+' <i>Beste gebruik:</i> '+e(t[2])+'</li>'; }).join('')+'</ol>';
+    // investeringsaftrek
+    var T=I.aftrekT;
+    if(!I.part && T && T.status && T.status!=='nvt'){ var ok=(T.status==='alle'||T.status==='klein'), wie=(T.status==='klein'?' als kleine onderneming':' (alle ondernemingen)');
+      h+='<p style="margin-bottom:2px"><b>Verhoogde investeringsaftrek</b></p><p style="margin-top:0">'+(ok
+        ? (I.studieIn
+            ? 'Het project komt in aanmerking voor de verhoogde investeringsaftrek'+e(wie)+', met een indicatief belastingvoordeel van ± '+e(E(T.voordeel))+'. De energiestudie en het ingevulde VEKA-sjabloon zitten in de ZIP: laten ondertekenen en opladen bij het VEKA.'
+            : 'Op basis van deze analyse komt het project in aanmerking voor de verhoogde investeringsaftrek'+e(wie)+', met een indicatief belastingvoordeel van ± '+e(E(T.voordeel))+'. Het dossier daarvoor (energiestudie en ingevuld VEKA-sjabloon) werken we af op basis van de bevestigde offerte: laat ons weten wanneer de bestelling bevestigd is.')
+        : 'Op de voorzichtige basis komt dit project waarschijnlijk niet in aanmerking voor de verhoogde investeringsaftrek (terugverdientijd na belastingen korter dan 3 jaar). Met de bevestigde offerte toetsen we dat opnieuw.')+'</p>'; }
+    if(I.link) h+='<p>Het dossier online (resultaten bekijken en vergelijken):<br><a href="'+e(I.link)+'">'+e(I.link)+'</a></p>';
+    h+='<p>We blijven steeds beschikbaar voor vragen, een toelichting of de volgende stap, en helpen je graag verder.</p>';
+    h+='<p>Met vriendelijke groeten,<br>Johan Konings<br>Fluctus.net CVSO · Energie-Compas</p></div>';
+    return h; }
   window.ekProjectZip=async function(zo){
     // v0.190.0 (Johan 06-11): bankdossier ALTIJD in de ZIP; het dossier investeringsaftrek (studie + VEKA-sjabloon) enkel na een bevestigde
     //   bestelling (aanvaarde offerte) — ook voor oekene. zo.alles (knop enkel voor oekene) = alle dossiers, ook vóór de bevestiging.
-    var _alles=!!(zo&&zo.alles); try{ if(_alles && !EK_IS_OEKENE) _alles=false; }catch(xa){ _alles=false; }
-    var st=$('rapport-status'), btn=$((zo&&zo.alles)?'btn-zip-alles':'btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
+    //   v0.193.0: zo.mail (knop enkel voor oekene) = dezelfde ZIP + originele factuur en offerte + concept-mail; het dossier investeringsaftrek
+    //   enkel na de bevestigde bestelling (ook hier).
+    var _mailZ=!!(zo&&(zo.mail||zo.alles)); try{ if(_mailZ && !(EK_IS_OEKENE&&!EK_KLANTVIEW)) _mailZ=false; }catch(xa){ _mailZ=false; }
+    var st=$('rapport-status'), btn=$(_mailZ?'btn-zip-alles':'btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
     var sel=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; if(!sel || !window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
     // v0.188.1: eerst wachten tot de vastgelegde keuze hersteld is (na het openen ± 1 min) — anders bevatte de ZIP deels ons advies, deels de keuze
     for(var _w=0; _w<120 && window._EK_KEUZE && !window._EK_OFF_KEUZE && !(HM && HM._kzOk); _w++){ meld('⏳ Je vastgelegde keuze wordt nog geladen…'); await new Promise(function(r){ setTimeout(r,1000); }); }
     var naam=(String(($('i-klant')||{}).value||'').trim()||String(STATE_CODE||'').trim()||(window._ekMerkNaam?window._ekMerkNaam():'Energie-Compas')).replace(/[\\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
-    var a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0];
+    var a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0], _offU=a||null;   // v0.193.0: de gebruikte offerte
     var _l=(window.EC_LANG==='fr'||window.EC_LANG==='en')?window.EC_LANG:'nl', T3=function(nl,fr,en){ return _l==='fr'?fr:(_l==='en'?en:nl); };   // FR/EN: geen VEKA/Fluvius in bestandsnamen
     // v0.187.1 (Johan 05-11): het energierapport in de ZIP volgt de VASTGELEGDE keuze of offerte (ACOM: zip toonde ons advies 125/250, A4/bank de keuze 125/261)
     var _zOpt={ sel:((HM&&HM.best)||sel) }; try{ var _zS=window._ekSelectie?window._ekSelectie():null; if(_zS && (_zS.modus==='keuze'||_zS.modus==='offerte')){ var _zr=_ekRapSel(); if(_zr && _zr.sel) _zOpt=Object.assign({}, _zr); } }catch(eZs){}
@@ -5805,7 +5889,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       if(kt!=='particulier' && T && (T.status==='alle'||T.status==='klein')) jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:window._ekOffOpt(a.id,'studie'), xlsx:true });
     } else { noot=' Het dossier voor de verhoogde investeringsaftrek komt erbij zodra de offerte opgeladen en bevestigd is als verkocht.';
       try{ var _gk=window._EK_OFF_KEUZE, _go=_gk?(window._EK_OFF||[]).filter(function(o){ return o&&o.id===_gk&&o.bevestigd; })[0]:null, _gr=_go&&window._ekOffOpt?window._ekOffOpt(_go.id,''):null;   // v0.169.0: gekozen (nog niet aanvaarde) offerte
-        if(_gr) jobs.push({ titel:T3('Offerterapport-','Rapport-offre-','Quote-report-')+String((_go.data&&_go.data.installateur)||'offerte').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40), opt:_gr }); }catch(eGk){} }
+        if(_gr) jobs.push({ titel:T3('Offerterapport-','Rapport-offre-','Quote-report-')+String((_go.data&&_go.data.installateur)||'offerte').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40), opt:_gr }); if(_go) _offU=_go; }catch(eGk){} }
+    try{ if(!_offU){ var _zS2=window._ekSelectie?window._ekSelectie():null; if(_zS2 && _zS2.modus==='offerte' && _zS2.offerte) _offU=_zS2.offerte; } }catch(eOu){}
     // v0.188.0 (Johan 05-11): ALLES IN ÉÉN ZIP — ook de analyse op één A4, en (oekene, advies-niveau) bankdossier + energiestudie met het
     //   VEKA-sjabloon voor de vastgelegde keuze als er nog geen aanvaarde offerte is. Alle PDF's komen van de SERVER (zelfde engine en opmaak als
     //   de mail-PDF en de afzonderlijke documenten); lukt dat niet, dan valt EK terug op de oude opbouw in de browser.
@@ -5813,39 +5898,58 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var _bO=_ekOffVoorDossier('bank')||Object.assign({}, _zOpt, { bank:true, studie:false }); if(!(window._ekRolKlant&&window._ekRolKlant())) jobs.push({ titel:T3('Bankdossier','Dossier-bancaire','Bank-file'), opt:_bO });   // v0.190.0: adviseur en oekene · v0.191.0: niet voor de klant vóór de bevestiging
       var _T2=null; try{ _T2=window._ekAftrekToets?window._ekAftrekToets(_zOpt.sel):null; }catch(eT2){}
       if(_kt2==='particulier' || !(_T2 && (_T2.status==='alle'||_T2.status==='klein'))) noot='';
-      if(_alles && _kt2!=='particulier' && _T2 && (_T2.status==='alle'||_T2.status==='klein')){ var _sO=_ekOffVoorDossier('studie')||Object.assign({}, _zOpt, { studie:true, bank:false }); jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:_sO, xlsx:true }); }
-      if(_alles) noot=''; }
+      if(false && _kt2!=='particulier' && _T2 && (_T2.status==='alle'||_T2.status==='klein')){   /* v0.193.0: ook voor oekene geen aftrekdossier vóór de bevestigde bestelling */ var _sO=_ekOffVoorDossier('studie')||Object.assign({}, _zOpt, { studie:true, bank:false }); jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:_sO, xlsx:true }); }
+      }
     var _isPartZ=false; try{ _isPartZ=_ekIsPart(); }catch(xp){}
     if(!_isPartZ) jobs.unshift({ titel:T3('Analyse-A4','Analyse-A4','Analysis-A4'), a4:true });
     var _klaar=window._ekBtnBezig(btn, 'Download wordt voorbereid…'); meld('⏳ Download wordt voorbereid…');
     var _b64Blob=function(b64, type){ var bin=atob(b64), n=bin.length, u8=new Uint8Array(n); for(var q=0;q<n;q++) u8[q]=bin.charCodeAt(q); return new Blob([u8],{ type:type }); };
     var _srv=async function(path, body){ var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{}); var r=await fetch(API+path,{ method:'POST', headers:hd, body:JSON.stringify(body) }); var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('HTTP '+r.status)); return j; };
     try{
-      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam), _fout=[], _CT=[], _D4c=null, _c4c=null;   // v0.189.0: + consistentiecontrole
+      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam), _fout=[], _CT=[], _D4c=null, _c4c=null, _ZL=[];   // v0.193.0: + bestandenlijst voor de mail   // v0.189.0: + consistentiecontrole
       try{ await window._ekExactSel(); }catch(eEx){}
       for(var i=0;i<jobs.length;i++){ var J=jobs[i];
         meld('⏳ '+(i+1)+'/'+jobs.length+' — '+J.titel+' wordt opgebouwd op de server… (± 20–40 s per document)');
         if(J.a4){ try{ var c4=_ekStuCel(); if(c4){ try{ await _ekOnbHaal(c4); }catch(eO4){} var D4=window._ekA4Data(); if(D4){ D4.foto=_ekA4Foto(); try{ delete D4.meta; }catch(eM){}
-              var j4=await _srv('/api/ek/a4-mail', { token:TOKEN, data:D4, alleen_pdf:true }); map.file(BN(J.titel,'pdf'), _b64Blob(j4.pdf_b64,'application/pdf')); _D4c=D4; _c4c=c4; } } }
+              var j4=await _srv('/api/ek/a4-mail', { token:TOKEN, data:D4, alleen_pdf:true }); map.file(BN(J.titel,'pdf'), _b64Blob(j4.pdf_b64,'application/pdf')); _ZL.push({ soort:'a4', naam:BN(J.titel,'pdf') }); _D4c=D4; _c4c=c4; } } }
             catch(eA4){ _fout.push(J.titel+' ('+(eA4.message||eA4)+')'); } continue; }
         var gedaan=false;
         try{ var PQ=await toonKlantrapport(Object.assign({}, J.opt, { serverPdf:true })); if(!PQ||!PQ.payload) throw new Error('geen rapportgegevens');
           var jr=await _srv('/api/ek/doc-pdf', { token:TOKEN, payload:PQ.payload, qs:PQ.qs });
           map.file(BN(J.titel,'pdf'), _b64Blob(jr.pdf_b64,'application/pdf')); if(jr.controle) _CT.push({ titel:J.titel, c:jr.controle });   // v0.189.0
-          if(J.xlsx && jr.xlsx_b64) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), _b64Blob(jr.xlsx_b64,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
+          _ZL.push({ soort:(J.opt&&J.opt.bank)?'bank':((J.opt&&J.opt.studie)?'studie':(/^(Offerterapport|Rapport-offre|Quote-report)/.test(J.titel)?'offrap':'rapport')), naam:BN(J.titel,'pdf') });
+          if(J.xlsx && jr.xlsx_b64){ map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), _b64Blob(jr.xlsx_b64,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')); _ZL.push({ soort:'veka', naam:BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx') }); }
           gedaan=true; }catch(eS){ console.warn('[zip] server-PDF faalde, terugval in de browser:', eS); }
         if(!gedaan){ var url=await toonKlantrapport(Object.assign({}, J.opt, { zip:true })); if(!url) throw new Error(J.titel+' opbouwen lukte niet');
           var R=await _ekZipFrame(url);
-          map.file(BN(J.titel,'pdf'), R.pdf);
-          if(J.xlsx && R.xlsx) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx); }
+          map.file(BN(J.titel,'pdf'), R.pdf); _ZL.push({ soort:(J.opt&&J.opt.bank)?'bank':((J.opt&&J.opt.studie)?'studie':(/^(Offerterapport|Rapport-offre|Quote-report)/.test(J.titel)?'offrap':'rapport')), naam:BN(J.titel,'pdf') });
+          if(J.xlsx && R.xlsx){ map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx); _ZL.push({ soort:'veka', naam:BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx') }); } }
       }
+      if(_mailZ){ meld('⏳ Originele factuur en offerte worden toegevoegd…'); try{ var _BR=await _ekZipBronnen(map, BN, _offU); _BR.lijst.forEach(function(x){ _ZL.push(x); }); if(_BR.fout.length) _fout.push(_BR.fout.join(', ')); }catch(eBr){ _fout.push('factuur/offerte ('+(eBr.message||eBr)+')'); } }   // v0.193.0
       if(_fout.length) noot+=' Niet gelukt: '+_fout.join(', ')+'.';
       window._EK_CTL_LAATST=null; try{ var _c4z=_c4c; if(!_c4z){ try{ _c4z=_ekStuCel(); }catch(eSc){} } if(_CT.length || _D4c) _ekZipControle(_CT, _D4c, _c4z); }catch(eCz){}   // v0.189.0: stil — enkel een mail naar oekene bij een afwijking
       meld('⏳ ZIP wordt gemaakt…');
       var blob=await z.generateAsync({ type:'blob', compression:'DEFLATE' });
       var l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download=naam+'.zip'; document.body.appendChild(l); l.click(); setTimeout(function(){ URL.revokeObjectURL(l.href); l.remove(); }, 4000);
       var _ctlT=''; try{ var _CL=window._EK_CTL_LAATST, _oekC=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); if(_oekC && _CL && Date.now()-_CL.ts<600000) _ctlT=_CL.afw.length?(' ⚠ Coherentie: '+_CL.afw.length+' afwijking'+(_CL.afw.length===1?'':'en')+' op '+_CL.n+' controles — details in je mail en de projectlog.'):(' ✔ Coherentie: '+_CL.n+' controles, alles gelijk.'); }catch(eCt){}   // v0.192.0: enkel oekene
-      meld('✔ '+naam+'.zip gedownload ('+jobs.length+' document'+(jobs.length===1?'':'en')+(jobs.some(function(x){ return x.xlsx; })?' + VEKA-sjabloon':'')+').'+noot+_ctlT, 'var(--green)');
+      meld('✔ '+naam+'.zip gedownload ('+_ZL.length+' bestand'+(_ZL.length===1?'':'en')+').'+noot+_ctlT, 'var(--green)');
+      // v0.193.0: concept-mail met de ZIP (enkel oekene)
+      if(_mailZ){ try{ meld('✔ '+naam+'.zip gedownload.'+_ctlT+' ⏳ Concept-mail met de ZIP wordt klaargezet in Outlook…', 'var(--muted)');
+          var _cm=_c4c||((_zOpt&&_zOpt.sel)||sel), _KEm=null; try{ _KEm=_ekKern(_cm); }catch(eKm){}
+          var _Tm=null; try{ _Tm=window._ekAftrekToets?window._ekAftrekToets(_cm):null; }catch(eTm){}
+          var _A=window._EK_ADV||null, _vn=(_A&&_A.naam)?String(_A.naam).trim().split(/\s+/)[0]:'';
+          var _pal=null; try{ _pal=window._ekPalen?window._ekPalen(_cm):null; }catch(ePl){}
+          var _bp=0; try{ _bp=+((($('i-best-pv')||{}).value)||0)||0; }catch(eBp){}
+          var _html=_ekZipMailHtml({ klant:(String((($('i-klant')||{}).value)||'').trim()||STATE_KLANT||''), code:STATE_CODE||'', KE:_KEm, D4:_D4c, offU:(_offU&&_offU.data)?_offU:null, aanv:!!a, files:_ZL, aftrekT:_Tm,
+            studieIn:_ZL.some(function(x){ return x.soort==='studie'; }), part:_isPartZ, aanhef:_vn, palen:_pal, bestPv:_bp, sturing:true, gemeten:!!(_D4c&&_D4c.invoer&&_D4c.invoer.gemeten),
+            vgl:(window._ekVglTxt?window._ekVglTxt(_cm):''), link:(TOKEN?(location.origin+'/apps/ek.html?case='+encodeURIComponent(TOKEN)):'') });
+          var _zb64=await new Promise(function(ok,nok){ var fr=new FileReader(); fr.onload=function(){ ok(String(fr.result||'').split(',')[1]||''); }; fr.onerror=function(){ nok(new Error('ZIP lezen lukte niet')); }; fr.readAsDataURL(blob); });
+          var _ond='Energie-Compas: projectdossier '+(String((($('i-klant')||{}).value)||'').trim()||STATE_KLANT||'')+(STATE_CODE?' ('+STATE_CODE+')':'');
+          var jm=await _srv('/api/ek/zip-concept', { token:TOKEN, onderwerp:_ond, html:_html, zip_b64:_zb64, zip_naam:naam+'.zip', mail:(String((($('i-mail')||{}).value)||'').trim()||undefined) });
+          var _esc=function(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+          var _mt='✔ '+_esc(naam)+'.zip gedownload ('+_ZL.length+' bestanden).'+_esc(noot+_ctlT)+'<br>✔ Concept-mail klaargezet in '+_esc(jm.mailbox||'Outlook')+(jm.aan?(' (aan '+(jm.aan_adviseur?'de adviseur ':'')+_esc(jm.aan)+')'):' (nog geen ontvanger)')+(jm.attached?' met de ZIP als bijlage. ':' — <b>zonder</b> bijlage'+(jm.attach_error?' ('+_esc(jm.attach_error)+')':'')+'. ')+(jm.webLink?'<a href="'+_esc(jm.webLink)+'" target="_blank" rel="noopener">Open het concept</a> — nakijken en verzenden.':'Je vindt het bij Concepten.');
+          if(st){ st.style.color='var(--green)'; st.innerHTML=_mt; } try{ window._ekAdvMeld(_mt, 'var(--green)', true); }catch(xM){}
+        }catch(eMl){ meld('✔ '+naam+'.zip gedownload.'+noot+_ctlT+' Concept-mail klaarzetten lukte niet: '+(eMl.message||eMl)+'.', '#8a1f1f'); } }
     }catch(e){ meld('ZIP maken lukte niet: '+(e.message||e)+'.', '#8a1f1f'); }
     finally{ _klaar(); }
   };
