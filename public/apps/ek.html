@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.189.0 (2026-11-06): CONSISTENTIECONTROLE BIJ DE ZIP — documenten (server-render, klantrapport ≥ 0.111.0) en A4 tegen de kerncijfers van EK en onderling; afwijking → projectlog «consistentie» → mail enkel naar oekene (server ≥ 15.401.0). Stil voor adviseur en klant. -->
 <!-- ek.html v0.188.4 (2026-11-06): FIX BEVRIEZING — de aftrektoets riep _battValue op, die opnieuw de aftrektoets opriep … tot de stapel overliep (sinds v0.184.0, 04-11): 5 s blokkering bij het laden en ± 250 ms elke seconde daarna. Nu één niveau diep; zelfde uitkomst. -->
 <!-- ek.html v0.188.3 (2026-11-06): «met onbalans» behoudt de investeringsaftrek (toets op de basis zonder onbalans) → A4/scherm 1,2 j = rapport en bank; A4-rooster toont «direct» / «—» i.p.v. «0». -->
 <!-- ek.html v0.188.2 (2026-11-05): korte toelichting investering voor voetnoten (kern_ek.capex.kort) — de lange tekst duwde voorblad en bankdossier over de paginarand in de server-PDF; A4 gebruikt de korte versie. -->
@@ -5738,6 +5739,38 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var k=klantIn; if(k==null){ try{ k=(typeof STATE_KLANT!=='undefined'&&STATE_KLANT)||((document.getElementById('i-klant')||{}).value)||(typeof STATE_CODE!=='undefined'&&STATE_CODE)||''; }catch(e){ k=''; } }
     k=String(k||'Klant').replace(/[\\\/:*?"<>|_]+/g,' ').trim().replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'Klant';
     var t=String(type||'Rapport').replace(/[\\\/:*?"<>|_]+/g,' ').trim().replace(/\s+/g,'-'); return dt+'_'+k+'_'+t+(ext?'.'+ext:''); };
+  // v0.189.0 (Johan 06-11): CONSISTENTIECONTROLE BIJ DE ZIP — elk document (server-render) legt zijn getoonde kerncijfers naast die van EK
+  //   (klantrapport ≥ 0.111.0, window.__KR_CONTROLE); EK vergelijkt bovendien de A4 met EK en de documenten onderling (onbalans, cycli,
+  //   €/100 km, bijlage 1 ↔ bank). Afwijking → projectlog «consistentie» → server mailt ENKEL oekene. Niets zichtbaar voor adviseur of klant.
+  function _ekZipControle(docs, D4, c4){
+    var KE=null; try{ KE=c4?_ekKern(c4):null; }catch(eK){}
+    var afw=[], n=0, eu=function(v){ return '€ '+Math.round(+v||0).toLocaleString('nl-BE'); };
+    var fm=function(v,sx){ if(v==null||!isFinite(+v)) return '—'; v=+v; return sx==='j'?(String(Math.round(v*10)/10).replace('.',',')+' j'):(sx==='%'?(Math.round(v)+' %'):(sx==='km'?('€ '+v.toFixed(2).replace('.',',')):(sx==='n'?String(Math.round(v)):eu(v)))); };
+    var num=function(x){ if(x==null) return null; if(typeof x==='number') return isFinite(x)?x:null; var m=String(x).replace(/\s/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.').match(/-?\d+(\.\d+)?/); return m?+m[0]:null; };
+    var eq=function(lbl,a,b,sx){ a=num(a); b=num(b); if(a==null||b==null) return; n++; var tol=(sx==='j')?0.15:((sx==='%')?1.5:((sx==='km')?0.02:((sx==='n')?1:Math.max(100,Math.abs(b)*0.01)))); if(Math.abs(a-b)>tol) afw.push(lbl+': '+fm(a,sx)+' ↔ '+fm(b,sx)); };
+    var zelfde=function(cb){ return !!(KE && KE.combi && cb && cb.pv===KE.combi.pv && cb.kw===KE.combi.kw && cb.kwh===KE.combi.kwh); };
+    var Rp=null, Bk=null, Sd=null;
+    (docs||[]).forEach(function(d){ var c=d&&d.c; if(!c) return; if(c.fout){ afw.push(d.titel+': controle liep niet ('+c.fout+')'); return; } n+=(+c.n||0);
+      (c.afw||[]).forEach(function(x){ afw.push(d.titel+' · '+x.wat+': '+fm(x.doc,x.soort)+' (document) ↔ '+fm(x.ek,x.soort)+' (EK)'); });
+      if(zelfde(c.combi)){ if(c.mode==='rapport' && !Rp) Rp=c.cijfers||{}; else if(c.mode==='bank') Bk=c.cijfers||{}; else if(c.mode==='studie') Sd=c.cijfers||{}; } });
+    var bG=Bk&&Bk.scen&&Bk.scen.gunstig, bV=Bk&&Bk.scen&&Bk.scen.voorzichtig;
+    if(D4 && KE){ var K=D4.keuze||{}, S=D4.sturing||{};
+      eq('A4 · terugverdientijd ↔ EK', K.tvt, KE.tvt, 'j'); if(K.cf) eq('A4 · investering (grafiek) ↔ EK', K.cf.inv, KE.inv);
+      if(S.zonder) eq('A4 · besparing zonder onbalans ↔ EK', S.zonder.besp, KE.besp);
+      if(D4.aftrek && (D4.aftrek.status==='alle'||D4.aftrek.status==='klein')) eq('A4 · belastingvoordeel ↔ EK', D4.aftrek.voordeel, KE.aftrek);
+      if(D4.bank && KE.bank){ eq('A4 · lening ↔ EK', D4.bank.inv, KE.bank.inv); eq('A4 · aflossing ↔ EK', D4.bank.ann, KE.bank.ann); }
+      if(S.met && bG) eq('A4 ↔ bankdossier · terugverdientijd met onbalans', S.met.tvt, bG.tvt, 'j');
+      if(S.met && Rp && !Rp.onb_zl){ eq('A4 ↔ energierapport · besparing met onbalans', S.met.besp, Rp.onb_besp); eq('A4 ↔ energierapport · terugverdientijd met onbalans', S.met.tvt, Rp.onb_tvt, 'j'); }
+      if(K.km100 && Rp) eq('A4 ↔ energierapport · kost per 100 km', K.km100.na, Rp.km100, 'km'); }
+    if(Rp && bG && !Rp.onb_zl) eq('Energierapport ↔ bankdossier · terugverdientijd met onbalans', Rp.onb_tvt, bG.tvt, 'j');
+    if(Rp && Bk) eq('Energierapport ↔ bankdossier · cycli per jaar', Rp.cycli, Bk.cycli, 'n');
+    if(Rp && Sd) eq('Energierapport ↔ energiestudie · cycli per jaar', Rp.cycli, Sd.cycli, 'n');
+    if(Sd && bV){ eq('Energiestudie ↔ bankdossier · lening (voorzichtig)', Sd.lening, bV.inv); eq('Energiestudie ↔ bankdossier · aflossing (voorzichtig)', Sd.a, bV.a); }
+    var info={ n:n, docs:(docs||[]).length, a4:!!D4, combi:(KE&&KE.combi)?(KE.combi.pv+' kWp · '+KE.combi.kw+' kW / '+KE.combi.kwh+' kWh'):'', vgl:KE?KE.vgl:'' };
+    try{ if(window._ekLog){ if(afw.length) window._ekLog('consistentie', Object.assign(info, { afw:afw.slice(0,30) })); else window._ekLog('consistentie_ok', info); } }catch(eL){}
+    try{ console.info('[consistentie]', afw.length?afw:'ok', info); }catch(eI){}
+    return afw; }
+  window._ekZipControle=_ekZipControle;
   window.ekProjectZip=async function(){
     var st=$('rapport-status'), btn=$('btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
     var sel=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; if(!sel || !window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
@@ -5773,17 +5806,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var _b64Blob=function(b64, type){ var bin=atob(b64), n=bin.length, u8=new Uint8Array(n); for(var q=0;q<n;q++) u8[q]=bin.charCodeAt(q); return new Blob([u8],{ type:type }); };
     var _srv=async function(path, body){ var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{}); var r=await fetch(API+path,{ method:'POST', headers:hd, body:JSON.stringify(body) }); var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j||!j.ok) throw new Error((j&&j.error)||('HTTP '+r.status)); return j; };
     try{
-      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam), _fout=[];
+      naam=BN(T3('Projectdossier','Dossier-projet','Project-file')); await _ekZipLaadJs(); var z=new JSZip(), map=z.folder(naam), _fout=[], _CT=[], _D4c=null, _c4c=null;   // v0.189.0: + consistentiecontrole
       try{ await window._ekExactSel(); }catch(eEx){}
       for(var i=0;i<jobs.length;i++){ var J=jobs[i];
         meld('⏳ '+(i+1)+'/'+jobs.length+' — '+J.titel+' wordt opgebouwd op de server… (± 20–40 s per document)');
         if(J.a4){ try{ var c4=_ekStuCel(); if(c4){ try{ await _ekOnbHaal(c4); }catch(eO4){} var D4=window._ekA4Data(); if(D4){ D4.foto=_ekA4Foto(); try{ delete D4.meta; }catch(eM){}
-              var j4=await _srv('/api/ek/a4-mail', { token:TOKEN, data:D4, alleen_pdf:true }); map.file(BN(J.titel,'pdf'), _b64Blob(j4.pdf_b64,'application/pdf')); } } }
+              var j4=await _srv('/api/ek/a4-mail', { token:TOKEN, data:D4, alleen_pdf:true }); map.file(BN(J.titel,'pdf'), _b64Blob(j4.pdf_b64,'application/pdf')); _D4c=D4; _c4c=c4; } } }
             catch(eA4){ _fout.push(J.titel+' ('+(eA4.message||eA4)+')'); } continue; }
         var gedaan=false;
         try{ var PQ=await toonKlantrapport(Object.assign({}, J.opt, { serverPdf:true })); if(!PQ||!PQ.payload) throw new Error('geen rapportgegevens');
           var jr=await _srv('/api/ek/doc-pdf', { token:TOKEN, payload:PQ.payload, qs:PQ.qs });
-          map.file(BN(J.titel,'pdf'), _b64Blob(jr.pdf_b64,'application/pdf'));
+          map.file(BN(J.titel,'pdf'), _b64Blob(jr.pdf_b64,'application/pdf')); if(jr.controle) _CT.push({ titel:J.titel, c:jr.controle });   // v0.189.0
           if(J.xlsx && jr.xlsx_b64) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), _b64Blob(jr.xlsx_b64,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
           gedaan=true; }catch(eS){ console.warn('[zip] server-PDF faalde, terugval in de browser:', eS); }
         if(!gedaan){ var url=await toonKlantrapport(Object.assign({}, J.opt, { zip:true })); if(!url) throw new Error(J.titel+' opbouwen lukte niet');
@@ -5792,6 +5825,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(J.xlsx && R.xlsx) map.file(BN(T3('VEKA-sjabloon-TVT-IRR','Modele-TVT-TRI','TVT-IRR-template'),'xlsx'), R.xlsx); }
       }
       if(_fout.length) noot+=' Niet gelukt: '+_fout.join(', ')+'.';
+      try{ var _c4z=_c4c; if(!_c4z){ try{ _c4z=_ekStuCel(); }catch(eSc){} } if(_CT.length || _D4c) _ekZipControle(_CT, _D4c, _c4z); }catch(eCz){}   // v0.189.0: stil — enkel een mail naar oekene bij een afwijking
       meld('⏳ ZIP wordt gemaakt…');
       var blob=await z.generateAsync({ type:'blob', compression:'DEFLATE' });
       var l=document.createElement('a'); l.href=URL.createObjectURL(blob); l.download=naam+'.zip'; document.body.appendChild(l); l.click(); setTimeout(function(){ URL.revokeObjectURL(l.href); l.remove(); }, 4000);
