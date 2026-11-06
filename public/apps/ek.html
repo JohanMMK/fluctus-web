@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.190.0 (2026-11-06): BANKDOSSIER = GEWOON DOSSIER — niet meer op slot tot de bevestigde bestelling (tegel, tab Dossiers, offerte, ZIP; gratis service at risk). ZIP: bank altijd, dossier investeringsaftrek enkel na bevestigde bestelling (ook oekene); extra knop «ZIP met alle dossiers» enkel voor oekene. -->
 <!-- ek.html v0.189.0 (2026-11-06): CONSISTENTIECONTROLE BIJ DE ZIP — documenten (server-render, klantrapport ≥ 0.111.0) en A4 tegen de kerncijfers van EK en onderling; afwijking → projectlog «consistentie» → mail enkel naar oekene (server ≥ 15.401.0). Stil voor adviseur en klant. -->
 <!-- ek.html v0.188.4 (2026-11-06): FIX BEVRIEZING — de aftrektoets riep _battValue op, die opnieuw de aftrektoets opriep … tot de stapel overliep (sinds v0.184.0, 04-11): 5 s blokkering bij het laden en ± 250 ms elke seconde daarna. Nu één niveau diep; zelfde uitkomst. -->
 <!-- ek.html v0.188.3 (2026-11-06): «met onbalans» behoudt de investeringsaftrek (toets op de basis zonder onbalans) → A4/scherm 1,2 j = rapport en bank; A4-rooster toont «direct» / «—» i.p.v. «0». -->
@@ -1505,7 +1506,8 @@
             <input type="text" id="dim-scenario" class="hidden" maxlength="80" placeholder="Scenarionaam" title="Verschijnt vetjes rechtsboven op elke pagina van het rapport" data-i18n-skip="1" style="flex:1 1 220px;min-width:200px;max-width:340px;font:inherit;font-size:13.5px;font-weight:700;padding:5px 12px;border:1px solid var(--greenln);border-radius:999px;background:#fff;color:var(--navy)">   <!-- v0.76.0 -->
           </div>
           <div class="adv-lijn adv-acties">
-            <button class="btn ghost sm" type="button" id="btn-zip" onclick="ekProjectZip()" title="Alle documenten van dit project in één ZIP-bestand met de projectnaam">⬇ Alles voor dit project (ZIP)</button>
+            <button class="btn ghost sm" type="button" id="btn-zip" onclick="ekProjectZip()" title="Alle documenten van dit project in één ZIP-bestand met de projectnaam (het dossier voor de investeringsaftrek pas na de bevestigde bestelling)">⬇ Alles voor dit project (ZIP)</button>
+            <button class="btn ghost sm" type="button" id="btn-zip-alles" onclick="ekProjectZip({alles:true})" style="display:none" title="Enkel oekene: ook het dossier voor de investeringsaftrek, vóór de bevestigde bestelling">⬇ ZIP met alle dossiers (oekene)</button>
             <button class="btn ghost sm" type="button" id="btn-bank" onclick="toonBankdossier()" title="Financieringsdossier voor de bank: lening, aflossing en kasstroom per jaar">🏦 Bankdossier opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-studie" onclick="toonEnergiestudie()" title="Energiestudie voor de verhoogde (thematische) investeringsaftrek — enkel voor ondernemingen">📑 Energiestudie investeringsaftrek opvragen</button>
             <button class="btn ghost sm" type="button" id="btn-concept" style="display:none" onclick="conceptMailRapport()" title="Zet in Outlook een concept-mail klaar met een samenvatting en het rapport als PDF — nakijken en zelf verzenden">✉️ Concept-mail met rapport</button>
@@ -5771,8 +5773,12 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{ console.info('[consistentie]', afw.length?afw:'ok', info); }catch(eI){}
     return afw; }
   window._ekZipControle=_ekZipControle;
-  window.ekProjectZip=async function(){
-    var st=$('rapport-status'), btn=$('btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
+  setInterval(function(){ try{ var b2=document.getElementById('btn-zip-alles'); if(!b2) return; var z=false; try{ z=!!(EK_IS_OEKENE && !EK_KLANTVIEW); }catch(x){} var d=z?'':'none'; if(b2.style.display!==d) b2.style.display=d; }catch(e){} }, 1500);   // v0.190.0: knop «ZIP met alle dossiers» enkel voor oekene
+  window.ekProjectZip=async function(zo){
+    // v0.190.0 (Johan 06-11): bankdossier ALTIJD in de ZIP; het dossier investeringsaftrek (studie + VEKA-sjabloon) enkel na een bevestigde
+    //   bestelling (aanvaarde offerte) — ook voor oekene. zo.alles (knop enkel voor oekene) = alle dossiers, ook vóór de bevestiging.
+    var _alles=!!(zo&&zo.alles); try{ if(_alles && !EK_IS_OEKENE) _alles=false; }catch(xa){ _alles=false; }
+    var st=$('rapport-status'), btn=$((zo&&zo.alles)?'btn-zip-alles':'btn-zip'); function meld(t,kl){ if(st){ st.style.color=kl||'var(--muted)'; st.textContent=t; } try{ window._ekAdvMeld(t,kl); }catch(x){} }
     var sel=(typeof HM!=='undefined'&&HM)?(HM.sel||HM.best):null; if(!sel || !window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
     // v0.188.1: eerst wachten tot de vastgelegde keuze hersteld is (na het openen ± 1 min) — anders bevatte de ZIP deels ons advies, deels de keuze
     for(var _w=0; _w<120 && window._EK_KEUZE && !window._EK_OFF_KEUZE && !(HM && HM._kzOk); _w++){ meld('⏳ Je vastgelegde keuze wordt nog geladen…'); await new Promise(function(r){ setTimeout(r,1000); }); }
@@ -5788,18 +5794,18 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       jobs.push({ titel:T3('Bankdossier','Dossier-bancaire','Bank-file'), opt:window._ekOffOpt(a.id,'bank') });
       var kt=(document.querySelector('input[name=ktype]:checked')||{}).value||'', T=window._ekAftrekToets?window._ekAftrekToets(oR.sel):null;
       if(kt!=='particulier' && T && (T.status==='alle'||T.status==='klein')) jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:window._ekOffOpt(a.id,'studie'), xlsx:true });
-    } else { noot=' Bankdossier en dossier verhoogde investeringsaftrek komen erbij zodra de offerte opgeladen en bevestigd is als verkocht.';
+    } else { noot=' Het dossier voor de verhoogde investeringsaftrek komt erbij zodra de offerte opgeladen en bevestigd is als verkocht.';
       try{ var _gk=window._EK_OFF_KEUZE, _go=_gk?(window._EK_OFF||[]).filter(function(o){ return o&&o.id===_gk&&o.bevestigd; })[0]:null, _gr=_go&&window._ekOffOpt?window._ekOffOpt(_go.id,''):null;   // v0.169.0: gekozen (nog niet aanvaarde) offerte
         if(_gr) jobs.push({ titel:T3('Offerterapport-','Rapport-offre-','Quote-report-')+String((_go.data&&_go.data.installateur)||'offerte').replace(/[\\\/:*?"<>|]+/g,' ').trim().slice(0,40), opt:_gr }); }catch(eGk){} }
     // v0.188.0 (Johan 05-11): ALLES IN ÉÉN ZIP — ook de analyse op één A4, en (oekene, advies-niveau) bankdossier + energiestudie met het
     //   VEKA-sjabloon voor de vastgelegde keuze als er nog geen aanvaarde offerte is. Alle PDF's komen van de SERVER (zelfde engine en opmaak als
     //   de mail-PDF en de afzonderlijke documenten); lukt dat niet, dan valt EK terug op de oude opbouw in de browser.
-    var _oekZ=false; try{ _oekZ=!!EK_IS_OEKENE; }catch(xo){}
-    if(!a && _oekZ){ var _kt2=(document.querySelector('input[name=ktype]:checked')||{}).value||'';
-      var _bO=_ekOffVoorDossier('bank')||Object.assign({}, _zOpt, { bank:true, studie:false }); jobs.push({ titel:T3('Bankdossier','Dossier-bancaire','Bank-file'), opt:_bO });
+    if(!a){ var _kt2=(document.querySelector('input[name=ktype]:checked')||{}).value||'';
+      var _bO=_ekOffVoorDossier('bank')||Object.assign({}, _zOpt, { bank:true, studie:false }); jobs.push({ titel:T3('Bankdossier','Dossier-bancaire','Bank-file'), opt:_bO });   // v0.190.0: voor iedereen
       var _T2=null; try{ _T2=window._ekAftrekToets?window._ekAftrekToets(_zOpt.sel):null; }catch(eT2){}
-      if(_kt2!=='particulier' && _T2 && (_T2.status==='alle'||_T2.status==='klein')){ var _sO=_ekOffVoorDossier('studie')||Object.assign({}, _zOpt, { studie:true, bank:false }); jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:_sO, xlsx:true }); }
-      noot=''; }
+      if(_kt2==='particulier' || !(_T2 && (_T2.status==='alle'||_T2.status==='klein'))) noot='';
+      if(_alles && _kt2!=='particulier' && _T2 && (_T2.status==='alle'||_T2.status==='klein')){ var _sO=_ekOffVoorDossier('studie')||Object.assign({}, _zOpt, { studie:true, bank:false }); jobs.push({ titel:T3('Energiestudie-investeringsaftrek','Etude-energetique-deduction-majoree','Energy-study-increased-deduction'), opt:_sO, xlsx:true }); }
+      if(_alles) noot=''; }
     var _isPartZ=false; try{ _isPartZ=_ekIsPart(); }catch(xp){}
     if(!_isPartZ) jobs.unshift({ titel:T3('Analyse-A4','Analyse-A4','Analysis-A4'), a4:true });
     var _klaar=window._ekBtnBezig(btn, 'Download wordt voorbereid…'); meld('⏳ Download wordt voorbereid…');
@@ -5842,8 +5848,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(oek) return false;
     window._ekOffToon();
     var st=$('off-rst')||$('rapport-status'); if(st){ st.style.color='var(--navy,#1F3864)'; st.textContent=L.some(function(o){ return o&&o.bevestigd; })
-      ? '👉 Duid hieronder aan welke offerte aanvaard is («✅ Aanvaard? Vraag je dossiers aan») — dan maken we gratis je bankdossier en je dossier voor de verhoogde investeringsaftrek.'
-      : '👉 Laad de offerte van je installateur op en duid aan dat ze aanvaard is — dan maken we gratis je bankdossier en je dossier voor de verhoogde investeringsaftrek.'; }
+      ? '👉 Duid hieronder aan welke offerte aanvaard is («✅ Aanvaard? Vraag je dossiers aan») — dan maken we gratis je dossier voor de verhoogde investeringsaftrek.'
+      : '👉 Laad de offerte van je installateur op en duid aan dat ze aanvaard is — dan maken we gratis je dossier voor de verhoogde investeringsaftrek.'; }   // v0.190.0: bank staat niet meer achter de poort
     return true;
   }
   // v0.136.0 (Johan 30-10): «JE DOCUMENTEN» — vijf tegels in de stijl van de rapporten (ec-iconen.js): je profiel verdient meer,
@@ -5865,7 +5871,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     L.push({ soort:'doc', id:'ek-doc-rap', titel:_L3d('Energierapport','Rapport énergétique','Energy report'), sub:_selSub });   // v0.170.0
     var L2=[];   // v0.172.0: tweede lijn — gekozen offerte, bank, aftrek horen bij elkaar
     L2.push({ soort:'off', id:'ek-doc-off', dim:!offId, titel:_L3d('Gekozen offerte','Offre choisie','Chosen quote'), sub:offId?(offN||_L3d('rapport van de offerte','rapport de l’offre','quote report')):_L3d('kies eerst een offerte','choisissez d’abord une offre','choose a quote first') });
-    L2.push({ soort:'bank', id:'ek-doc-bank', slot:!open, dim:!open&&!oek, titel:_L3d('Bankrapport','Rapport bancaire','Bank report'), sub:open?_L3d('lening en kasstroom','prêt et trésorerie','loan and cash flow'):slotSub });
+    L2.push({ soort:'bank', id:'ek-doc-bank', titel:_L3d('Bankrapport','Rapport bancaire','Bank report'), sub:_L3d('lening en kasstroom','prêt et trésorerie','loan and cash flow') });   // v0.190.0 (Johan 06-11): bankdossier altijd open — de klant bevestigt pas als zijn financiering rond is
     var _afNvt=false; try{ var _afT=(window._ekAftrekToets&&SEL&&SEL.cel)?window._ekAftrekToets(SEL.cel):null; _afNvt=!!(_afT&&(_afT.status==='niet'||_afT.status==='nvt')); }catch(eAf){}   // v0.183.2: aftrek niet van toepassing (bv. terugverdiend < 3 jaar, enkel laadpalen)
     window._EK_AFTREK_NVT=_afNvt;
     if(!isP && _afNvt) L2.push({ soort:'aftrek', id:'ek-doc-aftrek', dim:true, titel:_L3d('Investeringsaftrek','Déduction pour investissement','Investment deduction'), sub:_L3d('niet van toepassing','non applicable','not applicable') });
@@ -5977,8 +5983,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!o){ var B=(window._EK_OFF||[]).filter(function(x){ return x&&x.bevestigd; }); if(B.length) o=B[B.length-1]; }   // geen aanvaarde → de (laatst) bevestigde offerte
     if(!o||!window._ekOffOpt) return null; var op=window._ekOffOpt(o.id, soort); return (op&&op.sel)?op:null; }catch(e){ return null; } }
   window.toonBankdossier=function(offerte){
-    if(_ekDossierPoort('bank')) return;
+    // v0.190.0 (Johan 06-11): BANKDOSSIER = GEWOON DOSSIER — niet meer op slot tot de bevestigde bestelling (gratis service, at risk)
+    var _aB=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0]; if(_aB && window._ekOffDossier){ window._ekOffDossier(_aB.id,'bank'); return; }
     var _op=_ekOffVoorDossier('bank'); if(_op) return toonKlantrapport(_op);   // v0.133.0: zelfde configuratie als de gekozen offerte
+    try{ var _rs=_ekRapSel(); if(_rs && _rs.sel) return toonKlantrapport(Object.assign({}, _rs, { bank:true, studie:false })); }catch(eRs){}   // keuze / advies zoals de antwoordkaart
     var sel=(HM&&(HM.sel||HM.best))||null; if(!sel){ var st=$('rapport-status'); if(st){ st.style.color='var(--muted)'; st.textContent='Doe eerst een simulatie.'; } return; }
     return toonKlantrapport({ sel:sel, bank:true });
   };
@@ -6379,7 +6387,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   setInterval(function(){ try{ gekozenBlok(); }catch(x){} }, 1500);   // keuze kan ook elders wijzigen (rooster, herstel bij openen)
   function dossier(id, soort){
     var o=(window._EK_OFF||[]).filter(function(x){ return x.id===id; })[0]; if(!o) return;
-    if(o.aanvaard || o.getekend || magVrij()) return rapport(id, soort==='bank'?true:'studie');
+    if(soort==='bank' || o.aanvaard || o.getekend || magVrij()) return rapport(id, soort==='bank'?true:'studie');   // v0.190.0: bank zonder aanvaarding
     aanvaardModal(id, soort);
   }
   window._ekOffDossier=dossier;
@@ -9122,7 +9130,7 @@ window._ekAmb=(function(){
       rijB(e(L3('Besparing dekt de aflossing','L’économie couvre le remboursement','Savings cover the repayment')),(dek>=100?'✔ ':'')+dek+' %',dek>=100?'#05803C':'#B45309')):'';
     var bank=tile('🏦 '+e(L3('Bankdossier','Dossier bancaire','Bank file')),
       '<div style="font-size:12.5px;color:#5A6577;margin-bottom:4px">'+e(L3('Lening, aflossing en kasstroom per jaar — in drie scenario\'s.','Prêt, remboursement et flux de trésorerie par an — trois scénarios.','Loan, repayment and cash flow per year — three scenarios.'))+'</div>'+bankCijfers+
-      (open?vrijR('bank'):slotR));
+      '<div style="margin-top:6px;font-size:12.5px"><a href="#" onclick="event.preventDefault();window.toonBankdossier()" style="font-weight:600;color:var(--navy)">🏦 '+e(L3('Open het bankdossier','Ouvrir le dossier bancaire','Open the bank file'))+'</a></div>'+(_oekD?'<div class="dos-slot" data-slot="bank" style="margin-top:6px"></div>':''));   // v0.190.0: altijd open
     var aft='';
     if(T && T.status && T.status!=='nvt'){
       var stT=T.status==='alle'?('✔ '+L3('Mogelijk — voor alle ondernemingen','Possible — pour toutes les entreprises','Possible — for all companies'))
@@ -9136,12 +9144,14 @@ window._ekAmb=(function(){
     }
     var _fz=0; try{ _fz=window._ekKompasNu().fase; }catch(xf){}   // v0.101.0
     var _pD=part()||!aft;   // particulier / geen aftrek = enkel bankdossier
-    var voet=open
-      ? '<div class="dos-voet" style="margin-top:8px;font-size:13px;color:#05803C"><b>✔ '+e(_pD?L3('Je bestelling is bevestigd — je bankdossier is vrijgegeven.','Votre commande est confirmée — votre dossier bancaire est débloqué.','Your order is confirmed — your bank file is unlocked.'):L3('Je bestelling is bevestigd — je dossiers zijn vrijgegeven.','Votre commande est confirmée — vos dossiers sont débloqués.','Your order is confirmed — your files are unlocked.'))+'</b></div>'
+    // v0.190.0 (Johan 06-11): het bankdossier is altijd open → de voet gaat enkel nog over het dossier voor de investeringsaftrek
+    var _aV=!part() && aftOk;
+    var voet=!_aV ? '' : (open
+      ? '<div class="dos-voet" style="margin-top:8px;font-size:13px;color:#05803C"><b>✔ '+e(L3('Je bestelling is bevestigd — je dossier voor de verhoogde investeringsaftrek is vrijgegeven.','Votre commande est confirmée — votre dossier de déduction majorée est débloqué.','Your order is confirmed — your increased deduction file is unlocked.'))+'</b></div>'
       : '<div class="dos-voet" style="margin-top:10px;font-size:13px;color:#5A6577">'+e(bev
-          ?(_pD?L3('Kies je offerte in de tab Offertes en bevestig je bestelling — dan maken wij gratis je bankdossier.','Choisissez votre offre dans l’onglet Offres et confirmez la commande — nous préparons gratuitement votre dossier bancaire.','Choose your quote in the Quotes tab and confirm the order — we prepare your bank file free of charge.'):L3('Kies je offerte in de tab Offertes en bevestig je bestelling — dan maken wij beide dossiers gratis.','Choisissez votre offre dans l’onglet Offres et confirmez la commande — nous préparons les deux dossiers gratuitement.','Choose your quote in the Quotes tab and confirm the order — we prepare both files free of charge.'))
-          :(_pD?L3('Laad de offerte van je installateur op in de tab Offertes, kies ze en bevestig je bestelling — dan maken wij gratis je bankdossier.','Chargez l’offre de votre installateur dans l’onglet Offres, choisissez-la et confirmez la commande — nous préparons gratuitement votre dossier bancaire.','Upload your installer’s quote in the Quotes tab, choose it and confirm the order — we prepare your bank file free of charge.'):L3('Laad de offerte van je installateur op in de tab Offertes, kies ze en bevestig je bestelling — dan maken wij beide dossiers gratis.','Chargez l’offre de votre installateur dans l’onglet Offres, choisissez-la et confirmez la commande — nous préparons les deux dossiers gratuitement.','Upload your installer’s quote in the Quotes tab, choose it and confirm the order — we prepare both files free of charge.')))+
-        ' <a href="#" onclick="event.preventDefault();window._ekOffToon()" style="font-weight:600;color:var(--navy)">'+e(L3('→ Naar Offertes','→ Vers les offres','→ To quotes'))+'</a></div>';   // v0.151.0: geen «Duid je aanvaarde offerte aan» meer — bevestigen gebeurt in de tab Offertes
+          ?L3('Kies je offerte in de tab Offertes en bevestig je bestelling — dan maken wij gratis je dossier voor de verhoogde investeringsaftrek.','Choisissez votre offre dans l’onglet Offres et confirmez la commande — nous préparons gratuitement votre dossier de déduction majorée.','Choose your quote in the Quotes tab and confirm the order — we prepare your increased deduction file free of charge.')
+          :L3('Laad de offerte van je installateur op in de tab Offertes, kies ze en bevestig je bestelling — dan maken wij gratis je dossier voor de verhoogde investeringsaftrek.','Chargez l’offre de votre installateur dans l’onglet Offres, choisissez-la et confirmez la commande — nous préparons gratuitement votre dossier de déduction majorée.','Upload your installer’s quote in the Quotes tab, choose it and confirm the order — we prepare your increased deduction file free of charge.'))+
+        ' <a href="#" onclick="event.preventDefault();window._ekOffToon()" style="font-weight:600;color:var(--navy)">'+e(L3('→ Naar Offertes','→ Vers les offres','→ To quotes'))+'</a></div>');
     return '<div style="display:flex;gap:10px;flex-wrap:wrap">'+bank+aft+'</div>'+voet;
   }
   function stappen(){
@@ -9149,7 +9159,7 @@ window._ekAmb=(function(){
     Z('nx-t2',L3('Offertes','Offres','Quotes')); Z('nx-u2',(window._EK_ADV&&window._EK_ADV.email)?L3('Laad de offertes op die je kreeg — wij rekenen ze door met hun eigen prijs. Kies er één en bevestig je bestelling.','Chargez les offres reçues — nous les calculons à leur propre prix. Choisissez-en une.','Upload the quotes you received — we calculate them at their own price. Pick one.'):L3('Vraag offertes aan bij onze installateurs of laad een offerte op die je al hebt — wij rekenen ze door met hun eigen prijs. Kies er één en bevestig je bestelling.','Demandez des offres à nos installateurs ou chargez une offre que vous avez déjà — nous la calculons à son propre prix.','Request quotes from our installers or upload a quote you already have — we calculate it at its own price.'));
     if(part()) Z('nx-t3',L3('Bankdossier','Dossier bancaire','Bank file')); else Z('nx-t3',L3('Bankdossier en verhoogde investeringsaftrek','Dossier bancaire et déduction majorée','Bank file and increased investment deduction'));
     var S=(window._ekSelectie?window._ekSelectie():{modus:'advies'});
-    Z('nx-u3',L3('De cijfers voor ','Les chiffres pour ','The figures for ')+(S.modus==='offerte'?L3('je offerte','votre offre','your quote'):(S.modus==='keuze'?L3('je keuze','votre choix','your choice'):L3('ons advies','notre conseil','our advice')))+' — '+L3('de dossiers gratis zodra je bestelling bevestigd is.','les dossiers gratuits dès que votre commande est confirmée.','the files free once your order is confirmed.'));
+    Z('nx-u3',L3('De cijfers voor ','Les chiffres pour ','The figures for ')+(S.modus==='offerte'?L3('je offerte','votre offre','your quote'):(S.modus==='keuze'?L3('je keuze','votre choix','your choice'):L3('ons advies','notre conseil','our advice')))+' — '+(part()?L3('je bankdossier, gratis.','votre dossier bancaire, gratuit.','your bank file, free.'):L3('je bankdossier meteen, het dossier voor de investeringsaftrek gratis zodra je bestelling bevestigd is.','votre dossier bancaire tout de suite, le dossier de déduction gratuit dès que votre commande est confirmée.','your bank file right away, the deduction file free once your order is confirmed.')));   // v0.190.0
     Z('nx-t6',L3('Sturing','Pilotage','Control')); Z('nx-u6',L3('Haal het maximum uit je installatie met een slimme sturing.','Tirez le maximum de votre installation avec un pilotage intelligent.','Get the most out of your installation with smart control.'));
     Z('btn-off-opladen','⬆️ '+L3('Offerte opladen','Charger une offre','Upload a quote')); 
   }
