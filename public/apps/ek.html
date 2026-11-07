@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.197.4 (2026-11-07): tab Adviseur — knop «✉️ Factuurcheck naar klant» (enkel oekene): eerste klik toont de ontvangers, tweede verstuurt de eerste A4 naar klant + boekhouder (server ≥ 15.411.0). -->
 <!-- ek.html v0.197.3 (2026-11-07): profiel «Industrie met zomersluiting» in de keuzelijst (factuurcheck-dossiers openen met het profiel van de A4, server ≥ 15.410.0). -->
 <!-- ek.html v0.197.2 (2026-11-06): dossiermail — A4 mag gedeeld worden op sociale media (anoniem); «Je profiel verdient meer» = inzicht en educatie voor de klant; «zitten in bijlage» i.p.v. «in de ZIP». -->
 <!-- ek.html v0.197.1 (2026-11-06): oekene ziet na «Conceptmail met dossiers» of de archiefkopie in dossier@ › Verzonden dossiers gelukt is (server ≥ 15.407.0). -->
@@ -1523,6 +1524,7 @@
             <!-- v0.197.0 (Johan 06-11): EENVOUDIG — twee knoppen; de vroegere knoppen blijven verborgen in #adv-oud (code en id's blijven werken) -->
             <button class="btn ghost sm" type="button" id="btn-dos-mail" style="display:none" onclick="ekProjectZip({mail:true})" title="Het platform mailt de adviseur van dit dossier: uitleg + alle documenten los in bijlage. Nooit rechtstreeks naar de klant.">✉️ Conceptmail met dossiers</button>
             <button class="btn ghost sm" type="button" id="btn-dos-concept" style="display:none" onclick="ekProjectZip({concept:true})" title="Enkel oekene: zet in je Outlook-concepten dezelfde mail aan de adviseur klaar, met alle documenten los in bijlage — nakijken, aanpassen en zelf verzenden.">✉️ Conceptmail dossiers (oekene)</button>
+            <button class="btn ghost sm" type="button" id="btn-fc-verstuur" style="display:none" onclick="window._ekFcVerstuur()" data-nolog="1" title="Enkel oekene: verstuur de factuurcheck (eerste A4 op het standaardprofiel) naar de klant en de boekhouder van dit dossier. Eerste klik toont de ontvangers, tweede klik verstuurt.">✉️ Factuurcheck naar klant</button>   <!-- v0.197.4 -->
             <span id="adv-oud" style="display:none">
             <!-- v0.194.0 (Johan 06-11): volgorde A4 → rapport → bankdossier → investeringsdossier → ZIP → ZIP + concept-mail -->
             <span id="ek-verwittig-blok" class="hidden"><button class="btn ghost sm" type="button" id="btn-a4-klant" onclick="window._ekA4Mail()" data-nolog="1" title="Mailt de adviseur van dit dossier (namens Johan): de A4 zonder naam of adres van de klant, een mail voor de klant, een LinkedIn-post en een banner">✉️ Conceptmail met analyse (A4)</button></span>
@@ -5802,6 +5804,22 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     window._EK_CTL_LAATST={ n:n, afw:afw.slice(), ts:Date.now() };   // v0.192.0: voor de statusregel (enkel oekene)
     return afw; }
   window._ekZipControle=_ekZipControle;
+  // v0.197.4 (Johan 07-11): FACTUURCHECK NAAR KLANT — enkel oekene. Eerste klik: ontvangers ophalen en tonen; tweede klik (binnen 20 s):
+  //   server rekent de factuurcheck opnieuw en mailt de A4 naar de klant (Aan) en de boekhouder + cc (Cc). Server ≥ 15.411.0.
+  window._ekFcVerstuur=async function(){ var b=$('btn-fc-verstuur'); if(!b||b.disabled) return; var LBL='✉️ Factuurcheck naar klant', meld=function(t,k){ try{ window._ekAdvMeld(t,k); }catch(e){} };
+    var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{});
+    if(!(b._klaar && Date.now()-b._klaar<20000)){
+      try{ var r=await fetch(API+'/api/fc/ontvangers',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN }) }); var j=await r.json().catch(function(){ return {}; }); if(!r.ok||!j.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
+        b._klaar=Date.now(); b.textContent='Bevestig: versturen naar '+j.aan+(j.cc&&j.cc.length?' (cc '+j.cc.join(', ')+')':'');
+        meld('Klik binnen 20 seconden nogmaals om de factuurcheck te versturen'+(j.laatste&&j.laatste.ts?' (laatste factuurcheck: '+new Date(j.laatste.ts).toLocaleString('nl-BE')+(j.laatste.verstuurd?', verstuurd':', nog niet verstuurd')+')':'')+'.','var(--navy,#1F3864)');
+        setTimeout(function(){ if(b._klaar && Date.now()-b._klaar>=19500){ b._klaar=0; b.textContent=LBL; } },20000);
+      }catch(e1){ meld('Ontvangers ophalen lukte niet: '+(e1.message||e1)+'.','#8a1f1f'); }
+      return; }
+    b._klaar=0; b.textContent=LBL; b.disabled=true; meld('⏳ De factuurcheck wordt gerekend en verstuurd (± 1 minuut)…','var(--muted)');
+    try{ var r2=await fetch(API+'/api/fc/verstuur',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN }) }); var j2=await r2.json().catch(function(){ return {}; }); if(!r2.ok||!j2.ok) throw new Error((j2&&j2.error)||('HTTP '+r2.status));
+      meld('✔ Factuurcheck verstuurd naar '+j2.aan+(j2.cc&&j2.cc.length?' (cc '+j2.cc.join(', ')+')':'')+'.'+(j2.twijfel&&j2.twijfel.length?' Let op: '+j2.twijfel.join('; ')+'.':''),'var(--green)');
+    }catch(e2){ meld('Versturen lukte niet: '+(e2.message||e2)+'.','#8a1f1f'); }
+    finally{ b.disabled=false; } };
   setInterval(function(){ try{ var z=false, oek=false; try{ oek=!!(EK_IS_OEKENE && !EK_KLANTVIEW); z=!!((EK_IS_OEKENE||EK_IS_ADV) && !EK_KLANTVIEW && TOKEN); }catch(x){} var zet=function(id,ok){ var b=document.getElementById(id); if(!b) return; var d=ok?'':'none'; if(b.style.display!==d) b.style.display=d; };
     // v0.195.0 (Johan 06-11): ook voor de ADVISEUR — oekene krijgt een concept in Outlook, de adviseur een mail in zijn eigen inbox
     var lab=function(id,t,ti){ var b=document.getElementById(id); if(b && b.textContent!==t){ b.textContent=t; if(ti) b.title=ti; } };
@@ -5811,6 +5829,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     lab('btn-concept-studie', oek?'✉️ Concept-mail met investeringsdossier':'✉️ Mail met investeringsdossier', oek?'':'Je krijgt in je inbox een kant-en-klare mail voor je klant met de energiestudie en het VEKA-sjabloon — doorsturen of aanpassen');
     var nt=document.getElementById('adv-mailnoot'); if(nt){ var tN=oek?'✉️ «Conceptmail met dossiers»: het platform mailt de adviseur (nooit de klant). «Conceptmail dossiers (oekene)»: dezelfde mail als concept in je Outlook — er wordt niets verstuurd.':'✉️ «Conceptmail met dossiers» stuurt een mail naar jou, de adviseur — nooit rechtstreeks naar je klant. Je klant krijgt pas iets als jij de mail zelf doorstuurt.'; if(nt.textContent!==tN) nt.textContent=tN; var dN=z?'':'none'; if(nt.style.display!==dN) nt.style.display=dN; }
     zet('btn-dos-mail', z && !!window._RAP_PAYLOAD); zet('btn-dos-concept', oek && !!TOKEN && !!window._RAP_PAYLOAD);   // v0.197.0
+    zet('btn-fc-verstuur', oek && !!TOKEN);   // v0.197.4: factuurcheck naar klant + boekhouder (enkel oekene)
     zet('btn-zip-alles', z); zet('btn-concept', z && !!window._RAP_PAYLOAD); zet('btn-concept-bank', z && !!window._RAP_PAYLOAD);
     var _sOk=false; if(z && window._RAP_PAYLOAD){ var _a=(window._EK_OFF||[]).filter(function(o){ return o&&(o.aanvaard||o.getekend); })[0]; var _kt=(document.querySelector('input[name=ktype]:checked')||{}).value||'';
       if(_a && _kt!=='particulier'){ try{ var _o=window._ekOffOpt?window._ekOffOpt(_a.id,'studie'):null, _T=(_o&&_o.sel&&window._ekAftrekToets)?window._ekAftrekToets(_o.sel):null; _sOk=!!(_T&&(_T.status==='alle'||_T.status==='klein')); }catch(eS){} } }
