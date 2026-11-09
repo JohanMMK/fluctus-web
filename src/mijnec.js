@@ -1,3 +1,4 @@
+// mijnec.js v1.20.0 — 2026-11-09 — tegel «Campagne RESCert» (✉️ /apps/campagne-rescert.html, managers; server ≥ 15.415.0), naast «Campagne LinkedIn».
 // mijnec.js v1.19.0 — 2026-10-31 — white-label: is het contract van de partner van de aangemelde adviseur op «merk aan» gezet, dan krijgt MijnEC het logo en de kleuren van die partner (proxy ≥ 15.376.0, GET /api/merk/ik).
 // mijnec.js v1.18.0 — 2026-10-24 — tegel «Campagne LinkedIn» voor alle managers (managerOnly; vlag alleenVoor blijft beschikbaar).
 // mijnec.js v1.17.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
@@ -59,6 +60,7 @@ const APP_CATALOG = [
   { id: 'trechter', naam: 'Kompas-trechter', ico: '🧭', beschrijving: 'Hoeveel dossiers elke kompasfase bereikten (data → advies → offertes → bevestigd → sturing aan) en waar ze nu staan.', url: '/apps/trechter.html', managerOnly: true },   // 2026-10-18 (Johan): kompas-trechter
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
   { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne — v1.18.0: weer voor alle managers
+  { id: 'campagne-rescert', naam: 'Campagne RESCert', ico: '✉️', beschrijving: 'Installateurs uitnodigen «één batterij per week»: verzending met mondjesmaat, antwoorden, aspiranten → adviseur, A/B-resultaten.', url: '/apps/campagne-rescert.html', managerOnly: true },   // 2026-11-09 (Johan): RESCert-campagne
 ];
 
 // v1.12.0 (Johan 18-10): tegels vertaald (FR/EN) — naam + beschrijving per app-id; NL blijft in APP_CATALOG.
@@ -85,6 +87,7 @@ const TEGEL_TR = {
   trechter:      { fr: ['Entonnoir boussole', 'Combien de dossiers ont atteint chaque étape (données → conseil → offres → confirmé → pilotage actif).'], en: ['Compass funnel', 'How many files reached each step (data → advice → quotes → confirmed → control on).'] },
   campagne:      { fr: ['Campagne EPC', 'Gérer les contacts et envoyer le mail de campagne avec la brochure.'], en: ['EPC campaign', 'Manage contacts and send the campaign e-mail with the brochure.'] },
   'campagne-li': { fr: ['Campagne LinkedIn', 'Tableau de bord : quoi publier et quand, blogs, premiers commentaires, ambassadeurs et leurs actions, sources.'], en: ['LinkedIn campaign', 'Dashboard: what to post and when, blogs, first comments, ambassadors and their actions, sources.'] },
+  'campagne-rescert': { fr: ['Campagne RESCert', 'Inviter des installateurs : envoi au compte-gouttes, réponses, aspirants → conseiller, résultats A/B.'], en: ['RESCert campaign', 'Invite installers: paced sending, replies, applicants → adviser, A/B results.'] },
 };
 function tegelTekst(a) { const L = _FR ? 'fr' : (_EN ? 'en' : null), x = L && TEGEL_TR[a.id] && TEGEL_TR[a.id][L]; return x ? { naam: x[0], beschrijving: x[1] } : { naam: a.naam, beschrijving: a.beschrijving }; }
 

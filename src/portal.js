@@ -1,3 +1,4 @@
+// portal.js v1.25.0 — 2026-11-09 — tegel «Campagne RESCert» (✉️ /apps/campagne-rescert.html, managers; server ≥ 15.415.0).
 // portal.js v1.24.0 — 2026-10-24 — tegel «Campagne LinkedIn» voor alle managers (managerOnly; vlag alleenVoor blijft beschikbaar).
 // portal.js v1.23.0 — 2026-10-24 — tegel «Campagne LinkedIn» enkel voor oekene@gmail.com en patrick@energie-compas.eu (vlag alleenVoor).
 // portal.js v1.22.0 — 2026-10-24 — tegel «Campagne LinkedIn» (📅 /apps/campagne-li.html, managers; server ≥ 15.351.0).
@@ -108,6 +109,7 @@ const APP_CATALOG = [
   { id: 'leadgen-log', naam: 'Lead Generator — opvolging', ico: '📋', beschrijving: 'Wie doet wat in de Lead Generator: geopende gemeenten, bekeken parkings, genoteerde leads.', url: '/apps/leadgen-log.html', managerOnly: true },   // 2026-10-16 (Johan): opvolging leadgenerator
   { id: 'campagne', naam: 'EPC-campagne', ico: '📣', beschrijving: 'Contacten (naam, mail, telefoon, leverancier/installateur, taal) bijhouden en de campagnemail met de brochure versturen.', url: '/apps/campagne.html', managerOnly: true },   // 2026-10-12 (Johan): EPC-campagne
   { id: 'campagne-li', naam: 'Campagne LinkedIn', ico: '📅', beschrijving: 'Campagnedashboard: wanneer wat posten, blogs publiceren, eerste reacties, ambassadeurs en hun acties, bronnen.', url: '/apps/campagne-li.html', managerOnly: true },   // 2026-10-24 (Johan): LinkedIn-campagne — v1.24.0: weer voor alle managers
+  { id: 'campagne-rescert', naam: 'Campagne RESCert', ico: '✉️', beschrijving: 'Installateurs uitnodigen «één batterij per week»: verzending met mondjesmaat, antwoorden, aspiranten → adviseur, A/B-resultaten.', url: '/apps/campagne-rescert.html', managerOnly: true },   // 2026-11-09 (Johan): RESCert-campagne
   // Congestie wordt toegevoegd zodra ze in de app ingebed is.
   // { id: 'congestie',   naam: 'Congestie',    ico: '🌐', beschrijving: 'Netcongestie & load factor.',      url: '/apps/congestie.html' },
 ];
