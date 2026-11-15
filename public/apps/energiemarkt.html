@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- energiemarkt.html v1.7.0 — 2026-11-15 (Johan): «geen recente winddata, zon-data op de dool» — (1) GATEN HERSTELLEN: wind/zon/onbalans worden over de laatste 90 dagen gescand op gaten > 1 u en die periodes worden opnieuw opgehaald (vroeger werd enkel het laatste punt bekeken, dus een gat midden in de reeks bleef eeuwig staan); per gat hooguit één poging per 6 u. (2) Wind en zon zijn nu near real-time (server 15.421.0: ods086 / ods210), dus «actueel» = laatste punt < 3 u. -->
 <!-- energiemarkt.html v1.6.0 — 2026-10-27 (Johan): ZON-DATA TERUG — server v15.354.1 haalt PV uit de nieuwe Elia-datasets ods209/ods210 (België-totaal); oude zon-cache eenmalig ÷3 (was de som van België + gewesten + provincies); waarschuwing als Elia een deel van de periode niet levert. -->
 <!-- energiemarkt.html v1.5.0 — 2026-10-16 15:45 (Europe/Madrid) — MUISAANWIJZER OMGEDRAAID (Johan): gewone aanwijzer =
      klassiek pijltje met lichtgroene invulling (#8ee5a8, donkergroene rand; ec-cursor-pijl.png 24px + @2x). Boven iets
@@ -763,7 +764,8 @@ window.fdFetch=async function(){
     }
     // Voor onbalans/wind/zon: laatste punt mag tot 26u oud zijn (Elia publiceert
     // met ~24u vertraging). Update als ouder.
-    function startFor(arr, label){
+    function startFor(arr, label, maxH){
+      maxH=maxH||26;
       var last=lastOf(arr);
       if(!last){
         log(label+': leeg in cache — volledig ophalen','info');
@@ -771,7 +773,7 @@ window.fdFetch=async function(){
       }
       var ageH=(now-last)/3600000;
       var lastStr=last.toLocaleString('nl-BE',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-      if(ageH>26){
+      if(ageH>maxH){
         log(label+': laatste punt='+lastStr+' ('+Math.round(ageH)+'u oud) — update nodig','info');
         return new Date(Math.max(last.getTime()-3*86400000, fiveYearsAgo.getTime()));
       }
@@ -805,15 +807,55 @@ window.fdFetch=async function(){
 
     var startSpot  = startForSpot(cache.spot,  'Spot (ENTSO-E)');
     var startImb   = startFor(cache.imb,   'Onbalans');
-    var startWind  = startFor(cache.wind,  'Wind');
-    var startSolar = startFor(cache.solar, 'Zon');
+    var startWind  = startFor(cache.wind,  'Wind', 3);    // v1.7.0: near real-time (ods086)
+    var startSolar = startFor(cache.solar, 'Zon', 3);     // v1.7.0: near real-time (ods210)
 
     if(startSpot)  await fetchDayAheadSpot(startSpot, now);
     if(startImb)   await fetchImbalance(startImb, now);
     if(startWind)  await fetchRenewable('ods031','Wind','wind',startWind,now);
     if(startSolar) await fetchRenewable('ods032','Zon','solar',startSolar,now);
 
-    if(!startSpot&&!startImb&&!startWind&&!startSolar){
+    // v1.7.0: gaten midden in de reeks herstellen (laatste 90 dagen, gat > 1 u). Elia levert soms een stuk te laat of
+    //   (zoals ods209 van 26/10 tot 14/11) een tijd niet; zonder deze stap bleef zo'n gat voor altijd in de cache staan.
+    var gatenHersteld=0;
+    function gatenIn(arr){
+      var grens=now.getTime()-90*86400000, uit=[];
+      if(!arr||arr.length<2) return uit;
+      for(var gi=1;gi<arr.length;gi++){
+        var a=arr[gi-1].t, b=arr[gi].t;
+        if(b<grens) continue;
+        if(b-a>3600000) uit.push({van:new Date(Math.max(a,grens)), tot:new Date(b)});
+      }
+      return uit;
+    }
+    function gatGeprobeerd(sleutel){
+      try{ var m=JSON.parse(localStorage.getItem('em_gaten')||'{}'); return m[sleutel] && (Date.now()-m[sleutel])<6*3600000; }catch(e){ return false; }
+    }
+    function gatMarkeer(sleutel){
+      try{ var m=JSON.parse(localStorage.getItem('em_gaten')||'{}'), nu=Date.now();
+        Object.keys(m).forEach(function(k){ if(nu-m[k]>7*86400000) delete m[k]; }); m[sleutel]=nu; localStorage.setItem('em_gaten',JSON.stringify(m)); }catch(e){}
+    }
+    var gatTaken=[['wind','Wind',function(v,t){return fetchRenewable('ods031','Wind','wind',v,t);}],
+                  ['solar','Zon',function(v,t){return fetchRenewable('ods032','Zon','solar',v,t);}],
+                  ['imb','Onbalans',function(v,t){return fetchImbalance(v,t);}]];
+    for(var gk=0;gk<gatTaken.length;gk++){
+      var gKey=gatTaken[gk][0], gLabel=gatTaken[gk][1];
+      if(cache._loadErrors&&cache._loadErrors[gKey]) continue;
+      var gaten=gatenIn(cache[gKey]).slice(-6);
+      for(var gj=0;gj<gaten.length;gj++){
+        var g=gaten[gj], sl=gKey+':'+g.van.getTime()+'-'+g.tot.getTime();
+        if(gatGeprobeerd(sl)) continue;
+        gatMarkeer(sl);
+        log(gLabel+': gat in de reeks van '+g.van.toLocaleString('nl-BE')+' tot '+g.tot.toLocaleString('nl-BE')+' — opnieuw ophalen','info');
+        var voor=(cache[gKey]||[]).length;
+        await gatTaken[gk][2](new Date(g.van.getTime()-86400000), new Date(Math.min(g.tot.getTime()+86400000, now.getTime())));
+        var bij=(cache[gKey]||[]).length-voor;
+        log(gLabel+': '+(bij>0?bij+' kwartieren bijgevuld':'Elia levert die periode (nog) niet — volgende poging over 6 u'),bij>0?'ok':'warn');
+        gatenHersteld+=Math.max(0,bij);
+      }
+    }
+
+    if(!startSpot&&!startImb&&!startWind&&!startSolar&&!gatenHersteld){
       log('Alle datasets actueel — geen API-call nodig','ok');
     } else {
       // Meta bijwerken op GitHub (lastDate, cacheVersion)
