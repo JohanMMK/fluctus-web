@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.199.1 (2026-11-15, Johan «bewaren we elke wagen ook op particulierdossier?»): NEE, tot nu enkel het TOTAAL — bij heropenen kwamen alle wagens in 's nachts terecht. Nu bewaart ev_part_veh per tijdsblok het aantal + merk + model (server ≥ 15.422.1) en zet het exact terug. -->
 <!-- ek.html v0.199.0 (2026-11-15, Johan): voertuigdata NAAST elkaar — bij bedrijf staan merk, model en uitleg op één lijn in een rij onder het voertuig (vroeger gestapeld in de smalle eerste kolom). Residentieel: per tijdsblok ('s nachts / overdag / 24 u) ook merk + model voor de personenwagen, onder elkaar; het gekozen model stuurt kWh/km en laadvermogen van dat blok. Bewaard op het dossier (ev_part_veh, server ≥ 15.422.0; ook merk/vd van de bedrijfsrijen worden nu echt bewaard). -->
 <!-- ek.html v0.198.1 (2026-11-15): voertuigdata — verbruik van personen- en bestelwagens = WLTP × 1,2 (praktijkfactor, server ≥ 15.420.1); de info onder de rij toont beide. -->
 <!-- ek.html v0.198.0 (2026-11-14): VOERTUIGDATA — per voertuigrij «Merk» en «Model/type» (GET /api/vehicles?type=…, server ≥ 15.420.0). Gekozen model → verbruik (kWh/km), laadvermogen (AC/DC van de wagen, begrensd door het laadpunt) en kWh per laadbeurt (10→80 %) van dat model; leeg = standaardwaarden van het type. Onder de rij staat welke waarden gebruikt worden; in het rapport staat het model en de versie van de voertuigtabel. -->
@@ -1886,10 +1887,14 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         else if(f==='model'){ rr.vd=el.value?_vehZoek('personenwagen',rr.merk,el.value):null; }
         _evPartVehRender(); _evSync(); }; });
     }); }catch(e){} }
+  // v0.199.1: per tijdsblok aantal + merk + model (vroeger ging enkel het totaal mee → bij heropenen alles in 's nachts)
   function _ekEvPartBewaar(){ try{ if(KLANTTYPE==='bedrijf') return null; var o={}, n=0;
-    Object.keys(_EV_PART_ID).forEach(function(b){ var r=EV_PART_VEH[b]||{}; if(r.merk||_vehVd(r)){ o[b]={ merk:r.merk||'', vd:_vehVd(r)||null }; n++; } }); return n?o:null; }catch(e){ return null; } }
-  function _ekEvPartHerstel(o){ if(!o||typeof o!=='object') return; Object.keys(_EV_PART_ID).forEach(function(b){ var x=o[b];
-    EV_PART_VEH[b]={ type:'personenwagen', merk:(x&&x.merk)||'', vd:((x&&x.vd&&typeof x.vd==='object')?Object.assign({type:'personenwagen'},x.vd):null) }; }); _evPartVehRender(); }
+    Object.keys(_EV_PART_ID).forEach(function(b){ var r=EV_PART_VEH[b]||{}, a=_evPartAantal(b); if(a>0||r.merk||_vehVd(r)){ o[b]={ aantal:a, merk:r.merk||'', vd:_vehVd(r)||null }; n++; } }); return n?o:null; }catch(e){ return null; } }
+  function _ekEvPartHerstel(o){ if(!o||typeof o!=='object') return; var metAantal=false;
+    Object.keys(_EV_PART_ID).forEach(function(b){ var x=o[b]; if(x&&x.aantal!=null) metAantal=true;
+      EV_PART_VEH[b]={ type:'personenwagen', merk:(x&&x.merk)||'', vd:((x&&x.vd&&typeof x.vd==='object')?Object.assign({type:'personenwagen'},x.vd):null) }; });
+    if(metAantal && KLANTTYPE!=='bedrijf') Object.keys(_EV_PART_ID).forEach(function(b){ var e=$(_EV_PART_ID[b]); if(e) e.value=Math.max(0,Math.round(+((o[b]||{}).aantal)||0)); });
+    window._EV_PART_SIG=null; _evSync(); _evPartVehRender(); }
   // per blok: kWh/km + laadvermogen (enkel als er een model gekozen is, anders de standaard van het type)
   function _evPartBlok(b){ var pw=_evType('personenwagen'), r=EV_PART_VEH[b]||{}, vd=_vehVd(r), cap=_vehCap(vd,'personenwagen');
     return { kwhkm:(vd?vd.kwh_km:pw.kwhkm), label:pw.label+(vd?' · '+_vehNaam(vd)+' (voertuigdata '+(vd.versie||'—')+')':''), laadverm_kw:(cap>0?Math.min(_ownKw('personenwagen'),cap):null), vd:vd }; }
@@ -3737,6 +3742,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       var _was={ kt:KLANTTYPE, n:(EV_ROWS||[]).length };
       if(_D0.klanttype==='bedrijf'||_D0.klanttype==='particulier') _evSetKlanttype(_D0.klanttype);
       if(!(_D0.rows.length && _ekEvRowsHerstel(_D0.rows))) _evApplyTotal(_D0.ev);
+      if(_D0.part) _ekEvPartHerstel(_D0.part);   // v0.199.1: aantallen + model per tijdsblok
       try{ if(window._ekLog) window._ekLog('ev_hersteld',{ ev:_D0.ev, kt_was:_was.kt, rijen_was:_was.n }); }catch(eL){} } }catch(eV){}
     var profiel=$('i-profiel').value;
     var ev=+$('i-ev').value||0;
@@ -4522,7 +4528,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           window._EK_PV_BRON=String(B.best_pv_bron||'');   // v0.110.0
           if(B.injectie_mwh!=null && $('i-best-inj')) $('i-best-inj').value=+B.injectie_mwh||0;
           if(B.profiel && $('i-profiel')) $('i-profiel').value=B.profiel;
-          try{ window._EK_EV_DOS={ klanttype:B.klanttype||'', rows:(Array.isArray(B.ev_rows)?B.ev_rows.slice():[]), ev:+B.ev||0 }; window._EK_EV_USER=false; }catch(eD){}   // v0.148.3: bewaarde voertuigen onthouden (vangnet)
+          try{ window._EK_EV_DOS={ klanttype:B.klanttype||'', rows:(Array.isArray(B.ev_rows)?B.ev_rows.slice():[]), ev:+B.ev||0, part:(B.ev_part_veh||null) }; window._EK_EV_USER=false; }catch(eD){}   // v0.148.3: bewaarde voertuigen onthouden (vangnet)
           if(B.ev!=null||Array.isArray(B.ev_rows)){ try{ _KTYPE_USER=false;
             if(B.klanttype==='bedrijf'||B.klanttype==='particulier') _evSetKlanttype(B.klanttype);   // v0.24.52: bewaard klanttype terug
             if(!(Array.isArray(B.ev_rows)&&B.ev_rows.length&&_ekEvRowsHerstel(B.ev_rows))) _evApplyTotal(+B.ev||0);
