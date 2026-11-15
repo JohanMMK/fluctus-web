@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.200.0 (2026-11-15, Johan «wat wordt er nu niet bewaard in dossier bedrijf en particulier»): (1) een NIEUW dossier (eerste doorrekening, «Maak dossier», offerte zonder dossier) stuurde een uitgeklede set mee en de server vervangt het hele bevestigd-blok → certificaten, sturing/fee, generator, cabine/palen, batterij-instellingen, voertuig-defaults, DNB/Elia, factuurreferentie, eigen combi's en EAN vielen weg tot een volgende volledige bewaring; nu sturen alle 4 de bewaarplekken dezelfde volledige set (_ekBevExtra). (2) C-factor uit «Pas aan» (CRATE_OV) en (3) scenarionaam (was enkel in deze browser) staan nu op het dossier (server ≥ 15.423.0). -->
 <!-- ek.html v0.199.1 (2026-11-15, Johan «bewaren we elke wagen ook op particulierdossier?»): NEE, tot nu enkel het TOTAAL — bij heropenen kwamen alle wagens in 's nachts terecht. Nu bewaart ev_part_veh per tijdsblok het aantal + merk + model (server ≥ 15.422.1) en zet het exact terug. -->
 <!-- ek.html v0.199.0 (2026-11-15, Johan): voertuigdata NAAST elkaar — bij bedrijf staan merk, model en uitleg op één lijn in een rij onder het voertuig (vroeger gestapeld in de smalle eerste kolom). Residentieel: per tijdsblok ('s nachts / overdag / 24 u) ook merk + model voor de personenwagen, onder elkaar; het gekozen model stuurt kWh/km en laadvermogen van dat blok. Bewaard op het dossier (ev_part_veh, server ≥ 15.422.0; ook merk/vd van de bedrijfsrijen worden nu echt bewaard). -->
 <!-- ek.html v0.198.1 (2026-11-15): voertuigdata — verbruik van personen- en bestelwagens = WLTP × 1,2 (praktijkfactor, server ≥ 15.420.1); de info onder de rij toont beide. -->
@@ -2462,6 +2463,19 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.125.0: batterijsturing + leveranciersfee injectie (adviseur) → sweep/cel/rapport + bewaard op het dossier
   function _ekNetladen(){ var e=$('i-netladen'); return (e&&e.value==='volledig')?'volledig':''; }
   function _ekInjFee(){ var e=$('i-inj-fee'); if(!e||e.value==='') return null; var v=+String(e.value).replace(',','.'); return isFinite(v)?Math.max(0,Math.min(200,v)):null; }
+  // v0.200.0: ÉÉN volledige set extra velden voor ALLE bewaarplekken (vroeger stuurden de dossier-aanmaakflows een uitgeklede set
+  //   en de server vervangt het hele bevestigd-blok → velden vielen weg). Overschrijft enkel lege EAN's in de basis.
+  function _ekBevExtra(o){ o=o||{};
+    var x={ nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
+      fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
+      ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),
+      ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),
+      elia:(STATE_ELIA||''), certificaten:_ekCertBody(), netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(), referentie:(REF_NIETS?'niets':''),
+      custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]),
+      crate_ov:(CRATE_OV>0?CRATE_OV:null),   // v0.200.0: C-factor uit «Pas aan»
+      scenario:(function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,120):''; }catch(eS){ return ''; } })() };   // v0.200.0: scenarionaam
+    if(!o.ean_afname && STATE_EAN_AFNAME){ x.ean_afname=STATE_EAN_AFNAME; x.ean_injectie=(STATE_EAN_INJECTIE||''); }
+    return Object.assign(o,x); }
   function _ekMeldingen(swp, body){ var el=$('ek-meldingen'); if(!el) return; var d=[], w=[];
     try{ if(swp&&swp.grd) d.push('Netbeheerder: '+swp.grd+(swp.grd_bron==='postcode'?' (uit de postcode)':(swp.grd_bron==='opgegeven'?'':''))); }catch(e){}
     try{ (swp&&swp.meldingen||[]).forEach(function(m){ if(m&&m.tekst) w.push('⚠️ '+m.tekst); }); }catch(e){}
@@ -3192,7 +3206,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekScenSleutel(){ try{ return 'EK_SCENARIO_'+(STATE_CODE||new URLSearchParams(location.search).get('case')||''); }catch(e){ return null; } }
   function _ekScenarioLaad(){ var el=$('dim-scenario'); if(!el) return; var k=_ekScenSleutel(); if(!k||k===_ekScenKey) return; _ekScenKey=k;
     try{ el.value=localStorage.getItem(k)||''; }catch(e){}
-    if(!el._ekBound){ el._ekBound=true; el.addEventListener('input',function(){ try{ var kk=_ekScenSleutel(); if(kk){ if(el.value.trim()) localStorage.setItem(kk,el.value); else localStorage.removeItem(kk); } }catch(e){} }); } }
+    if(!el._ekBound){ el._ekBound=true; el.addEventListener('input',function(){ try{ var kk=_ekScenSleutel(); if(kk){ if(el.value.trim()) localStorage.setItem(kk,el.value); else localStorage.removeItem(kk); } }catch(e){} });
+      el.addEventListener('change',function(){ try{ if(TOKEN||STATE_CODE) _ekPersistBevestigd(); }catch(e){} }); } }   // v0.200.0: scenarionaam ook op het dossier
   // v0.76.2 (Johan): staat er een gemeten afnameprofiel op het dossier, dan is «Analoge meter gedetecteerd» (uit een voorschot-
   //   of oude factuur) niet meer van toepassing → melding verbergen.
   function _ekAnaloogCheck(){ try{ var an=$('analoog-note'); if(an && !an.classList.contains('hidden') && STATE_PROFIEL_STATUS && STATE_PROFIEL_STATUS.afname && STATE_PROFIEL_STATUS.afname.aanwezig) an.classList.add('hidden'); }catch(e){} }
@@ -3463,6 +3478,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
         referentie:(REF_NIETS?'niets':''),   // v0.107.0
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };
+      _ekBevExtra(_bev);   // v0.200.0
       var _hI=Object.assign({'Content-Type':'application/json'}, (await window._ekGateHdr().catch(function(){ return {}; }))||{});   // v0.142.0: adviseur meteen op het dossier
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hI, body:JSON.stringify({
         token:TOKEN||undefined, naam:(STATE_KLANT||'').trim(), adres:(STATE_ADRES||''), btw:(STATE_BTW||'').trim(),
@@ -3789,6 +3805,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
         referentie:(REF_NIETS?'niets':''),   // v0.107.0
         custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]) };   // v0.24.35 (Johan): manuele "Pas aan"-combi's meebewaren → bij heropenen terug op de heatmap
+      _ekBevExtra(_bevestigd);   // v0.200.0
       var _r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         token:TOKEN||undefined, mail:($('i-mail').value||'').trim(), tel:($('i-tel').value||'').trim(),
         naam:(STATE_KLANT||'').trim(), adres:(_bevestigd.adres||''), btw:(STATE_BTW||'').trim(),   // v0.24.32 (Johan): klantnaam/adres/BTW meesturen → server werkt dossiernaam + klantnaam op het projectrecord bij (cockpit)
@@ -4559,6 +4576,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(+B.fact_maand_mwh>0) STATE_FACT_MAAND={ mwh:+B.fact_maand_mwh, label:(B.fact_maand_label||'') };
           // v0.24.35 (Johan): manuele "Pas aan"-combi's terugzetten → _herstelCustomCombos() (na de sweep) zet ze terug op de heatmap.
           if(Array.isArray(B.custom_combos)) CUSTOM_COMBOS=B.custom_combos.slice(0,20);
+          if(+B.crate_ov>0) CRATE_OV=Math.max(0.5,Math.min(8,+B.crate_ov));   // v0.200.0: C-factor uit «Pas aan» terug
+          if(B.scenario){ try{ var _sk=_ekScenSleutel(); if(_sk && !localStorage.getItem(_sk)) localStorage.setItem(_sk,String(B.scenario)); }catch(eSk){} try{ var _sc=$('dim-scenario'); if(_sc && !_sc.value) _sc.value=String(B.scenario); }catch(eSc){} }   // v0.200.0: scenarionaam van het dossier
         }
         // v0.110.0 (Johan 23-10): volledig gemeten jaar injectie → bestaande PV = 1,1 × hoogste gemeten injectiepiek (tenzij manueel aangepast).
         try{ _ekPvUitInjectieZet(STATE_PROFIEL_STATUS && STATE_PROFIEL_STATUS.injectie, false); }catch(ePvI){}
@@ -4974,7 +4993,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var mail=(($('i-mail')&&$('i-mail').value)||'').trim() || 'oekene@gmail.com';
     var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
       profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
-      ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze (rec.bevestigd.ev_rows)
+      ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') }; _ekBevExtra(_bevestigd);   // v0.200.0: volledige set · v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze (rec.bevestigd.ev_rows)
     var _hI2=Object.assign({'Content-Type':'application/json'}, (await window._ekGateHdr().catch(function(){ return {}; }))||{});   // v0.142.0
     var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hI2, body:JSON.stringify({
       token:TOKEN||undefined, mail:mail, naam:klant, adres:adres,
@@ -5023,7 +5042,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     try{
       var _bevestigd={ afname_mwh:afnameMwh, toegang_kw:toegangKw, kost:kost, best_pv_kwp:bestPvKwp, best_pv_bron:(window._EK_PV_BRON||''), injectie_mwh:injMwh,
         profiel:profiel, ev:ev, klant:klant, btw:btw, adres:adres, ean_afname:'', ean_injectie:'',
-        ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') };   // v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze
+        ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||'') }; _ekBevExtra(_bevestigd);   // v0.200.0: volledige set · v0.24.60 (Johan): laadmomenten + voertuigrijen (type+aantal+moment+weekend) IN bevestigd → server bewaart ze
       var _hdD={'Content-Type':'application/json'}; try{ var _ah=await _ekAuthHeaders(); if(_ah&&_ah.Authorization) _hdD.Authorization=_ah.Authorization; }catch(eA){} try{ if(new URLSearchParams(location.search).get('gatetest')==='1') _hdD['X-EK-Gate-Test']='1'; }catch(eG){}
       var r=await fetch(API+'/api/ek-intake',{ method:'POST', headers:_hdD, body:JSON.stringify({
         token:TOKEN||undefined, mail:mail, naam:klant, adres:adres, adviseur_email:(window._EK_ADV_PENDING||undefined),   // v0.78.3
