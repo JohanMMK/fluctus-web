@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.201.0 (2026-11-15, Johan): RESIDENTIEEL MERK/MODEL PER WAGEN — onder elk tijdsblok «Wagen 1», «Wagen 2» … elk met eigen merk + model (vroeger één model per blok). Rekenen per wagen (thuisladen) resp. per modelgroep (sweep). Bewaard als ev_part_veh[blok].wagens[] (server ≥ 15.424.0); oude dossiers (één model per blok) worden naar alle wagens van dat blok gekopieerd. -->
 <!-- ek.html v0.200.0 (2026-11-15, Johan «wat wordt er nu niet bewaard in dossier bedrijf en particulier»): (1) een NIEUW dossier (eerste doorrekening, «Maak dossier», offerte zonder dossier) stuurde een uitgeklede set mee en de server vervangt het hele bevestigd-blok → certificaten, sturing/fee, generator, cabine/palen, batterij-instellingen, voertuig-defaults, DNB/Elia, factuurreferentie, eigen combi's en EAN vielen weg tot een volgende volledige bewaring; nu sturen alle 4 de bewaarplekken dezelfde volledige set (_ekBevExtra). (2) C-factor uit «Pas aan» (CRATE_OV) en (3) scenarionaam (was enkel in deze browser) staan nu op het dossier (server ≥ 15.423.0). -->
 <!-- ek.html v0.199.1 (2026-11-15, Johan «bewaren we elke wagen ook op particulierdossier?»): NEE, tot nu enkel het TOTAAL — bij heropenen kwamen alle wagens in 's nachts terecht. Nu bewaart ev_part_veh per tijdsblok het aantal + merk + model (server ≥ 15.422.1) en zet het exact terug. -->
 <!-- ek.html v0.199.0 (2026-11-15, Johan): voertuigdata NAAST elkaar — bij bedrijf staan merk, model en uitleg op één lijn in een rij onder het voertuig (vroeger gestapeld in de smalle eerste kolom). Residentieel: per tijdsblok ('s nachts / overdag / 24 u) ook merk + model voor de personenwagen, onder elkaar; het gekozen model stuurt kWh/km en laadvermogen van dat blok. Bewaard op het dossier (ev_part_veh, server ≥ 15.422.0; ook merk/vd van de bedrijfsrijen worden nu echt bewaard). -->
@@ -1868,37 +1869,43 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _evHeavyCount(){ if(KLANTTYPE!=='bedrijf') return 0; return EV_ROWS.reduce(function(s,r){ return s+((r.type==='lichte_vracht'||r.type==='vrachtwagen'||r.type==='bus')?Math.max(0,+r.aantal||0):0); },0); }   // v0.24.56 (Johan): DC voor lichte vrachtwagen + vrachtwagen + bus (1 DC per voertuig)
   function _evTotal(){ return KLANTTYPE==='bedrijf'?_evBedrTotal():_evPartTotal(); }
   function _evSync(){ var n=_evTotal(); var h=$('i-ev'); if(h) h.value=n; var pt=$('ev-part-tot');
-    var _pvAny=false; try{ _pvAny=Object.keys(_EV_PART_ID).some(function(b){ return _evPartAantal(b)>0 && !!_vehVd(EV_PART_VEH[b]); }); }catch(eP){}
+    var _pvAny=false; try{ _pvAny=Object.keys(_EV_PART_ID).some(function(b){ return _evPartCars(b).some(function(r){ return !!_vehVd(r); }); }); }catch(eP){}
     if(pt) pt.textContent = (KLANTTYPE==='particulier') ? ('Totaal: '+n+' personenwagen'+(n===1?'':'s')+' · '+(_pvAny?'kWh/km per gekozen model':_evNum(_evType('personenwagen').kwhkm)+' kWh/km')+' · '+_evType('personenwagen').kmjaar+' km/j') : '';
-    if(KLANTTYPE!=='bedrijf'){ try{ var _sig=Object.keys(_EV_PART_ID).map(function(b){ return _evPartAantal(b)>0?1:0; }).join(''); if(_sig!==window._EV_PART_SIG){ window._EV_PART_SIG=_sig; _evPartVehRender(); } }catch(eR){} } }
+    if(KLANTTYPE!=='bedrijf'){ try{ var _sig=Object.keys(_EV_PART_ID).map(function(b){ return Math.min(20,_evPartAantal(b)); }).join('|'); if(_sig!==window._EV_PART_SIG){ window._EV_PART_SIG=_sig; _evPartVehRender(); } }catch(eR){} } }
   // v0.34 (Johan): fysiek laadvermogen per voertuig (eigen vloot, depotladen) — spiegelt de server-defaults; 0 = val terug op 11.
   var _EV_OWN_KW={ personenwagen:11, bestelwagen:22, lichte_vracht:150, vrachtwagen:150, bus:150 };
   function _ownKw(key){ return _EV_OWN_KW[key]||11; }
-  // v0.199.0 (Johan 15-11): RESIDENTIEEL — per tijdsblok één personenwagen-model (geldt voor alle wagens in dat blok).
-  var EV_PART_VEH={ nacht:{type:'personenwagen'}, dag:{type:'personenwagen'}, h24:{type:'personenwagen'} };
+  // v0.199.0 (Johan 15-11): RESIDENTIEEL — merk/model onder het tijdsblok. v0.201.0: PER WAGEN (wagen 1, wagen 2 …) i.p.v. één model per blok.
   var _EV_PART_ID={ nacht:'ev-p-nacht', dag:'ev-p-dag', h24:'ev-p-24' };
+  var EV_PART_CARS={ nacht:[], dag:[], h24:[] };   // per blok: [{type,merk,vd}] — lengte volgt het aantal
   function _evPartAantal(b){ return Math.max(0,Math.round(+(($(_EV_PART_ID[b])||{}).value)||0)); }
+  function _evPartCars(b){ var n=Math.min(20,_evPartAantal(b)), a=EV_PART_CARS[b]||(EV_PART_CARS[b]=[]); while(a.length<n) a.push({type:'personenwagen',merk:'',vd:null}); return a.slice(0,n); }
   function _evPartVehRender(){ try{
     Array.prototype.forEach.call(document.querySelectorAll('.ev-p-veh[data-pvb]'),function(box){
-      var b=box.getAttribute('data-pvb'), r=EV_PART_VEH[b]||(EV_PART_VEH[b]={type:'personenwagen'}), aan=_evPartAantal(b)>0;
-      box.style.display=aan?'':'none'; if(!aan){ box.innerHTML=''; return; }
-      box.innerHTML=_vehSelHtml(r,'p-'+b,'onder','data-pb="'+b+'"');
-      Array.prototype.forEach.call(box.querySelectorAll('select[data-pb]'),function(el){ el.onchange=function(){ var rr=EV_PART_VEH[b], f=el.getAttribute('data-f');
+      var b=box.getAttribute('data-pvb'), cars=_evPartCars(b);
+      box.style.display=cars.length?'':'none'; if(!cars.length){ box.innerHTML=''; return; }
+      box.innerHTML=cars.map(function(r,k){ return '<div class="ev-p-wagen" style="margin-top:8px">'+(cars.length>1?'<div style="font-size:11px;font-weight:700;color:#5A6577;margin-bottom:-2px">Wagen '+(k+1)+'</div>':'')+
+        _vehSelHtml(r,'p-'+b+'-'+k,'onder','data-pb="'+b+'" data-pk="'+k+'"')+'</div>'; }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('select[data-pb]'),function(el){ el.onchange=function(){ var k=+el.getAttribute('data-pk')||0, rr=_evPartCars(b)[k], f=el.getAttribute('data-f'); if(!rr) return;
         if(f==='merk'){ rr.merk=el.value||''; rr.vd=null; }
         else if(f==='model'){ rr.vd=el.value?_vehZoek('personenwagen',rr.merk,el.value):null; }
         _evPartVehRender(); _evSync(); }; });
     }); }catch(e){} }
-  // v0.199.1: per tijdsblok aantal + merk + model (vroeger ging enkel het totaal mee → bij heropenen alles in 's nachts)
+  // v0.199.1: per tijdsblok aantal + merk + model · v0.201.0: + wagens[] (per wagen). merk/vd blijven = wagen 1 (achterwaarts compatibel).
   function _ekEvPartBewaar(){ try{ if(KLANTTYPE==='bedrijf') return null; var o={}, n=0;
-    Object.keys(_EV_PART_ID).forEach(function(b){ var r=EV_PART_VEH[b]||{}, a=_evPartAantal(b); if(a>0||r.merk||_vehVd(r)){ o[b]={ aantal:a, merk:r.merk||'', vd:_vehVd(r)||null }; n++; } }); return n?o:null; }catch(e){ return null; } }
+    Object.keys(_EV_PART_ID).forEach(function(b){ var a=_evPartAantal(b), cars=_evPartCars(b);
+      if(a>0){ o[b]={ aantal:a, merk:(cars[0]&&cars[0].merk)||'', vd:(cars[0]&&_vehVd(cars[0]))||null, wagens:cars.map(function(r){ return { merk:r.merk||'', vd:_vehVd(r)||null }; }) }; n++; } });
+    return n?o:null; }catch(e){ return null; } }
   function _ekEvPartHerstel(o){ if(!o||typeof o!=='object') return; var metAantal=false;
     Object.keys(_EV_PART_ID).forEach(function(b){ var x=o[b]; if(x&&x.aantal!=null) metAantal=true;
-      EV_PART_VEH[b]={ type:'personenwagen', merk:(x&&x.merk)||'', vd:((x&&x.vd&&typeof x.vd==='object')?Object.assign({type:'personenwagen'},x.vd):null) }; });
+      var mk=function(y){ return { type:'personenwagen', merk:(y&&y.merk)||'', vd:((y&&y.vd&&typeof y.vd==='object')?Object.assign({type:'personenwagen'},y.vd):null) }; };
+      var n=Math.max(0,Math.round(+((x||{}).aantal)||0));
+      EV_PART_CARS[b]=(x&&Array.isArray(x.wagens)&&x.wagens.length) ? x.wagens.map(mk) : (x&&(x.merk||x.vd) ? Array.apply(null,{length:Math.max(1,n)}).map(function(){ return mk(x); }) : []); });
     if(metAantal && KLANTTYPE!=='bedrijf') Object.keys(_EV_PART_ID).forEach(function(b){ var e=$(_EV_PART_ID[b]); if(e) e.value=Math.max(0,Math.round(+((o[b]||{}).aantal)||0)); });
     window._EV_PART_SIG=null; _evSync(); _evPartVehRender(); }
-  // per blok: kWh/km + laadvermogen (enkel als er een model gekozen is, anders de standaard van het type)
-  function _evPartBlok(b){ var pw=_evType('personenwagen'), r=EV_PART_VEH[b]||{}, vd=_vehVd(r), cap=_vehCap(vd,'personenwagen');
-    return { kwhkm:(vd?vd.kwh_km:pw.kwhkm), label:pw.label+(vd?' · '+_vehNaam(vd)+' (voertuigdata '+(vd.versie||'—')+')':''), laadverm_kw:(cap>0?Math.min(_ownKw('personenwagen'),cap):null), vd:vd }; }
+  // per wagen: kWh/km + laadvermogen (enkel als er een model gekozen is, anders de standaard van het type)
+  function _evPartWagen(r){ var pw=_evType('personenwagen'), vd=_vehVd(r||{}), cap=_vehCap(vd,'personenwagen');
+    return { kwhkm:(vd?vd.kwh_km:pw.kwhkm), label:pw.label+(vd?' · '+_vehNaam(vd)+' (voertuigdata '+(vd.versie||'—')+')':''), laadverm_kw:(cap>0?Math.min(_ownKw('personenwagen'),cap):null), vd:vd, sleutel:(vd?vd.id:'std') }; }
   // v0.39.0 (Johan): (i)-uitleg bij de voertuigtabel.
   var EK_INFO={
     kw:{ t:'kW — laadvermogen', h:'<p><b>Eigen vloot</b> (Betalend uit): het vermogen waarmee <b>één voertuig</b> laadt aan zijn laadpunt, in kW. Een AC-laadpunt op de bedrijfsparking of thuis is typisch 7 à 11 kW; vrachtwagens en bussen laden op een depot vaak aan een hoger vermogen.</p><p>Dit vermogen bepaalt hoeveel het laden van je aansluiting vraagt en hoe snel de voertuigen vol zijn. Met slimme sturing en een batterij spreiden we die vraag, zodat je binnen je bestaande aansluiting blijft.</p><p><b>Betalend laadplein</b> (Betalend aan): het vermogen <b>per snellaadpaal</b> voor bezoekers, bv. 150 kW.</p>' },
@@ -2052,7 +2059,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     _evRenderRows(); _evSync(); return true; }
   // thuisladen-wagens[] uit de particulier-buckets (elk voertuig = 1 item met wd/we-venster)
   function _wagensV2(){ var pw=_evType('personenwagen'), out=[];
-    function push(cnt,vs,ve,b){ cnt=Math.max(0,Math.round(cnt)); var bl=_evPartBlok(b); for(var i=0;i<cnt;i++) out.push({km:pw.kmjaar,kwhkm:bl.kwhkm,wd_start:vs,wd_eind:ve,we_start:vs,we_eind:ve,creg:true}); }   // v0.199.0: kWh/km van het gekozen model
+    function push(cnt,vs,ve,b){ cnt=Math.max(0,Math.round(cnt)); var cars=_evPartCars(b); for(var i=0;i<cnt;i++){ var bl=_evPartWagen(cars[i]); out.push({km:pw.kmjaar,kwhkm:bl.kwhkm,wd_start:vs,wd_eind:ve,we_start:vs,we_eind:ve,creg:true}); } }   // v0.199.0: kWh/km van het gekozen model
     push(+(($('ev-p-nacht')||{}).value)||0,19,7,'nacht'); push(+(($('ev-p-dag')||{}).value)||0,7,19,'dag'); push(+(($('ev-p-24')||{}).value)||0,0,24,'h24');
     return out.length?out:_wagens(0); }
   // bedrijf-pleinen[] uit de rijen (type → kwh/km + km/j; laadmoment → venster; weekend → dagen/week)
@@ -2086,10 +2093,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   // v0.24.39 (Johan: "een woning mag eigenlijk ook een rooster"): thuislaad-buckets (nacht/dag/24u) → wagenpark-pleinen,
   //   zodat een woning via DEZELFDE bedrijf-sweep (PV×batterij-rooster) kan lopen. Personenwagen-defaults; venster per bucket.
   function _pleinenParticulier(){ var pw=_evType('personenwagen'), out=[];
-    function add(cnt,vs,ve,naam,b){ cnt=Math.max(0,Math.round(cnt)); if(!(cnt>0)) return; var bl=_evPartBlok(b), vd=bl.vd;   // v0.199.0: gekozen model per tijdsblok
-      var o={ naam:naam, type_plein:'wagenpark', betalend:false, type:'personenwagen', voertuig:(vd?bl.label:pw.label+' (standaardwaarden)'), aantal:cnt, km_per_jaar:pw.kmjaar, kwh_per_km:bl.kwhkm, venster_start:vs, venster_eind:ve, dagen_per_week:7, creg:true,
-        voertuig_waarden:(vd?'voertuigspecifiek':'standaard'), voertuigtabel_versie:(vd?vd.versie:null), voertuig_data:(vd?{merk:vd.merk,model:vd.model,variant:vd.variant,batt_kwh:vd.batt_kwh,kwh_km:vd.kwh_km,kwh_km_wltp:(vd.kwh_km_wltp||null),praktijkfactor:(vd.praktijkfactor||1),ac_kw:vd.ac_kw,dc_kw:vd.dc_kw,bron:vd.bron,controle:vd.controle}:null) };
-      if(bl.laadverm_kw>0) o.laadverm_kw=bl.laadverm_kw; out.push(o); }
+    function add(cnt,vs,ve,naam,b){ cnt=Math.max(0,Math.round(cnt)); if(!(cnt>0)) return;   // v0.201.0: per gekozen model één groep (wagens met hetzelfde model samen)
+      var groepen={}, volg=[]; _evPartCars(b).slice(0,cnt).forEach(function(r){ var w=_evPartWagen(r); if(!groepen[w.sleutel]){ groepen[w.sleutel]={w:w,n:0}; volg.push(w.sleutel); } groepen[w.sleutel].n++; });
+      var rest=cnt-volg.reduce(function(s2,k){ return s2+groepen[k].n; },0); if(rest>0){ if(!groepen.std){ groepen.std={w:_evPartWagen(null),n:0}; volg.push('std'); } groepen.std.n+=rest; }
+      volg.forEach(function(k){ var g=groepen[k], bl=g.w, vd=bl.vd;
+        var o={ naam:naam+(volg.length>1&&vd?' · '+_vehNaam(vd):''), type_plein:'wagenpark', betalend:false, type:'personenwagen', voertuig:(vd?bl.label:pw.label+' (standaardwaarden)'), aantal:g.n, km_per_jaar:pw.kmjaar, kwh_per_km:bl.kwhkm, venster_start:vs, venster_eind:ve, dagen_per_week:7, creg:true,
+          voertuig_waarden:(vd?'voertuigspecifiek':'standaard'), voertuigtabel_versie:(vd?vd.versie:null), voertuig_data:(vd?{merk:vd.merk,model:vd.model,variant:vd.variant,batt_kwh:vd.batt_kwh,kwh_km:vd.kwh_km,kwh_km_wltp:(vd.kwh_km_wltp||null),praktijkfactor:(vd.praktijkfactor||1),ac_kw:vd.ac_kw,dc_kw:vd.dc_kw,bron:vd.bron,controle:vd.controle}:null) };
+        if(bl.laadverm_kw>0) o.laadverm_kw=bl.laadverm_kw; out.push(o); }); }
     add(+(($('ev-p-nacht')||{}).value)||0,19,7,'Thuisladen nacht','nacht'); add(+(($('ev-p-dag')||{}).value)||0,7,19,'Thuisladen dag','dag'); add(+(($('ev-p-24')||{}).value)||0,0,24,'Thuisladen 24u','h24');
     return out; }
   // Voertuig-defaults-modal (enkel oekene@gmail.com)
