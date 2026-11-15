@@ -1,4 +1,4 @@
-/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.4.16, 2026-10-29: + DC-laadbuffer overal; v1.4.15, 2026-10-29: + laadsessies t.o.v. diesel, DC-laadbuffer; v1.4.14, 2026-10-25: + aannames, laadplein, fastDC, profiel (dekkingstest klantrapport v0.75.0); v1.4.13, 2026-10-25: + «Jaar {#} *» (klantrapport v0.74.0); v1.4.12, 2026-10-21: + investeringsaftrek in jaar 1 (klantrapport v0.70.0); v1.4.11, 2026-10-21: + referentie «niets doen» (ek v0.107.0); v1.4.10, 2026-10-20: + verhoogde investeringsaftrek, loadfactor, piek, maand-jaar; v1.4.8, 2026-10-16: + meldingen trage simulatie (ek v0.76.2); v1.4.7, 2026-10-16: + rooster volledig exact / dubbelklik (ek v0.74.0); v1.4.6, 2026-10-16: + legende exact/geschat + herinterpoleren (ek v0.73.0); v1.4.5, 2026-10-16: + "{#} j" / "> {#} j" (terugverdientijd in jaren); v1.4.4, 2026-10-13: + betalend laadplein/netverzwaring-labels; v1.4.3, 2026-10-13: + kVA-tekst verzwaring nodig; v1.4.1, 2026-10-13: + bijlage laadverplichtingen; v1.4.0, 2026-10-13: + methodiek bijgewerkt; v1.3.9, 2026-10-13: + impact «Voor je …», thuisladen goedkoper; v1.3.8, 2026-10-13: + logica twee beslissingen; v1.3.7, 2026-10-13: + varia, netto-investering overzicht; v1.3.6, 2026-10-13: + teksten volgens PV/batterij, roosterlabels incl. laadpalen; v1.3.5, 2026-10-13: + advies, inhoud, rendement voorblad; v1.3.4, 2026-10-13: + titels zonder laadpalen; v1.3.3, 2026-10-13: + financieel plan met laadpalen; v1.3.2, 2026-10-13: + laadsessies naar het bedrijf; v1.3.1, 2026-10-12: + uitleg afgeremd v1.16; v1.3.0, 2026-10-12: + afgeremde PV energiebalans; v1.2.9, 2026-10-12: + noot batterij-verkoop energiebalans; v1.2.8, 2026-10-12: + KPI-kader EK; v1.2.7, 2026-10-12: + kalibratie (kVA-blok zonder laadplein, netto onbalans, injectieprijs); v1.2.6, 2026-10-12: + bijlage bestaande PV — injectie sturen; v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
+/* fr-ec-seg.js — Energie-Compas FR-sjablonen per tekstsegment (v1.4.17, 2026-11-15: + EK-invoer/resultaat-tabs (help-video); v1.4.16, 2026-10-29: + DC-laadbuffer overal; v1.4.15, 2026-10-29: + laadsessies t.o.v. diesel, DC-laadbuffer; v1.4.14, 2026-10-25: + aannames, laadplein, fastDC, profiel (dekkingstest klantrapport v0.75.0); v1.4.13, 2026-10-25: + «Jaar {#} *» (klantrapport v0.74.0); v1.4.12, 2026-10-21: + investeringsaftrek in jaar 1 (klantrapport v0.70.0); v1.4.11, 2026-10-21: + referentie «niets doen» (ek v0.107.0); v1.4.10, 2026-10-20: + verhoogde investeringsaftrek, loadfactor, piek, maand-jaar; v1.4.8, 2026-10-16: + meldingen trage simulatie (ek v0.76.2); v1.4.7, 2026-10-16: + rooster volledig exact / dubbelklik (ek v0.74.0); v1.4.6, 2026-10-16: + legende exact/geschat + herinterpoleren (ek v0.73.0); v1.4.5, 2026-10-16: + "{#} j" / "> {#} j" (terugverdientijd in jaren); v1.4.4, 2026-10-13: + betalend laadplein/netverzwaring-labels; v1.4.3, 2026-10-13: + kVA-tekst verzwaring nodig; v1.4.1, 2026-10-13: + bijlage laadverplichtingen; v1.4.0, 2026-10-13: + methodiek bijgewerkt; v1.3.9, 2026-10-13: + impact «Voor je …», thuisladen goedkoper; v1.3.8, 2026-10-13: + logica twee beslissingen; v1.3.7, 2026-10-13: + varia, netto-investering overzicht; v1.3.6, 2026-10-13: + teksten volgens PV/batterij, roosterlabels incl. laadpalen; v1.3.5, 2026-10-13: + advies, inhoud, rendement voorblad; v1.3.4, 2026-10-13: + titels zonder laadpalen; v1.3.3, 2026-10-13: + financieel plan met laadpalen; v1.3.2, 2026-10-13: + laadsessies naar het bedrijf; v1.3.1, 2026-10-12: + uitleg afgeremd v1.16; v1.3.0, 2026-10-12: + afgeremde PV energiebalans; v1.2.9, 2026-10-12: + noot batterij-verkoop energiebalans; v1.2.8, 2026-10-12: + KPI-kader EK; v1.2.7, 2026-10-12: + kalibratie (kVA-blok zonder laadplein, netto onbalans, injectieprijs); v1.2.6, 2026-10-12: + bijlage bestaande PV — injectie sturen; v1.2.5, 2026-10-12: + bestaande PV — injectie sturen (ek v0.57.0 / klantrapport v0.36.0); v1.2.4, 2026-10-10: + voortgangspaneel simulatie (ek v0.44.2); v1.2.3: + EK-knop "Haal mijn profieldata op"; v1.2.2: + live scan particulier & betalend laadplein; v1.2.1: + QC-labels; v1.2.0: + live dekkingsscan EK-resultaatscherm + EC_FR_FN-regels; v1.1.0: + EK-scherm; v1.0.0: klantrapport).
    Sleutel = NL-segment met getallen → {#} en maandnamen → {m} (zie i18n-ec.js v0.2 norm()); optioneel 'segment|volgende tekst'.
    Waarde = FR-sjabloon met dezelfde placeholders. B2B 'vous'.    2026-10-12 (Johan): NL-sleutels mee omgezet naar de je-vorm (u/uw → je/jouw), zelfde omzetting als ek.html v0.56.0 / klantrapport v0.35.0. */
 window.EC_FR_SEG = {
@@ -1577,10 +1577,61 @@ window.EC_FR_SEG = {
 "hoog — piek {#} €": "élevé — pic {#} €",
 "Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van het PV-vermogen. Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.": "Uniquement vos panneaux solaires existants. La puissance d’onduleur (kVA) est estimée sur la base de la puissance PV. Indicatif : le résultat dépend des prix de marché, qui changent chaque année.",
 "Enkel je bestaande zonnepanelen. Het omvormervermogen (kVA) is geschat op basis van je gemeten injectiepiek. Indicatief: het resultaat hangt af van de marktprijzen, die elk jaar anders zijn.": "Uniquement vos panneaux solaires existants. La puissance d’onduleur (kVA) est estimée sur la base de votre pic d’injection mesuré. Indicatif : le résultat dépend des prix de marché, qui changent chaque année.",
+/* v1.4.17 (2026-11-15): EK-invoer + resultaat-tabs (dekkingsscan help-video's) */
+"✔ Databron: gemeten kwartierdata (Fluvius) · {#} mnd": "✔ Source : données quart-horaires mesurées (Fluvius) · {#} mois",
+"Beweeg over een vakje om die combinatie te bekijken,": "Survolez une case pour voir cette combinaison,",
+"om ze te kiezen en": "pour la choisir et",
+"om een geschat vakje exact door te rekenen. Het": "pour recalculer exactement une case estimée. La",
+"vakje is ons advies. Horizontaal = zonnepanelen (kWp) · verticaal = batterij. Kies per rooster een kengetal om er twee te vergelijken.": "est notre conseil. Horizontal = panneaux solaires (kWc) · vertical = batterie. Choisissez un indicateur par grille pour en comparer deux.",
+"geen nieuwe zonnepanelen + {#} kWh batterij ({#} kW)": "pas de nouveaux panneaux solaires + batterie {#} kWh ({#} kW)",
+"besparing €{#}k/jaar · investering €{#}k (bruto PV + batterij €{#}k)": "économie €{#}k/an · investissement €{#}k (brut PV + batterie €{#}k)",
+"· terug in {#} jaar ·": "· rentabilisé en {#} ans ·",
+"Donkerder = beter. Terugverdientijd, rendement en investering rekenen op": "Plus foncé = meilleur. Le temps de retour, le rendement et l’investissement portent sur",
+"Investering hele project": "Investissement projet complet",
+"netto · PV + batterij + laadpalen": "net · PV + batterie + bornes",
+"netto · PV + batterij": "net · PV + batterie",
+"🏦 Bankdossier opvragen": "🏦 Demander le dossier bancaire",
+"🔧 Adviseur": "🔧 Conseiller",
+"✉️ Conceptmail met dossiers": "✉️ Brouillon de mail avec dossiers",
+"✉️ Factuurcheck naar klant": "✉️ Contrôle de facture au client",
+"📜 Projectlog": "📜 Journal du projet",
+"— wordt automatisch aangemaakt zodra je een factuur of profiel oplaadt.": "— créé automatiquement dès que vous chargez une facture ou un profil.",
+"afname: {#} MWh/j · piek {#} kW · {#} mnd gemeten": "prélèvement : {#} MWh/an · pointe {#} kW · {#} mois mesurés",
+"afname: {#} MWh/j · piek {#} kW · {#} mnd gemeten, aangevuld": "prélèvement : {#} MWh/an · pointe {#} kW · {#} mois mesurés, complétés",
+"🔌 EAN: afname": "🔌 EAN : prélèvement",
+"📈 Meetprofiel: afname": "📈 Profil mesuré : prélèvement",
+"📝 Commentaar": "📝 Commentaire",
+"nog leeg": "vide",
+"E-mail adviseur": "E-mail du conseiller",
+"Met een adviseur gaan antwoorden op hulpvragen en de concept-mail met het rapport enkel naar de adviseur.": "Avec un conseiller, les réponses aux demandes d’aide et le brouillon avec le rapport vont uniquement au conseiller.",
+"Adviseur op dit project sinds": "Conseiller sur ce projet depuis",
+"— geen adviseur (we communiceren met de klant) —": "— pas de conseiller (nous communiquons avec le client) —",
+"Toegangsvermogen of hoogste piek (kVA)": "Puissance d’accès ou pointe la plus élevée (kVA)",
+"Verberg kaart": "Masquer la carte",
+"Toon kaart": "Afficher la carte",
+"Luchtfoto": "Photo aérienne",
+"Kaart": "Carte",
+"🔌 Bestaande laadpalen": "🔌 Bornes existantes",
+"🅿️ Bedrijfsparkings": "🅿️ Parkings d’entreprise",
+"Luchtfoto © Esri, Maxar, Earthstar Geographics": "Photo aérienne © Esri, Maxar, Earthstar Geographics",
+"Klopt de locatie niet? Sleep de pin of klik op de juiste plek.": "La localisation n’est pas correcte ? Faites glisser l’épingle ou cliquez au bon endroit.",
+"Klopt de pin niet? Sleep hem naar de juiste plaats of klik op de foto, en bewaar.": "L’épingle n’est pas au bon endroit ? Faites-la glisser ou cliquez sur la photo, puis enregistrez.",
+"dichtste middenspanningscabine": "cabine moyenne tension la plus proche",
+"laadpunten binnen {#} m": "points de recharge dans un rayon de {#} m",
+"laadpunten binnen {#} m — kans": "points de recharge dans un rayon de {#} m — opportunité",
+"Spanning (adviseur):": "Tension (conseiller) :",
+"Aansluiting (adviseur):": "Raccordement (conseiller) :",
+"Distributienet (DNB)": "Réseau de distribution (GRD)",
+"Transmissienet (Elia)": "Réseau de transport (Elia)",
+"kVA bestaande cabine (adviseur):": "kVA cabine existante (conseiller) :",
+"Overschrijdt het toegangsvermogen van een cel deze cabine → eenmalige cabine-upgrade (€{#} + €/kVA op het surplus). Leeg/{#} = geen cabinekost.": "Si la puissance d’accès d’une case dépasse cette cabine → mise à niveau unique de la cabine (€{#} + €/kVA sur le surplus). Vide/{#} = pas de coût de cabine.",
+"Leeg = automatisch ({#} AC per {#} lichte voertuigen, {#} DC per vrachtwagen/bus). Ingevuld = dit aantal, volledig aangerekend.": "Vide = automatique ({#} AC par {#} véhicules légers, {#} DC par camion/bus). Rempli = ce nombre, entièrement facturé.",
 };
 
 /* v1.2.0: regels voor zinnen met vrije tekst (gebruikt door i18n-ec.js v0.2.1 als SEG niets vindt). fn(match, H) → FR of null. */
 window.EC_FR_FN = [
+  [/^✉️ Conceptmail dossiers \((.+)\)$/, function (m) { return '✉️ Brouillon dossiers (' + m[1] + ')'; }],
+  [/^Aantal laadpalen \((.+)\): AC$/, function (m) { return 'Nombre de bornes (' + m[1] + ') : AC'; }],
   [/^→ (LS|MS) \((laagspanning|middenspanning)\)(?: · (uit factuur|handmatig))?$/, function (m) {
     return '→ ' + (m[1] === 'LS' ? 'BT (basse tension)' : 'MT (moyenne tension)') + (m[3] ? ' · ' + (m[3] === 'handmatig' ? 'manuel' : 'de la facture') : ''); }],
   [/^(.+?) · ([\d.,]+) MWh\/j · ([\d.,]+) kW toegang · (LS|MS)(?: · (\d+) EV)?$/, function (m, H) {
