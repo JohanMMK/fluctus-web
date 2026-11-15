@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- energiemarkt.html v1.7.1 — 2026-11-15 (Johan): wind/zon niet meer met een rechte lijn over een periode die Elia (nog) niet levert — zichtbare onderbreking; lege €-as verborgen als spot en onbalans uit staan. -->
 <!-- energiemarkt.html v1.7.0 — 2026-11-15 (Johan): «geen recente winddata, zon-data op de dool» — (1) GATEN HERSTELLEN: wind/zon/onbalans worden over de laatste 90 dagen gescand op gaten > 1 u en die periodes worden opnieuw opgehaald (vroeger werd enkel het laatste punt bekeken, dus een gat midden in de reeks bleef eeuwig staan); per gat hooguit één poging per 6 u. (2) Wind en zon zijn nu near real-time (server 15.421.0: ods086 / ods210), dus «actueel» = laatste punt < 3 u. -->
 <!-- energiemarkt.html v1.6.0 — 2026-10-27 (Johan): ZON-DATA TERUG — server v15.354.1 haalt PV uit de nieuwe Elia-datasets ods209/ods210 (België-totaal); oude zon-cache eenmalig ÷3 (was de som van België + gewesten + provincies); waarschuwing als Elia een deel van de periode niet levert. -->
 <!-- energiemarkt.html v1.5.0 — 2026-10-16 15:45 (Europe/Madrid) — MUISAANWIJZER OMGEDRAAID (Johan): gewone aanwijzer =
@@ -1063,14 +1064,28 @@ function buildChart1(spot,imb,wind,solar){
     return day+'/'+mon+' '+hr+'u';
   });
   // Wind en zon mappen
-  var wm2={};if(wind)wind.forEach(function(p){wm2[p.t]=p.v;});
-  var sm2={};if(solar)solar.forEach(function(p){sm2[p.t]=p.v;});
+  // v1.7.1 (Johan 15-11, «in wind zit nog iets raars»): een periode die Elia (nog) niet levert werd als rechte lijn
+  //   overbrugd (spanGaps). Nu: per tijdstip het dichtstbijzijnde echte punt, maar enkel als dat binnen de rasterstap
+  //   ligt (min. 1 u); anders null → een zichtbare onderbreking i.p.v. verzonnen waarden.
+  var _stap=3600000;
+  if(ts.length>2){ var _d=[]; for(var _i=1;_i<ts.length;_i++) _d.push(ts[_i]-ts[_i-1]); _d.sort(function(a,b){return a-b;}); _stap=Math.max(3600000, _d[Math.floor(_d.length/2)]*1.5); }
+  function _opRaster(arr){
+    var m={}; if(!arr||!arr.length) return m;
+    var j=0;
+    ts.forEach(function(t){
+      while(j<arr.length-1 && Math.abs(arr[j+1].t-t)<=Math.abs(arr[j].t-t)) j++;
+      if(Math.abs(arr[j].t-t)<=_stap) m[t]=arr[j].v;
+    });
+    return m;
+  }
+  var wm2=_opRaster(wind);
+  var sm2=_opRaster(solar);
 
   var ds=[];
   if(showSpot)ds.push({label:'Spot',data:ts.map(function(t){return sm[t]!=null?sm[t]:null;}),borderColor:'#388bfd',backgroundColor:'#388bfd15',borderWidth:1,pointRadius:0,fill:true,tension:0.2,spanGaps:true,yAxisID:'y'});
   if(showImb) ds.push({label:'Onbalans',data:ts.map(function(t){return im[t]!=null?im[t]:null;}),borderColor:'#d29922',backgroundColor:'#d2992215',borderWidth:1,pointRadius:0,fill:true,tension:0.2,spanGaps:true,yAxisID:'y'});
-  if(showWind&&wind&&wind.length>0)ds.push({label:'Wind (MW)',data:ts.map(function(t){return wm2[t]!=null?wm2[t]:null;}),borderColor:'#39d353',backgroundColor:'#39d35318',borderWidth:1,pointRadius:0,fill:true,tension:0.3,spanGaps:true,yAxisID:'y2'});
-  if(showSolar&&solar&&solar.length>0)ds.push({label:'Zon (MW)',data:ts.map(function(t){return sm2[t]!=null?sm2[t]:null;}),borderColor:'#f0a500',backgroundColor:'#f0a50018',borderWidth:1,pointRadius:0,fill:true,tension:0.3,spanGaps:true,yAxisID:'y2'});
+  if(showWind&&wind&&wind.length>0)ds.push({label:'Wind (MW)',data:ts.map(function(t){return wm2[t]!=null?wm2[t]:null;}),borderColor:'#39d353',backgroundColor:'#39d35318',borderWidth:1,pointRadius:0,fill:true,tension:0.3,spanGaps:false,yAxisID:'y2'});
+  if(showSolar&&solar&&solar.length>0)ds.push({label:'Zon (MW)',data:ts.map(function(t){return sm2[t]!=null?sm2[t]:null;}),borderColor:'#f0a500',backgroundColor:'#f0a50018',borderWidth:1,pointRadius:0,fill:true,tension:0.3,spanGaps:false,yAxisID:'y2'});
   if(c1)c1.destroy();
   c1=new Chart(document.getElementById('fd-c1'),{
     type:'line',data:{labels:labels,datasets:ds},
@@ -1083,8 +1098,8 @@ function buildChart1(spot,imb,wind,solar){
       }}}},
       scales:{
         x:{ticks:{color:'#7d8590',maxTicksLimit:10,maxRotation:0},grid:{color:'#21262d'},border:{color:'#30363d'}},
-        y:{position:'left',ticks:{color:'#7d8590',callback:function(v){return v.toFixed(0)+'€';}},grid:{color:'#21262d'},border:{color:'#30363d'}},
-        y2:{position:'right',ticks:{color:'#39d353',callback:function(v){return v.toFixed(0)+' MW';}},grid:{display:false},border:{color:'#30363d'}}
+        y:{position:'left',display:(showSpot||showImb),ticks:{color:'#7d8590',callback:function(v){return v.toFixed(0)+'€';}},grid:{color:'#21262d'},border:{color:'#30363d'}},   // v1.7.1: geen lege €-as als spot en onbalans uit staan
+        y2:{position:'right',ticks:{color:'#39d353',callback:function(v){return v.toFixed(0)+' MW';}},grid:{display:!(showSpot||showImb),color:'#21262d'},border:{color:'#30363d'}}
       }}
   });
 }
