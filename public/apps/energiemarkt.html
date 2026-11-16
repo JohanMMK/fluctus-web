@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- energiemarkt.html v1.9.0 — 2026-11-16 (Johan): spotprijs als lijn in de productiemix (eigen as rechts), knop «🎬 Energieweerbericht» (modal met de recentste aflevering) en «▶ Uitleg» (modal met de uitlegvideo van de app, gemaakt door de server). -->
 <!-- energiemarkt.html v1.8.0 — 2026-11-16 (Johan): PRODUCTIEMIX + GRENSSTROMEN + GAS — nieuwe kaart met de volledige Belgische productie per brandstof (nucleair, gas, wind on/offshore, zon, water, opslag, biomassa, overig; Elia ods201) en de fysieke stroom per grens (FR/NL/DE/UK/LU, ods026, netto import), per uur, voor perioden t.e.m. 30 dagen; gasstrip met TTF (Yahoo) en vullingsgraad gasopslag EU/BE (AGSI+) t.o.v. vorig jaar. De 7-dagenanalyse («Wat zie ik?») krijgt die cijfers mee. Server 15.425.0: /energiemix + /gas-context. -->
 <!-- energiemarkt.html v1.7.1 — 2026-11-15 (Johan): wind/zon niet meer met een rechte lijn over een periode die Elia (nog) niet levert — zichtbare onderbreking; lege €-as verborgen als spot en onbalans uit staan. -->
 <!-- energiemarkt.html v1.7.0 — 2026-11-15 (Johan): «geen recente winddata, zon-data op de dool» — (1) GATEN HERSTELLEN: wind/zon/onbalans worden over de laatste 90 dagen gescand op gaten > 1 u en die periodes worden opnieuw opgehaald (vroeger werd enkel het laatste punt bekeken, dus een gat midden in de reeks bleef eeuwig staan); per gat hooguit één poging per 6 u. (2) Wind en zon zijn nu near real-time (server 15.421.0: ods086 / ods210), dus «actueel» = laatste punt < 3 u. -->
@@ -136,7 +137,22 @@ html,body,#fluctus-dashboard,#fluctus-dashboard *{cursor:url(/apps/ec-cursor-pij
   #fluctus-dashboard #fd-kernboodschap{font-size:12px;padding:14px 16px;margin:10px 0 14px;}
 }
 @keyframes fd-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* v1.9.0: kopknoppen + videomodal */
+#fluctus-dashboard .fd-kopknop{font-family:monospace;font-size:11px;padding:6px 12px;border-radius:4px;border:1px solid #30363d;background:#161b22;color:#e6edf3;cursor:pointer;white-space:nowrap}
+#fluctus-dashboard .fd-kopknop:hover{border-color:#05B050}
+#fluctus-dashboard .fd-kopknop-groen{background:#05B050;border-color:#05B050;color:#fff;font-weight:700}
+#fd-vmodal{position:fixed;inset:0;background:rgba(1,4,9,.82);z-index:9999;display:none;align-items:center;justify-content:center;padding:16px}
+#fd-vmodal.open{display:flex}
+#fd-vmodal .fd-vbox{background:#0d1117;border:1px solid #30363d;border-radius:10px;max-width:min(980px,96vw);width:100%;max-height:94vh;overflow:auto;padding:16px 18px;color:#e6edf3;font-family:Poppins,Arial,sans-serif;position:relative}
+#fd-vmodal .fd-vtitel{font-weight:700;font-size:16px;margin:0 34px 4px 0}
+#fd-vmodal .fd-vsub{font-size:12px;color:#7d8590;margin-bottom:10px}
+#fd-vmodal video{width:100%;max-height:72vh;background:#000;border-radius:6px;display:block}
+#fd-vmodal .fd-vx{position:absolute;top:10px;right:12px;background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer}
+#fd-vmodal .fd-vvoet{font-size:12px;color:#7d8590;margin-top:10px;display:flex;gap:14px;flex-wrap:wrap}
+#fd-vmodal .fd-vvoet a{color:#05B050}
+#fd-vmodal .fd-proef{display:inline-block;background:#d29922;color:#0d1117;font-weight:700;font-size:10px;padding:2px 6px;border-radius:3px;margin-left:8px;vertical-align:2px}
 </style>
+<div id="fd-vmodal" onclick="if(event.target===this)fdSluitModal()"><div class="fd-vbox"><button type="button" class="fd-vx" onclick="fdSluitModal()" aria-label="Sluiten">×</button><div id="fd-vinhoud"></div></div></div>
 
 <div class="fd-header">
   <div class="fd-brand">
@@ -147,6 +163,8 @@ html,body,#fluctus-dashboard,#fluctus-dashboard *{cursor:url(/apps/ec-cursor-pij
     </div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <button type="button" class="fd-kopknop fd-kopknop-groen" id="fd-ewb-knop" onclick="fdOpenEwb()" title="Bekijk het recentste energieweerbericht">🎬 Energieweerbericht</button>
+    <button type="button" class="fd-kopknop" id="fd-uitleg-knop" onclick="fdOpenUitleg()" title="Videorondleiding door deze app">▶ Uitleg</button>
     <span class="fd-badge fd-warn" id="fd-s-spot" style="display:none"></span>
     <span class="fd-badge fd-warn" id="fd-s-cache">cache: laden...</span>
     <span class="fd-badge fd-load" id="fd-s-api">● API</span>
@@ -214,7 +232,7 @@ html,body,#fluctus-dashboard,#fluctus-dashboard *{cursor:url(/apps/ec-cursor-pij
 <!-- v1.8.0: productiemix + grensstromen + gas -->
 <div class="fd-card" id="fd-mixcard">
   <div class="fd-cardhead">
-    <span class="fd-ctitle">PRODUCTIEMIX BELGIË (Elia, per brandstof) &amp; NETTO IMPORT (fysieke stroom per grens) — GW, uurgemiddelde</span>
+    <span class="fd-ctitle">PRODUCTIEMIX BELGIË (Elia, per brandstof) &amp; NETTO IMPORT (fysieke stroom per grens) — GW, uurgemiddelde · SPOTPRIJS €/MWh (rechts)</span>
     <div class="fd-legend" id="fd-mixleg"></div>
   </div>
   <div class="fd-metrics" id="fd-mixkpi" style="margin:4px 0 10px;"></div>
@@ -2043,15 +2061,24 @@ function fdTekenMix(cutoff){
   var netImp=idx.map(function(i){ var s=0,ok=false; gk.forEach(function(g){var v=j.grens[g][i]; if(v!=null){s+=v;ok=true;}}); return ok?Math.round(-s/10)/100:null; });
   ds.push({label:'Netto import',type:'line',data:netImp,borderColor:'#e6edf3',borderDash:[4,3],borderWidth:1.5,pointRadius:0,fill:false,tension:0.2,spanGaps:false,yAxisID:'y',stack:'imp',order:-1});
   leg+='<span class="fd-li"><span class="fd-ld" style="background:#e6edf3"></span>Netto import (+) / export (−)</span>';
+  // v1.9.0: day-ahead spotprijs (uurgemiddelde) als gele lijn op een eigen as rechts
+  var sh={}; (cache.spot||[]).forEach(function(p){ var u=Math.floor(p.t/3600000)*3600000; (sh[u]=sh[u]||[]).push(p.v); });
+  var spotUur=ts.map(function(t){ var a=sh[Math.floor(t/3600000)*3600000]; if(!a||!a.length) return null; var s=0; a.forEach(function(v){s+=v;}); return Math.round(s/a.length*10)/10; });
+  var metSpot=spotUur.some(function(v){return v!=null;});
+  if(metSpot){
+    ds.push({label:'Spotprijs',type:'line',data:spotUur,borderColor:'#ffd33d',borderWidth:2,pointRadius:0,fill:false,tension:0.2,spanGaps:true,yAxisID:'y2',stack:'spot',order:-2});
+    leg+='<span class="fd-li"><span class="fd-ld" style="background:#ffd33d"></span>Spotprijs (€/MWh, rechts)</span>';
+  }
   document.getElementById('fd-mixleg').innerHTML=leg;
   if(c3)c3.destroy();
   c3=new Chart(document.getElementById('fd-c3'),{
     type:'line',data:{labels:labels,datasets:ds},
     options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:'index'},
       plugins:{legend:{display:false},tooltip:{backgroundColor:'#161b22',borderColor:'#30363d',borderWidth:1,titleColor:'#7d8590',bodyColor:'#e6edf3',
-        callbacks:{label:function(c){ if(c.parsed.y==null||Math.abs(c.parsed.y)<0.005) return null; return c.dataset.label+': '+c.parsed.y.toFixed(2).replace('.',',')+' GW'; }}}},
+        callbacks:{label:function(c){ if(c.parsed.y==null) return null; if(c.dataset.yAxisID==='y2') return 'Spotprijs: '+Math.round(c.parsed.y)+' €/MWh'; if(Math.abs(c.parsed.y)<0.005) return null; return c.dataset.label+': '+c.parsed.y.toFixed(2).replace('.',',')+' GW'; }}}},
       scales:{x:{ticks:{color:'#7d8590',maxTicksLimit:10,maxRotation:0},grid:{color:'#21262d'},border:{color:'#30363d'}},
-        y:{stacked:true,beginAtZero:true,ticks:{color:'#7d8590',callback:function(v){return v.toFixed(0)+' GW';}},grid:{color:'#21262d'},border:{color:'#30363d'}}}}
+        y:{stacked:true,beginAtZero:true,ticks:{color:'#7d8590',callback:function(v){return v.toFixed(0)+' GW';}},grid:{color:'#21262d'},border:{color:'#30363d'}},
+        y2:{display:metSpot,position:'right',stacked:false,ticks:{color:'#ffd33d',callback:function(v){return Math.round(v)+' €';}},grid:{drawOnChartArea:false},border:{color:'#30363d'}}}}
   });
   var e3=document.getElementById('fd-e3'); if(e3)e3.style.display='none';
 
@@ -2077,6 +2104,34 @@ function fdTekenMix(cutoff){
   document.getElementById('fd-grensrij').innerHTML='Gemiddeld per grens: '+(gr||'—')
     +'<br><span style="color:#484f58">Elia publiceert de mix tot '+fmtLokaal(j.laatste&&j.laatste.mix)+' en de grensstromen tot '+fmtLokaal(j.laatste&&j.laatste.grens)+'.</span>';
 }
+// ═══ v1.9.0: video-modals (energieweerbericht + uitleg) ═════════════════════════════════
+function _fdToken(){ try{ var k=Object.keys(localStorage).find(function(x){return /auth-token/.test(x);}); if(!k) return null; var j=JSON.parse(localStorage.getItem(k)); return j&&j.access_token||null; }catch(e){ return null; } }
+function _fdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function fdToonModal(html){ document.getElementById('fd-vinhoud').innerHTML=html; document.getElementById('fd-vmodal').classList.add('open'); var v=document.querySelector('#fd-vinhoud video'); if(v){ try{ var p=v.play(); if(p&&p.catch)p.catch(function(){}); }catch(e){} } }
+function fdSluitModal(){ var v=document.querySelector('#fd-vinhoud video'); if(v){ try{v.pause();}catch(e){} } document.getElementById('fd-vmodal').classList.remove('open'); document.getElementById('fd-vinhoud').innerHTML=''; }
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&document.getElementById('fd-vmodal').classList.contains('open')) fdSluitModal(); });
+async function fdOpenEwb(){
+  fdToonModal('<div class="fd-vtitel">🎬 Energieweerbericht</div><div class="fd-vsub">recentste aflevering laden…</div>');
+  try{
+    var h={}, t=_fdToken(); if(t) h.Authorization='Bearer '+t; // managers zien ook de proefaflevering
+    var r=await fetch(CFG.WORKER+'/api/ewb/vandaag',{headers:h}); var j=await r.json();
+    if(!j.ok){ fdToonModal('<div class="fd-vtitel">🎬 Energieweerbericht</div><div class="fd-vsub">Nog geen aflevering beschikbaar. Het energieweerbericht verschijnt van zondag tot vrijdag om 18u50.</div><div class="fd-vvoet"><a href="https://www.energie-compas.eu/energieweerbericht" target="_blank" rel="noopener">Naar de pagina van het energieweerbericht →</a></div>'); return; }
+    fdToonModal('<div class="fd-vtitel">🎬 '+_fdEsc(j.titel)+(j.proef?'<span class="fd-proef">PROEF · nog niet publiek</span>':'')+'</div>'
+      +'<div class="fd-vsub">Stroomprijs, weer en markt voor de dag die komt · '+Math.round(j.duur||0)+' s'+(j.metStem?' · stem gegenereerd met AI':'')+'</div>'
+      +'<video src="'+_fdEsc(j.video)+'" poster="'+_fdEsc(j.poster)+'" controls playsinline autoplay></video>'
+      +'<div class="fd-vvoet"><a href="https://www.energie-compas.eu/energieweerbericht" target="_blank" rel="noopener">Alle afleveringen en inschrijven →</a>'+(j.cta_mailto?'<a href="'+_fdEsc(j.cta_mailto)+'">✉ Analyse op maat vragen</a>':'')+'</div>');
+  }catch(e){ fdToonModal('<div class="fd-vtitel">🎬 Energieweerbericht</div><div class="fd-vsub">Laden mislukt ('+_fdEsc(e.message)+').</div>'); }
+}
+async function fdOpenUitleg(){
+  fdToonModal('<div class="fd-vtitel">▶ Uitleg — de energiemarkt-app</div><div class="fd-vsub">video laden…</div>');
+  try{
+    var r=await fetch(CFG.WORKER+'/api/uitleg/energiemarkt'); var j=await r.json();
+    if(!j.ok){ fdToonModal('<div class="fd-vtitel">▶ Uitleg — de energiemarkt-app</div><div class="fd-vsub">De uitlegvideo wordt nog gemaakt. Probeer het later opnieuw.</div>'); return; }
+    fdToonModal('<div class="fd-vtitel">▶ Uitleg — de energiemarkt-app</div><div class="fd-vsub">Rondleiding langs alle onderdelen · '+Math.round(j.duur||0)+' s'+(j.metStem?' · stem gegenereerd met AI':'')+'</div>'
+      +'<video src="'+_fdEsc(j.video)+'" poster="'+_fdEsc(j.poster||'')+'" controls playsinline autoplay></video>');
+  }catch(e){ fdToonModal('<div class="fd-vtitel">▶ Uitleg</div><div class="fd-vsub">Laden mislukt ('+_fdEsc(e.message)+').</div>'); }
+}
+
 function fmtLokaal(iso){ if(!iso) return '—'; var d=new Date(iso); return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+'u'; }
 
 async function fdLaadGas(){
