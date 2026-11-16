@@ -33,6 +33,10 @@ export default defineConfig({
         ecenstart: resolve(__dirname, 'ec/en/start.html'),
         ecencontact: resolve(__dirname, 'ec/en/contact.html'),
         ecenlogin: resolve(__dirname, 'ec/en/login.html'),
+        // 2026-11-16 (Johan): privacyverklaring NL/FR/EN (cookieloos tellen, gebruik van de resultaten).
+        ecprivacy: resolve(__dirname, 'ec/privacy.html'),
+        ecfrprivacy: resolve(__dirname, 'ec/fr/privacy.html'),
+        ecenprivacy: resolve(__dirname, 'ec/en/privacy.html'),
       },
     },
   },
