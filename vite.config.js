@@ -37,6 +37,8 @@ export default defineConfig({
         ecprivacy: resolve(__dirname, 'ec/privacy.html'),
         ecfrprivacy: resolve(__dirname, 'ec/fr/privacy.html'),
         ecenprivacy: resolve(__dirname, 'ec/en/privacy.html'),
+        // 2026-11-16 (Johan): dagelijks energieweerbericht (video + tekst + inschrijving) → energie-compas.eu/energieweerbericht.
+        ecenergieweerbericht: resolve(__dirname, 'ec/energieweerbericht.html'),
       },
     },
   },
