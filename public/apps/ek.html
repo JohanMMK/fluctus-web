@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.204.0 (2026-11-16): DOELGROEP per dossier (thuisladen / KMO met EV / logistiek — automatisch op laadenergie, aanpasbaar in de tab Adviseur, bewaard in ek_bevestigd.doelgroep, server ≥ 15.425.0) + «👀 Bekeken» (bezoek aan klantzijde: geopend, toestellen per dag, documenten, laatst — GET /api/ek/bezoek) + privacynoot onderaan de resultaten met link naar /privacy. -->
 <!-- ek.html v0.203.1 (2026-11-15): FR/EN — Pas aan in bewerkmodus (uitleg, exploitatiekost, prijs installatie, all-in, C-factor), «📄 Factuur» bij de stukken, 📍 Locatie / 💾 Bewaar locatie, dieselgenerator-label (data-t3). -->
 <!-- ek.html v0.203.0 (2026-11-15): UITLEGVIDEO PER TAB — knop «▶ Uitleg» in de stappenbalk (invoer) en de tabbalk (resultaat) → modal met een merkneutrale video in NL/FR/EN (/ec-video/help/<tab>_<taal>.mp4; knop enkel als de video bestaat) + lijst van alle uitlegvideo's. FR/EN: gekozen/ons advies, scenarionaam, netbeheerder, kaartlagen, groter/kleiner, «tension» bij Plus de réglages. -->
 <!-- ek.html v0.202.0 (2026-11-15): FR/EN-dekking invoer- en resultaat-tabs (help-video's) — globale _ek3(nl,fr,en); voertuigspecifiek, stukken in dit dossier, sturing actief, offerte aanvragen, adviseursnoot, ambassadeursbrief + widget drietalig; fr-ec-seg 1.4.17 / en-ec-seg 1.0.32 met de ontbrekende segmenten. -->
@@ -2484,6 +2485,20 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _ekInjFee(){ var e=$('i-inj-fee'); if(!e||e.value==='') return null; var v=+String(e.value).replace(',','.'); return isFinite(v)?Math.max(0,Math.min(200,v)):null; }
   // v0.200.0: ÉÉN volledige set extra velden voor ALLE bewaarplekken (vroeger stuurden de dossier-aanmaakflows een uitgeklede set
   //   en de server vervangt het hele bevestigd-blok → velden vielen weg). Overschrijft enkel lege EAN's in de basis.
+  // v0.204.0 (Johan 16-11): DOELGROEP per dossier — automatisch voorgesteld, de adviseur kan aanpassen (tab Adviseur).
+  //   Thuisladen = particulier · Logistiek = bedrijf waar bestelwagens + (lichte) vrachtwagens/bussen ≥ 50 % van de jaarlijkse
+  //   laadenergie nemen (aantal × km/jaar × kWh/km) · KMO = elk ander bedrijf (ook zonder voertuigen).
+  var DOELGROEP_KEUZE='';
+  function _ekDgAuto(){ try{
+    if(KLANTTYPE!=='bedrijf') return { k:'thuisladen', reden:_ek3('particulier','particulier','private household') };
+    var tot=0, com=0; (EV_ROWS||[]).forEach(function(r){ var t=_evType(r.type), e=(+r.aantal||0)*(+t.kmjaar||0)*(+t.kwhkm||0); tot+=e; if(r.type!=='personenwagen') com+=e; });
+    if(!(tot>0)) return { k:'kmo', reden:_ek3('bedrijf zonder voertuigen','entreprise sans véhicules','business without vehicles') };
+    var p=Math.round(com/tot*100);
+    return p>=50 ? { k:'logistiek', reden:p+_ek3(' % van de laadenergie: bestelwagens en vrachtwagens',' % de l’énergie de recharge : camionnettes et camions',' % of charging energy: vans and trucks') }
+                 : { k:'kmo', reden:(100-p)+_ek3(' % van de laadenergie: personenwagens',' % de l’énergie de recharge : voitures',' % of charging energy: cars') };
+  }catch(e){ return { k:'kmo', reden:'' }; } }
+  window._ekDoelgroep=function(){ var a=_ekDgAuto(); return { k:(DOELGROEP_KEUZE||a.k), auto:a.k, keuze:DOELGROEP_KEUZE, reden:a.reden }; };
+  window._ekDoelgroepZet=function(k){ DOELGROEP_KEUZE=(['thuisladen','kmo','logistiek'].indexOf(k)>=0)?k:''; try{ _ekPersistBevestigd(); }catch(e){} try{ if(window._ekLog) window._ekLog('doelgroep',{ keuze:(DOELGROEP_KEUZE||'automatisch') }); }catch(e){} };
   function _ekBevExtra(o){ o=o||{};
     var x={ nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
       fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
@@ -2492,7 +2507,8 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       elia:(STATE_ELIA||''), certificaten:_ekCertBody(), netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(), referentie:(REF_NIETS?'niets':''),
       custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]),
       crate_ov:(CRATE_OV>0?CRATE_OV:null),   // v0.200.0: C-factor uit «Pas aan»
-      scenario:(function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,120):''; }catch(eS){ return ''; } })() };   // v0.200.0: scenarionaam
+      scenario:(function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,120):''; }catch(eS){ return ''; } })(),   // v0.200.0: scenarionaam
+      doelgroep:(function(){ try{ var d=window._ekDoelgroep(); return { auto:d.auto, keuze:d.keuze, reden:d.reden }; }catch(eD){ return null; } })() };   // v0.204.0: doelgroep
     if(!o.ean_afname && STATE_EAN_AFNAME){ x.ean_afname=STATE_EAN_AFNAME; x.ean_injectie=(STATE_EAN_INJECTIE||''); }
     return Object.assign(o,x); }
   function _ekMeldingen(swp, body){ var el=$('ek-meldingen'); if(!el) return; var d=[], w=[];
@@ -4597,6 +4613,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           // v0.24.35 (Johan): manuele "Pas aan"-combi's terugzetten → _herstelCustomCombos() (na de sweep) zet ze terug op de heatmap.
           if(Array.isArray(B.custom_combos)) CUSTOM_COMBOS=B.custom_combos.slice(0,20);
           if(+B.crate_ov>0) CRATE_OV=Math.max(0.5,Math.min(8,+B.crate_ov));   // v0.200.0: C-factor uit «Pas aan» terug
+          if(B.doelgroep && B.doelgroep.keuze && ['thuisladen','kmo','logistiek'].indexOf(B.doelgroep.keuze)>=0) DOELGROEP_KEUZE=String(B.doelgroep.keuze);   // v0.204.0
           if(B.scenario){ try{ var _sk=_ekScenSleutel(); if(_sk && !localStorage.getItem(_sk)) localStorage.setItem(_sk,String(B.scenario)); }catch(eSk){} try{ var _sc=$('dim-scenario'); if(_sc && !_sc.value) _sc.value=String(B.scenario); }catch(eSc){} }   // v0.200.0: scenarionaam van het dossier
         }
         // v0.110.0 (Johan 23-10): volledig gemeten jaar injectie → bestaande PV = 1,1 × hoogste gemeten injectiepiek (tenzij manueel aangepast).
@@ -9737,6 +9754,56 @@ window._ekAmb=(function(){
   }catch(e){} }
   setInterval(stukken, 2000);
   setInterval(function(){ try{ if(!window.ECW) return; var a=document.getElementById('ek-antw'); if(!a || a.querySelector('.ecw-i')) return; ECW.markeer(a); }catch(e){} }, 1500);
+})();
+</script>
+<script>
+/* ek.html v0.204.0 (Johan 16-11): TAB ADVISEUR — (1) DOELGROEP (automatisch voorstel + aanpassen) en (2) BEZOEK AAN KLANTZIJDE
+   (server ≥ 15.425.0: GET /api/ek/bezoek — cookieloos, toestel per dag). (3) Privacynoot onderaan de resultaten (alle weergaven). */
+(function(){
+  var API_B='https://lucid-amazement-production.up.railway.app', NM={ thuisladen:['Thuisladen','Recharge à domicile','Home charging'], kmo:['KMO met EV','PME avec VE','SME with EVs'], logistiek:['Logistiek','Logistique','Logistics'] };
+  function ix(){ var L=window.EC_LANG; return L==='fr'?1:(L==='en'?2:0); }
+  function t3(a,b,c){ return [a,b,c][ix()]; }
+  function esc(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+  var BZ=null, BZ_T=0, BZ_TOK='';
+  function haalBezoek(tok){
+    if(!tok || (BZ_TOK===tok && Date.now()-BZ_T<60000)) return;
+    try{ var h=window._ekLogHdr?window._ekLogHdr():{}; if(!h.Authorization) return; BZ_T=Date.now(); BZ_TOK=tok;
+      fetch(API_B+'/api/ek/bezoek?token='+encodeURIComponent(tok),{ headers:h, cache:'no-store' }).then(function(r){ return r.json(); }).then(function(j){ BZ=(j&&j.ok)?j:{ fout:true }; teken(); }).catch(function(){}); }catch(e){} }
+  function dt(ts){ try{ var d=new Date(ts); return d.toLocaleDateString(window.EC_LOCALE||'nl-BE',{ day:'2-digit', month:'2-digit' })+' '+d.toLocaleTimeString(window.EC_LOCALE||'nl-BE',{ hour:'2-digit', minute:'2-digit' }); }catch(e){ return ''; } }
+  function bezoekTekst(){
+    if(!BZ) return t3('laden…','chargement…','loading…');
+    if(BZ.fout) return t3('niet beschikbaar','indisponible','not available');
+    if(!BZ.dagen) return t3('nog niet geopend door de klant','pas encore ouvert par le client','not opened by the client yet');
+    var D={ rap:t3('rapport','rapport','report'), a4:'A4', bank:t3('bankrapport','rapport bancaire','bank report'), aftrek:t3('aftrek','déduction','deduction'), markt:t3('Je profiel verdient meer','Votre profil mérite mieux','Your profile deserves more'), off:t3('offerte','offre','quote') };
+    var p=[ BZ.opens+'× '+t3('geopend','ouvert','opened'),
+      BZ.toestellen_som+' '+t3('toestel','appareil','device')+(BZ.toestellen_som===1?'':t3('len','s','s'))+' '+t3('op','sur','over')+' '+BZ.dagen+' '+t3('dag','jour','day')+(BZ.dagen===1?'':t3('en','s','s')) ];
+    Object.keys(BZ.docs||{}).forEach(function(k){ p.push((D[k]||k)+' '+BZ.docs[k]+'×'); });
+    if(BZ.markt) p.push(D.markt+' '+BZ.markt+'×');
+    if(BZ.video && BZ.video.start) p.push(t3('video','vidéo','video')+' '+BZ.video.start+'× ('+BZ.video.eind+'× '+t3('tot het einde','jusqu’à la fin','to the end')+')');
+    if(BZ.laatste) p.push(t3('laatst','dernière fois','last')+' '+dt(BZ.laatste));
+    return p.join(' · '); }
+  function teken(){
+    var sec=document.getElementById('sec-adv'); if(!sec || sec.style.display==='none') return;
+    var host=document.getElementById('adv-rij')||sec, b=document.getElementById('adv-dg');
+    if(!b){ b=document.createElement('div'); b.id='adv-dg'; b.setAttribute('data-i18n-skip','1'); b.style.cssText='margin:6px 0 4px'; host.appendChild(b); }
+    var d=window._ekDoelgroep?window._ekDoelgroep():null, i=ix(); if(!d) return;
+    var sig=JSON.stringify(d)+'|'+i+'|'+JSON.stringify(BZ); if(b._sig===sig) return; b._sig=sig;
+    var seg=['thuisladen','kmo','logistiek'].map(function(k){ return '<button type="button" data-dg="'+k+'" class="'+(d.k===k?'on':'')+'">'+esc(NM[k][i])+'</button>'; }).join('');
+    b.innerHTML='<div class="adv-lijn"><span class="adv-lbl">🎯 '+t3('Doelgroep','Public cible','Target group')+'</span><span class="adv-seg">'+seg+'</span>'+
+      '<span class="adv-hint">'+(d.keuze?(t3('aangepast · automatisch: ','modifié · automatique : ','changed · automatic: ')+esc(NM[d.auto][i])+' — <a href="#" data-dg="">'+t3('terug naar automatisch','revenir à l’automatique','back to automatic')+'</a>'):(t3('automatisch: ','automatique : ','automatic: ')+esc(d.reden)))+'</span></div>'+
+      '<div class="adv-lijn"><span class="adv-lbl">👀 '+t3('Bekeken','Consulté','Viewed')+'</span><span class="adv-hint">'+esc(bezoekTekst())+'</span></div>';
+    Array.prototype.forEach.call(b.querySelectorAll('[data-dg]'), function(x){ x.onclick=function(ev){ ev.preventDefault(); if(window._ekDoelgroepZet) window._ekDoelgroepZet(x.getAttribute('data-dg')); b._sig=''; teken(); }; });
+  }
+  function noot(){
+    var dash=document.getElementById('dash'); if(!dash || dash.classList.contains('hidden')) return;
+    var n=document.getElementById('ek-privacy-noot'); var L=window.EC_LANG, pad=(L==='fr'?'/fr/privacy':(L==='en'?'/en/privacy':'/privacy'));
+    var txt=t3('We registreren welke delen van deze resultaten geopend worden, zonder cookies, zodat je adviseur je op het juiste moment kan helpen. ',
+               'Nous enregistrons, sans cookies, quelles parties de ces résultats sont ouvertes, afin que votre conseiller puisse vous aider au bon moment. ',
+               'Without cookies, we record which parts of these results are opened, so your adviser can help you at the right moment. ')+'<a href="https://www.energie-compas.eu'+pad+'" target="_blank" rel="noopener">'+t3('Privacyverklaring','Déclaration de confidentialité','Privacy statement')+'</a>';
+    if(!n){ n=document.createElement('p'); n.id='ek-privacy-noot'; n.className='noprint'; n.setAttribute('data-i18n-skip','1'); n.style.cssText='font-size:11.5px;color:var(--muted);margin:14px 4px 4px;line-height:1.45'; dash.parentNode.insertBefore(n, dash.nextSibling); }
+    if(n._t!==txt){ n._t=txt; n.innerHTML=txt; } }
+  function tik(){ try{ var sec=document.getElementById('sec-adv'); if(sec && sec.style.display!=='none'){ var tok=window.TOKEN||new URLSearchParams(location.search).get('case')||''; haalBezoek(tok); teken(); } noot(); }catch(e){} }
+  setInterval(tik, 1500); setTimeout(tik, 2500);
 })();
 </script>
 <script>
