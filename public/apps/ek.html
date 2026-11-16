@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
+<!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
 <!-- ek.html v0.204.0 (2026-11-16): DOELGROEP per dossier (thuisladen / KMO met EV / logistiek — automatisch op laadenergie, aanpasbaar in de tab Adviseur, bewaard in ek_bevestigd.doelgroep, server ≥ 15.425.0) + «👀 Bekeken» (bezoek aan klantzijde: geopend, toestellen per dag, documenten, laatst — GET /api/ek/bezoek) + privacynoot onderaan de resultaten met link naar /privacy. -->
 <!-- ek.html v0.203.1 (2026-11-15): FR/EN — Pas aan in bewerkmodus (uitleg, exploitatiekost, prijs installatie, all-in, C-factor), «📄 Factuur» bij de stukken, 📍 Locatie / 💾 Bewaar locatie, dieselgenerator-label (data-t3). -->
 <!-- ek.html v0.203.0 (2026-11-15): UITLEGVIDEO PER TAB — knop «▶ Uitleg» in de stappenbalk (invoer) en de tabbalk (resultaat) → modal met een merkneutrale video in NL/FR/EN (/ec-video/help/<tab>_<taal>.mp4; knop enkel als de video bestaat) + lijst van alle uitlegvideo's. FR/EN: gekozen/ons advies, scenarionaam, netbeheerder, kaartlagen, groter/kleiner, «tension» bij Plus de réglages. -->
@@ -6107,6 +6108,27 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     h+='<p>We blijven steeds beschikbaar voor vragen of een toelichting, en helpen u graag verder.</p>';
     h+='<p>Met vriendelijke groeten,<br>'+((I.afz&&I.afz.length)?I.afz.map(e).join('<br>'):'Johan Konings<br>Fluctus.net CVSO · Energie-Compas')+'</p></div>';
     return h; }
+  // v0.205.0 (Johan 16-11): V&A-PDF — twee pagina's «Je vragen, onze antwoorden» per doelgroep, uit het klantrapport (?mode=vena&dg=…),
+  //   server-PDF via /api/ek/doc-pdf (server ≥ 15.427.0). Cijfers = die van het energierapport van de huidige keuze.
+  window._ekVenaPdf=async function(btn){
+    var meld=function(t,kl){ try{ window._ekAdvMeld(t,kl); }catch(x){} };
+    if(!window._RAP_PAYLOAD){ meld('Doe eerst een simulatie.'); return; }
+    var rs=null; try{ rs=_ekRapSel(); }catch(eR){} if(!rs || !rs.sel){ meld('Geen combinatie gevonden — doe eerst een simulatie.'); return; }
+    var dg='kmo'; try{ dg=window._ekDoelgroep().k; }catch(eD){}
+    var klaar=window._ekBtnBezig?window._ekBtnBezig(btn, '⏳ V&A-PDF…'):function(){};
+    try{
+      meld('⏳ De V&A-PDF wordt gemaakt… (± 30 s)');
+      var hd=Object.assign({'Content-Type':'application/json'}, (await _ekAuthHeaders())||{});
+      var PQ=await toonKlantrapport(Object.assign({}, rs, { serverPdf:true })); if(!PQ||!PQ.payload) throw new Error('geen rapportgegevens');
+      var r=await fetch(API+'/api/ek/doc-pdf',{ method:'POST', headers:hd, body:JSON.stringify({ token:TOKEN, payload:PQ.payload, qs:String(PQ.qs||'').replace(/(^|&)mode=[^&]*/g,'')+'&mode=vena&dg='+dg }) });
+      var j=await r.json().catch(function(){ return {}; }); if(!r.ok || !j || !j.ok || !j.pdf_b64) throw new Error((j&&j.error)||('HTTP '+r.status));
+      var bin=atob(j.pdf_b64), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+      var url=URL.createObjectURL(new Blob([u8],{ type:'application/pdf' })), a=document.createElement('a'); a.href=url; a.download=window._ekBestand?window._ekBestand('Vraag-en-antwoord','pdf'):'Vraag-en-antwoord.pdf';
+      document.body.appendChild(a); a.click(); setTimeout(function(){ try{ URL.revokeObjectURL(url); a.remove(); }catch(eU){} }, 4000);
+      meld('✓ V&A-PDF gedownload ('+j.kb+' kB).','#05803C'); try{ if(window._ekLog) window._ekLog('vena_pdf',{ doelgroep:dg }); }catch(eL){}
+    }catch(e){ meld('V&A-PDF mislukt: '+(e.message||e),'#B42318'); }
+    finally{ try{ klaar(); }catch(eK){} }
+  };
   async function _ekDocConcept(soort){
     var st=$('rapport-status'), btn=$(soort==='bank'?'btn-concept-bank':(soort==='rapport'?'btn-concept':'btn-concept-studie')), _oek=false; try{ _oek=!!(EK_IS_OEKENE&&!EK_KLANTVIEW); }catch(xo){}
     var meld=function(t,kl,html){ if(st){ st.style.color=kl||'var(--muted)'; if(html) st.innerHTML=t; else st.textContent=t; } try{ window._ekAdvMeld(t,kl,!!html); }catch(x){} };
@@ -9790,8 +9812,10 @@ window._ekAmb=(function(){
     var sig=JSON.stringify(d)+'|'+i+'|'+JSON.stringify(BZ); if(b._sig===sig) return; b._sig=sig;
     var seg=['thuisladen','kmo','logistiek'].map(function(k){ return '<button type="button" data-dg="'+k+'" class="'+(d.k===k?'on':'')+'">'+esc(NM[k][i])+'</button>'; }).join('');
     b.innerHTML='<div class="adv-lijn"><span class="adv-lbl">🎯 '+t3('Doelgroep','Public cible','Target group')+'</span><span class="adv-seg">'+seg+'</span>'+
+      '<span class="adv-acties"><button type="button" class="btn" id="adv-vena" title="'+t3('Twee pagina’s: de 4 kernvragen van deze doelgroep met de cijfers van dit dossier, en de andere vragen','Deux pages : les 4 questions clés de ce public avec les chiffres de ce dossier, et les autres questions','Two pages: the 4 key questions for this target group with this file’s figures, and the other questions')+'">📄 '+t3('V&A-PDF','PDF Q&R','Q&A PDF')+'</button></span>'+
       '<span class="adv-hint">'+(d.keuze?(t3('aangepast · automatisch: ','modifié · automatique : ','changed · automatic: ')+esc(NM[d.auto][i])+' — <a href="#" data-dg="">'+t3('terug naar automatisch','revenir à l’automatique','back to automatic')+'</a>'):(t3('automatisch: ','automatique : ','automatic: ')+esc(d.reden)))+'</span></div>'+
       '<div class="adv-lijn"><span class="adv-lbl">👀 '+t3('Bekeken','Consulté','Viewed')+'</span><span class="adv-hint">'+esc(bezoekTekst())+'</span></div>';
+    var vb=b.querySelector('#adv-vena'); if(vb) vb.onclick=function(){ if(window._ekVenaPdf) window._ekVenaPdf(vb); };
     Array.prototype.forEach.call(b.querySelectorAll('[data-dg]'), function(x){ x.onclick=function(ev){ ev.preventDefault(); if(window._ekDoelgroepZet) window._ekDoelgroepZet(x.getAttribute('data-dg')); b._sig=''; teken(); }; });
   }
   function noot(){
