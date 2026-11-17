@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.214.0 (2026-11-17, Johan): KLANTTYPE BIJ ENKEL EEN PROFIEL — (1) dossier zonder factuur/baseCase: afname + piek uit het gekoppelde meetprofiel voorvullen en het klanttype afleiden (> 30 MWh of > 10 kW ⇒ bedrijf, anders woning/particulier), EAN's, dossiercode en eigen-profiel-UI; vroeger stopte de prefill (bleef standaard particulier, velden leeg); (2) profiel opgeladen tijdens de sessie (adviseur) → klanttype opnieuw getoetst (_ekBedrijfUitVelden). -->
 <!-- ek.html v0.213.0 (2026-11-17, Johan): STATUS IN DE VASTE BALK — #ek-top-status rechts in de bovenbalk toont wat de EK nu doet (berekening, exacte combinatie, rapport opbouwen, marktanalyse, PDF, mail, profiel/factuur lezen, offerte, bewaren) met lopende tijd en +N; daarna ✓ Klaar (3 s) of ⚠ … niet gelukt (8 s). Bron: fetch-omhulsel (enkel lange API-taken) + _ekBtnBezig. Puur weergave. -->
 <!-- ek.html v0.212.0 (2026-11-17, Johan): (1) «📄 V&A-PDF» in de tab Adviseur opent de V&A in een nieuw tabblad (klantrapport ?mode=vena&dg=…, zoals het rapport) i.p.v. een download; (2) tab Resultaat — knop «📈 Financieel plan» rechts van de chips onder het blauwe blok: venster met het eerste financieel plan van het energierapport (kerncijfers, cumulatieve cashflow, jaar per jaar) uit _ekKern(c).plannen + aftrek in jaar 1. -->
 <!-- ek.html v0.211.0 (2026-11-17, Johan): V&A-PDF — de zichtbare KPI-tegels van de tab Resultaat (#kpi-card: label, waarde, 2 subregels, hero) gaan mee als payload.ek_tegels (klantrapport ≥ 0.116.0). -->
@@ -4544,7 +4545,30 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         if(j.mail && $('i-mail')) $('i-mail').value=j.mail;   // v0.4: contactvelden voorvullen — we kennen ze uit de factuurmail
         if(j.tel && $('i-tel')) $('i-tel').value=j.tel;
         if(j.ev!=null && $('i-ev')) $('i-ev').value=j.ev;      // v0.6.1: onthoud aantal wagens uit de vorige input
-        if(!j.baseCase) return; var bc=j.baseCase;
+        // v0.214.0 (Johan 17-11): DOSSIER MET ENKEL EEN PROFIEL (nog geen factuur, nog nooit doorgerekend → geen baseCase). Vroeger stopte
+        //   de prefill hier: afname en piek uit het meetprofiel werden niet ingevuld en het klanttype bleef op de standaard (woning/particulier).
+        //   Nu: afname + piek uit het profiel, en het klanttype met dezelfde drempel als bij een factuur (> 30 MWh of > 10 kW ⇒ bedrijf).
+        if(!j.baseCase){ try{
+          var _ps0=j.profiel_status||null, _pa0=_ps0&&_ps0.afname;
+          if(j.project_id) STATE_CODE=j.project_id;
+          STATE_PROFIEL_STATUS=_ps0; STATE_HEEFT_PROFIEL=!!(_ps0&&(_ps0.afname||_ps0.injectie));
+          if(_ps0 && _ps0.afname && _ps0.afname.ean) STATE_EAN_AFNAME=_ps0.afname.ean;
+          if(_ps0 && _ps0.injectie && _ps0.injectie.ean) STATE_EAN_INJECTIE=_ps0.injectie.ean;
+          if(_pa0 && _pa0.aanwezig){
+            if(+_pa0.mwh>0 && $('i-afname') && !(+$('i-afname').value>0)) $('i-afname').value=Math.round(+_pa0.mwh*10)/10;
+            if(+_pa0.piek_kw>0 && $('i-toegang') && !(+$('i-toegang').value>0)){ $('i-toegang').value=Math.round(+_pa0.piek_kw*10)/10; PIEK_IS_SLP=false; }
+            if(j.profiel && $('i-profiel')) $('i-profiel').value=j.profiel;
+            _KTYPE_USER=false;
+            if(_ekBedrijfDrempel(+_pa0.mwh||0, +_pa0.piek_kw||0, 0)){
+              if($('i-profiel') && $('i-profiel').value==='residentieel') $('i-profiel').value='kantoor';
+              _evSetKlanttype('bedrijf'); var _br0=$('ktype-bron'); if(_br0) _br0.textContent='afgeleid uit het opgeladen meetprofiel ('+_ekNf(+_pa0.mwh||0)+' MWh, piek '+_ekNf(+_pa0.piek_kw||0)+' kW) — pas gerust aan';
+            } else { _evAfleiden(); var _br1=$('ktype-bron'); if(_br1) _br1.textContent='afgeleid uit het opgeladen meetprofiel (woningvolume) — pas gerust aan'; }
+            try{ if(window._ekLog) window._ekLog('klanttype_profiel',{ kt:KLANTTYPE, mwh:+_pa0.mwh||0, piek:+_pa0.piek_kw||0 }); }catch(eLg){}
+          }
+          try{ _evApplyTotal(j.ev!=null?j.ev:0); }catch(eEv){}
+          try{ _updSpanningBadge(); }catch(eSb){} try{ _ekProfielKeuzeUI(); }catch(eKz){} try{ _ekOekeneSamenvatting(); }catch(eOs){}
+        }catch(eP0){ console.warn('[profiel zonder factuur]', eP0&&eP0.message); } return; }
+        var bc=j.baseCase;
         STATE_SPANNING_FACT=_spanningFactVan(bc); if(bc.spanningsniveau_handmatig==='LS'||bc.spanningsniveau_handmatig==='MS') _spanningZet(bc.spanningsniveau_handmatig);   // v0.24.29: LS/MS uit de factuur (extractor)
         var dg=(function(){ try{ var a=new Date(bc.periodeVan),b=new Date(bc.periodeTot),d=Math.round((b-a)/86400000)+1; return d>0?d:365; }catch(e){ return 365; } })();
         var jf=365/dg;
@@ -5413,7 +5437,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           try{ var _ti=_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage; if(_ti && +_ti.jaar_mwh>0 && $('i-best-inj')){ $('i-best-inj').value=String(Math.round(+_ti.jaar_mwh*10)/10); _ch.push('injectie '+_ekNf(+_ti.jaar_mwh)+' MWh'); } }catch(eTi){}
           try{ var _pvI=_ekPvUitInjectieZet(_LAST_PROFIEL_ANALYSE.types.injectie&&_LAST_PROFIEL_ANALYSE.types.injectie.coverage, true); if(_pvI) _ch.push('bestaande PV '+_ekNf(_pvI.kwp)+' kWp'+((_pvI.b!=null&&_pvI.b>0)?' (gemiddelde van 1,1 × injectiepiek en (zelfverbruik + injectie) ÷ 0,9)':' (1,1 × injectiepiek '+_ekNf(_pvI.piek)+' kW)')); }catch(ePvU){}   // v0.110.0   // v0.99.0: injectie uit het injectieprofiel
           try{ if(!STATE_HEEFT_FACTUUR && $('i-kost')){ $('i-kost').value=''; } }catch(eKs){}   // v0.99.0: zonder factuur geen fictieve € 1.150 — de server schat de kost uit verbruik × marktprijs
-          if(_ch.length){ try{ _updSpanningBadge(); }catch(e1){} try{ LAST_SIG=''; }catch(e2){} try{ _ekOekeneSamenvatting(); }catch(e3){} try{ _ekPersistBevestigd(); }catch(e4){}
+          if(_ch.length){ try{ _updSpanningBadge(); }catch(e1){} try{ _ekBedrijfUitVelden(); }catch(eKt){} try{ LAST_SIG=''; }catch(e2){} try{ _ekOekeneSamenvatting(); }catch(e3){} try{ _ekPersistBevestigd(); }catch(e4){}
             var _stA=$('prof-status'); if(_stA){ var _w=document.createElement('div'); _w.style.cssText='font-size:12px;color:#1E7A42;margin-top:6px'; _w.textContent='Jaarafname en piekvermogen aangepast aan het profiel: '+_ch.join(' · ')+'.'; _stA.appendChild(_w); } } } }catch(eAP){}
       // v0.24.30 (Johan): opgeladen-profielen in de blijvende samenvatting bijwerken (uit de laatste analyse-coverage: jaarverbruik + piek).
       try{ var _t=_LAST_PROFIEL_ANALYSE&&_LAST_PROFIEL_ANALYSE.types; if(_t){ STATE_PROFIEL_STATUS=STATE_PROFIEL_STATUS||{}; ['afname','injectie'].forEach(function(k){ var c=_t[k]&&_t[k].coverage; if(c){ STATE_PROFIEL_STATUS[k]={ aanwezig:true, mwh:(c.jaar_mwh!=null?+c.jaar_mwh:null), piek_kw:(c.maandpiek_kw!=null?+c.maandpiek_kw:null), gemeten_maanden:(c.gemeten_maanden!=null?+c.gemeten_maanden:null), aangevuld:(c.gemeten_maanden!=null&&+c.gemeten_maanden<12) }; } }); STATE_HEEFT_PROFIEL=!!(STATE_PROFIEL_STATUS.afname||STATE_PROFIEL_STATUS.injectie); } _ekOekeneSamenvatting(); try{ _ekProfielExtra(); }catch(e){} }catch(e){}
