@@ -57,6 +57,18 @@ if (fs.existsSync(DIST)) {
     }
     next();
   });
+  // 2026-11-17 (Johan): BETERE LADER — partnerpagina's dieteren./pluon.energie-compas.eu (elk extensieloos pad) en
+  //   www.energie-compas.eu/beterladen → apps/beterladen.html. De pagina leest de partner uit het subdomein of ?p=.
+  const BL_SUB = new Set(['dieteren', 'pluon']);
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/') || path.extname(req.path)) return next();
+    const host = String(req.hostname || '').toLowerCase();
+    const sub = (host.match(/^([a-z0-9-]+)\.energie-compas\.eu$/) || [])[1] || '';
+    const isBl = BL_SUB.has(sub) || ((EC_HOSTS.has(host) || host === 'app.energie-compas.eu' || host === 'localhost' || host === '127.0.0.1') && /^\/beterladen\/?$/.test(req.path));
+    if (!isBl) return next();
+    const f = path.join(DIST, 'apps', 'beterladen.html');
+    return fs.existsSync(f) ? res.sendFile(f) : next();
+  });
   // 2026-10-16 (Johan): MijnEC = het enige portaal. (a) app.energie-compas.eu (apps + klantlinks) toont nooit de Fluctus-site/portal:
   //   elk extensieloos pad, /index.html en /portal.html → www.energie-compas.eu (zelfde pad; /portal.html → /login).
   //   (b) Op de EC-hosts zelf: /portal.html → /login en /index.html → / (anders serveerde static de Fluctus-pagina's).
