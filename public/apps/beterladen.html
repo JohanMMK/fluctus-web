@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Betere Lader</title>
+<meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
+<link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.1.0 (2026-11-17, Johan): BETERE LADER — eenvoudige laadtool per partner (D'Ieteren Energy, PLUON).
+     Flow: factuur-PDF → wagens (voertuigtabel) → mail + 6 cijfers → laadplan + offerteaanvraag. Partner via ?p= of subdomein.
+     Server: /api/bl/* (fluctus-proxy ≥ 15.433.0). Eén dossier (FLX) → «Volledige analyse» opent hetzelfde dossier in de EK. -->
+<style>
+:root{--navy:#003658;--groen:#6BAE41;--p:#003658;--a:#6BAE41;--pt:#fff;--ink:#1F2937;--muted:#6B7280;--line:#E5E7EB;--bg:#F6F8FB;--ok:#0E7A3E;--warn:#B45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--p)}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px 40px}
+header.top{background:#fff;border-bottom:1px solid var(--line)}
+header.top .in{max-width:760px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px;justify-content:space-between}
+.plogo{height:38px;display:flex;align-items:center}
+.plogo img{max-height:38px;max-width:180px;display:block}
+.plogo.donker{background:#000;border-radius:8px;padding:6px 10px}
+.bllogo{height:30px}
+.met{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.hero{padding:28px 0 8px}
+.hero h1{font-size:28px;line-height:1.2;margin:0 0 10px;color:var(--p)}
+.hero p{margin:0 0 6px;color:#374151}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0}
+.stap{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+h2{font-size:20px;margin:0 0 10px}
+.btn{display:inline-block;border:0;border-radius:10px;background:var(--p);color:#fff;font:inherit;font-weight:700;padding:12px 18px;cursor:pointer;text-decoration:none}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:#fff;color:var(--p);border:1.5px solid var(--p)}
+.btn.klein{padding:7px 12px;font-size:14px}
+.drop{display:block;border:2px dashed #C9D3E0;border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:#FAFBFD}
+.drop:hover{border-color:var(--p)}
+.msg{font-size:14px;margin-top:10px}
+.msg.fout{color:#B91C1C}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px;margin-top:10px}
+.kv b{font-weight:600}
+.haak{background:color-mix(in srgb,var(--a) 14%,#fff);border-left:4px solid var(--a);border-radius:8px;padding:12px 14px;margin-top:14px;font-size:15px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;cursor:pointer;font:inherit;font-size:14px}
+.chip.aan{border-color:var(--p);background:var(--p);color:#fff}
+.wrij{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:#FCFDFE}
+.wrij .r1{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wrij .r2{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.wrij .r3{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--muted)}
+label.l{display:block;font-size:12px;color:var(--muted);margin-bottom:2px}
+select,input{width:100%;font:inherit;font-size:15px;padding:9px 10px;border:1px solid #C9D3E0;border-radius:9px;background:#fff;color:var(--ink);min-width:0}
+input[type=number]{-moz-appearance:textfield}
+.wauto{font-size:13px;color:var(--muted);margin-top:6px}
+.code{letter-spacing:6px;font-size:22px;text-align:center;max-width:220px}
+.rij{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.vragen{display:grid;gap:10px;margin-top:6px}
+.v{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.v .q{font-size:13px;color:var(--muted);font-weight:600}
+.v .a{font-size:17px;margin-top:2px}
+.v .s{font-size:13px;color:var(--muted);margin-top:2px}
+table.hz{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+table.hz th,table.hz td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right}
+table.hz th:first-child,table.hz td:first-child{text-align:left}
+table.hz th{font-size:12px;color:var(--muted);font-weight:600}
+.ok{color:var(--ok);font-weight:600}.nok{color:var(--warn);font-weight:600}
+.tabwrap{overflow-x:auto}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0}
+.check input{width:auto;margin-top:3px}
+.klein{font-size:13px;color:var(--muted)}
+.verborgen{display:none!important}
+footer{border-top:1px solid var(--line);background:#fff;margin-top:30px}
+footer .in{max-width:760px;margin:0 auto;padding:16px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+footer img{height:22px}
+.a4kop{display:none}
+@media (max-width:520px){.hero h1{font-size:23px}.wrij .r2{grid-template-columns:repeat(2,1fr)}.plogo img{max-width:130px}}
+@media print{
+  body{background:#fff}header.top,footer,.hero,.noprint,#s1,#s2,#s3{display:none!important}
+  .card{border:0;padding:0;margin:0}.a4kop{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--p);padding-bottom:8px;margin-bottom:10px}
+  .wrap{max-width:none;padding:0}@page{size:A4;margin:14mm}
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <div id="plogo" class="plogo"><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" class="bllogo"></div>
+  <div class="met" id="metbl"></div>
+</div></header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Als we niet slim samen laden, kan straks niemand nog laden.</h1>
+    <p id="herop">Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar.</p>
+    <p class="klein">Onafhankelijke berekening op basis van je factuur en een standaard laadprofiel.</p>
+  </section>
+
+  <!-- STAP 1: FACTUUR -->
+  <section class="card" id="s1">
+    <div class="stap">Stap 1 van 3</div>
+    <h2>Je energiefactuur (PDF)</h2>
+    <label class="drop" for="fpdf"><b>Kies je factuur (PDF)</b><br><span class="klein">Je jaarafrekening of een recente maandfactuur. We lezen ze automatisch in.</span></label>
+    <input type="file" id="fpdf" accept="application/pdf,.pdf" class="verborgen">
+    <p class="klein" id="mailinstap">Liever mailen? Stuur je factuur naar <b id="aliasmail">dossier@energie-compas.eu</b>. Je krijgt een link terug.</p>
+    <div id="fmsg" class="msg"></div>
+    <div id="fok" class="verborgen">
+      <div class="kv" id="fkv"></div>
+      <div class="haak" id="haak"></div>
+      <p class="klein">Klopt het toegangsvermogen niet? <a href="#" id="toegaanpas">Pas aan</a><span id="toegbox" class="verborgen"> <input type="number" id="toeg" style="width:110px;display:inline-block"> kW</span></p>
+      <button class="btn" id="naar2">Verder: je wagens</button>
+    </div>
+  </section>
+
+  <!-- STAP 2: WAGENS -->
+  <section class="card verborgen" id="s2">
+    <div class="stap">Stap 2 van 3</div>
+    <h2>Je wagens, nu en de komende 3 jaar</h2>
+    <div class="klein">Waar laden ze?</div>
+    <div class="chips" id="dg">
+      <button class="chip" data-dg="thuisladen">Thuis (woning)</button>
+      <button class="chip aan" data-dg="kmo">Bedrijf: personeelswagens</button>
+      <button class="chip" data-dg="logistiek">Bedrijf: bestel- en vrachtwagens</button>
+    </div>
+    <div id="wrijen"></div>
+    <button class="btn ghost klein" id="wplus">+ Ander type wagen</button>
+    <div class="rij" style="margin-top:12px">
+      <div style="flex:1;min-width:150px"><label class="l" for="venster">Hoe lang staan ze aan de laadpaal?</label>
+        <select id="venster"><option value="4">± 4 uur</option><option value="6">± 6 uur</option><option value="8" selected>± 8 uur (werkdag)</option><option value="10">± 10 uur (nacht)</option><option value="12">± 12 uur</option></select></div>
+    </div>
+    <p class="klein">Het aantal per periode is het totaal op dat moment (bv. nu 10, over 2 jaar 25).</p>
+    <button class="btn" id="naar3" style="margin-top:6px">Verder: bekijk je resultaat</button>
+  </section>
+
+  <!-- STAP 3: MAIL + CODE -->
+  <section class="card verborgen" id="s3">
+    <div class="stap">Stap 3 van 3</div>
+    <h2>Waar mogen we je laadplan naartoe sturen?</h2>
+    <div class="rij"><div style="flex:1;min-width:220px"><input type="email" id="mail" placeholder="naam@bedrijf.be" autocomplete="email"></div><button class="btn" id="stuurcode">Stuur mijn code</button></div>
+    <div id="codebox" class="verborgen" style="margin-top:12px">
+      <p class="klein">We stuurden een code van 6 cijfers naar <b id="mailtoon"></b>.</p>
+      <div class="rij"><input id="code" class="code" inputmode="numeric" maxlength="6" placeholder="••••••"><button class="btn" id="checkcode">Bevestig</button><a href="#" id="opnieuw" class="klein">Nieuwe code</a></div>
+    </div>
+    <div id="cmsg" class="msg"></div>
+  </section>
+
+  <!-- RESULTAAT -->
+  <section class="card verborgen" id="s4">
+    <div class="a4kop"><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" style="height:30px"><div id="a4p" style="font-size:13px;color:#6B7280;text-align:right"></div></div>
+    <div class="stap" id="dossnr">Je laadplan</div>
+    <h2 id="rtitel">Je laadplan</h2>
+    <div class="klein" id="rsub"></div>
+    <div class="vragen" id="vragen"></div>
+    <div class="tabwrap"><table class="hz" id="hz"></table></div>
+    <p class="klein" style="margin-top:10px"><b>Vraag bij je offerte:</b> stuurbare laadpalen (OCPP), dynamische load balancing, een MID-meter per punt, badge of reservatie (nodig om te wisselen) en koppelbaar met een energiebeheersysteem.</p>
+    <p class="klein" id="indic">Indicatief: berekend op je factuur en een standaard laadprofiel. Met je eigen kwartierdata wordt het exact.</p>
+    <div class="noprint" id="acties" style="margin-top:14px">
+      <div id="offbox">
+        <div class="rij"><input id="tel" type="tel" placeholder="Telefoon (optioneel)" style="max-width:240px"><input id="opm" placeholder="Opmerking (optioneel)" style="flex:1;min-width:200px"></div>
+        <label class="check"><input type="checkbox" id="akkoord"> <span id="akkoordtxt">Ik wil dat mijn laadplan en gegevens naar de partner gaan en dat ik gecontacteerd word voor een offerte.</span></label>
+        <button class="btn" id="offerte" disabled>Vraag een offerte aan</button>
+      </div>
+      <div id="omsg" class="msg"></div>
+      <div class="rij" style="margin-top:14px">
+        <button class="btn ghost klein" id="print">Download als PDF (A4)</button>
+        <a class="btn ghost klein" id="ek" href="#" target="_blank" rel="noopener">Volledige analyse met batterij en zonnepanelen</a>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer><div class="in">
+  <div>Betere Lader · <span id="fpartner"></span>powered by <a href="https://www.energie-compas.eu" target="_blank" rel="noopener">Energie-Compas</a> · Fluctus.net CVSO</div>
+  <img src="/apps/ec-logo.png" alt="Energie-Compas">
+</div></footer>
+
+<script>
+(function(){
+'use strict';
+var API='https://lucid-amazement-production.up.railway.app';
+var Q=new URLSearchParams(location.search);
+var host=location.hostname.toLowerCase(), mh=host.match(/^([a-z0-9-]+)\.energie-compas\.eu$/);
+var SLUG=(Q.get('p')||((mh&&['www','app'].indexOf(mh[1])<0)?mh[1]:'')||'').toLowerCase().replace(/[^a-z0-9-]/g,'');
+var P=null, S={bc:null,fb:[],toeg:0,piek:0,afn:0,prijs:0.25,dg:'kmo',venster:8,token:'',verified:false,res:null,pid:'',ek:''};
+var VEH={}, TYPES=[['personenwagen','Personenwagen'],['bestelwagen','Bestelwagen'],['lichte_vracht','Lichte vracht'],['vrachtwagen','Vrachtwagen'],['bus','Bus']];
+var TYP={personenwagen:{batt:60,kwhkm:0.18,ac:11,km:15000},bestelwagen:{batt:70,kwhkm:0.27,ac:11,km:25000},lichte_vracht:{batt:110,kwhkm:0.38,ac:22,km:30000},vrachtwagen:{batt:450,kwhkm:1.25,ac:22,km:60000},bus:{batt:350,kwhkm:1.0,ac:22,km:50000}};
+var CAP_EUR_KW=50, SLIM_KORTING=0.03;
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function n0(x){return Math.round(+x||0).toLocaleString('nl-BE');}
+function n1(x){return (Math.round((+x||0)*10)/10).toLocaleString('nl-BE');}
+function eur(x){return '€ '+n0(x);}
+function toon(id,ja){var e=$(id); if(e) e.classList.toggle('verborgen',!ja);}
+function post(pad,body){return fetch(API+pad,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){j._st=r.status;return j;});});}
+function bewaarLokaal(){try{sessionStorage.setItem('bl_state',JSON.stringify({token:S.token,mail:$('mail').value}));}catch(e){}}
+
+// ── Partner ──
+function zetPartner(p){
+  P=p; if(!p) return;
+  var r=document.documentElement.style; r.setProperty('--p',p.kleur); r.setProperty('--a',p.accent); r.setProperty('--pt',p.tekstOpAccent||'#fff');
+  var donker=(p.slug==='pluon');
+  $('plogo').innerHTML='<a href="'+esc(p.site)+'" target="_blank" rel="noopener" class="plogo'+(donker?' donker':'')+'"><img src="'+esc(p.logo)+'" alt="'+esc(p.naam)+'"></a>';
+  $('metbl').innerHTML='<span>met</span><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" class="bllogo" style="height:24px">';
+  $('aliasmail').textContent=p.alias; $('fpartner').textContent=p.naam+' · ';
+  $('herop').textContent='Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar. Een service van '+p.naam+'.';
+  $('offerte').textContent='Vraag een offerte aan bij '+p.naam;
+  $('akkoordtxt').textContent='Ik wil dat mijn laadplan en gegevens naar '+p.naam+' gaan en dat ik gecontacteerd word voor een offerte.';
+  document.title='Betere Lader · '+p.naam;
+}
+if(SLUG) fetch(API+'/api/bl/partner/'+encodeURIComponent(SLUG)).then(function(r){return r.json();}).then(function(j){if(j&&j.ok) zetPartner(j.partner);}).catch(function(){});
+
+// ── Stap 1: factuur ──
+function b64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||'');res(s.slice(s.indexOf(',')+1));};r.onerror=function(){rej(new Error('Kon het bestand niet lezen'));};r.readAsDataURL(file);});}
+function dagen(a,b){var d=(new Date(b)-new Date(a))/86400000;return (isFinite(d)&&d>0)?d:0;}
+function leesBc(bc){
+  S.bc=bc;
+  var br=bc._aansluitvermogenBron||{};
+  S.toeg=+bc.toegangsvermogenKw||+br.gekozenMaxKw||+br.capaciteitKw||Math.round((+bc.aansluitVermogenKva||0)*0.9)||0;
+  var d=dagen(bc.periodeVan,bc.periodeTot), jf=d>20?365/d:1;
+  S.afn=(+bc.afnameKwh||0)*jf/1000;
+  var gem=S.afn*1000/8760;
+  S.piek=+br.maandpiekKw||Math.min(S.toeg*0.8,gem*3)||0;
+  var kost=+bc.totaalEnergieExclBtw||+bc.totaalExclBtw||0;
+  var p=(kost>0&&bc.afnameKwh>0)?kost/bc.afnameKwh:0; S.prijs=(p>0.08&&p<0.8)?p:0.25;
+  var ean=bc.ean||((bc.eanBlokken||[])[0]||{}).ean||'';
+  $('fkv').innerHTML='<b>Klant</b><span>'+esc(bc.klantNaam||'–')+'</span><b>Adres</b><span>'+esc(bc.leveringsadres||'–')+'</span>'+(ean?'<b>EAN</b><span>'+esc(ean)+'</span>':'')+
+    '<b>Toegangsvermogen</b><span id="kvtoeg">'+n0(S.toeg)+' kW</span><b>Verbruik</b><span>± '+n1(S.afn)+' MWh per jaar</span><b>Huidige piek</b><span>± '+n0(S.piek)+' kW'+(br.maandpiekKw?'':' (geschat)')+'</span>';
+  $('toeg').value=Math.round(S.toeg); haak(); toon('fok',true);
+}
+function haak(){
+  var vrij=Math.max(0,S.toeg*0.95-S.piek), dagE=15000/230*0.16;
+  var slim=Math.floor(vrij*8/dagE), dom=Math.floor(vrij/11);
+  $('haak').innerHTML=vrij>0?('Op je aansluiting is nog ± <b>'+n0(vrij)+' kW</b> vrij. Daarmee laad je ± <b>'+n0(slim)+' personenwagens slim</b>, tegenover '+n0(dom)+' als ze allemaal tegelijk laden.'):'Je aansluiting zit al dicht bij haar grens. Slim laden wordt hier het verschil tussen laden en verzwaren.';
+}
+$('fpdf').addEventListener('change',function(){
+  var f=this.files&&this.files[0]; this.value=''; if(!f) return;
+  if(!/pdf$/i.test(f.type||f.name)){ $('fmsg').className='msg fout'; $('fmsg').textContent='Kies een PDF-bestand.'; return; }
+  $('fmsg').className='msg'; $('fmsg').textContent='⏳ Je factuur wordt ingelezen (± 20 seconden)…'; toon('fok',false);
+  b64(f).then(function(b){return post('/api/factuur-extract',{files:[{base64:b,mediaType:'application/pdf',fileName:f.name}]});})
+  .then(function(r){
+    if(!r||!r.baseCase){ $('fmsg').className='msg fout'; $('fmsg').textContent='We konden deze factuur niet lezen'+(r&&r.error?(' ('+r.error+')'):'')+'. Probeer een andere PDF of mail ze naar '+$('aliasmail').textContent+'.'; return; }
+    S.fb=(r.baseCase.factuur_bestanden||[]).slice(0,3);
+    $('fmsg').textContent='✓ Factuur ingelezen.'; leesBc(r.baseCase);
+  }).catch(function(e){ $('fmsg').className='msg fout'; $('fmsg').textContent='Inlezen mislukt: '+(e&&e.message||'netwerkfout'); });
+});
+$('toegaanpas').addEventListener('click',function(e){e.preventDefault();toon('toegbox',true);$('toeg').focus();});
+$('toeg').addEventListener('input',function(){var v=+this.value; if(v>0){S.toeg=v; $('kvtoeg').textContent=n0(v)+' kW'; haak();}});
+$('naar2').addEventListener('click',function(){toon('s2',true); if(!$('wrijen').children.length) wRij(); $('s2').scrollIntoView({behavior:'smooth'});});
+
+// ── Stap 2: wagens ──
+function laadType(t){ if(VEH[t]) return Promise.resolve(VEH[t]); return fetch(API+'/api/vehicles?type='+t).then(function(r){return r.json();}).then(function(j){VEH[t]=(j&&j.merken)||[];return VEH[t];}).catch(function(){VEH[t]=[];return [];}); }
+function wRij(def){
+  def=def||{}; var d=document.createElement('div'); d.className='wrij';
+  var t0=def.type||(S.dg==='logistiek'?'bestelwagen':'personenwagen');
+  d.innerHTML='<div class="r1"><div><label class="l">Type</label><select class="wt">'+TYPES.map(function(t){return '<option value="'+t[0]+'"'+(t[0]===t0?' selected':'')+'>'+t[1]+'</option>';}).join('')+'</select></div>'+
+    '<div><label class="l">Merk</label><select class="wm"><option value="">Weet ik nog niet</option></select></div></div>'+
+    '<div style="margin-top:8px"><label class="l">Model</label><select class="wmo"><option value="">Typische wagen</option></select></div>'+
+    '<div class="r2"><div><label class="l">Nu</label><input type="number" min="0" class="wn" value="'+(def.nu!=null?def.nu:'')+'" placeholder="0"></div><div><label class="l">Over 1 jaar</label><input type="number" min="0" class="w12" placeholder="="></div><div><label class="l">Over 2 jaar</label><input type="number" min="0" class="w24" placeholder="="></div><div><label class="l">Over 3 jaar</label><input type="number" min="0" class="w36" placeholder="="></div></div>'+
+    '<div class="r3"><span>km per jaar per wagen <input type="number" class="wkm" style="width:100px;display:inline-block;padding:5px 8px" value="'+TYP[t0].km+'"></span><a href="#" class="wdel">verwijder</a></div><div class="wauto"></div>';
+  $('wrijen').appendChild(d);
+  var st=d.querySelector('.wt'), sm=d.querySelector('.wm'), smo=d.querySelector('.wmo');
+  function vulMerken(){ laadType(st.value).then(function(M){ sm.innerHTML='<option value="">Weet ik nog niet</option>'+M.map(function(m,i){return '<option value="'+i+'">'+esc(m.merk)+'</option>';}).join(''); vulModellen(); }); }
+  function vulModellen(){ var M=VEH[st.value]||[], m=M[+sm.value]; smo.innerHTML='<option value="">'+(m?'Kies een model':'Typische wagen')+'</option>'+(m?m.modellen.map(function(x,i){return '<option value="'+i+'">'+esc(x.label)+'</option>';}).join(''):''); info(); }
+  function info(){ var w=leesRij(d); d.querySelector('.wauto').innerHTML=w?uitleg(w):''; }
+  st.addEventListener('change',function(){ d.querySelector('.wkm').value=TYP[st.value].km; vulMerken(); });
+  sm.addEventListener('change',vulModellen); smo.addEventListener('change',info);
+  d.querySelector('.wkm').addEventListener('input',info);
+  d.querySelector('.wdel').addEventListener('click',function(e){e.preventDefault(); d.remove();});
+  vulMerken();
+}
+function leesRij(d){
+  var t=d.querySelector('.wt').value, M=VEH[t]||[], mi=d.querySelector('.wm').value, m=mi!==''?M[+mi]:null, xi=d.querySelector('.wmo').value, x=(m&&xi!=='')?m.modellen[+xi]:null, T=TYP[t];
+  function g(c){var v=d.querySelector(c).value;return v===''?null:Math.max(0,Math.round(+v||0));}
+  var nu=g('.wn')||0, a=g('.w12'), b=g('.w24'), c=g('.w36');
+  if(a==null) a=nu; if(b==null) b=a; if(c==null) c=b;
+  return {type:t,merk:m?m.merk:'',model:x?x.label:(m?'':'Typische '+TYPES.filter(function(z){return z[0]===t;})[0][1].toLowerCase()),id:x?x.id:'',
+    batt_kwh:x&&x.batt_kwh?+x.batt_kwh:T.batt,kwh_km:x&&x.kwh_km?+x.kwh_km:T.kwhkm,ac_kw:x&&x.ac_kw?+x.ac_kw:T.ac,
+    nu:nu,m12:a,m24:b,m36:c,km_jaar:Math.max(0,+d.querySelector('.wkm').value||T.km)};
+}
+function dagenJaar(){return S.dg==='thuisladen'?365:(S.dg==='logistiek'?260:230);}
+function rotatie(w,dagE){ if(S.dg==='thuisladen'||w.type!=='personenwagen') return 1; return Math.max(1,Math.min(5,Math.floor(0.7*w.batt_kwh/Math.max(0.1,dagE)))); }
+function paalKw(w,nodig){ var cap=w.ac_kw||11; if(S.dg==='thuisladen') return Math.min(cap,nodig>7.4?11:7.4); return Math.min(cap,nodig>11?22:11); }
+function uitleg(w){
+  var dagE=w.km_jaar/dagenJaar()*w.kwh_km, R=rotatie(w,dagE), pk=paalKw(w,R*dagE/S.venster), uren=w.batt_kwh*0.7/Math.max(1,pk);
+  var s=['± '+n1(dagE)+' kWh per dag'];
+  if(R>1) s.push('rijdt ± '+R+' werkdagen op één laadbeurt');
+  s.push('laadt in ± '+n1(uren)+' u van 20 naar 90 % aan '+n1(pk)+' kW');
+  if(w.ac_kw&&w.ac_kw<22&&S.dg!=='thuisladen') s.push('een paal van 22 kW heeft voor deze wagen geen zin (laadt max. '+n1(w.ac_kw)+' kW)');
+  return s.join(' · ');
+}
+Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(b){b.addEventListener('click',function(){
+  Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x===b);});
+  S.dg=b.getAttribute('data-dg'); $('venster').value=S.dg==='kmo'?'8':'10'; S.venster=+$('venster').value;
+});});
+$('venster').addEventListener('change',function(){S.venster=+this.value;});
+$('wplus').addEventListener('click',function(){wRij();});
+
+// ── Berekening ──
+function bereken(){
+  var W=Array.prototype.map.call(document.querySelectorAll('.wrij'),leesRij).filter(function(w){return w.nu+w.m12+w.m24+w.m36>0;});
+  var vrij=Math.max(0,S.toeg*0.95-S.piek), R={beschikbaar_kw:Math.round(vrij),wagens:W};
+  ['nu','m12','m24','m36'].forEach(function(h){
+    var ev=0,lp=0,pdom=0,prot=0,edag=0,km=0,kwhkm=0,pk=0;
+    W.forEach(function(w){ var n=w[h]; if(!n) return; var dagE=w.km_jaar/dagenJaar()*w.kwh_km, r=rotatie(w,dagE), p=paalKw(w,r*dagE/S.venster), l=r>1?Math.ceil(n/r*1.15):n;
+      ev+=n; lp+=l; pdom+=n*p; prot+=l*p; edag+=n*dagE; km+=n*w.km_jaar; kwhkm+=n*w.km_jaar*w.kwh_km; pk=Math.max(pk,p); });
+    var pslim=Math.min(prot,edag/S.venster);
+    R[h]={ev:ev,laadpunten:lp,paal_kw:pk,p_dom_kw:Math.round(pdom),p_rot_kw:Math.round(prot),p_slim_kw:Math.round(pslim),edag_kwh:Math.round(edag),kwh_km:km>0?kwhkm/km:0.16,past:pslim<=vrij,past_rot:prot<=vrij};
+  });
+  var h0=['nu','m12','m24','m36'].filter(function(h){return R[h].ev>0;}), ref=R[h0[0]]||R.nu, dagEgem=ref.ev?ref.edag_kwh/ref.ev:9.6;
+  R.q1={slim:Math.floor(vrij*S.venster/Math.max(1,dagEgem)),dom:Math.floor(vrij/Math.max(3.7,ref.paal_kw||11))};
+  var hl=R[h0[h0.length-1]]||ref;
+  R.q4={kw_minder:Math.max(0,hl.p_rot_kw-hl.p_slim_kw),eur_cap:Math.max(0,hl.p_rot_kw-hl.p_slim_kw)*CAP_EUR_KW,eur_energie:hl.edag_kwh*dagenJaar()*SLIM_KORTING};
+  R.q5={dom:hl.kwh_km*100*S.prijs,slim:hl.kwh_km*100*Math.max(0.05,S.prijs-SLIM_KORTING)};
+  var grens=['nu','m12','m24','m36'].filter(function(h){return R[h].ev>0&&!R[h].past;})[0];
+  R.q7={grens:grens||null}; R.horizon_ek=h0.indexOf('m24')>=0?'m24':(h0[h0.length-1]||'nu');
+  return R;
+}
+var HZ={nu:'Nu',m12:'Over 1 jaar',m24:'Over 2 jaar',m36:'Over 3 jaar'};
+function render(){
+  var R=S.res, P2=P?P.naam:'';
+  var bc=S.bc||{}; $('rtitel').textContent='Je laadplan'+(bc.klantNaam?(' · '+bc.klantNaam):'');
+  $('dossnr').textContent=S.pid?('Dossier '+S.pid):'Je laadplan';
+  $('rsub').textContent=(bc.leveringsadres||'')+' · toegangsvermogen '+n0(S.toeg)+' kW · nog ± '+n0(R.beschikbaar_kw)+' kW vrij voor laden';
+  $('a4p').innerHTML=(P2?esc(P2)+'<br>':'')+(S.pid?esc(S.pid)+'<br>':'')+new Date().toLocaleDateString('nl-BE');
+  var hl=['m36','m24','m12','nu'].map(function(h){return R[h];}).filter(function(x){return x.ev>0;})[0]||R.nu;
+  var v=[];
+  v.push(['Hoeveel elektrische wagens kan ik laden op mijn huidige aansluiting?','± '+n0(R.q1.slim)+' wagens slim gestuurd','Tegenover '+n0(R.q1.dom)+' als ze allemaal tegelijk laden. Zonder verzwaring.']);
+  v.push(['Hoeveel laadpunten heb ik nodig?',n0(hl.laadpunten)+' laadpunten voor '+n0(hl.ev)+' wagens',hl.laadpunten<hl.ev?'Minder punten dan wagens: een volle wagen rijdt meerdere dagen. Dat vraagt een badge of reservatie om te wisselen.':'Elke wagen laadt dagelijks, dus één punt per wagen.']);
+  v.push(['Welk vermogen per laadpunt heeft zin?',n1(hl.paal_kw)+' kW per punt','Begrensd op wat je wagens zelf kunnen laden. Meer vermogen kost meer en levert niets op.']);
+  v.push(['Hoeveel extra vermogen vraagt dat?','Slim: ± '+n0(hl.p_slim_kw)+' kW · met wisselen: max. '+n0(hl.p_rot_kw)+' kW','Elke wagen een eigen paal zonder sturing: '+n0(hl.p_dom_kw)+' kW. Vrij op je aansluiting: ± '+n0(R.beschikbaar_kw)+' kW.']);
+  v.push(['Wat bespaar ik met slim laden?','± '+eur(R.q4.eur_cap)+' per jaar op je capaciteitstarief','Je piek ligt ± '+n0(R.q4.kw_minder)+' kW lager. Met een dynamisch contract komt daar ± '+eur(R.q4.eur_energie)+' per jaar bij door te laden op goedkope uren.']);
+  v.push(['Wat kost een kilometer elektrisch rijden?','± '+eur(R.q5.slim).replace('€ ','€ ')+' per 100 km met slim laden','Zonder sturing ± '+eur(R.q5.dom)+' per 100 km. Gerekend met je huidige stroomprijs van ± € '+n1(S.prijs*100/100*100)/100+' per kWh.']);
+  v[5][1]='± € '+(Math.round(R.q5.slim*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2})+' per 100 km met slim laden';
+  v[5][2]='Zonder sturing ± € '+(Math.round(R.q5.dom*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2})+' per 100 km. Gerekend met je huidige stroomprijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh).';
+  v.push(['Wanneer bots ik op de grens van mijn aansluiting?',R.q7.grens?(HZ[R.q7.grens]+' kom je aan je grens, ook met slim laden'):'Ook over 3 jaar past alles, als je slim laadt',R.q7.grens?'Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.':'Laad je zonder sturing, dan heb je wel tot '+n0(hl.p_dom_kw)+' kW nodig.']);
+  $('vragen').innerHTML=v.map(function(x,i){return '<div class="v"><div class="q">'+(i+1)+'. '+esc(x[0])+'</div><div class="a">'+esc(x[1])+'</div><div class="s">'+esc(x[2])+'</div></div>';}).join('');
+  var hs=['nu','m12','m24','m36'];
+  $('hz').innerHTML='<tr><th></th>'+hs.map(function(h){return '<th>'+HZ[h]+'</th>';}).join('')+'</tr>'+
+    [['Wagens','ev',n0],['Laadpunten','laadpunten',n0],['Per punt (kW)','paal_kw',n1],['Elke wagen een paal, zonder sturing','p_dom_kw',function(x){return n0(x)+' kW';}],['Met wisselen (max.)','p_rot_kw',function(x){return n0(x)+' kW';}],['Slim gestuurd','p_slim_kw',function(x){return n0(x)+' kW';}]]
+    .map(function(r){return '<tr><td>'+r[0]+'</td>'+hs.map(function(h){return '<td>'+r[2](R[h][r[1]])+'</td>';}).join('')+'</tr>';}).join('')+
+    '<tr><td>Past op je aansluiting?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(x.ev?(x.past?'<span class="ok">ja, slim</span>':'<span class="nok">nee</span>'):'–')+'</td>';}).join('')+'</tr>';
+  if(S.ek){ $('ek').href=S.ek; }
+  toon('s4',true);
+}
+
+$('naar3').addEventListener('click',function(){
+  var R=bereken(); if(!R.wagens.length){ alert('Geef minstens één wagen in.'); return; }
+  S.res=R;
+  if(S.verified){ return bewaar(); }
+  toon('s3',true); $('s3').scrollIntoView({behavior:'smooth'}); $('mail').focus();
+});
+
+// ── Stap 3: mail + code ──
+$('stuurcode').addEventListener('click',function(){
+  var m=$('mail').value.trim(); $('cmsg').className='msg'; $('cmsg').textContent='';
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)){ $('cmsg').className='msg fout'; $('cmsg').textContent='Geef een geldig e-mailadres.'; return; }
+  this.disabled=true; var knop=this;
+  post('/api/bl/start',{mail:m,partner:SLUG,token:S.token}).then(function(j){
+    knop.disabled=false;
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Er ging iets mis.'; return; }
+    S.token=j.token; bewaarLokaal();
+    if(j.verified){ S.verified=true; return bewaar(); }
+    $('mailtoon').textContent=m; toon('codebox',true); $('code').focus();
+    if(j.sent===false) { $('cmsg').className='msg fout'; $('cmsg').textContent='De mail kon niet vertrekken. Probeer later opnieuw.'; }
+  }).catch(function(){knop.disabled=false; $('cmsg').className='msg fout'; $('cmsg').textContent='Netwerkfout.';});
+});
+$('opnieuw').addEventListener('click',function(e){e.preventDefault(); $('stuurcode').click();});
+$('checkcode').addEventListener('click',function(){
+  post('/api/bl/code',{token:S.token,code:$('code').value}).then(function(j){
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Die code klopt niet.'; return; }
+    S.verified=true; $('cmsg').textContent=''; bewaar();
+  });
+});
+$('code').addEventListener('keyup',function(e){ if(this.value.replace(/\D/g,'').length===6&&e.key!=='Tab') $('checkcode').click(); });
+
+function bewaar(){
+  var R=S.res;
+  var inv={wagens:R.wagens,doelgroep:S.dg,venster_u:S.venster,toegang_kw:S.toeg,piek_kw:S.piek,afname_mwh:S.afn,prijs_kwh:S.prijs,horizon_ek:R.horizon_ek};
+  var res={beschikbaar_kw:R.beschikbaar_kw}; ['nu','m12','m24','m36'].forEach(function(h){res[h]=R[h];});
+  return post('/api/bl/bewaar',{token:S.token,baseCase:S.bc,factuur_bestanden:S.fb,invoer:inv,resultaat:res}).then(function(j){
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Bewaren mislukt.'; return; }
+    S.pid=j.project_id||''; S.ek=j.ek_link||''; toon('s3',false); render(); $('s4').scrollIntoView({behavior:'smooth'});
+  });
+}
+
+// ── Offerte ──
+$('akkoord').addEventListener('change',function(){ $('offerte').disabled=!this.checked; });
+$('offerte').addEventListener('click',function(){
+  var k=this; k.disabled=true; $('omsg').className='msg'; $('omsg').textContent='⏳ Je aanvraag vertrekt…';
+  post('/api/bl/offerte',{token:S.token,tel:$('tel').value,opmerking:$('opm').value}).then(function(j){
+    if(!j.ok){ k.disabled=false; $('omsg').className='msg fout'; $('omsg').textContent=j.error||'Er ging iets mis.'; return; }
+    toon('offbox',false); $('omsg').innerHTML='✓ Je aanvraag is vertrokken naar <b>'+esc(j.partner||'de partner')+'</b>. Je krijgt een bevestiging per mail en wordt binnen 2 werkdagen gecontacteerd.';
+  }).catch(function(){k.disabled=false; $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.';});
+});
+$('print').addEventListener('click',function(){window.print();});
+
+// ── Heropenen via link (mail-instap of terugkeer) ──
+var T0=Q.get('t');
+if(T0){
+  S.token=T0;
+  fetch(API+'/api/bl/dossier/'+encodeURIComponent(T0)+(Q.get('via')==='mail'?'?via=mail':'')).then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok) return;
+    S.verified=!!j.verified; S.pid=j.project_id||''; S.ek=j.ek_link||'';
+    if(j.partner&&!SLUG){ SLUG=j.partner; fetch(API+'/api/bl/partner/'+SLUG).then(function(r){return r.json();}).then(function(x){if(x&&x.ok) zetPartner(x.partner);}); }
+    if(j.baseCase){ leesBc(j.baseCase); $('fmsg').textContent='✓ Je factuur is al ingelezen.'; }
+    var I=j.bl&&j.bl.invoer;
+    if(I){
+      S.dg=I.doelgroep||S.dg; S.venster=+I.venster_u||S.venster; $('venster').value=String(S.venster);
+      Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x.getAttribute('data-dg')===S.dg);});
+      if(+I.toegang_kw) S.toeg=+I.toegang_kw;
+      toon('s2',true); $('wrijen').innerHTML='';
+      (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu}); var d=$('wrijen').lastChild; d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
+      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); var R=bereken(); S.res=R.wagens.length?R:S.res; render(); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken.'; } }
+    } else if(j.baseCase){ toon('s2',true); wRij(); }
+  }).catch(function(){});
+}
+})();
+</script>
+</body>
+</html>
