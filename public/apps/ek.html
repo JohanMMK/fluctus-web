@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.216.0 (2026-11-17, Johan): FINANCIEEL PLAN — keuzelijst in het venster om te wisselen tussen de plannen van het energierapport: volledig project (met laadpalen en laadsessies, als dat bestaat), zonder laadpalen/het plan van je installatie, en potentieel met onbalans (pvb-rijen + onbalans-extra geïndexeerd met de inflatie, zoals het rapport); met uitlegkader bij onbalans. -->
 <!-- ek.html v0.215.0 (2026-11-17, Johan): VRAAG EN ANTWOORD IN HET PROJECTDOSSIER — de V&A-PDF (doelgroep van het dossier, server-PDF mode=vena) gaat mee in de ZIP, «Conceptmail met dossiers» (concept in Outlook) en de mail aan de adviseur, direct na de A4, met uitleg in de bestandenlijst van de mail. -->
 <!-- ek.html v0.214.0 (2026-11-17, Johan): KLANTTYPE BIJ ENKEL EEN PROFIEL — (1) dossier zonder factuur/baseCase: afname + piek uit het gekoppelde meetprofiel voorvullen en het klanttype afleiden (> 30 MWh of > 10 kW ⇒ bedrijf, anders woning/particulier), EAN's, dossiercode en eigen-profiel-UI; vroeger stopte de prefill (bleef standaard particulier, velden leeg); (2) profiel opgeladen tijdens de sessie (adviseur) → klanttype opnieuw getoetst (_ekBedrijfUitVelden). -->
 <!-- ek.html v0.213.0 (2026-11-17, Johan): STATUS IN DE VASTE BALK — #ek-top-status rechts in de bovenbalk toont wat de EK nu doet (berekening, exacte combinatie, rapport opbouwen, marktanalyse, PDF, mail, profiel/factuur lezen, offerte, bewaren) met lopende tijd en +N; daarna ✓ Klaar (3 s) of ⚠ … niet gelukt (8 s). Bron: fetch-omhulsel (enkel lange API-taken) + _ekBtnBezig. Puur weergave. -->
@@ -6435,19 +6436,29 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var kwh=+(d&&d.dc_buffer_kwh)||0; return kwh>0?{ kwh:kwh, kw:(+d.dc_buffer_kw||0) }:null; }catch(e){ return null; } };
   // v0.212.0 (Johan 17-11): FINANCIEEL PLAN IN EEN VENSTER — hetzelfde (eerste) plan als in het energierapport: met laadpalen/laadsessies
   //   als dat plan bestaat, anders PV + batterij. Rijen = _ekKern(c).plannen (na exploitatie/sturing), + aftrek in jaar 1. Kerncijfers, grafiek, tabel.
-  window._ekFinPlan=function(){ try{
+  window._ekFinPlan=function(kz){ try{   // v0.216.0: kz = 'project' | 'pvb' | 'onb' (keuzelijst in het venster)
     var Lx=function(nl,fr,en){ var L=window.EC_LANG; return L==='fr'?fr:(L==='en'?en:nl); }, es=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); };
     var md=function(n){ return String(Math.round(Math.abs(+n||0))).replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }, eu=function(v){ return (v<0?'− ':'')+'€ '+md(v); }, nk=function(v,d){ return String((Math.round((+v||0)*Math.pow(10,d||0))/Math.pow(10,d||0))).replace('.',','); };
     var fk=function(v){ v=+v||0; var a=Math.abs(v); return (v<0?'−':'')+'€ '+(a>=1000?nk(a/1000,a>=100000?0:1)+'k':md(a)); };
     var rs=null; try{ rs=_ekRapSel(); }catch(eR){} var c=rs&&rs.sel; if(!c){ alertNiet(); return; }
     var K=_ekKern(c); if(!K||!K.plannen){ alertNiet(); return; }
-    var proj=!!(K.plan==='project' && K.plannen.project), P=proj?K.plannen.project:K.plannen.pvb; if(!P||!P.rows||!P.rows.length||!(+P.netInv>0)){ alertNiet(); return; }
-    var isP=(typeof _ekIsPart==='function')&&_ekIsPart(), aft=isP?0:Math.max(0,+K.aftrek||0), HOR=P.rows.length, netInv=+P.netInv;
-    var rows=[], cum=-netInv, tvt=null, som=0;
-    P.rows.forEach(function(x,t){ var b=(+x||0)+(t===0?aft:0); som+=b; var pv=cum; cum+=b; if(tvt===null&&cum>=0) tvt=t+(pv<0&&b>0?(-pv/b):0); rows.push({ jaar:t+1, b:b, cum:cum }); });
-    var winst=som-netInv, roi=winst/netInv*100, rend=som/HOR/netInv*100;
+    var isP=(typeof _ekIsPart==='function')&&_ekIsPart(), heeftProj=!!(K.plan==='project' && K.plannen.project), onbX=isP?0:Math.round(+(K.onb&&K.onb.extra)||0);
+    // v0.216.0 (Johan 17-11): de plannen van het energierapport — (1) met laadpalen en laadsessies (als dat plan bestaat), (2) zonder, (3) potentieel met onbalans
+    var opts=[]; if(heeftProj) opts.push(['project', Lx('Volledig project — met laadpalen en laadsessies','Projet complet — avec bornes et sessions de recharge','Full project — with chargers and charging sessions')]);
+    opts.push(['pvb', heeftProj?Lx('Zonder laadpalen en zonder laadsessies','Sans bornes ni sessions de recharge','Without chargers and charging sessions'):Lx('Het plan van je installatie','Le plan de votre installation','The plan of your installation')]);
+    if(onbX>0) opts.push(['onb', Lx('Potentieel met onbalans','Potentiel avec déséquilibre','Potential with imbalance')]);
+    if(!opts.some(function(o){ return o[0]===kz; })) kz=opts[0][0];
+    var proj=(kz==='project'), P=proj?K.plannen.project:K.plannen.pvb; if(!P||!P.rows||!P.rows.length||!(+P.netInv>0)){ alertNiet(); return; }
+    var aft=isP?0:Math.max(0,+K.aftrek||0), HOR=P.rows.length, netInv=+P.netInv;
     var infl=+K.plannen.infl||+NET_CFG.inflatie_pct||0, ext=+NET_CFG.net_extra_pct||0, dub=+NET_CFG.net_dubbel_jaar||0, opex=+P.opex||0, stur=Math.min(opex,+P.stur||0), ond=Math.max(0,opex-stur);
-    var titel=Lx('Financieel plan over ','Plan financier sur ','Financial plan over ')+HOR+' '+Lx('jaar','ans','years')+(proj?Lx(' — met laadpalen en laadsessies',' — avec bornes et sessions de recharge',' — with chargers and charging sessions'):'');
+    var rows=[], cum=-netInv, tvt=null, som=0;
+    P.rows.forEach(function(x,t){ var b=(+x||0)+(t===0?aft:0)+(kz==='onb'?onbX*Math.pow(1+infl/100,t):0); som+=b; var pv=cum; cum+=b; if(tvt===null&&cum>=0) tvt=t+(pv<0&&b>0?(-pv/b):0); rows.push({ jaar:t+1, b:b, cum:cum }); });
+    var winst=som-netInv, roi=winst/netInv*100, rend=som/HOR/netInv*100;
+    var titel=Lx('Financieel plan over ','Plan financier sur ','Financial plan over ')+HOR+' '+Lx('jaar','ans','years')+(proj?Lx(' — met laadpalen en laadsessies',' — avec bornes et sessions de recharge',' — with chargers and charging sessions'):(kz==='onb'?Lx(' — potentieel met onbalans',' — potentiel avec déséquilibre',' — potential with imbalance'):(heeftProj?Lx(' — zonder laadpalen en laadsessies',' — sans bornes ni sessions de recharge',' — without chargers and charging sessions'):'')));
+    var keuze=opts.length>1?('<label class="ekfp-kz"><span>'+es(Lx('Plan','Plan','Plan'))+'</span><select id="ekfp-kz">'+opts.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===kz?' selected':'')+'>'+es(o[1])+'</option>'; }).join('')+'</select></label>'):'';
+    var onbNoot=(kz==='onb')?'<div class="ekfp-onb">'+es(Lx('Potentieel met onbalans: jaarbesparing ± '+eu((+P.rows[0]||0)+onbX)+' in plaats van ± '+eu(+P.rows[0]||0)+' (+ '+eu(onbX)+'). Dit is het netto potentieel als de batterij ook passief het onbalanssignaal volgt, na de extra heffingen en de vergoeding van je leverancier. Of je dit haalt, hangt af van je energieleverancier — bespreek het zodra de monitoring goed werkt. De business case rekent bewust zonder onbalans.',
+      'Potentiel avec déséquilibre : économie annuelle ± '+eu((+P.rows[0]||0)+onbX)+' au lieu de ± '+eu(+P.rows[0]||0)+' (+ '+eu(onbX)+'). Potentiel net si la batterie suit aussi passivement le signal de déséquilibre, après taxes et rémunération du fournisseur. Cela dépend de votre fournisseur. Le business case calcule volontairement sans déséquilibre.',
+      'Potential with imbalance: annual savings ± '+eu((+P.rows[0]||0)+onbX)+' instead of ± '+eu(+P.rows[0]||0)+' (+ '+eu(onbX)+'). Net potential if the battery also passively follows the imbalance signal, after levies and the supplier’s fee. It depends on your energy supplier. The business case deliberately excludes imbalance.'))+'</div>':'';
     // grafiek (zoals het rapport: cumulatieve cashflow per jaar)
     var W=760, H=230, pl=56, pb=26, pt=14, n=rows.length, vals=rows.map(function(r){ return r.cum; }).concat([-netInv]), mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals); if(mx<0) mx=0; if(mn>0) mn=0;
     var sp=(mx-mn)||1, ph=H-pb-pt, pw=W-pl-8, y=function(v){ return pt+(mx-v)/sp*ph; }, y0=y(0), gp=pw/n, bw=gp*0.62, g='';
@@ -6461,10 +6472,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var half=Math.ceil(n/2), tab=function(a,b){ return '<table class="ekfp-t"><thead><tr><th>'+es(Lx('Jaar','Année','Year'))+'</th><th>'+es(Lx('Besparing','Économie','Savings'))+'</th><th>'+es(Lx('Cumulatief','Cumulé','Cumulative'))+'</th></tr></thead><tbody>'+
       rows.slice(a,b).map(function(r){ return '<tr><td>'+es(Lx('Jaar ','Année ','Year '))+r.jaar+(r.jaar===1&&aft>0?' *':'')+'</td><td>'+eu(r.b)+'</td><td class="'+(r.cum>=0?'pos':'neg')+'">'+(r.cum>=0?'+ ':'− ')+'€ '+md(r.cum)+'</td></tr>'; }).join('')+'</tbody></table>'; };
     var box=function(l,v,s2,win){ return '<div class="ekfp-b'+(win?' win':'')+'"><span>'+l+'</span><b>'+es(v)+'</b><small>'+s2+'</small></div>'; };
-    var h='<div class="ekfp-kop"><h2>'+es(titel)+'</h2><button type="button" class="ekfp-x" aria-label="Sluit">×</button></div>'+
+    var h='<div class="ekfp-kop"><h2>'+es(titel)+'</h2>'+keuze+'<button type="button" class="ekfp-x" aria-label="Sluit">×</button></div>'+
       '<p class="ekfp-lead">'+es(Lx('Deze berekening gaat uit van een investering uit eigen middelen (geen lening of leasing). Ze toont wat je elk jaar bespaart en wanneer je investering is terugverdiend.','Ce calcul part d’un investissement sur fonds propres (sans prêt ni leasing). Il montre ce que vous économisez chaque année et quand votre investissement est rentabilisé.','This calculation assumes an investment from own funds (no loan or leasing). It shows what you save each year and when your investment is paid back.'))+
         (ext>0?es(Lx(' De netkosten stijgen jaarlijks (inflatie + '+nk(ext)+' %'+(dub?', met een eenmalige verdubbeling in '+dub:'')+').',' Les coûts de réseau augmentent chaque année (inflation + '+nk(ext)+' %'+(dub?', avec un doublement unique en '+dub:'')+').',' Grid costs rise every year (inflation + '+nk(ext)+' %'+(dub?', with a one-off doubling in '+dub:'')+').')):'')+'</p>'+
-      '<div class="ekfp-bx">'+box(es(P.verzw>0?Lx('Netto-investering','Investissement net','Net investment'):Lx('Investering','Investissement','Investment')), eu(netInv), es(P.verzw>0?(Lx('bruto ','brut ','gross ')+eu(P.invBruto)+' − '+eu(P.verzw)):Lx('eenmalig, eigen middelen','unique, fonds propres','one-off, own funds')))+
+      onbNoot+'<div class="ekfp-bx">'+box(es(P.verzw>0?Lx('Netto-investering','Investissement net','Net investment'):Lx('Investering','Investissement','Investment')), eu(netInv), es(P.verzw>0?(Lx('bruto ','brut ','gross ')+eu(P.invBruto)+' − '+eu(P.verzw)):Lx('eenmalig, eigen middelen','unique, fonds propres','one-off, own funds')))+
         box(es(Lx('Terugverdiend na','Rentabilisé après','Paid back after')), (tvt!=null?nk(tvt,1)+' '+Lx('jaar','ans','years'):'> '+HOR+' '+Lx('jaar','ans','years')), es(Lx('daarna verdien je eraan','ensuite, vous y gagnez','after that, you earn')), true)+
         box(es(Lx('Wat je overhoudt na '+HOR+' jaar','Ce qui vous reste après '+HOR+' ans','What you keep after '+HOR+' years')), eu(winst), es(Lx('na aftrek van de investering','après déduction de l’investissement','after deducting the investment')))+
         box(es(Lx('Rendement (gemiddeld/jaar)','Rendement (moyen/an)','Return (average/year)')), nk(rend,0)+' %', es(Lx('samen ','au total ','in total ')+nk(roi,0)+' % '+Lx('winst op je investering','de gain sur votre investissement','gain on your investment')))+'</div>'+
@@ -6485,12 +6496,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       '.ekfp-h3{margin:14px 0 6px;color:var(--navy);font-size:15px}.ekfp-tt{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ekfp-t{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}'+
       '.ekfp-t th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#5A6577;border-bottom:1.5px solid var(--navy);padding:5px 6px}.ekfp-t td{padding:4px 6px;border-bottom:1px solid #EEF1F5}'+
       '.ekfp-t td:not(:first-child),.ekfp-t th:not(:first-child){text-align:right}.ekfp-t .pos{color:var(--green,#05803C);font-weight:600}.ekfp-t .neg{color:#9E480E}.ekfp-n{font-size:12px;color:#5A6577;margin:8px 0 0;line-height:1.45}'+
-      '@media(max-width:640px){.ekfp-bx{grid-template-columns:1fr 1fr}.ekfp-tt{grid-template-columns:1fr}#ekfp{padding:14px}}';
+      '.ekfp-kz{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#5A6577;margin-right:6px}.ekfp-kz select{font:inherit;font-size:13px;font-weight:600;color:var(--navy);border:1px solid var(--line,#C9D3DF);border-radius:999px;padding:5px 10px;background:#fff;max-width:300px}'+
+      '.ekfp-onb{background:#FFF8EB;border:1px solid #F1D49B;color:#7A4A06;border-radius:10px;padding:8px 12px;font-size:12.5px;line-height:1.45;margin:0 0 12px}'+
+      '@media(max-width:640px){.ekfp-kop{flex-wrap:wrap}.ekfp-kz select{max-width:100%}.ekfp-bx{grid-template-columns:1fr 1fr}.ekfp-tt{grid-template-columns:1fr}#ekfp{padding:14px}}';
       document.head.appendChild(st); }
     ov=document.createElement('div'); ov.id='ekfp-ov'; ov.setAttribute('data-i18n-skip','1'); ov.innerHTML='<div id="ekfp" role="dialog" aria-modal="true">'+h+'</div>'; document.body.appendChild(ov);
     var sl=function(){ try{ ov.remove(); document.removeEventListener('keydown',esc); }catch(x){} }, esc=function(ev){ if(ev.key==='Escape') sl(); };
     ov.addEventListener('click',function(ev){ if(ev.target===ov) sl(); }); ov.querySelector('.ekfp-x').onclick=sl; document.addEventListener('keydown',esc);
-    try{ if(window._ekLog) window._ekLog('financieel_plan',{ plan:proj?'project':'pvb' }); }catch(eL){}
+    var kzEl=ov.querySelector('#ekfp-kz'); if(kzEl) kzEl.onchange=function(){ var v=kzEl.value; sl(); window._ekFinPlan(v); };   // v0.216.0
+    try{ if(window._ekLog) window._ekLog('financieel_plan',{ plan:kz }); }catch(eL){}
     function alertNiet(){ try{ var m=document.getElementById('rapport-status'); if(m){ m.style.color='var(--muted)'; m.textContent=Lx('Geen financieel plan voor deze combinatie (geen investering).','Pas de plan financier pour cette combinaison.','No financial plan for this combination.'); } }catch(x){} }
   }catch(e){ console.warn('[financieel plan]', e&&e.message); } };
   window._ekHero=function(c, SEL, besp, inv, rend, tvt, _pl){ try{
