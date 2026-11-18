@@ -64,7 +64,9 @@ if (fs.existsSync(DIST)) {
     if (req.path.startsWith('/api/') || path.extname(req.path)) return next();
     const host = String(req.hostname || '').toLowerCase();
     const sub = (host.match(/^([a-z0-9-]+)\.energie-compas\.eu$/) || [])[1] || '';
-    const isBl = BL_SUB.has(sub) || ((EC_HOSTS.has(host) || host === 'app.energie-compas.eu' || host === 'localhost' || host === '127.0.0.1') && /^\/beterladen\/?$/.test(req.path));
+    const ecHost = EC_HOSTS.has(host) || host === 'app.energie-compas.eu' || host === 'localhost' || host === '127.0.0.1';
+    const pad1 = (req.path.match(/^\/([a-z0-9-]+)\/?$/) || [])[1] || '';   // 18-11: www.energie-compas.eu/pluon, /dieteren (Railway-limiet custom domains)
+    const isBl = BL_SUB.has(sub) || (ecHost && (pad1 === 'beterladen' || BL_SUB.has(pad1)));
     if (!isBl) return next();
     const f = path.join(DIST, 'apps', 'beterladen.html');
     return fs.existsSync(f) ? res.sendFile(f) : next();
