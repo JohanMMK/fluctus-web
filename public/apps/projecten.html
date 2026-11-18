@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
+<!-- projecten.html v1.7.0 (2026-11-18, Johan): LAADPROJECTEN — Betere Lader-projecten krijgen een badge «🔌 laadproject · partner», filter «soort» (Energie-Compas / Laadprojecten), openen het laadplan (/beterladen?t=…) i.p.v. de EK; opgeschaald → badge met het nieuwe Compas-nummer (server ≥ 15.434.0). -->
 <!-- projecten.html v1.6.0 (2026-10-23, Johan): MAANDAFREKENING — knop «🧾 Maandafrekening» (managers, server ≥ 15.350.0): uren per klant, te factureren, per adviseur/partner, Excel. -->
 <!-- projecten.html v1.5.0 (2026-10-19, Johan): KERNCIJFERS (trechter + tegels) standaard ingeklapt — klik «📊 Kerncijfers» om te openen (onthouden in je weergave); klik op de PROJECTNAAM opent het dossier in Energie-Compas op de invoer (nieuw tabblad). -->
 <!-- projecten.html v1.4.1 (2026-10-18, Johan): activiteit «keuze vastgelegd» / «keuze gewist» (server ≥ 15.338.0). -->
@@ -161,6 +162,7 @@
       <select id="fStatus" class="sel" onchange="V.flt.status=this.value;weergaveBewaar();render()"><option value="actief">actief</option><option value="on_hold">on hold</option><option value="verloren">verloren</option><option value="alles">alles</option></select>
       <select id="fAdv" class="sel" onchange="V.flt.adviseur=this.value;weergaveBewaar();render()"></select>
       <select id="fBedrijf" class="sel" onchange="V.flt.bedrijf=this.value;weergaveBewaar();render()"></select>
+      <select id="fSoort" class="sel" title="Soort project" onchange="V.flt.soort=this.value;weergaveBewaar();render()"><option value="">alle soorten</option><option value="compas">🧭 Energie-Compas</option><option value="laadproject">🔌 Laadprojecten</option></select>
       <span style="position:relative"><button class="btn ghost" id="bKol" onclick="kolMenu(event)">Kolommen ▾</button><div id="kolMenu" class="kolmenu" hidden></div></span>
       <button class="btn ghost tg mgr-only" id="bSel" onclick="selModus()">Selecteren</button>
       <button class="btn ghost mgr-only" onclick="maandOpen()" title="Uren per klant, te factureren en per adviseur/partner — Excel-download">🧾 Maandafrekening</button>
@@ -238,7 +240,7 @@
     var FASE_NAAM={}; FASEN.forEach(function(f){ FASE_NAAM[f[0]]=f[1]; });
     var COLS=[{k:'project',t:'Project',w:230},{k:'fase',t:'Fase',w:170},{k:'bal',t:'Bal bij',w:80},{k:'infase',t:'In fase',w:80},{k:'volgende',t:'Volgende stap',w:190},{k:'vragen',t:'💬',w:120},{k:'indiener',t:'Indiener',w:170},{k:'adviseur',t:'Adviseur',w:170},{k:'scope',t:'Scope',w:150},{k:'timers',t:'⏱ Timers',w:110},{k:'laatste',t:'Laatste activiteit',w:170}];
     var STD_VIS={project:1,fase:1,bal:1,infase:1,volgende:1,vragen:1,indiener:0,adviseur:1,scope:1,timers:1,laatste:1};
-    var V={ vis:Object.assign({},STD_VIS), w:{}, flt:{ fase:[], bal:[], telaat:false, vragen:false, adviseur:'', bedrijf:'', status:'actief', mijn:false }, sort:{k:'auto',dir:1} };
+    var V={ vis:Object.assign({},STD_VIS), w:{}, flt:{ fase:[], bal:[], telaat:false, vragen:false, adviseur:'', bedrijf:'', status:'actief', mijn:false, soort:'' }, sort:{k:'auto',dir:1} };
     var SELMODE=false, MIJN_MAIL='';
     function vClone(o){ return JSON.parse(JSON.stringify(o)); }
     var _vStd=vClone(V), _vT=null;
@@ -255,8 +257,10 @@
     function wachtOpOns(p){ var v=pr(p).vragen; return !!(v&&v.open>0); }
     function factuurKlaar(p){ var q=pr(p); return q.fase==='getekend' && !q.factuur && q.status!=='verloren'; }
     function mijnBal(){ return BEPERKT?'adviseur':'ons'; }
+    function blLink(p){ return '/beterladen?'+(p.bl_partner?('p='+encodeURIComponent(p.bl_partner)+'&'):'')+'t='+encodeURIComponent(p.lead_token)+'&adv=1'; }   // v1.7.0
     function filterRij(p){
       var q=pr(p), f=V.flt;
+      if(f.soort && (p.soort||'compas')!==f.soort) return false;   // v1.7.0: laadprojecten (Betere Lader) vs Energie-Compas
       if(f.status==='actief' && (q.status==='verloren'||q.status==='on_hold')) return false;
       if(f.status==='on_hold' && !(q.status==='on_hold'||q.status==='wakker')) return false;
       if(f.status==='verloren' && q.status!=='verloren') return false;
@@ -340,6 +344,7 @@
     function syncBar(){
       var b=$('bMijn'); if(b) b.classList.toggle('on',!!V.flt.mijn);
       var s=$('fStatus'); if(s) s.value=(V.flt.status==='factureren')?'actief':V.flt.status;
+      var so=$('fSoort'); if(so) so.value=V.flt.soort||'';
       var a=$('fAdv'); if(a){ var opts={}; DATA.forEach(function(p){ if(p.adviseur_mail) opts[p.adviseur_mail]=p.adviseur||p.adviseur_mail; }); var cur=V.flt.adviseur;
         a.innerHTML='<option value="">alle adviseurs</option><option value="-">zonder adviseur</option>'+Object.keys(opts).sort().map(function(m){ return '<option value="'+esc(m)+'"'+(cur===m?' selected':'')+'>'+esc(opts[m])+'</option>'; }).join(''); if(cur==='-') a.value='-'; }
       var bd=$('fBedrijf'); if(bd){ var bs={}; DATA.forEach(function(p){ if(p.adviseur_bedrijf) bs[p.adviseur_bedrijf]=1; }); var k=Object.keys(bs).sort(); bd.style.display=k.length?'':'none';
@@ -361,7 +366,7 @@
     function cel(p,k){
       var q=pr(p), s;
       switch(k){
-        case 'project': return '<div class="naam">'+(p.lead_token?'<a class="naam-l" href="/apps/ek.html?case='+encodeURIComponent(p.lead_token)+(BEPERKT&&!IS_ADV?'':'&adv=1&invoer=1')+'" target="_blank" rel="noopener" title="Open het dossier op de invoer">'+esc(p.naam)+'</a>':esc(p.naam))+(p.archief?' <span class="pill p-neu">gearchiveerd</span>':'')+'</div>'+(p.adres?('<div class="sub">'+esc(p.adres)+'</div>'):'')+'<div class="id" title="bron: '+esc(p.bron||'—')+(p.partner?(' · partner: '+esc(p.partner)):'')+'">'+esc(p.id)+'</div>';
+        case 'project': return '<div class="naam">'+(p.lead_token?'<a class="naam-l" href="'+(p.soort==='laadproject'?blLink(p):('/apps/ek.html?case='+encodeURIComponent(p.lead_token)+(BEPERKT&&!IS_ADV?'':'&adv=1&invoer=1')))+'" target="_blank" rel="noopener" title="'+(p.soort==='laadproject'?'Open het laadplan (Betere Lader)':'Open het dossier op de invoer')+'">'+esc(p.naam)+'</a>':esc(p.naam))+(p.archief?' <span class="pill p-neu">gearchiveerd</span>':'')+(p.soort==='laadproject'?' <span class="pill" style="background:#EAF6EF;color:#0E7A3E" title="Betere Lader">🔌 laadproject'+(p.bl_partner?' · '+esc(p.bl_partner):'')+'</span>':'')+(p.bl_compas?' <span class="pill p-neu" title="Opgeschaald naar Energie-Compas">→ '+esc(p.bl_compas)+'</span>':'')+(p.uit_laadproject?' <span class="pill p-neu" title="Kopie van laadproject">uit '+esc(p.uit_laadproject)+'</span>':'')+'</div>'+(p.adres?('<div class="sub">'+esc(p.adres)+'</div>'):'')+'<div class="id" title="bron: '+esc(p.bron||'—')+(p.partner?(' · partner: '+esc(p.partner)):'')+'">'+esc(p.id)+'</div>';
         case 'fase':
           s='<span class="pill f-'+esc(q.fase||'')+'">'+esc(FASE_NAAM[q.fase]||q.fase_naam||'—')+'</span>';
           if(q.status==='verloren') s+='<span class="pill p-mis" title="'+esc((q.eind&&q.eind.reden)||'')+'">verloren</span>';
@@ -513,7 +518,8 @@
       var h='<div class="m-card" onclick="event.stopPropagation()">'+
         '<div class="m-top"><span>'+esc(p.naam)+'</span><button class="m-x" onclick="_flxSluit()">✕</button></div>'+
         '<div class="sub" style="margin:2px 0 10px"><span class="code">'+esc(p.id)+'</span>'+(p.klant?(' · '+esc(p.klant)):'')+(p.partner?(' · '+esc(p.partner)):'')+'</div>';
-      if(p.lead_token) h+='<a class="m-act" href="/apps/ek.html?case='+encodeURIComponent(p.lead_token)+'&adv=1&invoer=1" target="_blank" rel="noopener" style="text-decoration:none">✍ Open invoer in Energie-Compas</a>'+
+      if(p.lead_token && p.soort==='laadproject') h+='<a class="m-act" href="'+blLink(p)+'" target="_blank" rel="noopener" style="text-decoration:none">🔌 Open laadplan (Betere Lader)</a>';
+      else if(p.lead_token) h+='<a class="m-act" href="/apps/ek.html?case='+encodeURIComponent(p.lead_token)+'&adv=1&invoer=1" target="_blank" rel="noopener" style="text-decoration:none">✍ Open invoer in Energie-Compas</a>'+
                          '<a class="m-act" href="/apps/ek.html?case='+encodeURIComponent(p.lead_token)+'&adv=1" target="_blank" rel="noopener" style="text-decoration:none">📈 Open resultaat in Energie-Compas</a>';
       if(eans.length){
         h+='<div class="sub" style="margin:12px 0 4px;font-weight:700;color:var(--navy2)">Mandaat-acties per EAN</div>';

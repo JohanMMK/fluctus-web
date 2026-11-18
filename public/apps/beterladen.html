@@ -6,7 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
-<!-- beterladen.html v0.1.1 (2026-11-18): partner ook uit het pad (www.energie-compas.eu/pluon, /dieteren) — Railway-plan laat geen extra custom domains toe. v0.1.0 (2026-11-17, Johan): BETERE LADER — eenvoudige laadtool per partner (D'Ieteren Energy, PLUON).
+<!-- beterladen.html v0.2.0 (2026-11-18): «Volledige analyse» = KOPIE naar een nieuw Energie-Compas-dossier (/api/bl/naar-compas); manager-weergave via MijnEC-sessie (projecten.html → laadplan); dossiernummer bovenaan. v0.1.1 (2026-11-18): partner ook uit het pad (www.energie-compas.eu/pluon, /dieteren) — Railway-plan laat geen extra custom domains toe. v0.1.0 (2026-11-17, Johan): BETERE LADER — eenvoudige laadtool per partner (D'Ieteren Energy, PLUON).
      Flow: factuur-PDF → wagens (voertuigtabel) → mail + 6 cijfers → laadplan + offerteaanvraag. Partner via ?p= of subdomein.
      Server: /api/bl/* (fluctus-proxy ≥ 15.433.0). Eén dossier (FLX) → «Volledige analyse» opent hetzelfde dossier in de EK. -->
 <style>
@@ -159,7 +159,7 @@ footer img{height:22px}
       <div id="omsg" class="msg"></div>
       <div class="rij" style="margin-top:14px">
         <button class="btn ghost klein" id="print">Download als PDF (A4)</button>
-        <a class="btn ghost klein" id="ek" href="#" target="_blank" rel="noopener">Volledige analyse met batterij en zonnepanelen</a>
+        <button class="btn ghost klein" id="ek">Volledige analyse met batterij en zonnepanelen</button>
       </div>
     </div>
   </section>
@@ -188,7 +188,9 @@ function n0(x){return Math.round(+x||0).toLocaleString('nl-BE');}
 function n1(x){return (Math.round((+x||0)*10)/10).toLocaleString('nl-BE');}
 function eur(x){return '€ '+n0(x);}
 function toon(id,ja){var e=$(id); if(e) e.classList.toggle('verborgen',!ja);}
-function post(pad,body){return fetch(API+pad,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){j._st=r.status;return j;});});}
+function sbTok(){try{var k=Object.keys(localStorage).filter(function(x){return /auth-token/.test(x);})[0];return k?(JSON.parse(localStorage.getItem(k))||{}).access_token||'':'';}catch(e){return '';}}   // manager (MijnEC-sessie op www)
+function hdrs(j){var h=j?{'Content-Type':'application/json'}:{};var t=sbTok();if(t)h.Authorization='Bearer '+t;return h;}
+function post(pad,body){return fetch(API+pad,{method:'POST',headers:hdrs(true),body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){j._st=r.status;return j;});});}
 function bewaarLokaal(){try{sessionStorage.setItem('bl_state',JSON.stringify({token:S.token,mail:$('mail').value}));}catch(e){}}
 
 // ── Partner ──
@@ -336,7 +338,7 @@ function render(){
     [['Wagens','ev',n0],['Laadpunten','laadpunten',n0],['Per punt (kW)','paal_kw',n1],['Elke wagen een paal, zonder sturing','p_dom_kw',function(x){return n0(x)+' kW';}],['Met wisselen (max.)','p_rot_kw',function(x){return n0(x)+' kW';}],['Slim gestuurd','p_slim_kw',function(x){return n0(x)+' kW';}]]
     .map(function(r){return '<tr><td>'+r[0]+'</td>'+hs.map(function(h){return '<td>'+r[2](R[h][r[1]])+'</td>';}).join('')+'</tr>';}).join('')+
     '<tr><td>Past op je aansluiting?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(x.ev?(x.past?'<span class="ok">ja, slim</span>':'<span class="nok">nee</span>'):'–')+'</td>';}).join('')+'</tr>';
-  if(S.ek){ $('ek').href=S.ek; }
+  $('ek').textContent=S.ek?'Open je Energie-Compas-dossier':'Volledige analyse met batterij en zonnepanelen';
   toon('s4',true);
 }
 
@@ -390,14 +392,26 @@ $('offerte').addEventListener('click',function(){
   }).catch(function(){k.disabled=false; $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.';});
 });
 $('print').addEventListener('click',function(){window.print();});
+// v0.2.0: opschalen = KOPIE naar een nieuw Energie-Compas-dossier (eigen FLX-nummer); het laadproject blijft bestaan
+$('ek').addEventListener('click',function(){
+  if(S.ek){ window.open(S.ek,'_blank','noopener'); return; }
+  var w=window.open('about:blank','_blank'); var k=this; k.disabled=true; $('omsg').className='msg'; $('omsg').textContent='⏳ We maken je Energie-Compas-dossier aan…';
+  post('/api/bl/naar-compas',{token:S.token}).then(function(j){ k.disabled=false;
+    if(!j.ok){ if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent=j.error||'Dat lukte niet.'; return; }
+    S.ek=j.ek_link; $('ek').textContent='Open je Energie-Compas-dossier';
+    $('omsg').innerHTML='✓ Nieuw Energie-Compas-dossier'+(j.project_id?' <b>'+esc(j.project_id)+'</b>':'')+'. Je factuur, wagens en invoer zijn meegenomen. Voeg er je verbruiksprofiel aan toe voor een exacte analyse.';
+    if(w) w.location=j.ek_link; else window.open(j.ek_link,'_blank','noopener');
+  }).catch(function(){ k.disabled=false; if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.'; });
+});
 
 // ── Heropenen via link (mail-instap of terugkeer) ──
 var T0=Q.get('t');
 if(T0){
   S.token=T0;
-  fetch(API+'/api/bl/dossier/'+encodeURIComponent(T0)+(Q.get('via')==='mail'?'?via=mail':'')).then(function(r){return r.json();}).then(function(j){
+  fetch(API+'/api/bl/dossier/'+encodeURIComponent(T0)+(Q.get('via')==='mail'?'?via=mail':''),{headers:hdrs(false)}).then(function(r){return r.json();}).then(function(j){
     if(!j||!j.ok) return;
-    S.verified=!!j.verified; S.pid=j.project_id||''; S.ek=j.ek_link||'';
+    S.verified=!!j.verified; S.pid=j.project_id||''; S.ek=j.ek_link||''; S.mgr=!!j.manager;
+    if(S.pid){ $('fmsg').textContent='Dossier '+S.pid; }
     if(j.partner&&!SLUG){ SLUG=j.partner; fetch(API+'/api/bl/partner/'+SLUG).then(function(r){return r.json();}).then(function(x){if(x&&x.ok) zetPartner(x.partner);}); }
     if(j.baseCase){ leesBc(j.baseCase); $('fmsg').textContent='✓ Je factuur is al ingelezen.'; }
     var I=j.bl&&j.bl.invoer;
@@ -407,7 +421,7 @@ if(T0){
       if(+I.toegang_kw) S.toeg=+I.toegang_kw;
       toon('s2',true); $('wrijen').innerHTML='';
       (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu}); var d=$('wrijen').lastChild; d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
-      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); var R=bereken(); S.res=R.wagens.length?R:S.res; render(); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken.'; } }
+      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); var R=bereken(); S.res=R.wagens.length?R:S.res; render(); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken'+(j.offerte.partner_naam?' naar '+esc(j.offerte.partner_naam):'')+'.'; } else if(S.mgr){ toon('offbox',false); $('omsg').textContent='Beheerweergave: nog geen offerteaanvraag.'; } }
     } else if(j.baseCase){ toon('s2',true); wRij(); }
   }).catch(function(){});
 }
