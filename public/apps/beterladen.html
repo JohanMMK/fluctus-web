@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.7.5 (2026-11-18, Johan): wagenpark toont merk + model i.p.v. «Personenwagen» als we dat kennen; merk/model worden bij heropenen hersteld (keuzelijst of bewaarde waarden). -->
 <!-- beterladen.html v0.7.4 (2026-11-18, Johan): blok «Je wagenpark» onder de titel van het laadplan (scherm + PDF pagina 1): per wagentype aantallen nu/1/2/3 jaar, km/jaar, kWh/100 km, batterij en laadvermogen, plus waar en hoe lang ze laden en het verbruiksprofiel. -->
 <!-- beterladen.html v0.7.3 (2026-11-18, Johan): PDF IN SAFARI — Safari negeert paginabreuk-regels op flex-elementen: kaarten bij afdrukken als gewone blokken (icoon absoluut, uitleg rechts via float), paginabreuken via lege blok-elementen .pgbr (vóór «Wat levert slim laden op?» en vóór «Zo groeit je laadplein»). -->
 <!-- beterladen.html v0.7.2 (2026-11-18, Johan): PDF MET VASTE PAGINA-INDELING — p1: kop + 4 kaarten (wagens, laadpunten, vermogen, extra piek); p2: opbrengst, kost/100 km, grens, drukste laaddag; p3: groeitabel + checklist + indicatief. Kaarten als blokken (geen grid: grid-items negeren break-inside in sommige browsers), compacter lettertype en grafiek, harde paginabreuk (.pb). -->
@@ -452,20 +453,26 @@ function wRij(def){
     '<div class="r3"><span>km per jaar per wagen <input type="number" class="wkm" style="width:100px;display:inline-block;padding:5px 8px" value="'+TYP[t0].km+'"></span><a href="#" class="wdel">verwijder</a></div><div class="wauto"></div>';
   $('wrijen').appendChild(d);
   var st=d.querySelector('.wt'), sm=d.querySelector('.wm'), smo=d.querySelector('.wmo');
-  function vulMerken(){ laadType(st.value).then(function(M){ sm.innerHTML='<option value="">Weet ik nog niet</option>'+M.map(function(m,i){return '<option value="'+i+'">'+esc(m.merk)+'</option>';}).join(''); vulModellen(); }); }
+  function vulMerken(){ return laadType(st.value).then(function(M){ sm.innerHTML='<option value="">Weet ik nog niet</option>'+M.map(function(m,i){return '<option value="'+i+'">'+esc(m.merk)+'</option>';}).join(''); vulModellen(); }); }
   function vulModellen(){ var M=VEH[st.value]||[], m=M[+sm.value]; smo.innerHTML='<option value="">'+(m?'Kies een model':'Typische wagen')+'</option>'+(m?m.modellen.map(function(x,i){return '<option value="'+i+'">'+esc(x.label)+'</option>';}).join(''):''); info(); }
   function info(){ var w=leesRij(d), u=w?uitleg(w):''; d.querySelector('.wauto').innerHTML=u?('Zo laadt deze wagen'+ib('Zo laadt deze wagen',u.split(' · ').join('\n'))):''; }   // v0.7.1: achter een i
   st.addEventListener('change',function(){ d.querySelector('.wkm').value=TYP[st.value].km; vulMerken(); });
   sm.addEventListener('change',vulModellen); smo.addEventListener('change',info);
   d.querySelector('.wkm').addEventListener('input',info);
   d.querySelector('.wdel').addEventListener('click',function(e){e.preventDefault(); d.remove();});
-  vulMerken();
+  d._def=def;   // v0.7.5: bewaard merk/model terugzetten (keuzelijst als die het kent, anders blijven de bewaarde waarden gelden)
+  d._klaar=vulMerken().then(function(){ if(!def.merk) return; var M=VEH[st.value]||[], mi=-1;
+    M.forEach(function(m,i){ if(mi<0&&String(m.merk).toLowerCase()===String(def.merk).toLowerCase()) mi=i; });
+    if(mi<0) return; sm.value=String(mi); vulModellen(); var xs=M[mi].modellen||[], xi=-1;
+    xs.forEach(function(x,i){ if(xi<0&&((def.id&&x.id===def.id)||(def.model&&x.label===def.model))) xi=i; });
+    if(xi>=0){ smo.value=String(xi); info(); } }).catch(function(){});
 }
 function leesRij(d){
   var t=d.querySelector('.wt').value, M=VEH[t]||[], mi=d.querySelector('.wm').value, m=mi!==''?M[+mi]:null, xi=d.querySelector('.wmo').value, x=(m&&xi!=='')?m.modellen[+xi]:null, T=TYP[t];
   function g(c){var v=d.querySelector(c).value;return v===''?null:Math.max(0,Math.round(+v||0));}
   var nu=g('.wn')||0, a=g('.w12'), b=g('.w24'), c=g('.w36');
   if(a==null) a=nu; if(b==null) b=a; if(c==null) c=b;
+  var D=d._def||{}; if(!m&&D.merk&&D.type===t){ return {type:t,merk:D.merk,model:D.model||'',id:D.id||'',batt_kwh:+D.batt_kwh||T.batt,kwh_km:+D.kwh_km||T.kwhkm,ac_kw:+D.ac_kw||T.ac,nu:nu,m12:a,m24:b,m36:c,km_jaar:Math.max(0,+d.querySelector('.wkm').value||T.km)}; }   // v0.7.5
   return {type:t,merk:m?m.merk:'',model:x?x.label:(m?'':'Typische '+TYPES.filter(function(z){return z[0]===t;})[0][1].toLowerCase()),id:x?x.id:'',
     batt_kwh:x&&x.batt_kwh?+x.batt_kwh:T.batt,kwh_km:x&&x.kwh_km?+x.kwh_km:T.kwhkm,ac_kw:x&&x.ac_kw?+x.ac_kw:T.ac,
     nu:nu,m12:a,m24:b,m36:c,km_jaar:Math.max(0,+d.querySelector('.wkm').value||T.km)};
@@ -529,7 +536,7 @@ function render(){
     var lab=function(t){ var x=TYPES.filter(function(z){return z[0]===t;})[0]; return x?x[1]:t; };
     var tot={nu:0,m12:0,m24:0,m36:0};
     var rij=W.map(function(w){ ['nu','m12','m24','m36'].forEach(function(h){tot[h]+=(+w[h]||0);}); var naam=w.merk?((w.merk||'')+' '+(w.model||'')).trim():'';
-      return '<tr><td><b>'+esc(lab(w.type))+'</b>'+(naam&&naam!==lab(w.type)?' · '+esc(naam):'')+'</td><td>'+n0(w.nu)+'</td><td>'+n0(w.m12)+'</td><td>'+n0(w.m24)+'</td><td>'+n0(w.m36)+'</td>'+
+      return '<tr><td><b>'+esc(naam||lab(w.type))+'</b></td><td>'+n0(w.nu)+'</td><td>'+n0(w.m12)+'</td><td>'+n0(w.m24)+'</td><td>'+n0(w.m36)+'</td>'+
         '<td class="opt">'+n0(w.km_jaar)+'</td><td class="opt">'+n1((+w.kwh_km||0)*100)+'</td><td class="opt">'+n0(w.batt_kwh)+' kWh · '+n1(w.ac_kw)+' kW</td></tr>'; }).join('');
     if(W.length>1) rij+='<tr><td><b>Totaal</b></td><td><b>'+n0(tot.nu)+'</b></td><td><b>'+n0(tot.m12)+'</b></td><td><b>'+n0(tot.m24)+'</b></td><td><b>'+n0(tot.m36)+'</b></td><td class="opt"></td><td class="opt"></td><td class="opt"></td></tr>';
     var waar={kmo:'op het werk (personeelswagens)',logistiek:'op de eigen site (bestel- en vrachtwagens)',thuisladen:'thuis'}[S.dg]||'';
@@ -682,8 +689,8 @@ if(T0){
       Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x.getAttribute('data-dg')===S.dg);});
       if(+I.toegang_kw) S.toeg=+I.toegang_kw;
       toon('s2',true); $('wrijen').innerHTML='';
-      (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu}); var d=$('wrijen').lastChild; d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
-      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); berekenSim().then(function(R){ S.res=R.wagens.length?R:S.res; render(); }); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken'+(j.offerte.partner_naam?' naar '+esc(j.offerte.partner_naam):'')+'.'; } else if(S.mgr){ toon('offbox',false); $('omsg').textContent='Beheerweergave: nog geen offerteaanvraag.'; } }
+      var _kl=[]; (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu,merk:w.merk,model:w.model,id:w.id,batt_kwh:w.batt_kwh,kwh_km:w.kwh_km,ac_kw:w.ac_kw}); var d=$('wrijen').lastChild; _kl.push(d._klaar); d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
+      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); Promise.all(_kl).then(function(){ return berekenSim(); }).then(function(R){ S.res=R.wagens.length?R:S.res; render(); }); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken'+(j.offerte.partner_naam?' naar '+esc(j.offerte.partner_naam):'')+'.'; } else if(S.mgr){ toon('offbox',false); $('omsg').textContent='Beheerweergave: nog geen offerteaanvraag.'; } }
     } else if(j.baseCase){ toon('s2',true); wRij(); }
   }).catch(function(){});
 }
