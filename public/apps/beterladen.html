@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.6.1 (2026-11-18, Johan): grafiek = de DRUKSTE laaddag (eigen verbruik van die dag + laden, hoogste piek over alle dagen) i.p.v. een gemiddelde; netkost zonder sturing als VORK (beste geval: laden bovenop je verbruik van die dag; slechtste geval: bovenop je hoogste kwartier), €/kW uit de tariefkaart van je netbeheerder; kost per 100 km met een dynamisch contract incl. opslag, certificaten, netkost per kWh en accijns (excl. btw). -->
 <!-- beterladen.html v0.6.0 (2026-11-18, Johan): KWARTIERANALYSE — niet meer «toegangsvermogen − piek» (= één kwartier per maand), maar een synthetisch jaarprofiel (sectorprofiel × jaarverbruik × dag/nacht van de factuur) via /api/bl/ruimte: hoeveel energie kan er door de aansluiting tijdens de uren dat de wagens er staan. Keuze verbruiksprofiel in stap 1, daggrafiek, slim vs zonder sturing in €/100 km (extra piek aan € 100/kW/jaar + goedkopere spoturen), toegangsvermogen dat volstaat. Jaarverbruik uit de factuur (jaarverbruikKwh) i.p.v. maand × 12. -->
 <!-- beterladen.html v0.5.0 (2026-11-18, Johan): HELE PAGINA IN DE STIJL VAN DE RESULTATEN — voortgangsbalk (factuur → wagens → laadplan), stapkoppen met icoon in partnerkleur, factuur als 3 tegels + balk bezet/vrij op de aansluiting, keuzechips met icoon, wagenrijen met accentrand, groeitabel en checklist «Vraag bij je offerte» met iconen, offerteblok als kader. -->
 <!-- beterladen.html v0.4.1 (2026-11-18): icoonvlak in de accentkleur van de partner; eenheid onder het kerncijfer (geen grote regelafstand meer). -->
@@ -313,15 +314,15 @@ function leesBc(bc){
 // v0.6.0 (Johan 18-11): kwartieranalyse op de server (/api/bl/ruimte)
 function simIn(R){
   var bc=S.bc||{}, o={profiel:S.prof,doelgroep:S.dg,venster_u:S.venster,toeg_kw:S.toeg,piek_kw:S.piek,jaar_kwh:S.jaarKwh,afname_kwh:+bc.afnameKwh||0,
-    periodeVan:bc.periodeVan||null,periodeTot:bc.periodeTot||null,normaal_aandeel:S.normaal,eur_kw:CAP_EUR_KW,paal_kw:11,wagen_kwh_dag:15000/dagenJaar()*0.16};
+    periodeVan:bc.periodeVan||null,periodeTot:bc.periodeTot||null,normaal_aandeel:S.normaal,eur_kw:CAP_EUR_KW,adres:bc.leveringsadres||'',spanning:bc.spanningsniveau||'',dnb:bc.dnb||'',paal_kw:11,wagen_kwh_dag:15000/dagenJaar()*0.16};
   if(R){ var h0=['nu','m12','m24','m36'].filter(function(h){return R[h]&&R[h].ev>0;}), ref=R[h0[0]]; if(ref){ o.wagen_kwh_dag=ref.edag_kwh/ref.ev; o.paal_kw=ref.paal_kw||11; }
     o.horizons={}; h0.forEach(function(h){ var x=R[h]; o.horizons[h]={ev:x.ev,edag_kwh:x.edag_kwh,lp:x.laadpunten,paal_kw:x.paal_kw,km_jaar:x.km_jaar||0,kwh_km:x.kwh_km}; }); }
   return o;
 }
 function sim(R){ return post('/api/bl/ruimte',simIn(R)).then(function(j){ return (j&&j.ok)?j:null; }).catch(function(){ return null; }); }
 function dagGrafiek(m,h){   // m = sim-antwoord, h = horizon (optioneel): gemiddelde laaddag, 24 u
-  var L=m.dag_last_kw||[], sl=h&&h.gem_slim_kw||[], dm=h&&h.gem_dom_kw||[], W=640, Hh=190, pl=40, pb=22, pt=8;
-  var top=Math.max(m.toeg_kw, m.piek_kw); L.forEach(function(v,i){ top=Math.max(top,v+(+dm[i]||0),v+(+sl[i]||0)); }); top=top*1.08;
+  var pd=h&&h.piekdag, L=pd?pd.last_kw:(m.dag_last_kw||[]), sl=pd?pd.slim_kw:(h&&h.gem_slim_kw||[]), dm=pd?pd.dom_kw:(h&&h.gem_dom_kw||[]), W=640, Hh=190, pl=40, pb=22, pt=8;
+  var top=Math.max(m.toeg_kw, m.piek_kw), dmax=0, dmi=-1; L.forEach(function(v,i){ var t=v+(+dm[i]||0); top=Math.max(top,t,v+(+sl[i]||0)); if(dm.length&&t>dmax){dmax=t;dmi=i;} }); top=top*1.08;
   function x(i){return pl+(W-pl-6)*i/96;} function y(v){return pt+(Hh-pt-pb)*(1-v/top);}
   var v0=m.venster.start_u*4, v1=v0+m.venster.duur_u*4, band='';
   [[v0,Math.min(96,v1)],[0,Math.max(0,v1-96)]].forEach(function(b){ if(b[1]>b[0]) band+='<rect x="'+x(b[0])+'" y="'+pt+'" width="'+(x(b[1])-x(b[0]))+'" height="'+(Hh-pt-pb)+'" fill="var(--a)" opacity=".10"/>'; });
@@ -333,10 +334,11 @@ function dagGrafiek(m,h){   // m = sim-antwoord, h = horizon (optioneel): gemidd
   if(sl.length) g+='<path d="'+slim+' L'+x(96)+' '+y(0)+' L'+x(0)+' '+y(0)+' Z" fill="var(--a)" opacity=".85"/>';
   g+='<path d="'+basis+' L'+x(96)+' '+y(0)+' L'+x(0)+' '+y(0)+' Z" fill="#94A3B8"/>';
   if(dm.length) g+='<path d="'+pad(function(i){return (L[i]||0)+(+dm[i]||0);})+'" fill="none" stroke="#C0392B" stroke-width="1.6" stroke-dasharray="4 3"/>';
+  if(dmi>=0) g+='<text x="'+Math.min(W-60,x(dmi)+4)+'" y="'+(y(dmax)-4)+'" font-size="11" font-weight="700" fill="#C0392B">'+n0(dmax)+' kW</text>';
   g+='<line x1="'+pl+'" x2="'+(W-6)+'" y1="'+y(m.toeg_kw)+'" y2="'+y(m.toeg_kw)+'" stroke="var(--p)" stroke-width="2"/>';
   g+='<line x1="'+pl+'" x2="'+(W-6)+'" y1="'+y(m.piek_kw)+'" y2="'+y(m.piek_kw)+'" stroke="#475569" stroke-width="1.2" stroke-dasharray="2 3"/>';
   g+='</svg>';
-  var lg='<div class="lgd"><span><i style="background:#94A3B8"></i>Je verbruik (gemiddeld)</span>'+(sl.length?'<span><i style="background:var(--a)"></i>Laden, slim gestuurd</span>':'')+(dm.length?'<span><i class="ds" style="border-color:#C0392B"></i>Laden zonder sturing</span>':'')+
+  var lg='<div class="lgd"><span><i style="background:#94A3B8"></i>Je verbruik ('+(pd?'die dag':'gemiddeld')+')</span>'+(sl.length?'<span><i style="background:var(--a)"></i>Laden, slim gestuurd</span>':'')+(dm.length?'<span><i class="ds" style="border-color:#C0392B"></i>Laden zonder sturing</span>':'')+
     '<span><i class="ln" style="border-color:var(--p)"></i>Toegangsvermogen '+n0(m.toeg_kw)+' kW</span><span><i class="ds" style="border-color:#475569"></i>Hoogste kwartier '+n0(m.piek_kw)+' kW</span><span><i style="background:var(--a);opacity:.25"></i>Wagens aanwezig</span></div>';
   return '<div class="dagchart">'+g+lg+'</div>';
 }
@@ -485,17 +487,22 @@ function render(){
     bars([['Wagens',hl.ev,n0(hl.ev)],['Laadpunten',hl.laadpunten,n0(hl.laadpunten),'hl']])));
   K.push(kaart('bliksem','Welk vermogen per laadpunt heeft zin?',n1(hl.paal_kw)+' kW','per punt','Begrensd op wat je wagens zelf kunnen laden. Meer vermogen kost meer en levert niets op.'));
   if(hs0){
-    var pn=P2||'je laadpartner', netD=+hs0.net_eur100_dom||0, netS=+hs0.net_eur100_slim||0, spt=Math.max(0,+hs0.spot_eur100||0), tot=Math.max(0,netD-netS)+spt;
+    var pn=P2||'je laadpartner', netD=+hs0.net_eur100_dom||0, netX=+hs0.net_eur100_dom_max||netD, netS=+hs0.net_eur100_slim||0, spt=Math.max(0,+hs0.spot_eur100||0);
+    var totMin=Math.max(0,netD-netS)+spt, totMax=Math.max(0,netX-netS)+spt, vork=function(a,b){ return Math.abs(b-a)<0.005?('± '+eu2(a)):(eu2(a)+' – '+eu2(b)); };
+    var T=M.tarief, kwTxt=T?('maandpiek € '+n0(T.mp_eur_kw)+' per kW per jaar'+(T.tv_eur_kw?(' en, boven je toegangsvermogen, € '+n0(T.tv_eur_kw)+' per kW per jaar'):'')+' ('+esc(T.dnb||'')+' '+esc(T.spanning||'')+(T.jaar?(' '+T.jaar):'')+')'):('€ '+n0(M.eur_kw)+' per kW per jaar');
     K.push(kaart('meter','Hoeveel extra piek vraagt dat?',hs0.extra_slim_kw>0?('+ '+n0(hs0.extra_slim_kw)+' kW'):'Geen extra piek','slim gestuurd',
       (hs0.verzwaren_dom?'Zonder sturing ga je over je toegangsvermogen: verzwaren. ':'')+(M.toegang_volstaat_kw<M.toeg_kw?('Slim gestuurd volstaat ± '+n0(M.toegang_volstaat_kw)+' kW toegangsvermogen (nu '+n0(M.toeg_kw)+' kW).'):''),
-      bars([['Zonder sturing',hs0.piek_dom_kw,n0(hs0.piek_dom_kw)+' kW'],['Slim gestuurd',hs0.piek_slim_kw,n0(hs0.piek_slim_kw)+' kW','hl'],['Je hoogste kwartier nu',M.piek_kw,n0(M.piek_kw)+' kW'],['Toegangsvermogen',M.toeg_kw,n0(M.toeg_kw)+' kW','acc']])));
-    K.push(kaart('euro','Wat levert slim laden op?','± '+eu2(tot),'per 100 km goedkoper dan zonder sturing',
-      'Extra piek aan € '+n0(M.eur_kw)+' per kW per jaar. Slim laden kiest binnen de laaduren de goedkoopste uren op de spotmarkt. Dat vraagt een slimme laadpartner zoals '+pn+'.',
-      bars([['Netkost zonder sturing',netD,eu2(netD)+'/100 km'],['Netkost slim',netS,eu2(netS)+'/100 km','hl'],['Goedkopere uren (spot)',spt,'− '+eu2(spt)+'/100 km','acc']])+
-      ((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0)>0?'<span class="pil">± '+esc(eur((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0)))+' per jaar voor '+n0(hs0.ev)+' wagens</span>':'')));
-    var e100=hl.kwh_km*100*S.prijs, d100=e100+netD, s100=Math.max(0,e100-spt)+netS;
-    K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(s100),'per 100 km met slim laden','Stroom aan je huidige prijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh), plus de netkost van de extra piek.',
-      bars([['Slim laden',s100,eu2(s100),'hl'],['Zonder sturing',d100,eu2(d100)]])));
+      bars([['Zonder sturing, slechtste geval',hs0.piek_dom_max_kw||hs0.piek_dom_kw,n0(hs0.piek_dom_max_kw||hs0.piek_dom_kw)+' kW'],['Zonder sturing, drukste dag',hs0.piek_dom_kw,n0(hs0.piek_dom_kw)+' kW'],['Slim gestuurd',hs0.piek_slim_kw,n0(hs0.piek_slim_kw)+' kW','hl'],['Toegangsvermogen',M.toeg_kw,n0(M.toeg_kw)+' kW','acc']])));
+    K.push(kaart('euro','Wat levert slim laden op?',vork(totMin,totMax),'per 100 km goedkoper dan zonder sturing',
+      'Netkost van de extra piek: '+kwTxt+'. Laagste cijfer: het laden valt bovenop je verbruik van die dag. Hoogste: het valt samen met je hoogste kwartier. Slim laden kiest binnen de laaduren ook de goedkoopste uren op de spotmarkt. Dat vraagt een slimme laadpartner zoals '+pn+'.',
+      bars([['Netkost zonder sturing',netX,vork(netD,netX)],['Netkost slim',netS,eu2(netS),'hl'],['Goedkopere uren (spot)',spt,'− '+eu2(spt),'acc']])+
+      (function(a,b){ return '<span class="pil">'+esc(Math.abs(b-a)<1?('± '+eur(a)):(eur(a)+' – '+eur(b)))+' per jaar voor '; })((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0),(+(hs0.net_eur_jaar_dom_max||hs0.net_eur_jaar_dom)-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0))+n0(hs0.ev)+' wagens</span>'));
+    var s100, d100, d100x, vtxt;
+    if(hs0.kost100_slim!=null){ s100=hs0.kost100_slim; d100=hs0.kost100_dom; d100x=hs0.kost100_dom_max; var V=hs0.var_eur_mwh||{};
+      vtxt='Met een dynamisch contract: spotprijs + ± € '+n0(V.totaal)+' per MWh (opslag '+n0(V.opslag)+', vergroening '+n1(V.vergroening)+', groenestroom- en WKK-certificaten '+n1((+V.gsc||0)+(+V.wkk||0))+', netkost per kWh '+n1(V.net)+', accijns '+n1(V.accijns)+'), plus de netkost van de extra piek. Excl. btw.'; }
+    else { var e100=hl.kwh_km*100*S.prijs; s100=Math.max(0,e100-spt)+netS; d100=e100+netD; d100x=e100+netX; vtxt='Stroom aan je huidige prijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh), plus de netkost van de extra piek.'; }
+    K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(s100),'per 100 km met slim laden',vtxt,
+      bars([['Slim laden',s100,eu2(s100),'hl'],['Zonder sturing',d100x,vork(d100,d100x)]])));
   } else {
   K.push(kaart('meter','Hoeveel extra vermogen vraagt dat?','± '+n0(hl.p_slim_kw)+' kW','slim gestuurd','',
     bars([['Elke wagen een paal',hl.p_dom_kw,n0(hl.p_dom_kw)+' kW'],['Met wisselen (max.)',hl.p_rot_kw,n0(hl.p_rot_kw)+' kW'],['Slim gestuurd',hl.p_slim_kw,n0(hl.p_slim_kw)+' kW','hl'],['Vrij op je aansluiting',R.beschikbaar_kw,'± '+n0(R.beschikbaar_kw)+' kW','acc']])));
@@ -506,8 +513,8 @@ function render(){
   }
   var tl='<div class="tl">'+['nu','m12','m24','m36'].map(function(h){ var x=R[h]||{}; var c=!x.ev?'leeg':(x.past?'ja':'nee'); return '<div class="st '+c+'"><div class="dot">'+(!x.ev?'–':(x.past?'✓':'✕'))+'</div>'+esc(HZ[h])+'</div>'; }).join('')+'</div>';
   K.push(kaart('kalender','Wanneer bots ik op de grens van mijn aansluiting?',R.q7.grens?HZ[R.q7.grens]:'Ook over 3 jaar past alles',R.q7.grens?'kom je aan je grens, ook met slim laden':'als je slim laadt',
-    R.q7.grens?'Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.':('Laad je zonder sturing, dan heb je wel tot '+n0(hs0?hs0.piek_dom_kw:hl.p_dom_kw)+' kW nodig'+(hs0?' op je aansluiting.':'.')), tl, true));
-  if(hs0) K.push('<div class="v breed">'+ico('meter')+'<div class="in"><div class="q">Zo ziet een gemiddelde laaddag eruit ('+esc(HZ[['m36','m24','m12','nu'].filter(function(h){return M.horizons[h]&&M.horizons[h].ev>0;})[0]])+', '+n0(hs0.ev)+' wagens)</div>'+dagGrafiek(M,hs0)+'<div class="s">Slim gestuurd vult het laden de dalen in je verbruik, onder je hoogste kwartier. Zonder sturing laden alle wagens meteen bij aankomst.</div></div></div>');
+    R.q7.grens?'Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.':('Laad je zonder sturing, dan heb je wel tot '+n0(hs0?hs0.piek_dom_kw:hl.p_dom_kw)+' kW nodig'+(hs0?(' op je aansluiting'+(hs0.piek_dom_max_kw>hs0.piek_dom_kw?(', in het slechtste geval '+n0(hs0.piek_dom_max_kw)+' kW.'):'.')):'.')), tl, true));
+  if(hs0) K.push('<div class="v breed">'+ico('meter')+'<div class="in"><div class="q">'+(hs0.piekdag?'Je drukste laaddag':'Zo ziet een gemiddelde laaddag eruit')+' ('+(hs0.piekdag?(['zo','ma','di','wo','do','vr','za'][hs0.piekdag.weekdag]+' '+new Date(hs0.piekdag.datum+'T12:00:00Z').toLocaleDateString('nl-BE',{day:'numeric',month:'long'})+', '):'')+esc(HZ[['m36','m24','m12','nu'].filter(function(h){return M.horizons[h]&&M.horizons[h].ev>0;})[0]])+', '+n0(hs0.ev)+' wagens)</div>'+dagGrafiek(M,hs0)+'<div class="s">'+(hs0.piekdag?('We rekenen elke laaddag van het jaar door (je verbruik van die dag + het laden) en tonen de dag met de hoogste piek zonder sturing: '+n0(hs0.piek_dom_kw)+' kW. Valt het laden samen met je eigen hoogste kwartier ('+n0(M.piek_kw)+' kW), dan wordt het tot '+n0(hs0.piek_dom_max_kw)+' kW. '):'')+'Slim gestuurd vult het laden de dalen in je verbruik, onder je hoogste kwartier. Zonder sturing laden alle wagens meteen bij aankomst.</div></div></div>');
   $('vragen').innerHTML=K.join('');
   var hs=['nu','m12','m24','m36'];
   $('hz').innerHTML='<tr><th></th>'+hs.map(function(h){return '<th>'+HZ[h]+'</th>';}).join('')+'</tr>'+
