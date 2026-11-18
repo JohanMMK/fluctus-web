@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.220.0 (2026-11-18, Johan): ADVIES BEDRIJF OP MS = 1 C&I-batterij-eenheid + 150 kWp zonnepanelen (was zonder PV); kolom 150 kWp wordt toegevoegd als het rooster ze niet heeft, anders de dichtstbijzijnde PV-kolom. -->
 <!-- ek.html v0.219.3 (2026-11-18): «Controle cijfers» leest getallen taalonafhankelijk (4,4 in een EN-scherm gaf nog «≠»). -->
 <!-- ek.html v0.219.2 (2026-11-18, Johan — Sunward): (1) eigen prijs uit «Pas aan» geldt ook voor de standaardcel met dezelfde PV/batterij-kW (rooster «Investering» toonde € 143k = standaardprijs i.p.v. € 126k; ook rendement/TVT van die cel); (2) keuzepaneel boven het rooster in FR/EN. -->
 <!-- ek.html v0.219.1 (2026-11-18): «Controle cijfers» (enkel oekene) las EN-getallen fout (€ 126,000 → 126; 4.4 → 44) → valse melding «≠ kerncijfer» in EN-dossiers. -->
@@ -2771,12 +2772,19 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // Default-selectie naar een zichtbare rooster-cel snappen (anker-PV → dichtstbijzijnde staffel-kolom).
     try{ var _snap=function(cx){ var bc=pvCols[0],bd=Infinity; pvCols.forEach(function(c){ if(cx>0 && !(c>0)) return; var d=Math.abs(c-cx); if(d<bd){bd=d;bc=c;}}); return bc; };   // v0.142.1: een advies MET zonnepanelen nooit naar de kolom «geen PV» snappen (ADREM: 21 kWp → 0 = €0)
       var _sr=best?best._ry:(realRows[0]||0), _sc=_snap(best?best._cx:0), _sel=_cellAt(HM,_sr,_sc); if(_sel) HM.sel=_sel; }catch(e){}
-    // v0.62.0 (Johan): BEDRIJF OP MS → standaardcel = 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH, config of project-override) ZONDER PV.
+    // v0.62.0 (Johan): BEDRIJF OP MS → standaardcel = 1 C&I-batterij-eenheid (BATT_EENHEID_KW/KWH, config of project-override) — v0.220.0: + 150 kWp PV.
     //   Bestaat die rij niet exact in het rooster, dan de dichtstbijzijnde batterij-rij (kW>0). Particulier/LS: ongewijzigd.
     try{ if(!_ekIsPart() && String((payload&&payload.spanning)||'')==='MS'){
       var _kCI=KEY(BATT_EENHEID_KW,BATT_EENHEID_KWH), _rCI=(realRows.indexOf(_kCI)>=0)?_kCI:null;
       if(_rCI==null){ var _bd=Infinity; realRows.forEach(function(k){ var m=battMap[k]; if(!m||!(m.kw>0)) return; var d=Math.abs(m.kw-BATT_EENHEID_KW)+Math.abs(m.kwh-BATT_EENHEID_KWH)/10; if(d<_bd){ _bd=d; _rCI=k; } }); }
-      if(_rCI!=null){ var _ci=_cellAt(HM,_rCI,0); if(_ci){ HM.sel=_ci; HM.best=_ci; } }
+      // v0.220.0 (Johan 18-11): + 150 kWp zonnepanelen bij de C&I-eenheid (was: zonder PV). Kolom 150 kWp toevoegen als het rooster ze niet heeft;
+      //   lukt die cel niet, dan de PV-kolom (> 0) die het dichtst bij 150 kWp ligt.
+      if(_rCI!=null){ var _PVCI=150, _ci=null;
+        try{ if(pvCols.indexOf(_PVCI)<0){ pvCols.push(_PVCI); pvCols.sort(function(x,y){ return x-y; }); } }catch(ePc){}
+        _ci=_cellAt(HM,_rCI,_PVCI);
+        if(!_ci){ var _bdp=Infinity; pvCols.forEach(function(cx){ if(!(cx>0)) return; var c2=_cellAt(HM,_rCI,cx), d2=Math.abs(cx-_PVCI); if(c2 && d2<_bdp){ _bdp=d2; _ci=c2; } }); }
+        if(!_ci) _ci=_cellAt(HM,_rCI,0);
+        if(_ci){ HM.sel=_ci; HM.best=_ci; } }
     } }catch(e){}
     HM.compute=function(ry,cx,done){ var key=ry+'|'+cx; if(HM.computed[key]){ done&&done(HM.computed[key]); return; }
       var _m=HM.battMap[ry]||{kw:0,kwh:0};
