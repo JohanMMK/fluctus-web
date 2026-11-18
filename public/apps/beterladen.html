@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.7.4 (2026-11-18, Johan): blok «Je wagenpark» onder de titel van het laadplan (scherm + PDF pagina 1): per wagentype aantallen nu/1/2/3 jaar, km/jaar, kWh/100 km, batterij en laadvermogen, plus waar en hoe lang ze laden en het verbruiksprofiel. -->
 <!-- beterladen.html v0.7.3 (2026-11-18, Johan): PDF IN SAFARI — Safari negeert paginabreuk-regels op flex-elementen: kaarten bij afdrukken als gewone blokken (icoon absoluut, uitleg rechts via float), paginabreuken via lege blok-elementen .pgbr (vóór «Wat levert slim laden op?» en vóór «Zo groeit je laadplein»). -->
 <!-- beterladen.html v0.7.2 (2026-11-18, Johan): PDF MET VASTE PAGINA-INDELING — p1: kop + 4 kaarten (wagens, laadpunten, vermogen, extra piek); p2: opbrengst, kost/100 km, grens, drukste laaddag; p3: groeitabel + checklist + indicatief. Kaarten als blokken (geen grid: grid-items negeren break-inside in sommige browsers), compacter lettertype en grafiek, harde paginabreuk (.pb). -->
 <!-- beterladen.html v0.7.1 (2026-11-18, Johan): wagenuitleg (kWh/dag, laadbeurt, laadtijd, 22 kW) achter een i; PDF: antwoordkaarten over de volle breedte met de uitleg rechts van de grafische delen, paginaverbrekingen die kaarten, koppen+tabel en checklist bij elkaar houden. -->
@@ -114,6 +115,13 @@ footer img{height:22px}
 #imod .sluit{border:0;background:none;font-size:22px;line-height:1;cursor:pointer;color:#64748B;padding:0 2px}
 @media print{.ib,#imod{display:none!important}.sprint{display:block}}
 .pgbr{display:none}
+.wpark{border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px 12px;margin:10px 0 12px}
+.wpark .wt{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.wpark table{width:100%;border-collapse:collapse;font-size:13px}.wpark th,.wpark td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}
+.wpark th{font-size:11.5px;color:var(--muted);font-weight:600;white-space:nowrap}.wpark td{white-space:nowrap}.wpark td:first-child{white-space:normal}.wpark th:first-child,.wpark td:first-child{text-align:left}.wpark tr:last-child td{border-bottom:0}
+.wpark .wm{font-size:12.5px;color:var(--muted);margin-top:6px}
+@media (max-width:640px){.wpark .opt{display:none}}
+@media print{.wpark{padding:6px 10px;margin:6px 0 8px;break-inside:avoid;page-break-inside:avoid}.wpark table{font-size:11px}.wpark th{font-size:10px}.wpark .wm{font-size:10.5px;margin-top:3px}.wpark .opt{display:table-cell}}
 .dagchart{margin:10px 0 4px}.dagchart svg{width:100%;height:auto;display:block}
 .lgd{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:4px}.lgd i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .lgd i.ln{height:0;border-top:2px solid;border-radius:0}.lgd i.ds{height:0;border-top:2px dashed;border-radius:0}
@@ -254,6 +262,7 @@ table.hz tr:last-child td{border-bottom:0}
     <div class="a4kop"><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" style="height:30px"><div id="a4p" style="font-size:13px;color:#6B7280;text-align:right"></div></div>
     <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg></div><div><div class="stap" id="dossnr">Je laadplan</div><h2 id="rtitel">Je laadplan</h2></div></div>
     <div class="klein" id="rsub"></div>
+    <div class="wpark" id="wpark"></div>
     <div class="vragen" id="vragen"></div>
     <div class="pgbr"></div>
     <div class="kop" style="margin:18px 0 0"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V11M10 20V5M16 20v-7M2 20h20"/></svg></div><div><div class="stap">Nu en de komende 3 jaar</div><h2 style="font-size:17px">Zo groeit je laadplein</h2></div></div>
@@ -515,6 +524,19 @@ function render(){
   var bc=S.bc||{}; $('rtitel').textContent='Je laadplan'+(bc.klantNaam?(' · '+bc.klantNaam):'');
   $('dossnr').textContent=S.pid?('Dossier '+S.pid):'Je laadplan';
   $('rsub').textContent=(bc.leveringsadres||'')+' · toegangsvermogen '+n0(S.toeg)+' kW · '+(R.sim?('± '+n0(R.sim.ruimte_kwh_dag_p5)+' kWh per laaddag vrij om te laden'):('nog ± '+n0(R.beschikbaar_kw)+' kW vrij voor laden'));
+  (function(){   // v0.7.4: het voorziene wagenpark
+    var W=(R.wagens||[]); if(!W.length){ $('wpark').innerHTML=''; return; }
+    var lab=function(t){ var x=TYPES.filter(function(z){return z[0]===t;})[0]; return x?x[1]:t; };
+    var tot={nu:0,m12:0,m24:0,m36:0};
+    var rij=W.map(function(w){ ['nu','m12','m24','m36'].forEach(function(h){tot[h]+=(+w[h]||0);}); var naam=w.merk?((w.merk||'')+' '+(w.model||'')).trim():'';
+      return '<tr><td><b>'+esc(lab(w.type))+'</b>'+(naam&&naam!==lab(w.type)?' · '+esc(naam):'')+'</td><td>'+n0(w.nu)+'</td><td>'+n0(w.m12)+'</td><td>'+n0(w.m24)+'</td><td>'+n0(w.m36)+'</td>'+
+        '<td class="opt">'+n0(w.km_jaar)+'</td><td class="opt">'+n1((+w.kwh_km||0)*100)+'</td><td class="opt">'+n0(w.batt_kwh)+' kWh · '+n1(w.ac_kw)+' kW</td></tr>'; }).join('');
+    if(W.length>1) rij+='<tr><td><b>Totaal</b></td><td><b>'+n0(tot.nu)+'</b></td><td><b>'+n0(tot.m12)+'</b></td><td><b>'+n0(tot.m24)+'</b></td><td><b>'+n0(tot.m36)+'</b></td><td class="opt"></td><td class="opt"></td><td class="opt"></td></tr>';
+    var waar={kmo:'op het werk (personeelswagens)',logistiek:'op de eigen site (bestel- en vrachtwagens)',thuisladen:'thuis'}[S.dg]||'';
+    var po=$('prof')&&$('prof').selectedOptions[0]?$('prof').selectedOptions[0].text:'';
+    $('wpark').innerHTML='<div class="wt">Je wagenpark</div><table><tr><th>Wagen</th><th>Nu</th><th>Over 1 jaar</th><th>Over 2 jaar</th><th>Over 3 jaar</th><th class="opt">km/jaar</th><th class="opt">kWh/100 km</th><th class="opt">Batterij · laden</th></tr>'+rij+'</table>'+
+      '<div class="wm">Laden '+esc(waar)+', ± '+n0(S.venster)+' uur aan de laadpaal'+(S.dg==='thuisladen'?' per dag':' per werkdag')+(R.sim&&po?(' · verbruiksprofiel «'+esc(po)+'», jaarverbruik ± '+n0(R.sim.jaar_mwh)+' MWh'):'')+'.</div>';
+  })();
   $('a4p').innerHTML=(P2?esc(P2)+'<br>':'')+(S.pid?esc(S.pid)+'<br>':'')+new Date().toLocaleDateString('nl-BE');
   var hl=['m36','m24','m12','nu'].map(function(h){return R[h];}).filter(function(x){return x.ev>0;})[0]||R.nu;
   // v0.4.0 (Johan 18-11): grafische kaarten — icoon in partnerkleur, groot kerncijfer, mini-staafjes en tijdlijn
