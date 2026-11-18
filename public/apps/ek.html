@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.221.0 (2026-11-18, Johan — Wannes): «Pas aan» bewaart een gewijzigde combinatie automatisch bij het verlaten van de bewerkmodus (andere tab, «Opnieuw», pagina verlaten/verbergen) — zelfde als «💾 Opslaan»; enkel als er iets wijzigde; melding + projectlog «pas_aan_auto_bewaard». -->
 <!-- ek.html v0.220.0 (2026-11-18, Johan): ADVIES BEDRIJF OP MS = 1 C&I-batterij-eenheid + 150 kWp zonnepanelen (was zonder PV); kolom 150 kWp wordt toegevoegd als het rooster ze niet heeft, anders de dichtstbijzijnde PV-kolom. -->
 <!-- ek.html v0.219.3 (2026-11-18): «Controle cijfers» leest getallen taalonafhankelijk (4,4 in een EN-scherm gaf nog «≠»). -->
 <!-- ek.html v0.219.2 (2026-11-18, Johan — Sunward): (1) eigen prijs uit «Pas aan» geldt ook voor de standaardcel met dezelfde PV/batterij-kW (rooster «Investering» toonde € 143k = standaardprijs i.p.v. € 126k; ook rendement/TVT van die cel); (2) keuzepaneel boven het rooster in FR/EN. -->
@@ -2499,7 +2500,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       g('i-klant'),g('i-btw'),g('i-adres'),   // v0.24.34 (Johan): klantnaam/BTW/adres in de signature → een naam-wijziging herrekent (en bewaart de nieuwe naam) i.p.v. de dedup te raken
       g('ev-p-nacht'),g('ev-p-dag'),g('ev-p-24'),rows,(function(){ try{ return JSON.stringify(_ekEvPartBewaar()); }catch(e){ return ''; } })(),String(BATT_RTE),String(BATT_DOD),String(CRATE_OV||'')].join('|');
   }
-  function terugNaarInput(){ var d=$('dash'); if(d) d.classList.add('hidden'); var ik=$('intake'); if(ik) ik.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
+  function terugNaarInput(){ try{ window._invAutoSave&&window._invAutoSave('opnieuw'); }catch(eAs){} var d=$('dash'); if(d) d.classList.add('hidden'); var ik=$('intake'); if(ik) ik.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
   // v0.23: spanningsniveau (LS/MS) uit het toegangsvermogen — >63 kW ⇒ MS. Live in de invoer + in resultaat/rapport.
   // v0.24.24 (Johan): oekene kan LS/MS handmatig overschrijven. STATE_SPANNING='' → auto; 'LS'/'MS' → geforceerd.
   // v0.24.29 (Johan): LS/MS-basis komt uit de FACTUUR (bc.spanningsniveau, door de extractor bepaald uit de netkosten-
@@ -3507,7 +3508,17 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     INV_EDIT=true; _invBtnLabel();
     var a=HM&&HM.sel; var pvKwp=a?Math.round(_anchorKwp(a)*10)/10:((CTX&&CTX.pvKwpFb)||0), battKwh=a?(+a.battKwh||0):((CTX&&CTX.battKwhFb)||0);
     _invBlok(pvKwp, battKwh, (INV_OV?INV_OV.ac:_acDefault()), (INV_OV?INV_OV.dc:_dcDefault()), (a&&+a.battKw)||0);
+    try{ INV_SNAP=_invFormSig(); }catch(eSn){ INV_SNAP=null; }   // v0.221.0: vertrekpunt → enkel automatisch bewaren als er iets wijzigde
   }
+  // v0.221.0 (Johan 18-11, Wannes): AUTOMATISCH BEWAREN — wie in «Pas aan» iets wijzigt en de bewerkmodus verlaat (andere tab, «Opnieuw»,
+  //   pagina verlaten) zonder op «💾 Opslaan» te klikken, verloor zijn aanpassing. Nu wordt ze dan automatisch opgeslagen (zelfde als Opslaan).
+  var INV_SNAP=null;
+  function _invFormSig(){ var g=function(id){ var e=$(id); return e?(e.type==='checkbox'?(e.checked?'1':'0'):String(e.value)):''; }; return ['inv-pv','inv-bkw','inv-bkwh-in','inv-ac','inv-dc','inv-tot-in','inv-opex','inv-allin'].map(g).join('|'); }
+  window._invAutoSave=function(waarom){ try{ if(!INV_EDIT) return false; if(INV_SNAP!=null && _invFormSig()===INV_SNAP) return false;
+      _invSave(); try{ if(window._ekLog) window._ekLog('pas_aan_auto_bewaard',{ waarom:String(waarom||'') }); }catch(eL){}
+      try{ if(window._ekAdvMeld) window._ekAdvMeld(_ek3('✔ Je aanpassing in «Pas aan» is automatisch bewaard.','✔ Votre modification dans « Ajuster » a été enregistrée automatiquement.','✔ Your change in “Adjust” was saved automatically.'),'var(--green)'); }catch(eM){}
+      return true; }catch(e){ return false; } };
+  try{ window.addEventListener('pagehide', function(){ try{ window._invAutoSave('verlaten'); }catch(e){} }); document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden'){ try{ window._invAutoSave('verborgen'); }catch(e){} } }); }catch(eEv){}
   function _invSave(){
     var pv=+($('inv-pv')&&$('inv-pv').value)||0, bkw=+($('inv-bkw')&&$('inv-bkw').value)||0;
     var bkwh=+($('inv-bkwh-in')&&$('inv-bkwh-in').value)||0;
@@ -7664,7 +7675,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   }
   function tabToewijzen(){ var d=el('dash'); if(!d) return; try{ advBlokken(d); }catch(eAb){}
     Array.prototype.forEach.call(d.children, function(c){ var t=c.id&&TAB_MAP[c.id]; if(!t && c.tagName==='DETAILS' && !c.id){ var sm=c.querySelector('summary'); t=(sm&&/investeer|investiss|invest/i.test(sm.textContent))?'v':((sm&&/berekenen|calculons|calculate|aannames/i.test(sm.textContent))?'a':'2'); } if(t){ if(c.getAttribute('data-ektab')!==t) c.setAttribute('data-ektab',t); if(t==='v') tabOpen(c); } }); }
-  window._ekTabZet=function(n, scroll){ var d=el('dash'); if(!d) return; n=String(n||'2'); window._EK_TAB=n; tabToewijzen(); if(n==='h'){ try{ window._ekHeatToon&&window._ekHeatToon(); }catch(eHt){} }
+  window._ekTabZet=function(n, scroll){ var d=el('dash'); if(!d) return; try{ window._invAutoSave&&window._invAutoSave('tab'); }catch(eAs){}   /* v0.221.0 */ n=String(n||'2'); window._EK_TAB=n; tabToewijzen(); if(n==='h'){ try{ window._ekHeatToon&&window._ekHeatToon(); }catch(eHt){} }
     if(window._ekTabAan()){ d.classList.add('ek-tabs'); d.setAttribute('data-tab', n); document.body.classList.add('ek-tabs-aan'); } else { d.classList.remove('ek-tabs'); document.body.classList.remove('ek-tabs-aan'); }
     window._ekTabsPas(); if(scroll){ try{ window.scrollTo({ top:0, behavior:'smooth' }); }catch(e){} } };
   window._ekTabVoor=function(id){ if(!window._ekTabAan()) return; var t=TAB_MAP[id]; if(t && String(window._EK_TAB||'2')!==t) window._ekTabZet(t, false); };
