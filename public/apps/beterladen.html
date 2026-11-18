@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.3.0 (2026-11-18, Johan): factuur al ingelezen (mail-instap, terugkeer of net opgeladen) → het opladen-vak verdwijnt; naast «✓ Je factuur is al ingelezen — dossier …» staat een klein knopje «↻ Opnieuw opladen». -->
 <!-- beterladen.html v0.2.0 (2026-11-18): «Volledige analyse» = KOPIE naar een nieuw Energie-Compas-dossier (/api/bl/naar-compas); manager-weergave via MijnEC-sessie (projecten.html → laadplan); dossiernummer bovenaan. v0.1.1 (2026-11-18): partner ook uit het pad (www.energie-compas.eu/pluon, /dieteren) — Railway-plan laat geen extra custom domains toe. v0.1.0 (2026-11-17, Johan): BETERE LADER — eenvoudige laadtool per partner (D'Ieteren Energy, PLUON).
      Flow: factuur-PDF → wagens (voertuigtabel) → mail + 6 cijfers → laadplan + offerteaanvraag. Partner via ?p= of subdomein.
      Server: /api/bl/* (fluctus-proxy ≥ 15.433.0). Eén dossier (FLX) → «Volledige analyse» opent hetzelfde dossier in de EK. -->
@@ -96,9 +97,11 @@ footer img{height:22px}
   <section class="card" id="s1">
     <div class="stap">Stap 1 van 3</div>
     <h2>Je energiefactuur (PDF)</h2>
+    <div id="fupl">
     <label class="drop" for="fpdf"><b>Kies je factuur (PDF)</b><br><span class="klein">Je jaarafrekening of een recente maandfactuur. We lezen ze automatisch in.</span></label>
     <input type="file" id="fpdf" accept="application/pdf,.pdf" class="verborgen">
     <p class="klein" id="mailinstap">Liever mailen? Stuur je factuur naar <b id="aliasmail">dossier@energie-compas.eu</b>. Je krijgt een link terug.</p>
+    </div>
     <div id="fmsg" class="msg"></div>
     <div id="fok" class="verborgen">
       <div class="kv" id="fkv"></div>
@@ -239,9 +242,15 @@ $('fpdf').addEventListener('change',function(){
   .then(function(r){
     if(!r||!r.baseCase){ $('fmsg').className='msg fout'; $('fmsg').textContent='We konden deze factuur niet lezen'+(r&&r.error?(' ('+r.error+')'):'')+'. Probeer een andere PDF of mail ze naar '+$('aliasmail').textContent+'.'; return; }
     S.fb=(r.baseCase.factuur_bestanden||[]).slice(0,3);
-    $('fmsg').textContent='✓ Factuur ingelezen.'; leesBc(r.baseCase);
+    leesBc(r.baseCase); factuurKlaar('✓ Factuur ingelezen.');
   }).catch(function(e){ $('fmsg').className='msg fout'; $('fmsg').textContent='Inlezen mislukt: '+(e&&e.message||'netwerkfout'); });
 });
+// v0.3.0 (Johan 18-11): factuur al ingelezen → opladen verbergen; klein knopje «Opnieuw opladen» als de klant dat toch wil
+function factuurKlaar(tekst){
+  toon('fupl',false); $('fmsg').className='msg';
+  $('fmsg').innerHTML=esc(tekst)+' <button type="button" id="fopnieuw" style="margin-left:8px;font:inherit;font-size:12.5px;padding:3px 10px;border:1px solid #CBD5E1;border-radius:6px;background:#fff;color:#334155;cursor:pointer">↻ Opnieuw opladen</button>';
+  $('fopnieuw').onclick=function(){ toon('fupl',true); $('fmsg').textContent=''; $('fupl').scrollIntoView({behavior:'smooth',block:'center'}); };
+}
 $('toegaanpas').addEventListener('click',function(e){e.preventDefault();toon('toegbox',true);$('toeg').focus();});
 $('toeg').addEventListener('input',function(){var v=+this.value; if(v>0){S.toeg=v; $('kvtoeg').textContent=n0(v)+' kW'; haak();}});
 $('naar2').addEventListener('click',function(){toon('s2',true); if(!$('wrijen').children.length) wRij(); $('s2').scrollIntoView({behavior:'smooth'});});
@@ -413,7 +422,7 @@ if(T0){
     S.verified=!!j.verified; S.pid=j.project_id||''; S.ek=j.ek_link||''; S.mgr=!!j.manager;
     if(S.pid){ $('fmsg').textContent='Dossier '+S.pid; }
     if(j.partner&&!SLUG){ SLUG=j.partner; fetch(API+'/api/bl/partner/'+SLUG).then(function(r){return r.json();}).then(function(x){if(x&&x.ok) zetPartner(x.partner);}); }
-    if(j.baseCase){ leesBc(j.baseCase); $('fmsg').textContent='✓ Je factuur is al ingelezen.'; }
+    if(j.baseCase){ leesBc(j.baseCase); factuurKlaar('✓ Je factuur is al ingelezen'+(S.pid?(' — dossier '+S.pid):'')+'.'); }
     var I=j.bl&&j.bl.invoer;
     if(I){
       S.dg=I.doelgroep||S.dg; S.venster=+I.venster_u||S.venster; $('venster').value=String(S.venster);
