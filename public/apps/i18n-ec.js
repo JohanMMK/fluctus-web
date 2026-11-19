@@ -78,11 +78,15 @@
     'horeca':'horeca', 'school':'école', 'garage':'atelier / garage', 'werkplaats / garage':'atelier / garage',
     'opslag / magazijn':'stockage / entrepôt', 'opslag___magazijn':'stockage / entrepôt', 'landbouw':'agriculture', 'boer_melkvee':'agriculture (élevage laitier)',
     'industrie_voeding':'industrie / production', 'industrie / productie':'industrie / production',
+    'industrie_zonder_zomersluiting':'industrie sans fermeture estivale', 'industrie zonder zomersluiting':'industrie sans fermeture estivale',
+    'industrie_met_zomersluiting':'industrie avec fermeture estivale', 'industrie met zomersluiting':'industrie avec fermeture estivale', 'industrie continu (24/7)':'industrie continue (24/7)',
     'retail_zonder_koeling':'commerce — sans réfrigération', 'retail_voeding_en_koeling':'commerce alimentaire — avec réfrigération' };
   if (EN) PROF = { 'kantoor':'office', 'kantoor / diensten':'office / services', 'residentieel':'residential', 'woning':'home',
     'horeca':'hospitality', 'school':'school', 'garage':'workshop / garage', 'werkplaats / garage':'workshop / garage',
     'opslag / magazijn':'storage / warehouse', 'opslag___magazijn':'storage / warehouse', 'landbouw':'agriculture', 'boer_melkvee':'agriculture (dairy farming)',
     'industrie_voeding':'industry / production', 'industrie / productie':'industry / production',
+    'industrie_zonder_zomersluiting':'industry without summer shutdown', 'industrie zonder zomersluiting':'industry without summer shutdown',
+    'industrie_met_zomersluiting':'industry with summer shutdown', 'industrie met zomersluiting':'industry with summer shutdown', 'industrie continu (24/7)':'continuous industry (24/7)',
     'retail_zonder_koeling':'retail — without refrigeration', 'retail_voeding_en_koeling':'food retail — with refrigeration' };
 
   var H = { zoek: function (x) { return zoek(x); }, num: function (x) { return fmtNum(x); }, prof: function (x) { return PROF[String(x).toLowerCase()] || zoek(x) || x; } };
