@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.224.0 (2026-11-19, Johan): KADE OP DE DOCUMENTEN — de A4 toont het bijladen aan de snellader als eigen regel in de voertuigtabel («overdag aan de snellader (11–14 u) · 2 × 240 kWh/dag»); het klantrapport krijgt payload.kade (klantrapport ≥ 0.119.0: V&A «Hoeveel laders…»). -->
 <!-- ek.html v0.223.0 (2026-11-19, Johan): TYPE KADE — snelladen tijdens laden en lossen voor de eigen vloot. Per voertuigrij (geen personenwagen, niet betalend) een vinkje «Snelladen aan de kade» met laadbeurten/dag, minuten aan de paal, kWh/beurt, aankomstvenster en aantal snelladers. Wordt een apart plein type_plein «kade»: sessiemodel (vast vermogen = kWh ÷ duur, begrensd op de DC van de wagen), telt mee als eigen vloot (km, €/100 km, diesel), geen opbrengst of betaalterminal; de kade-energie gaat af van het depotladen van dezelfde rij. Snelladers tellen bij de DC-palen. Bewaard in ev_rows[].kade (server ≥ 15.450.0, simulator ≥ 1.27.0). -->
 <!-- ek.html v0.222.0 (2026-11-19, Johan): REALISTISCHERE INDUSTRIEPROFIELEN — keuzelijst «Industrie zonder zomersluiting» (nieuw, één ploeg, LF ± 35 %) en «Industrie met zomersluiting» (herbouwd, LF ± 33 %); het continue profiel (industrie_voeding, LF ± 69 %) blijft als «Industrie continu (24/7)»; voorbeeld bedrijf = zonder zomersluiting (server ≥ 15.450.0). -->
 <!-- ek.html v0.221.1 (2026-11-18): automatisch bewaren enkel als het bewerkformulier er echt staat (vangnet: nooit lege velden opslaan). -->
@@ -2068,6 +2069,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _kadeSan(k){ if(!k||typeof k!=='object') return undefined; var n=function(x,mn,mx){ x=+x; return isFinite(x)?Math.max(mn,Math.min(mx,x)):mn; };
     return { aan:!!k.aan, beurten:Math.round(n(k.beurten,1,2000)), duur:n(k.duur,10,480), kwh:n(k.kwh,5,2000), vs:_evUur(k.vs,8), ve:_evUur(k.ve,17), palen:Math.round(n(k.palen,1,500)) }; }
   function _kadeKw(k){ return (k&&k.duur>0)?Math.round(k.kwh/(k.duur/60)):0; }
+  // v0.224.0 (Johan 19-11): kade-regels voor de documenten (A4-voertuigtabel, payload.kade voor de V&A)
+  window._ekKadeLijst=function(){ try{ return (window._ekEvRows?window._ekEvRows():[]).filter(function(r){ return r && +r.aantal>0 && _kadeKan(r) && r.kade && r.kade.aan && +r.kade.beurten>0 && +r.kade.kwh>0; })
+      .map(function(r){ var t=_evType(r.type)||{}, k=r.kade; return { type:r.type, label:(t.label||t.naam||r.type||''), aantal:+r.aantal, beurten:Math.round(+k.beurten), kwh:Math.round(+k.kwh), duur:Math.round(+k.duur||60),
+        vs:_evUur(k.vs,8), ve:_evUur(k.ve,17), palen:Math.max(1,Math.round(+k.palen||1)), kw:_kadeKw(k), weekend:!!r.weekend }; }); }catch(e){ return []; } };
   function _kadeHtml(r,i){ if(!_kadeKan(r)) return ''; var k=r.kade||null, aan=!!(k&&k.aan);
     var h='<div class="ev-kade" style="margin-top:6px;font-size:12px"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-i="'+i+'" data-f="kade_aan"'+(aan?' checked':'')+'> '+_ek3('Snelladen aan de kade (laden en lossen)','Recharge rapide au quai (chargement/déchargement)','Fast charging at the dock (loading/unloading)')+'</label>';
     if(aan){ var inp=function(fk,v,mn,mx,st,w,tt){ return '<input type="number" min="'+mn+'" max="'+mx+'" step="'+st+'" inputmode="decimal" data-i="'+i+'" data-f="kade_'+fk+'" value="'+v+'" style="width:'+w+'px" title="'+tt+'">'; };
@@ -3277,6 +3282,11 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var sp=''; try{ sp=(typeof STATE_SPANNING!=='undefined'&&STATE_SPANNING)?STATE_SPANNING:''; }catch(e){}
     var V=[]; try{ (window._ekEvRows?window._ekEvRows():[]).forEach(function(r){ if(!r||!(+r.aantal>0)) return; var t=_evType(r.type)||{};
       V.push({ label:(t.label||t.naam||r.type||''), aantal:+r.aantal, betalend:!!r.betalend, moment:((EV_MOMENT[r.moment]||{}).label||''), weekend:!!r.weekend, kw:(+r.laadverm_kw||+r.paal_kw||0) }); }); }catch(e){}
+    try{ (window._ekKadeLijst?window._ekKadeLijst():[]).forEach(function(k){   // v0.224.0: bijladen aan de snellader (kade) als eigen regel
+      V.push({ label:k.label, aantal:k.aantal, betalend:false, weekend:k.weekend, kw:k.kw,
+        moment:_ekL3('overdag aan de snellader ('+_evUurTxt(k.vs)+'–'+_evUurTxt(k.ve)+' u) · '+k.beurten+' × '+k.kwh+' kWh/dag',
+                     'en journée au chargeur rapide ('+_evUurTxt(k.vs)+'–'+_evUurTxt(k.ve)+' h) · '+k.beurten+' × '+k.kwh+' kWh/jour',
+                     'daytime at the fast charger ('+_evUurTxt(k.vs)+'–'+_evUurTxt(k.ve)+' h) · '+k.beurten+' × '+k.kwh+' kWh/day') }); }); }catch(eK){}
     // rooster: terugverdientijd, zoals op het scherm
     var R=null; try{ var mk=M.tvt?'tvt':HMMETRIC_L, MM=M[mk], rows=H.rows.slice().sort(function(a,b){return b-a;}), cols=H.cols.slice().sort(function(a,b){return a-b;}), sel=H.sel||c, best=H.best, n=0;
       var cel=rows.map(function(ry){ return cols.map(function(cx){ var a=_cellAt(H,ry,cx); if(!a) return null; n++; var v=MM.val(a);
@@ -6049,7 +6059,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       // v0.14.1: payload via localStorage (Safari kopieert sessionStorage NIET naar een window.open-tabblad → demo-fallback).
       //   Faalt het opbouwen/bewaren → NIET openen, zodat er nooit een demo-rapport wordt getoond/gemaild.
       var _rid=Date.now().toString(36)+Math.random().toString(36).slice(2,7);   // v0.41.1: uniek rapport-id → klantrapport leest exact DEZE payload
-      var _pl; try{ var _po=_klantrapportPayload(j,sel); _po._rid=_rid; if(opt&&opt.offerte) _offRapportZet(_po, opt.offerte); _pl=JSON.stringify(_po); }catch(ePl){ _pl=null; }
+      var _pl; try{ var _po=_klantrapportPayload(j,sel); _po._rid=_rid; try{ var _kd=window._ekKadeLijst?window._ekKadeLijst():[]; if(_kd.length) _po.kade=_kd; }catch(eKd){} /* v0.224.0 */ if(opt&&opt.offerte) _offRapportZet(_po, opt.offerte); _pl=JSON.stringify(_po); }catch(ePl){ _pl=null; }
       if(!_pl){ _sluitWin(); if(st){ st.style.color='var(--muted)'; st.textContent='Rapportgegevens onvolledig — probeer opnieuw.'; } return; }
       var _stored=false;
       try{ localStorage.setItem('KLANTRAPPORT_DATA', _pl); _stored=true; }catch(e){}
