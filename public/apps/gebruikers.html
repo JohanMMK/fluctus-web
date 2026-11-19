@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
+<!-- Gebruikersbeheer v1.13 (19-11, Johan): knop «✉ Mailontvangers» in de filterbalk — modal met de effectieve ontvangers (LEAD_MAIL_TO, AUDIT_MAIL_TO, BL_MAIL_<partner>, afzender) en of ze uit Railway of de standaard komen. Vereist server ≥ 15.447.0 (/api/manager/mail-ontvangers). -->
 <!-- Gebruikersbeheer v1.12 (23-10, Johan): LOGRAPPORT — knop «Lograpport» in de filterbalk opent een modal met het activiteitslog van de gebruikers die op dat moment gefilterd in beeld staan (periode + app kiesbaar; overzicht per gebruiker met laatste login, aantal acties, gebruikte apps, laatste activiteit + details per gebruiker). Printbaar / te bewaren als PDF (A4, enkel het rapport). Vereist server ≥ 15.348.0 voor de multi-gebruiker-filter en de laatste login (oudere server: max. 1000 recentste regels, client filtert). -->
 <!-- Gebruikersbeheer v1.9 (15-10, Johan): alle kiesbare portal-tegels in de eerste rij — actief links, minder gebruikt rechts (grijs, met scheidingslijn); Academy niet meer automatisch (standaard uit, per gebruiker aan te zetten); tegels met «of via …» (Energie-Compas/Mijn klanten via EnergieKompas, Laadplein via Simulator). -->
 <!-- Gebruikersbeheer v1.11 (16-10, Johan): kolom Gebruiker blijft zichtbaar (sticky links) bij horizontaal scrollen. -->
@@ -254,6 +255,7 @@
           '</select></div>'+
           '<button class="reset" id="f-reset">Wis filters</button>'+
           '<button class="sec" id="f-log" title="Activiteitslog van de gebruikers die nu in beeld staan — printbaar als PDF">📄 Lograpport</button>'+
+          '<button class="sec" id="f-mail" title="Naar welk adres gaan leads, partnermails en audits?">✉ Mailontvangers</button>'+
         '</div>'+
         '<div style="overflow-x:auto"><table><thead><tr>'+
           '<th>Gebruiker</th><th>Rol</th><th>Status</th>'+
@@ -277,6 +279,7 @@
     $('f-access').onchange = function(){ FILT.access=this.value; renderTable(); };
     $('f-reset').onclick = function(){ FILT={q:'',status:'',app:'',access:''}; render(); };
     $('f-log').onclick = openLograpport;   // v1.12
+    $('f-mail').onclick = openMailOntvangers;   // v1.13
     renderTable();
   }
 
@@ -460,6 +463,33 @@
     var uit=[]; Object.keys(o).forEach(function(k){ if(uit.length>=4) return; var v=o[k]; if(v==null || v==='') return;
       if(typeof v==='object') v=JSON.stringify(v); v=String(v); if(v.length>40) v=v.slice(0,39)+'…'; uit.push(k+': '+v); });
     return uit.join(' · ');
+  }
+  // v1.13 (19-11): effectieve mailontvangers (server ≥ 15.447.0)
+  async function openMailOntvangers(){
+    var ov=document.createElement('div'); ov.className='lr-ov';
+    ov.innerHTML='<div class="lr-doos" style="max-width:820px">'+
+      '<div class="lr-kop"><b>✉ Mailontvangers</b><button class="lr-x" title="Sluiten">✕</button></div>'+
+      '<div id="mo-inhoud" style="padding:14px 18px"><div class="laad">Laden…</div></div></div>';
+    document.body.appendChild(ov);
+    function sluit(){ try{ document.body.removeChild(ov); }catch(e){} document.removeEventListener('keydown', k); }
+    function k(e){ if(e.key==='Escape') sluit(); }
+    document.addEventListener('keydown', k);
+    ov.addEventListener('click', function(e){ if(e.target===ov) sluit(); });
+    ov.querySelector('.lr-x').onclick=sluit;
+    var box=ov.querySelector('#mo-inhoud');
+    try{
+      var r=await fetch(PROXY+'/api/manager/mail-ontvangers?_='+Date.now(),{ headers: await authHeaders(), cache:'no-store' });
+      var j=await r.json().catch(function(){ return {}; });
+      if(!r.ok || !j.ok) throw new Error(j.error || ('HTTP '+r.status));
+      var h='<div style="overflow-x:auto"><table class="mo-tab" style="font-size:13px"><thead><tr><th>Variabele</th><th>Effectief adres</th><th>Bron</th><th>Waarvoor</th></tr></thead><tbody>';
+      (j.rijen||[]).forEach(function(x){
+        var std = x.bron!=='railway';
+        h+='<tr><td style="position:static;box-shadow:none;min-width:0;background:transparent"><code>'+esc(x.var)+'</code></td><td><b>'+esc(x.adres||'—')+'</b></td>'+
+           '<td style="color:'+(std?'#8A6100':'#1E7B4F')+'">'+esc(x.bron==='railway'?'Railway':x.bron)+'</td><td style="color:var(--grijs)">'+esc(x.waarvoor||'')+'</td></tr>';
+      });
+      h+='</tbody></table></div><p class="hint" style="margin-top:10px">Aanpassen: Railway → service <b>lucid-amazement</b> (fluctus-proxy) → Variables. Na wijzigen herstart de server automatisch.</p>';
+      box.innerHTML=h;
+    }catch(e){ box.innerHTML='<div class="msg err" style="display:block">Kon de ontvangers niet laden: '+esc(e.message)+'</div>'; }
   }
   function openLograpport(){
     LR.lijst=filtered().slice();
