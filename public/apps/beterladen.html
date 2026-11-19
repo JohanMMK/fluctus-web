@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.9.3 (2026-11-19, Johan): (1) CABINE in stap 1 bij een bedrijf op middenspanning: de geschatte maat (standaardmaat net boven de piek) staat er, met een keuzelijst om een grotere maat te kiezen (cabine_kva naar /api/bl/ruimte en bewaard); (2) BTW: bedrijf excl. btw, thuisladen incl. 6 % btw; (3) THUISLADEN: kaart met de gerealiseerde prijs per kWh tegenover de CREG-vergoeding voor thuisladen (incl. en excl. btw, per gewest); (4) een dossier zonder wagens (bv. demo via onderwerp «Betere Lader THU|KMO|LOG») opent met één lege wagenrij. -->
 <!-- beterladen.html v0.9.2 (2026-11-19, Johan): het totale laadvermogen per horizon (Σ laadpunten × kW per wagentype) gaat mee als cap_kw naar /api/bl/ruimte (bl-ruimte ≥ 1.3.3) — een mix met snelle vrachtwagenpalen rekende anders álle punten aan 50 kW (te hoge piek en kost zonder sturing). -->
 <!-- beterladen.html v0.9.1 (2026-11-19, Johan): (1) conclusie «snelle palen en sturing gaan samen» in de piekkaart zodra er palen > 22 kW zijn; (2) blok «Snelladen tijdens laden en lossen?» (logistiek of zware wagens): laadbeurten/dag, tijd aan de kade, kWh/beurt, van–tot, knop «Vraag een Energie-Compas-studie» → /api/bl/snelladen (server ≥ 15.450.0): Energie-Compas-dossier klaargezet + mail naar Fluctus (LEAD_MAIL_TO). -->
 <!-- beterladen.html v0.9.0 (2026-11-19, Johan): CABINE EN INGREEP — bij een bedrijf op MS schat de server (bl-ruimte 1.3.0, server ≥ 15.450.0) de cabine als de marktmaat (100/250/400/630/800/1000/1500/2000 kVA) net boven de piek op de factuur. Per horizon: past slim laden onder het toegangsvermogen (✓), enkel onder de cabine (! = toegangsvermogen verhogen, contract) of niet (✕ = ingreep op de aansluiting). Kaart «Wanneer bots ik op de grens» zegt welke; het blok «Nog goedkoper rijden?» krijgt een duidelijke waarschuwing met de gratis studie na de kwaliteitscheck. Het laadplan rekent gewoon door. -->
@@ -233,6 +234,7 @@ table.hz tr:last-child td{border-bottom:0}
       <div class="kv" id="fkv"></div>
       <div class="prof verborgen"><select id="prof" aria-hidden="true" tabindex="-1"><option value="industrie_met_zomersluiting">Industrie met zomersluiting</option><option value="residentieel">Residentieel</option></select></div>
       <div class="haak" id="haak"></div>
+      <p class="klein verborgen" id="cabbox"></p>
       <p class="klein">Klopt het toegangsvermogen niet? <a href="#" id="toegaanpas">Pas aan</a><span id="toegbox" class="verborgen"> <input type="number" id="toeg" style="width:110px;display:inline-block"> kW</span></p>
       <button class="btn" id="naar2">Verder: je wagens</button>
     </div>
@@ -350,7 +352,11 @@ var SLUG=(Q.get('p')||(mp?mp[1]:'')||((mh&&['www','app'].indexOf(mh[1])<0)?mh[1]
 var P=null, S={prof:'industrie_met_zomersluiting',sim:null,jaarKwh:0,normaal:0,bc:null,fb:[],toeg:0,piek:0,afn:0,prijs:0.25,dg:'kmo',venster:8,token:'',verified:false,res:null,pid:'',ek:''};
 var VEH={}, TYPES=[['personenwagen','Personenwagen'],['bestelwagen','Bestelwagen'],['lichte_vracht','Lichte vracht'],['vrachtwagen','Vrachtwagen'],['bus','Bus']];
 var TYP={personenwagen:{batt:60,kwhkm:0.18,ac:11,km:15000},bestelwagen:{batt:70,kwhkm:0.27,ac:11,km:25000},lichte_vracht:{batt:110,kwhkm:0.38,ac:22,km:30000},vrachtwagen:{batt:450,kwhkm:1.25,ac:22,km:60000},bus:{batt:350,kwhkm:1.0,ac:22,km:50000}};
-var CAP_EUR_KW=100, SLIM_KORTING=0.03;   // v0.6.0: € per kW extra piek per jaar (Johan)
+var CAP_EUR_KW=100, SLIM_KORTING=0.03;
+// v0.9.3 (Johan 19-11): marktmaten cabine (zoals bl-ruimte) en CREG-vergoeding thuisladen bedrijfswagen (all-in incl. btw, per gewest; elk kwartaal bijwerken)
+var CABINES=[100,250,400,630,800,1000,1500,2000];
+var CREG={kwartaal:'het 4de kwartaal van 2026',vl:0.3225,br:0.3688,wa:0.3779};
+function cregGewest(adres){ var pc=+((String(adres||'').match(/\b(\d{4})\b/)||[])[1]||0); if(pc>=1000&&pc<1300) return {v:CREG.br,g:'Brussel'}; if((pc>=1300&&pc<1500)||(pc>=4000&&pc<8000)) return {v:CREG.wa,g:'Wallonië'}; return {v:CREG.vl,g:'Vlaanderen'}; }   // v0.6.0: € per kW extra piek per jaar (Johan)
 function $(i){return document.getElementById(i);}
 // v0.7.0: uitleg achter een i-knopje → modal (afdrukken: uitgeschreven via .sprint)
 function ib(titel,tekst){ return tekst?('<button type="button" class="ib" aria-label="Uitleg" data-t="'+encodeURIComponent(titel||'Hoe berekenen we dit?')+'" data-i="'+encodeURIComponent(tekst)+'">i</button>'):''; }
@@ -423,7 +429,7 @@ function leesBc(bc){
 // v0.6.0 (Johan 18-11): kwartieranalyse op de server (/api/bl/ruimte)
 function simIn(R){
   var bc=S.bc||{}, o={profiel:S.prof,doelgroep:S.dg,venster_u:S.venster,toeg_kw:S.toeg,piek_kw:S.piek,jaar_kwh:S.jaarKwh,afname_kwh:+bc.afnameKwh||0,
-    periodeVan:bc.periodeVan||null,periodeTot:bc.periodeTot||null,normaal_aandeel:S.normaal,eur_kw:CAP_EUR_KW,adres:bc.leveringsadres||'',spanning:bc.spanningsniveau||'',dnb:bc.dnb||'',paal_kw:11,wagen_kwh_dag:15000/dagenJaar()*0.16};
+    periodeVan:bc.periodeVan||null,periodeTot:bc.periodeTot||null,normaal_aandeel:S.normaal,eur_kw:CAP_EUR_KW,adres:bc.leveringsadres||'',spanning:bc.spanningsniveau||'',dnb:bc.dnb||'',paal_kw:11,wagen_kwh_dag:15000/dagenJaar()*0.16,cabine_kva:S.cabine||0};
   if(R){ var h0=['nu','m12','m24','m36'].filter(function(h){return R[h]&&R[h].ev>0;}), ref=R[h0[0]]; if(ref){ o.wagen_kwh_dag=ref.edag_kwh/ref.ev; o.paal_kw=ref.paal_kw||11; }
     o.horizons={}; h0.forEach(function(h){ var x=R[h]; o.horizons[h]={ev:x.ev,edag_kwh:x.edag_kwh,lp:x.laadpunten,paal_kw:x.paal_kw,cap_kw:x.p_rot_kw,km_jaar:x.km_jaar||0,kwh_km:x.kwh_km}; }); }
   return o;
@@ -452,13 +458,23 @@ function dagGrafiek(m,h){   // m = sim-antwoord, h = horizon (optioneel): gemidd
   return '<div class="dagchart">'+g+lg+'</div>';
 }
 var _hk=null;
-function haak(){ clearTimeout(_hk); _hk=setTimeout(function(){ sim(null).then(function(m){ S.sim=m; if(!m) return haakOud();
+function haak(){ clearTimeout(_hk); _hk=setTimeout(function(){ sim(null).then(function(m){ S.sim=m; cabRij(m); if(!m) return haakOud();
     if(m.jaar_mwh&&$('kvafn')){ S.afn=m.jaar_mwh; $('kvafn').textContent='± '+n0(m.jaar_mwh); }
     var uren=S.dg==='kmo'?('werkdagen '+m.venster.start_u+'–'+((m.venster.start_u+m.venster.duur_u)%24)+' u'):('van '+m.venster.start_u+' u, '+m.venster.duur_u+' uur lang');
     $('haak').innerHTML=dagGrafiek(m,null)+'Je hoogste kwartier ('+n0(m.piek_kw)+' kW) is een kort moment. Op de uren dat je wagens er staan ('+uren+') verbruik je gemiddeld ± <b>'+n0(m.last_venster_gem_kw)+' kW</b>'+(m.pieken?' (zonder de korte pieken)':'')+'. '+
       'Daardoor kan er per laaddag ± <b>'+n0(m.ruimte_kwh_dag_p5)+' kWh</b> extra door je aansluiting, zonder je toegangsvermogen te overschrijden: genoeg voor ± <b>'+n0(m.wagens_slim)+' personenwagens slim gestuurd</b>, tegenover '+n0(m.wagens_dom)+' als ze allemaal tegelijk laden.'+
       (function(){ var tx='Berekend per kwartier over een heel jaar: profiel «'+$('prof').selectedOptions[0].text+'» op je jaarverbruik van ± '+n0(m.jaar_mwh)+' MWh (bron: '+m.jaar_bron+')'+(m.dag_nacht?', dag/nacht zoals op je factuur':'')+'. We houden 10 % marge onder je toegangsvermogen.'+(m.pieken?(' Je factuur toont een hoogste kwartier van '+n0(m.pieken.piek_kw)+' kW, een standaardprofiel komt maar tot '+n0(m.pieken.profiel_max_kw)+' kW. Daarom voegen we korte pieken toe (één per werkdag, op een willekeurig tijdstip, tot je gemeten piek). Met je eigen kwartierdata wordt dit exact.'):'')+''; return ib('Hoe berekenen we dit?',tx)+sprint(tx,'margin-top:6px'); })();
   }); },250); }
+// v0.9.3 (Johan 19-11): geschatte cabine tonen + een grotere maat laten kiezen
+function cabRij(m){ var e=$('cabbox'), A=m&&m.aansluiting; if(!e) return;
+  if(!A||!A.cabine_kva||S.dg==='thuisladen'){ e.innerHTML=''; toon('cabbox',false); return; }
+  if(A.cabine_bron==='geschat'||!S.cabEst) S.cabEst=S.cabEst&&A.cabine_bron!=='geschat'?S.cabEst:A.cabine_kva;
+  var gek=S.cabine||A.cabine_kva, opts=CABINES.filter(function(c){return c>=S.cabEst;}); if(opts.indexOf(gek)<0) opts.push(gek);
+  e.innerHTML='Cabine: <select id="cabsel" style="width:auto;display:inline-block;padding:3px 8px">'+opts.map(function(c){return '<option value="'+c+'"'+(c===gek?' selected':'')+'>'+n0(c)+' kVA</option>';}).join('')+'</select> '+
+    (S.cabine&&S.cabine!==S.cabEst?'door jou gekozen.':'geschat als de standaardmaat net boven je piek van '+n0(m.piek_kw)+' kW.')+' Is je cabine groter? Kies de juiste maat: we rekenen dan met die cabine.';
+  toon('cabbox',true);
+  $('cabsel').onchange=function(){ var v=+this.value; S.cabine=(v===S.cabEst)?0:v; haak(); };
+}
 function haakOud(){
   var vrij=Math.max(0,S.toeg*0.95-S.piek), dagE=15000/230*0.16;
   var slim=Math.floor(vrij*8/dagE), dom=Math.floor(vrij/11);
@@ -643,7 +659,9 @@ function render(){
   function bars(rows){ var mx=Math.max.apply(null,rows.map(function(r){return +r[1]||0;}).concat([1]));
     return '<div class="bars">'+rows.map(function(r){ var w=Math.max(2,Math.round((+r[1]||0)/mx*100)); return '<div class="bar'+(r[3]?(' '+r[3]):'')+'"><span>'+esc(r[0])+'</span><span class="t"><i style="width:'+w+'%"></i></span><b>'+esc(r[2])+'</b></div>'; }).join('')+'</div>'; }
   function kaart(k,q,groot,klein,s,extra,breed){ return '<div class="v'+(breed?' breed':'')+'">'+ico(k)+'<div class="in"><div class="q">'+esc(q)+ib(q,s)+'</div>'+(s&&!breed?'<div class="s sprint">'+esc(s)+'</div>':'')+'<div class="groot">'+esc(groot)+(klein?'<small>'+esc(klein)+'</small>':'')+'</div>'+(extra||'')+(s&&breed?'<div class="s sprint">'+esc(s)+'</div>':'')+'</div></div>'; }   // v0.7.3: uitleg vóór het cijfer in de DOM (float rechts bij afdrukken)
-  var eu2=function(x){ return '€ '+(Math.round((+x||0)*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var BT=S.dg==='thuisladen'?1.06:1, BTL=BT>1?'incl. btw':'excl. btw';   // v0.9.3: bedrijf excl. btw, thuisladen incl. 6 % btw
+  var eu2=function(x){ return '€ '+(Math.round((+x||0)*BT*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var eurB=function(x){ return eur((+x||0)*BT); };
   var K=[];
   var M=R.sim, hs0=M&&M.horizons?(['m36','m24','m12','nu'].map(function(h){return M.horizons[h];}).filter(function(x){return x&&x.ev>0;})[0]):null;
   K.push(kaart('wagen','Hoeveel elektrische wagens kan ik laden op mijn huidige aansluiting?','± '+n0(R.q1.slim),'wagens slim gestuurd',M?'Zonder verzwaring, berekend per kwartier over een heel jaar.':'Zonder verzwaring.',
@@ -655,27 +673,35 @@ function render(){
   if(hs0){
     var pn=P2||'je laadpartner', netD=+hs0.net_eur100_dom||0, netX=+hs0.net_eur100_dom_max||netD, netS=+hs0.net_eur100_slim||0, spt=Math.max(0,+hs0.spot_eur100||0);
     var totMin=Math.max(0,netD-netS)+spt, totMax=Math.max(0,netX-netS)+spt, vork=function(a,b){ return Math.abs(b-a)<0.005?('± '+eu2(a)):(eu2(a)+' – '+eu2(b)); };
-    var T=M.tarief, kwTxt=T?('maandpiek € '+n0(T.mp_eur_kw)+' per kW per jaar'+(T.tv_eur_kw?(' en, boven je toegangsvermogen, € '+n0(T.tv_eur_kw)+' per kW per jaar'):'')+' ('+esc(T.dnb||'')+' '+esc(T.spanning||'')+(T.jaar?(' '+T.jaar):'')+')'):('€ '+n0(M.eur_kw)+' per kW per jaar');
+    var T=M.tarief, kwTxt=T?('maandpiek € '+n0(T.mp_eur_kw*BT)+' per kW per jaar'+(T.tv_eur_kw?(' en, boven je toegangsvermogen, € '+n0(T.tv_eur_kw*BT)+' per kW per jaar'):'')+' ('+esc(T.dnb||'')+' '+esc(T.spanning||'')+(T.jaar?(' '+T.jaar):'')+')'):('€ '+n0(M.eur_kw*BT)+' per kW per jaar'); kwTxt+=' ('+BTL+')';
     K.push(kaart('meter','Hoeveel extra piek vraagt dat?',hs0.extra_slim_kw>0?('+ '+n0(hs0.extra_slim_kw)+' kW'):'Geen extra piek','slim gestuurd',
       (hs0.verzwaren_dom?'Zonder sturing ga je over je toegangsvermogen: verzwaren. ':'')+(M.toegang_volstaat_kw<M.toeg_kw?('Slim gestuurd volstaat ± '+n0(M.toegang_volstaat_kw)+' kW toegangsvermogen (nu '+n0(M.toeg_kw)+' kW).'):''),
       bars([['Zonder sturing, slechtste geval',hs0.piek_dom_max_kw||hs0.piek_dom_kw,n0(hs0.piek_dom_max_kw||hs0.piek_dom_kw)+' kW'],['Zonder sturing, drukste dag',hs0.piek_dom_kw,n0(hs0.piek_dom_kw)+' kW'],['Slim gestuurd',hs0.piek_slim_kw,n0(hs0.piek_slim_kw)+' kW','hl'],['Toegangsvermogen',M.toeg_kw,n0(M.toeg_kw)+' kW','acc']])+
       // v0.9.1 (Johan 19-11): snelle (DC-)palen en sturing horen samen
       ((+hl.paal_kw>22 && +hs0.piek_dom_kw>+hs0.piek_slim_kw)?('<span class="pil">Snelle palen en sturing gaan samen: met '+n0(hl.paal_kw)+' kW per paal loopt je piek zonder sturing op tot '+n0(hs0.piek_dom_kw)+' kW, gestuurd blijft hij op '+n0(hs0.piek_slim_kw)+' kW.</span>'):'')));
-    K.push(kaart('euro','Wat levert slim laden op?',vork(totMin,totMax),'per 100 km goedkoper dan zonder sturing',
+    K.push(kaart('euro','Wat levert slim laden op?',vork(totMin,totMax),'per 100 km goedkoper dan zonder sturing ('+BTL+')',
       'Netkost van de extra piek: '+kwTxt+'. Laagste cijfer: onze jaarsimulatie, dag per dag je verbruik (met de korte pieken) plus het laden, per maand de hoogste piek. Hoogste cijfer: elke maand valt het laden samen met je hoogste kwartier. Slim laden kiest binnen de laaduren ook de goedkoopste uren op de spotmarkt. Dat vraagt een slimme laadpartner zoals '+pn+'.',
       bars([['Netkost zonder sturing',netX,vork(netD,netX)],['Netkost slim',netS,eu2(netS),'hl'],['Goedkopere uren (spot)',spt,'− '+eu2(spt),'acc']])+
-      (function(a,b){ return '<span class="pil">'+esc(Math.abs(b-a)<1?('± '+eur(a)):(eur(a)+' – '+eur(b)))+' per jaar voor '; })((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0),(+(hs0.net_eur_jaar_dom_max||hs0.net_eur_jaar_dom)-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0))+n0(hs0.ev)+' wagens</span>'));
+      (function(a,b){ return '<span class="pil">'+esc(Math.abs(b-a)<1?('± '+eurB(a)):(eurB(a)+' – '+eurB(b)))+' per jaar voor '; })((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0),(+(hs0.net_eur_jaar_dom_max||hs0.net_eur_jaar_dom)-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0))+n0(hs0.ev)+' wagens</span>'));
     var s100, d100, d100x, vtxt;
     if(hs0.kost100_slim!=null){ s100=hs0.kost100_slim; d100=hs0.kost100_dom; d100x=hs0.kost100_dom_max; var V=hs0.var_eur_mwh||{};
-      vtxt='Met een dynamisch contract: spotprijs + ± € '+n0(V.totaal)+' per MWh (opslag '+n0(V.opslag)+', vergroening '+n1(V.vergroening)+', groenestroom- en WKK-certificaten '+n1((+V.gsc||0)+(+V.wkk||0))+', netkost per kWh '+n1(V.net)+', accijns '+n1(V.accijns)+'), plus de netkost van de extra piek. Excl. btw.'; }
+      vtxt='Met een dynamisch contract: spotprijs + ± € '+n0(V.totaal)+' per MWh (opslag '+n0(V.opslag)+', vergroening '+n1(V.vergroening)+', groenestroom- en WKK-certificaten '+n1((+V.gsc||0)+(+V.wkk||0))+', netkost per kWh '+n1(V.net)+', accijns '+n1(V.accijns)+'), plus de netkost van de extra piek. '+(BT>1?'Incl. 6 % btw (de onderdelen per MWh zijn excl. btw).':'Excl. btw.'); }
     else { var e100=hl.kwh_km*100*S.prijs; s100=Math.max(0,e100-spt)+netS; d100=e100+netD; d100x=e100+netX; vtxt='Stroom aan je huidige prijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh), plus de netkost van de extra piek.'; }
-    K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(s100),'per 100 km met slim laden',vtxt,
+    K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(s100),'per 100 km met slim laden ('+BTL+')',vtxt,
       bars([['Slim laden',s100,eu2(s100),'hl'],['Zonder sturing',d100x,vork(d100,d100x)]])));
+    // v0.9.3 (Johan 19-11): thuisladen — gerealiseerde prijs per kWh tegenover de CREG-vergoeding (werkgever betaalt het thuisladen van een bedrijfswagen terug)
+    if(S.dg==='thuisladen'){ var kwh100=Math.max(1,(+hl.kwh_km||0.16)*100), C=cregGewest(bc.leveringsadres), pS=s100/kwh100*1.06, pD=d100/kwh100*1.06, kwhJ=(+hl.km_jaar||0)*(+hl.kwh_km||0.16);
+      var e3=function(x){ return '€ '+(Math.round(x*1000)/1000).toLocaleString('nl-BE',{minimumFractionDigits:3,maximumFractionDigits:3}); }, vS=(C.v-pS)*kwhJ;
+      K.push(kaart('euro','Wat kost een kWh thuis laden, tegenover de CREG-vergoeding?','± '+e3(pS),'per kWh met slim laden (incl. btw)',
+        'Laadt een werknemer thuis een bedrijfswagen, dan mag de werkgever dat terugbetalen tegen het CREG-tarief: in '+CREG.kwartaal+' '+e3(C.v)+' per kWh in '+C.g+' (incl. btw; '+e3(C.v/1.06)+' excl. btw). Met slim laden kost een kWh je ± '+e3(pS)+' incl. btw ('+e3(pS/1.06)+' excl. btw), zonder sturing ± '+e3(pD)+' incl. btw ('+e3(pD/1.06)+' excl. btw). Zelfde basis als de kost per 100 km: dynamisch contract, netkost van de extra piek, heffingen en accijns.',
+        bars([['Slim laden',pS,e3(pS),'hl'],['Zonder sturing',pD,e3(pD)],['CREG-vergoeding',C.v,e3(C.v),'acc']])+
+        (kwhJ>0?'<span class="pil">'+esc('± '+eur(Math.abs(vS))+' per jaar '+(vS>=0?'onder':'boven')+' de CREG-vergoeding, voor ± '+n0(kwhJ)+' kWh')+'</span>':'')));
+    }
   } else {
   K.push(kaart('meter','Hoeveel extra vermogen vraagt dat?','± '+n0(hl.p_slim_kw)+' kW','slim gestuurd','',
     bars([['Elke wagen een paal',hl.p_dom_kw,n0(hl.p_dom_kw)+' kW'],['Met wisselen (max.)',hl.p_rot_kw,n0(hl.p_rot_kw)+' kW'],['Slim gestuurd',hl.p_slim_kw,n0(hl.p_slim_kw)+' kW','hl'],['Vrij op je aansluiting',R.beschikbaar_kw,'± '+n0(R.beschikbaar_kw)+' kW','acc']])));
-  K.push(kaart('euro','Wat bespaar ik met slim laden?','± '+eur(R.q4.eur_cap),'per jaar op je capaciteitstarief','Je piek ligt ± '+n0(R.q4.kw_minder)+' kW lager.',
-    (+R.q4.eur_energie>0?'<span class="pil">+ ± '+esc(eur(R.q4.eur_energie))+' per jaar met een dynamisch contract (laden op goedkope uren)</span>':'')));
+  K.push(kaart('euro','Wat bespaar ik met slim laden?','± '+eurB(R.q4.eur_cap),'per jaar op je capaciteitstarief','Je piek ligt ± '+n0(R.q4.kw_minder)+' kW lager.',
+    (+R.q4.eur_energie>0?'<span class="pil">+ ± '+esc(eurB(R.q4.eur_energie))+' per jaar met een dynamisch contract (laden op goedkope uren)</span>':'')));
   K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(R.q5.slim),'per 100 km met slim laden','Gerekend met je huidige stroomprijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh).',
     bars([['Slim laden',R.q5.slim,eu2(R.q5.slim),'hl'],['Zonder sturing',R.q5.dom,eu2(R.q5.dom)]])));
   }
@@ -728,7 +754,7 @@ $('code').addEventListener('keyup',function(e){ if(this.value.replace(/\D/g,'').
 
 function bewaar(){
   var R=S.res;
-  var inv={profiel:S.prof,wagens:R.wagens,doelgroep:S.dg,venster_u:S.venster,toegang_kw:S.toeg,piek_kw:S.piek,afname_mwh:S.afn,prijs_kwh:S.prijs,horizon_ek:R.horizon_ek};
+  var inv={profiel:S.prof,wagens:R.wagens,doelgroep:S.dg,venster_u:S.venster,toegang_kw:S.toeg,piek_kw:S.piek,afname_mwh:S.afn,prijs_kwh:S.prijs,horizon_ek:R.horizon_ek,cabine_kva:S.cabine||0};
   var res={beschikbaar_kw:R.beschikbaar_kw}; ['nu','m12','m24','m36'].forEach(function(h){res[h]=R[h];});
   if(R.sim){ var m=R.sim, hz={}; Object.keys(m.horizons||{}).forEach(function(h){ var x=Object.assign({},m.horizons[h]); delete x.gem_slim_kw; delete x.gem_dom_kw; hz[h]=x; });
     res.sim={versie:m.versie,profiel:m.profiel,jaar_mwh:m.jaar_mwh,jaar_bron:m.jaar_bron,toeg_kw:m.toeg_kw,piek_kw:m.piek_kw,last_venster_gem_kw:m.last_venster_gem_kw,ruimte_kwh_dag_p5:m.ruimte_kwh_dag_p5,wagens_slim:m.wagens_slim,wagens_dom:m.wagens_dom,toegang_volstaat_kw:m.toegang_volstaat_kw,eur_kw:m.eur_kw,horizons:hz,aansluiting:m.aansluiting||null}; }
@@ -808,9 +834,10 @@ if(T0){
     if(I){
       S.dg=I.doelgroep||S.dg; S.venster=+I.venster_u||S.venster; $('venster').value=String(S.venster); S.prof=S.dg==='thuisladen'?'residentieel':'industrie_met_zomersluiting'; $('prof').value=S.prof;   /* v0.8.2: bewaarde profielkeuze genegeerd */
       Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x.getAttribute('data-dg')===S.dg);});
-      if(+I.toegang_kw) S.toeg=+I.toegang_kw;
+      if(+I.toegang_kw) S.toeg=+I.toegang_kw; if(+I.cabine_kva) S.cabine=+I.cabine_kva;   /* v0.9.3 */
       toon('s2',true); $('wrijen').innerHTML='';
       var _kl=[]; (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu,merk:w.merk,model:w.model,id:w.id,batt_kwh:w.batt_kwh,kwh_km:w.kwh_km,ac_kw:w.ac_kw}); var d=$('wrijen').lastChild; _kl.push(d._klaar); d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
+      if(!$('wrijen').children.length) wRij();   /* v0.9.3: dossier zonder wagens (demo) */
       if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); Promise.all(_kl).then(function(){ return berekenSim(); }).then(function(R){ S.res=R.wagens.length?R:S.res; render(); }); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken'+(j.offerte.partner_naam?' naar '+esc(j.offerte.partner_naam):'')+'.'; } else if(S.mgr){ toon('offbox',false); $('omsg').textContent='Beheerweergave: nog geen offerteaanvraag.'; } }
     } else if(j.baseCase){ toon('s2',true); wRij(); }
     if(Q.get('enquete')) toonEnquete();   // v0.8.0: rechtstreeks naar de enquête
