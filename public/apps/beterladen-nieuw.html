@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Betere Lader</title>
+<meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
+<link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.11.0 (2026-11-20, Johan): LOOK & FEEL «eenvoud» — grote icoontegels (eigen iconen) voor «Waar laden ze?» en «Hoe lang aan de laadpaal?»; het resultaat is één donker paneel «Resultaat*» met 5–6 kerncijfers met icoon; alle uitleg (wagenpark, antwoordkaarten, grafiek, groeitabel, checklist) staat enkel nog in de PDF als «Bijlage · De uitleg bij je laadplan»; de PDF downloaden wordt geregistreerd in het dossier (ek:bl_pdf). -->
+<!-- beterladen.html v0.10.1 (2026-11-20, Johan): merknaam per taal — FR «Chargeur Malin», EN «Smart Charger» (tekst + logo bl/betere-lader-logo-fr|en.svg). -->
+<!-- beterladen.html v0.10.0 (2026-11-20, Johan): Betere Lader in NL/FR/EN — taalknoppen bovenaan; taal uit de mailknop (?lang=) wordt de dossiertaal (POST /api/ek/taal, gaat mee naar het EK-dossier); vertaallaag BL_I18N op alle teksten. -->
+<!-- beterladen.html v0.9.5 (2026-11-19, Johan): thuisladen standaard 12 uur aan de paal (18–6 u); per wagen een vinkje «bedrijfswagen (CREG)» — de CREG-kaart rekent enkel met de kWh van bedrijfswagens. -->
+<!-- beterladen.html v0.9.4 (2026-11-19, Johan): CREG-tarief per kwartaal, automatisch het lopende (Q1 2027 vanaf 1 januari); geen excl.-btw-bedragen meer in de CREG-kaart (terugbetaling is all-in, geen btw erop). -->
+<!-- beterladen.html v0.9.3 (2026-11-19, Johan): (1) CABINE in stap 1 bij een bedrijf op middenspanning: de geschatte maat (standaardmaat net boven de piek) staat er, met een keuzelijst om een grotere maat te kiezen (cabine_kva naar /api/bl/ruimte en bewaard); (2) BTW: bedrijf excl. btw, thuisladen incl. 6 % btw; (3) THUISLADEN: kaart met de gerealiseerde prijs per kWh tegenover de CREG-vergoeding voor thuisladen (incl. en excl. btw, per gewest); (4) een dossier zonder wagens (bv. demo via onderwerp «Betere Lader THU|KMO|LOG») opent met één lege wagenrij. -->
+<!-- beterladen.html v0.9.2 (2026-11-19, Johan): het totale laadvermogen per horizon (Σ laadpunten × kW per wagentype) gaat mee als cap_kw naar /api/bl/ruimte (bl-ruimte ≥ 1.3.3) — een mix met snelle vrachtwagenpalen rekende anders álle punten aan 50 kW (te hoge piek en kost zonder sturing). -->
+<!-- beterladen.html v0.9.1 (2026-11-19, Johan): (1) conclusie «snelle palen en sturing gaan samen» in de piekkaart zodra er palen > 22 kW zijn; (2) blok «Snelladen tijdens laden en lossen?» (logistiek of zware wagens): laadbeurten/dag, tijd aan de kade, kWh/beurt, van–tot, knop «Vraag een Energie-Compas-studie» → /api/bl/snelladen (server ≥ 15.450.0): Energie-Compas-dossier klaargezet + mail naar Fluctus (LEAD_MAIL_TO). -->
+<!-- beterladen.html v0.9.0 (2026-11-19, Johan): CABINE EN INGREEP — bij een bedrijf op MS schat de server (bl-ruimte 1.3.0, server ≥ 15.450.0) de cabine als de marktmaat (100/250/400/630/800/1000/1500/2000 kVA) net boven de piek op de factuur. Per horizon: past slim laden onder het toegangsvermogen (✓), enkel onder de cabine (! = toegangsvermogen verhogen, contract) of niet (✕ = ingreep op de aansluiting). Kaart «Wanneer bots ik op de grens» zegt welke; het blok «Nog goedkoper rijden?» krijgt een duidelijke waarschuwing met de gratis studie na de kwaliteitscheck. Het laadplan rekent gewoon door. -->
+<!-- beterladen.html v0.8.2 (2026-11-19, Johan): GEEN PROFIELKEUZE MEER — de keuzelijst «Hoe werkt je bedrijf?» is weg; de ruimte op de aansluiting volgt uit de loadfactor van de factuur (jaarverbruik, piek, dag/nacht). Vormprofiel vast: kmo/logistiek = «Industrie met zomersluiting» (herbouwd, LF ± 33 %, server ≥ 15.450.0), thuisladen = residentieel; ook bij heropenen van een dossier. -->
+<!-- beterladen.html v0.8.1 (2026-11-19, Johan): de wagens die naar Energie-Compas gaan zijn die van «over 1 jaar» (was «over 2 jaar»). -->
+<!-- beterladen.html v0.8.0 (2026-11-18, Johan): «Volledige analyse met batterij en zonnepanelen» vervangen door het blok «Nog goedkoper rijden?» (ook op de PDF): gratis analyse van de aansluiting na de installatie van de eerste laadpalen door de partner, in ruil voor een kwaliteitsenquête; projectcode bijhouden. Nieuw scherm «Kwaliteitsenquête» (#s5, ook rechtstreeks via ?enquete=1): 9 stellingen helemaal akkoord … helemaal niet akkoord, opmerking, naam + telefoon; indienknop pas actief als alles is ingevuld → /api/bl/enquete. -->
+<!-- beterladen.html v0.7.5 (2026-11-18, Johan): wagenpark toont merk + model i.p.v. «Personenwagen» als we dat kennen; merk/model worden bij heropenen hersteld (keuzelijst of bewaarde waarden). -->
+<!-- beterladen.html v0.7.4 (2026-11-18, Johan): blok «Je wagenpark» onder de titel van het laadplan (scherm + PDF pagina 1): per wagentype aantallen nu/1/2/3 jaar, km/jaar, kWh/100 km, batterij en laadvermogen, plus waar en hoe lang ze laden en het verbruiksprofiel. -->
+<!-- beterladen.html v0.7.3 (2026-11-18, Johan): PDF IN SAFARI — Safari negeert paginabreuk-regels op flex-elementen: kaarten bij afdrukken als gewone blokken (icoon absoluut, uitleg rechts via float), paginabreuken via lege blok-elementen .pgbr (vóór «Wat levert slim laden op?» en vóór «Zo groeit je laadplein»). -->
+<!-- beterladen.html v0.7.2 (2026-11-18, Johan): PDF MET VASTE PAGINA-INDELING — p1: kop + 4 kaarten (wagens, laadpunten, vermogen, extra piek); p2: opbrengst, kost/100 km, grens, drukste laaddag; p3: groeitabel + checklist + indicatief. Kaarten als blokken (geen grid: grid-items negeren break-inside in sommige browsers), compacter lettertype en grafiek, harde paginabreuk (.pb). -->
+<!-- beterladen.html v0.7.1 (2026-11-18, Johan): wagenuitleg (kWh/dag, laadbeurt, laadtijd, 22 kW) achter een i; PDF: antwoordkaarten over de volle breedte met de uitleg rechts van de grafische delen, paginaverbrekingen die kaarten, koppen+tabel en checklist bij elkaar houden. -->
+<!-- beterladen.html v0.7.0 (2026-11-18, Johan): UITLEG ACHTER EEN i — alle kleine uitlegteksten (hoe iets berekend wordt: stap 1, de antwoordkaarten, daggrafiek, indicatief, hero) zitten achter een i-knopje dat een modal opent; bij afdrukken staan ze wel uitgeschreven. Gemiddeld verbruik in de laaduren zonder de korte pieken (bl-ruimte 1.2.1). -->
+<!-- beterladen.html v0.6.2 (2026-11-18, Johan): uitleg piekcorrectie in stap 1 (bl-ruimte 1.2.0 legt korte kwartierpieken tot de gemeten maandpiek op het gladde standaardprofiel). -->
+<!-- beterladen.html v0.6.1 (2026-11-18, Johan): grafiek = de DRUKSTE laaddag (eigen verbruik van die dag + laden, hoogste piek over alle dagen) i.p.v. een gemiddelde; netkost zonder sturing als VORK (beste geval: laden bovenop je verbruik van die dag; slechtste geval: bovenop je hoogste kwartier), €/kW uit de tariefkaart van je netbeheerder; kost per 100 km met een dynamisch contract incl. opslag, certificaten, netkost per kWh en accijns (excl. btw). -->
+<!-- beterladen.html v0.6.0 (2026-11-18, Johan): KWARTIERANALYSE — niet meer «toegangsvermogen − piek» (= één kwartier per maand), maar een synthetisch jaarprofiel (sectorprofiel × jaarverbruik × dag/nacht van de factuur) via /api/bl/ruimte: hoeveel energie kan er door de aansluiting tijdens de uren dat de wagens er staan. Keuze verbruiksprofiel in stap 1, daggrafiek, slim vs zonder sturing in €/100 km (extra piek aan € 100/kW/jaar + goedkopere spoturen), toegangsvermogen dat volstaat. Jaarverbruik uit de factuur (jaarverbruikKwh) i.p.v. maand × 12. -->
+<!-- beterladen.html v0.5.0 (2026-11-18, Johan): HELE PAGINA IN DE STIJL VAN DE RESULTATEN — voortgangsbalk (factuur → wagens → laadplan), stapkoppen met icoon in partnerkleur, factuur als 3 tegels + balk bezet/vrij op de aansluiting, keuzechips met icoon, wagenrijen met accentrand, groeitabel en checklist «Vraag bij je offerte» met iconen, offerteblok als kader. -->
+<!-- beterladen.html v0.4.1 (2026-11-18): icoonvlak in de accentkleur van de partner; eenheid onder het kerncijfer (geen grote regelafstand meer). -->
+<!-- beterladen.html v0.4.0 (2026-11-18, Johan): RESULTATEN GRAFISCHER — 7 kaarten (2 kolommen) met icoon in partnerkleur, groot kerncijfer, mini-staafjes (wagens, laadpunten, vermogen dom/wisselen/slim/vrij, €/100 km), besparing met pil «dynamisch contract» en tijdlijn nu/1/2/3 jaar (✓ past / ✕ niet). Print: zelfde kaarten. -->
+<!-- beterladen.html v0.3.0 (2026-11-18, Johan): factuur al ingelezen (mail-instap, terugkeer of net opgeladen) → het opladen-vak verdwijnt; naast «✓ Je factuur is al ingelezen — dossier …» staat een klein knopje «↻ Opnieuw opladen». -->
+<!-- beterladen.html v0.2.0 (2026-11-18): «Volledige analyse» = KOPIE naar een nieuw Energie-Compas-dossier (/api/bl/naar-compas); manager-weergave via MijnEC-sessie (projecten.html → laadplan); dossiernummer bovenaan. v0.1.1 (2026-11-18): partner ook uit het pad (www.energie-compas.eu/pluon, /dieteren) — Railway-plan laat geen extra custom domains toe. v0.1.0 (2026-11-17, Johan): BETERE LADER — eenvoudige laadtool per partner (D'Ieteren Energy, PLUON).
+     Flow: factuur-PDF → wagens (voertuigtabel) → mail + 6 cijfers → laadplan + offerteaanvraag. Partner via ?p= of subdomein.
+     Server: /api/bl/* (fluctus-proxy ≥ 15.433.0). Eén dossier (FLX) → «Volledige analyse» opent hetzelfde dossier in de EK. -->
+<style>
+:root{--navy:#003658;--groen:#6BAE41;--p:#003658;--a:#6BAE41;--pt:#fff;--ink:#1F2937;--muted:#6B7280;--line:#E5E7EB;--bg:#F6F8FB;--ok:#0E7A3E;--warn:#B45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--p)}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px 40px}
+header.top{background:#fff;border-bottom:1px solid var(--line)}
+header.top .in{max-width:760px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px;justify-content:space-between}
+.plogo{height:38px;display:flex;align-items:center}
+.plogo img{max-height:38px;max-width:180px;display:block}
+.plogo.donker{background:#000;border-radius:8px;padding:6px 10px}
+.bllogo{height:30px}
+.met{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.taal{display:flex;gap:4px}.taal button{font:600 12px/1 inherit;padding:5px 7px;border:1px solid #D6E0EC;background:#fff;color:#4B5563;border-radius:6px;cursor:pointer}.taal button.aan{background:#003658;border-color:#003658;color:#fff}
+.hero{padding:28px 0 8px}
+.hero h1{font-size:28px;line-height:1.2;margin:0 0 10px;color:var(--p)}
+.hero p{margin:0 0 6px;color:#374151}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0}
+.stap{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+h2{font-size:20px;margin:0 0 10px}
+.btn{display:inline-block;border:0;border-radius:10px;background:var(--p);color:#fff;font:inherit;font-weight:700;padding:12px 18px;cursor:pointer;text-decoration:none}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:#fff;color:var(--p);border:1.5px solid var(--p)}
+.btn.klein{padding:7px 12px;font-size:14px}
+.drop{display:block;border:2px dashed #C9D3E0;border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:#FAFBFD}
+.drop:hover{border-color:var(--p)}
+.msg{font-size:14px;margin-top:10px}
+.msg.fout{color:#B91C1C}
+.msg.ok{color:var(--ok)}
+@media print{#snel{display:none!important}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px;margin-top:10px}
+.kv b{font-weight:600}
+.haak{background:color-mix(in srgb,var(--a) 14%,#fff);border-left:4px solid var(--a);border-radius:8px;padding:12px 14px;margin-top:14px;font-size:15px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;cursor:pointer;font:inherit;font-size:14px}
+.chip.aan{border-color:var(--p);background:var(--p);color:#fff}
+.wrij{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:#FCFDFE}
+.wrij .r1{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wrij .r2{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.wrij .r3{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--muted)}
+label.l{display:block;font-size:12px;color:var(--muted);margin-bottom:2px}
+select,input{width:100%;font:inherit;font-size:15px;padding:9px 10px;border:1px solid #C9D3E0;border-radius:9px;background:#fff;color:var(--ink);min-width:0}
+input[type=number]{-moz-appearance:textfield}
+.wauto{font-size:13px;color:var(--muted);margin-top:6px}
+.code{letter-spacing:6px;font-size:22px;text-align:center;max-width:220px}
+.rij{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.vragen{display:grid;gap:10px;margin-top:6px}
+.v{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.v .q{font-size:13px;color:var(--muted);font-weight:600}
+.v .a{font-size:17px;margin-top:2px}
+.v .s{font-size:13px;color:var(--muted);margin-top:2px}
+table.hz{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+table.hz th,table.hz td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right}
+table.hz th:first-child,table.hz td:first-child{text-align:left}
+table.hz th{font-size:12px;color:var(--muted);font-weight:600}
+.ok{color:var(--ok);font-weight:600}.nok{color:var(--warn);font-weight:600}
+.tabwrap{overflow-x:auto}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0}
+.check input{width:auto;margin-top:3px}
+.klein{font-size:13px;color:var(--muted)}
+.verborgen{display:none!important}
+footer{border-top:1px solid var(--line);background:#fff;margin-top:30px}
+footer .in{max-width:760px;margin:0 auto;padding:16px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+footer img{height:22px}
+.a4kop{display:none}
+/* v0.4.0 (Johan 18-11): resultaten grafischer — kaarten met icoon in partnerkleur, groot kerncijfer en mini-grafiekjes */
+.vragen{grid-template-columns:1fr 1fr}
+.v{display:flex;gap:12px;align-items:flex-start;background:#fff;padding:14px}
+.v.breed{grid-column:1/-1}
+.ic{flex:0 0 42px;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--a) 24%,#fff);color:var(--p)}
+.ic svg{width:24px;height:24px}
+/* v0.5.0 (Johan 18-11): hele pagina in dezelfde stijl als de resultaten */
+.kop{display:flex;gap:12px;align-items:center;margin-bottom:12px}.kop .stap{margin:0}.kop h2{margin:0}
+.voortgang{display:flex;gap:8px;margin:14px 0 4px;flex-wrap:wrap}
+.voortgang .vs{flex:1;min-width:150px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:13px;font-weight:600;color:var(--muted)}
+.voortgang .vs .ic{flex-basis:30px;width:30px;height:30px;border-radius:9px;background:#F1F4F8;color:#94A3B8}.voortgang .vs .ic svg{width:18px;height:18px}
+.voortgang .vs.aan{border-color:var(--p);color:var(--ink)}.voortgang .vs.aan .ic{background:var(--p);color:#fff}
+.voortgang .vs.klaar .ic{background:color-mix(in srgb,var(--a) 24%,#fff);color:var(--p)}.voortgang .vs.klaar{color:var(--ink)}
+.tegels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.tegel{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff}
+.tegel .k{font-size:12px;color:var(--muted);font-weight:600}.tegel .w{font-size:22px;font-weight:800;color:var(--p);line-height:1.2;margin-top:2px}.tegel .e{font-size:12px;color:var(--muted)}
+.wie{font-size:13px;color:var(--muted);margin-top:10px}.wie b{color:var(--ink);font-weight:600}
+.cap{display:flex;height:14px;border-radius:7px;overflow:hidden;background:#EEF2F7;margin:10px 0 4px}
+.cap i{display:block;height:100%}.cap .bez{background:#94A3B8}.cap .vrij{background:var(--a)}
+.caplbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);flex-wrap:wrap;gap:6px}
+.caplbl b{color:var(--ink)}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:6px;border-radius:50%;border:1.5px solid var(--p);background:#fff;color:var(--p);font:700 11px/1 Georgia,serif;font-style:italic;cursor:pointer;vertical-align:middle;padding:0;flex:none}
+.ib:hover,.ib:focus-visible{background:var(--p);color:#fff;outline:none}
+.sprint{display:none}
+#imod{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:1000}
+#imod.verborgen{display:none}
+#imod .box{background:#fff;border-radius:14px;max-width:520px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-height:80vh;overflow:auto}
+#imod .kopm{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}
+#imod h3{margin:0;font-size:16px;color:var(--p)}#imod .tekst{font-size:14.5px;line-height:1.55;color:var(--ink);white-space:pre-line}
+#imod .sluit{border:0;background:none;font-size:22px;line-height:1;cursor:pointer;color:#64748B;padding:0 2px}
+@media print{.ib,#imod{display:none!important}.sprint{display:block}}
+.pgbr{display:none}
+.goedk{margin-top:16px}.goedk p{margin:6px 0}.goedk .pcode{font-size:14px}.goedk .pcode b{color:var(--p);font-size:16px;letter-spacing:.03em}
+.evr{border-top:1px solid var(--line);padding:10px 0}.evr .st{font-weight:600;margin-bottom:6px}
+.likert{display:flex;flex-wrap:wrap;gap:6px}.likert label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:13px;cursor:pointer;background:#fff}
+.likert input{margin:0;width:auto!important;padding:0;flex:none}.likert label{white-space:nowrap;width:auto!important;justify-content:flex-start;margin:0}.likert label:has(input:checked){border-color:var(--p);background:color-mix(in srgb,var(--a) 22%,#fff);font-weight:600}
+@media print{#s5{display:none!important}.goedk{break-inside:avoid;page-break-inside:avoid;border:1px solid var(--line);border-radius:12px;padding:10px 12px}}
+.wpark{border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px 12px;margin:10px 0 12px}
+.wpark .wt{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.wpark table{width:100%;border-collapse:collapse;font-size:13px}.wpark th,.wpark td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}
+.wpark th{font-size:11.5px;color:var(--muted);font-weight:600;white-space:nowrap}.wpark td{white-space:nowrap}.wpark td:first-child{white-space:normal}.wpark th:first-child,.wpark td:first-child{text-align:left}.wpark tr:last-child td{border-bottom:0}
+.wpark .wm{font-size:12.5px;color:var(--muted);margin-top:6px}
+@media (max-width:640px){.wpark .opt{display:none}}
+@media print{.wpark{padding:6px 10px;margin:6px 0 8px;break-inside:avoid;page-break-inside:avoid}.wpark table{font-size:11px}.wpark th{font-size:10px}.wpark .wm{font-size:10.5px;margin-top:3px}.wpark .opt{display:table-cell}}
+.dagchart{margin:10px 0 4px}.dagchart svg{width:100%;height:auto;display:block}
+.lgd{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:4px}.lgd i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.lgd i.ln{height:0;border-top:2px solid;border-radius:0}.lgd i.ds{height:0;border-top:2px dashed;border-radius:0}
+.prof{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:10px}.prof select{width:auto;min-width:240px;padding:6px 8px}
+.chip{display:inline-flex;align-items:center;gap:6px}.chip svg{width:17px;height:17px}
+.wrij{border-left:4px solid var(--a);background:#fff}
+.tabwrap{border:1px solid var(--line);border-radius:12px;margin-top:12px}
+table.hz{margin-top:0}table.hz th{background:color-mix(in srgb,var(--a) 14%,#fff);color:var(--ink);font-size:12.5px}
+table.hz td:first-child,table.hz th:first-child{text-align:left;padding-left:12px}
+table.hz tr:last-child td{border-bottom:0}
+.ok,.nok{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12.5px}
+.ok{background:color-mix(in srgb,var(--ok) 13%,#fff)}.nok{background:#FDECEC;color:#B91C1C}
+.krap{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12.5px;background:#FEF3C7;color:#92400E;font-weight:600}
+.vraagbij{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:8px 0 0;padding:0;list-style:none;font-size:13.5px}
+.vraagbij li{display:flex;gap:8px;align-items:flex-start}.vraagbij svg{flex:0 0 18px;width:18px;height:18px;color:var(--p);margin-top:1px}
+.blok{margin-top:16px;border:1px solid color-mix(in srgb,var(--a) 45%,#fff);background:color-mix(in srgb,var(--a) 9%,#fff);border-radius:14px;padding:14px}
+@media (max-width:640px){.tegels{grid-template-columns:1fr 1fr}.vraagbij{grid-template-columns:1fr}.voortgang .vs{min-width:0}.voortgang .vs span{display:none}}
+.v .in{flex:1;min-width:0}
+.v .q{font-size:12.5px}
+.v .groot{font-size:26px;font-weight:800;line-height:1.15;color:var(--p);margin-top:4px}
+.v .groot small{display:block;font-size:13.5px;font-weight:600;line-height:1.35;color:var(--ink);margin-top:2px}
+.v .s{margin-top:4px}
+.v .pil{display:inline-block;margin-top:6px;font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 10px;background:color-mix(in srgb,var(--a) 18%,#fff);color:var(--ink)}
+.bars{margin-top:8px;display:grid;gap:5px}
+.bar{display:grid;grid-template-columns:118px 1fr auto;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.bar .t{height:9px;border-radius:5px;background:#EEF2F7;overflow:hidden}
+.bar .t i{display:block;height:100%;border-radius:5px;background:#CBD5E1}
+.bar.hl .t i{background:var(--p)}
+.bar.acc .t i{background:var(--a)}
+.bar b{color:var(--ink);font-weight:700;white-space:nowrap}
+.tl{display:flex;gap:6px;margin-top:10px}
+.tl .st{flex:1;text-align:center;font-size:12px;color:var(--muted)}
+.tl .dot{height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;margin-bottom:4px}
+.tl .ja .dot{background:color-mix(in srgb,var(--ok) 14%,#fff);color:var(--ok)}
+.tl .nee .dot{background:#FDECEC;color:#B91C1C}
+.tl .deels .dot{background:#FEF3C7;color:#B45309}
+.ingreep{border-left:4px solid #B91C1C;background:#FDECEC;padding:10px 12px;border-radius:8px;margin:10px 0;color:#7F1D1D}
+.ingreep.toeg{border-left-color:#B45309;background:#FEF3C7;color:#78350F}
+.tl .leeg .dot{background:#F3F4F6;color:#9CA3AF}
+@media (max-width:640px){.vragen{grid-template-columns:1fr}.bar{grid-template-columns:96px 1fr auto}}
+@media print{.vragen{grid-template-columns:1fr;gap:8px}.v{break-inside:avoid;page-break-inside:avoid;padding:10px 12px}.ic,.bar .t i,.tl .dot,.tegel,table.hz th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .v{display:block!important;position:relative;padding-left:58px!important;overflow:hidden}
+  .v>.ic{position:absolute;left:12px;top:10px}
+  .v .in{display:block}
+  .v:not(.breed) .in>.s.sprint{float:right;width:44%;margin:0 0 0 4%;font-size:11.5px;line-height:1.45;border-left:2px solid var(--line);padding-left:12px}
+  .v:not(.breed) .in>*:not(.s){margin-right:48%}
+  .v:not(.breed) .in>.q{margin-right:0}
+  .v .groot{font-size:22px}.v .bars{max-width:340px}
+  .kop{break-after:avoid;page-break-after:avoid}.kop+*{break-before:avoid;page-break-before:avoid}
+  .tabwrap,table.hz,ul.vraagbij,.dagchart,.tl{break-inside:avoid;page-break-inside:avoid}
+  span.sprint{display:inline}#rsub{margin-bottom:6px}
+  /* v0.7.2: vaste pagina-indeling */
+  .vragen{display:block}.vragen>.v{margin:0 0 7px}
+  .pgbr{display:block!important;height:0;margin:0;padding:0;border:0;break-before:page;page-break-before:always}
+  .pgbr+.kop,.pgbr+.v{margin-top:0!important}
+  .v{padding:8px 12px}.v .q{font-size:11.5px}.v .groot{font-size:20px;margin-top:2px}.v .groot small{font-size:12px}
+  .bar{font-size:11px;grid-template-columns:120px 1fr auto}.bars{gap:3px;margin-top:5px}
+  .dagchart svg{height:170px}.lgd{font-size:10.5px}.tl{margin-top:6px}.v:not(.breed) .in>.s.sprint{font-size:11px;line-height:1.4}.v.breed .s.sprint{font-size:11px}
+  .a4kop{margin-bottom:6px}.kop{margin-bottom:8px}}
+@media (max-width:520px){.hero h1{font-size:23px}.wrij .r2{grid-template-columns:repeat(2,1fr)}.plogo img{max-width:130px}}
+@media print{
+  body{background:#fff}header.top,footer,.hero,.noprint,.voortgang,#s1,#s2,#s3{display:none!important}
+  .card{border:0;padding:0;margin:0}.a4kop{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--p);padding-bottom:8px;margin-bottom:10px}
+  .wrap{max-width:none;padding:0}@page{size:A4;margin:14mm}
+}
+
+/* v0.11.0 (Johan 20-11): look & feel — grote icoontegels, één resultaatpaneel, uitleg in de PDF-bijlage */
+.vkop{font-size:22px;font-weight:800;color:var(--navy);text-align:center;margin:22px 0 12px;line-height:1.25}
+#dg.chips{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+#dg .chip{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;padding:18px 10px;font-weight:700;color:var(--navy);border:1.5px solid #C9D3E0;background:#fff;min-height:128px;text-align:center;line-height:1.25}
+#dg .chip svg{width:50px;height:50px}
+#dg .chip.aan{background:color-mix(in srgb,var(--a) 12%,#fff);border-color:var(--a);color:var(--navy);box-shadow:0 2px 10px rgba(0,54,88,.08)}
+.tegels{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:6px}
+.tegel2{border:1.5px solid #C9D3E0;background:#fff;border-radius:16px;padding:14px 6px 12px;cursor:pointer;font:inherit;font-weight:800;font-size:17px;color:var(--navy);display:flex;flex-direction:column;align-items:center;gap:6px;line-height:1.15}
+.tegel2 svg{width:40px;height:40px}
+.tegel2 small{font-weight:500;color:var(--muted);font-size:12px}
+.tegel2.aan{background:color-mix(in srgb,var(--a) 12%,#fff);border-color:var(--a);box-shadow:0 2px 10px rgba(0,54,88,.08)}
+@media(max-width:560px){#dg .chip{font-size:13px;padding:12px 6px;min-height:112px}#dg .chip svg{width:42px;height:42px}.tegels{grid-template-columns:repeat(3,1fr)}.vkop{font-size:19px}}
+.samen{background:#0B2E4A;color:#fff;border-radius:22px;padding:26px 24px 20px;margin:16px 0}
+.samen h3{font-size:32px;font-weight:800;text-align:center;margin:0 0 20px;color:#fff;letter-spacing:-.01em}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px}
+.sk{display:flex;gap:14px;align-items:center}
+.sk svg{width:58px;height:58px;flex:0 0 58px;color:#8CCB63}
+.sk .l{font-size:15px;font-weight:700;line-height:1.3;color:#E5EDF5}
+.sk .l em{font-style:normal;color:#8CCB63}
+.sk .g{font-size:30px;font-weight:800;line-height:1.1;margin:3px 0 2px;color:#fff}
+.sk .s{font-size:13px;color:#B9C7D6;line-height:1.35}
+.sk.krap .g{color:#FCD34D}.sk.nee .g{color:#FCA5A5}
+.samen .vt{font-size:13px;color:#B9C7D6;text-align:center;margin:20px 0 0}
+.samen .pdfk{display:flex;justify-content:center;margin-top:14px}
+.btn.licht{background:#fff;color:#0B2E4A;display:inline-flex;align-items:center;gap:8px}
+.btn.licht svg{width:22px;height:22px}
+@media(max-width:560px){.sgrid{grid-template-columns:1fr;gap:18px}.sk .g{font-size:26px}.samen h3{font-size:26px}.samen{padding:22px 16px 18px}}
+.pdfdeel,.bijlkop{display:none}
+@media print{.samen{-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid;page-break-inside:avoid;padding:18px 20px 14px}.samen .pdfk{display:none}.samen .vt{margin-top:12px}
+  .pdfdeel{display:block}.pgbr0{break-before:page;page-break-before:always;height:0}
+  .bijlkop{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--a);padding-bottom:4px;margin:0 0 10px}
+  .pdfdeel .v .ic{transform:scale(.8);transform-origin:top left}}
+</style>
+</head>
+<body>
+<script>
+/* beterladen.html v0.10.0 (2026-11-20, Johan): Betere Lader in NL/FR/EN. Taal: ?lang= (knop in de mail) › taal van het dossier › laatste keuze op dit toestel › NL.
+   De pagina blijft in het Nederlands geschreven; deze laag vertaalt elke tekst (ook wat later door het script verschijnt) via de tabel BL_I18N
+   (Nederlands fragment → [FR, EN]; langste fragment eerst, enkel op woordgrenzen). Een ontbrekend fragment blijft gewoon Nederlands. */
+(function(){
+  var L=['nl','fr','en'], q=(new URLSearchParams(location.search).get('lang')||'').toLowerCase(), l=q;
+  if(L.indexOf(l)<0){ try{ l=localStorage.getItem('bl_lang')||''; }catch(e){ l=''; } }
+  if(L.indexOf(l)<0) l='nl';
+  window.BL_LANG=l; window.BL_LANG_URL=L.indexOf(q)>=0?q:''; window.BL_LOC={nl:'nl-BE',fr:'fr-BE',en:'en-GB'}[l];
+  try{ if(window.BL_LANG_URL) localStorage.setItem('bl_lang',l); }catch(e){}
+  document.documentElement.lang=l;
+  var D={"Als we niet slim samen laden, kan straks niemand nog laden.":["Si nous ne rechargeons pas intelligemment ensemble, bientôt plus personne ne pourra recharger.","If we don't charge smartly together, soon nobody will be able to charge."],"Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar. Een service van":["Découvrez en 2 minutes combien de points de recharge il vous faut, quelle puissance a du sens et ce qui tient sur votre raccordement. Aujourd’hui et pour les 3 prochaines années. Un service de","Find out in 2 minutes how many charge points you need, which power makes sense and what fits on your grid connection. Now and for the next 3 years. A service by"],"Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar.":["Découvrez en 2 minutes combien de points de recharge il vous faut, quelle puissance a du sens et ce qui tient sur votre raccordement. Aujourd’hui et pour les 3 prochaines années.","Find out in 2 minutes how many charge points you need, which power makes sense and what fits on your grid connection. Now and for the next 3 years."],"Onafhankelijke berekening":["Calcul indépendant","Independent calculation"],"1 · Je factuur":["1 · Votre facture","1 · Your invoice"],"2 · Je wagens":["2 · Vos véhicules","2 · Your vehicles"],"3 · Je laadplan":["3 · Votre plan de recharge","3 · Your charging plan"],"Stap 1 van 3":["Étape 1 sur 3","Step 1 of 3"],"Stap 2 van 3":["Étape 2 sur 3","Step 2 of 3"],"Stap 3 van 3":["Étape 3 sur 3","Step 3 of 3"],"Je energiefactuur (PDF)":["Votre facture d’énergie (PDF)","Your energy invoice (PDF)"],"Kies je factuur (PDF)":["Choisissez votre facture (PDF)","Choose your invoice (PDF)"],"Je jaarafrekening of een recente maandfactuur. We lezen ze automatisch in.":["Votre décompte annuel ou une facture mensuelle récente. Nous la lisons automatiquement.","Your annual statement or a recent monthly invoice. We read it automatically."],"Liever mailen? Stuur je factuur naar":["Vous préférez l’e-mail ? Envoyez votre facture à","Prefer e-mail? Send your invoice to"],". Je krijgt een link terug.":[". Vous recevez un lien en retour.",". You will receive a link in return."],"Industrie met zomersluiting":["Industrie avec fermeture estivale","Industry with summer shutdown"],"Industrie zonder zomersluiting":["Industrie sans fermeture estivale","Industry without summer shutdown"],"Kantoor":["Bureau","Office"],"Residentieel":["Résidentiel","Residential"],"Klopt het toegangsvermogen niet?":["La puissance de raccordement n’est pas correcte ?","Is the contracted capacity incorrect?"],"Pas aan":["Modifier","Adjust"],"Verder: je wagens":["Suivant : vos véhicules","Next: your vehicles"],"Je wagens, nu en de komende 3 jaar":["Vos véhicules, aujourd’hui et pour les 3 prochaines années","Your vehicles, now and for the next 3 years"],"Waar laden ze?":["Où rechargent-ils ?","Where do they charge?"],"Thuis (woning)":["À domicile (habitation)","At home (residence)"],"Bedrijf: personeelswagens":["Entreprise : voitures du personnel","Company: staff cars"],"Bedrijf: bestel- en vrachtwagens":["Entreprise : camionnettes et camions","Company: vans and trucks"],"+ Ander type wagen":["+ Autre type de véhicule","+ Other vehicle type"],"Hoe lang staan ze aan de laadpaal?":["Combien de temps restent-ils à la borne ?","How long are they at the charger?"],"± 4 uur":["± 4 heures","± 4 hours"],"± 6 uur":["± 6 heures","± 6 hours"],"± 8 uur (werkdag)":["± 8 heures (journée de travail)","± 8 hours (working day)"],"± 10 uur":["± 10 heures","± 10 hours"],"± 12 uur (nacht, 18–6 u)":["± 12 heures (nuit, 18–6 h)","± 12 hours (night, 6 pm–6 am)"],"Het aantal per periode is het totaal op dat moment (bv. nu 10, over 2 jaar 25).":["Le nombre par période est le total à ce moment-là (p. ex. aujourd’hui 10, dans 2 ans 25).","The number per period is the total at that moment (e.g. now 10, in 2 years 25)."],"Verder: bekijk je resultaat":["Suivant : voir votre résultat","Next: see your result"],"Waar mogen we je laadplan naartoe sturen?":["Où pouvons-nous envoyer votre plan de recharge ?","Where may we send your charging plan?"],"Stuur mijn code":["Envoyer mon code","Send my code"],"We stuurden een code van 6 cijfers naar":["Nous avons envoyé un code à 6 chiffres à","We sent a 6-digit code to"],"Bevestig":["Confirmer","Confirm"],"Nieuwe code":["Nouveau code","New code"],"Je laadplan":["Votre plan de recharge","Your charging plan"],"Nu en de komende 3 jaar":["Aujourd’hui et pour les 3 prochaines années","Now and for the next 3 years"],"Zo groeit je laadplein":["Ainsi grandit votre parc de recharge","How your charging site grows"],"Checklist":["Liste de contrôle","Checklist"],"Vraag bij je offerte":["À demander dans votre devis","Ask for in your quote"],"Stuurbare laadpalen (OCPP)":["Bornes pilotables (OCPP)","Controllable chargers (OCPP)"],"Dynamische load balancing":["Équilibrage de charge dynamique","Dynamic load balancing"],"Een MID-meter per laadpunt":["Un compteur MID par point de recharge","A MID meter per charge point"],"Badge of reservatie (nodig om te wisselen)":["Badge ou réservation (nécessaire pour alterner)","Badge or reservation (needed to rotate)"],"Koppelbaar met een energiebeheersysteem":["Connectable à un système de gestion de l’énergie","Connectable to an energy management system"],"Indicatieve berekening":["Calcul indicatif","Indicative calculation"],"Volgende stap":["Prochaine étape","Next step"],"Een offerte op maat":["Un devis sur mesure","A tailored quote"],"Ik wil dat mijn laadplan en gegevens naar de partner gaan en dat ik gecontacteerd word voor een offerte.":["Je souhaite que mon plan de recharge et mes données soient transmis au partenaire et être contacté pour un devis.","I want my charging plan and details to go to the partner and to be contacted for a quote."],"Ik wil dat mijn laadplan en gegevens naar":["Je souhaite que mon plan de recharge et mes données soient transmis à","I want my charging plan and details to go to"],"gaan en dat ik gecontacteerd word voor een offerte.":["et être contacté pour un devis.","and to be contacted for a quote."],"Vraag een offerte aan bij":["Demander un devis à","Request a quote from"],"Vraag een offerte aan":["Demander un devis","Request a quote"],"Download als PDF (A4)":["Télécharger en PDF (A4)","Download as PDF (A4)"],"Volledige analyse met batterij en zonnepanelen":["Analyse complète avec batterie et panneaux solaires","Full analysis with battery and solar panels"],"Vrachtwagens":["Camions","Trucks"],"Snelladen tijdens laden en lossen?":["Recharge rapide pendant le chargement et le déchargement ?","Fast charging during loading and unloading?"],"Laden je vrachtwagens ook bij tussen het laden en lossen door (bv. een uur aan de kade) en moeten ze dan weer vol? Dan gaat het om korte, hoge pieken die je niet met sturing alleen opvangt. Dat rekenen we apart door in een studie met Energie-Compas (laadpalen, batterijbuffer, aansluiting).":["Vos camions rechargent-ils aussi entre le chargement et le déchargement (p. ex. une heure au quai) et doivent-ils alors repartir pleins ? Il s’agit alors de pointes courtes et élevées que le pilotage seul n’absorbe pas. Nous les calculons séparément dans une étude avec Energie-Compas (bornes, batterie tampon, raccordement).","Do your trucks also top up between loading and unloading (e.g. an hour at the dock) and must they then leave full? Then you are dealing with short, high peaks that control alone cannot absorb. We calculate this separately in a study with Energie-Compas (chargers, battery buffer, grid connection)."],"Laadbeurten per dag":["Recharges par jour","Charging sessions per day"],"Tijd aan de kade (min)":["Temps au quai (min)","Time at the dock (min)"],"kWh per laadbeurt":["kWh par recharge","kWh per session"],"Van (uur)":["De (heure)","From (hour)"],"Tot (uur)":["À (heure)","To (hour)"],"Opmerking (optioneel)":["Remarque (facultatif)","Comment (optional)"],"Vraag een Energie-Compas-studie":["Demander une étude Energie-Compas","Request an Energie-Compas study"],"Na de installatie":["Après l’installation","After the installation"],"Nog goedkoper rijden?":["Rouler encore moins cher ?","Drive even cheaper?"],"Zodra":["Dès que","As soon as"],"je laadpartner":["votre partenaire de recharge","your charging partner"],"je eerste laadpalen heeft geplaatst, analyseren we gratis je aansluiting: kan je kost per kilometer nog omlaag, bijvoorbeeld met zonnepanelen, een batterij of een slimmer contract? In ruil vragen we je een korte kwaliteitsenquête over de installatiewerken in te vullen.":["aura installé vos premières bornes, nous analysons gratuitement votre raccordement : votre coût par kilomètre peut-il encore baisser, par exemple avec des panneaux solaires, une batterie ou un contrat plus intelligent ? En échange, nous vous demandons de remplir une courte enquête de qualité sur les travaux d’installation.","has installed your first chargers, we analyse your grid connection for free: can your cost per kilometre go down further, for example with solar panels, a battery or a smarter contract? In return we ask you to fill in a short quality survey about the installation works."],"Bewaar je projectcode goed:":["Conservez bien votre code de projet :","Keep your project code safe:"],". Je hebt ze nodig voor de enquête.":[". Vous en aurez besoin pour l’enquête.",". You will need it for the survey."],"Kwaliteitsenquête invullen":["Remplir l’enquête de qualité","Fill in the quality survey"],"Kwaliteitsenquête":["Enquête de qualité","Quality survey"],"Hoe verliep de installatie?":["Comment s’est déroulée l’installation ?","How did the installation go?"],"Geef bij elke stelling aan in hoeverre je akkoord gaat. Zodra alles is ingevuld, kan je de enquête indienen en vraag je meteen de gratis analyse van je aansluiting aan.":["Indiquez pour chaque affirmation dans quelle mesure vous êtes d’accord. Dès que tout est rempli, vous pouvez envoyer l’enquête et demander immédiatement l’analyse gratuite de votre raccordement.","For each statement, indicate how far you agree. Once everything is filled in, you can submit the survey and immediately request the free analysis of your grid connection."],"Projectcode":["Code de projet","Project code"],"Wat kan er beter? (optioneel)":["Que pourrait-on améliorer ? (facultatif)","What could be better? (optional)"],"Nog te beantwoorden: alle stellingen, je naam en je telefoonnummer.":["Encore à répondre : toutes les affirmations, votre nom et votre numéro de téléphone.","Still to answer: all statements, your name and your phone number."],"Enquête indienen en analyse aanvragen":["Envoyer l’enquête et demander l’analyse","Submit the survey and request the analysis"],"naam@bedrijf.be":["nom@entreprise.be","name@company.com"],"Telefoon (optioneel)":["Téléphone (facultatif)","Phone (optional)"],"Je naam":["Votre nom","Your name"],"Je telefoonnummer":["Votre numéro de téléphone","Your phone number"],"Personenwagen":["Voiture","Car"],"Bestelwagen":["Camionnette","Van"],"Lichte vracht":["Utilitaire léger","Light truck"],"Vrachtwagen":["Camion","Truck"],"het 3de kwartaal van 2026":["le 3e trimestre 2026","Q3 2026"],"het 4de kwartaal van 2026":["le 4e trimestre 2026","Q4 2026"],"het 1ste kwartaal van 2027":["le 1er trimestre 2027","Q1 2027"],"Brussel":["Bruxelles","Brussels"],"Wallonië":["Wallonie","Wallonia"],"Vlaanderen":["Flandre","Flanders"],"Uitleg":["Explication","Explanation"],"Hoe berekenen we dit?":["Comment calculons-nous cela ?","How do we calculate this?"],"Sluiten":["Fermer","Close"],"We rekenen op basis van je energiefactuur (toegangsvermogen, verbruik, hoogste kwartier) en een standaard verbruiksprofiel voor je soort bedrijf, kwartier per kwartier over een heel jaar. Je wagens tellen we met hun echte verbruik per km en laadvermogen.":["Nous calculons sur la base de votre facture d’énergie (puissance de raccordement, consommation, quart d’heure le plus élevé) et d’un profil de consommation standard pour votre type d’entreprise, quart d’heure par quart d’heure sur une année entière. Vos véhicules sont pris en compte avec leur consommation réelle par km et leur puissance de charge.","We calculate from your energy invoice (contracted capacity, consumption, highest quarter-hour) and a standard consumption profile for your type of business, quarter-hour by quarter-hour over a full year. Your vehicles count with their real consumption per km and charging power."],"Berekend op je factuur en een standaard verbruiksprofiel. Met je eigen kwartierdata (via een mandaat bij Fluvius) wordt het exact: dan kennen we elk kwartier van je verbruik, ook de korte pieken.":["Calculé sur votre facture et un profil de consommation standard. Avec vos propres données quart-horaires (via un mandat chez Fluvius), cela devient exact : nous connaissons alors chaque quart d’heure de votre consommation, y compris les pointes courtes.","Calculated from your invoice and a standard consumption profile. With your own quarter-hour data (via a mandate with Fluvius) it becomes exact: we then know every quarter-hour of your consumption, including the short peaks."],"Hoe rekenen we?":["Comment calculons-nous ?","How do we calculate?"],"Indicatief":["Indicatif","Indicative"],"Kon het bestand niet lezen":["Impossible de lire le fichier","Could not read the file"],"Toegangsvermogen":["Puissance de raccordement","Contracted capacity"],"wat je aansluiting mag":["ce que votre raccordement peut prélever","what your connection may draw"],"Verbruik":["Consommation","Consumption"],"MWh per jaar":["MWh par an","MWh per year"],"Huidige piek":["Pointe actuelle","Current peak"],"hoogste kwartier":["quart d’heure le plus élevé","highest quarter-hour"],"Verbruik op een gemiddelde laaddag":["Consommation lors d’un jour de recharge moyen","Consumption on an average charging day"],"Je verbruik (":["Votre consommation (","Your consumption ("],"die dag":["ce jour-là","that day"],"Laden, slim gestuurd":["Recharge, pilotée intelligemment","Charging, smart-controlled"],"Laden zonder sturing":["Recharge sans pilotage","Charging without control"],"Hoogste kwartier":["Quart d’heure le plus élevé","Highest quarter-hour"],"Wagens aanwezig":["Véhicules présents","Vehicles present"],"uur lang":["heures durant","hours long"],"Je hoogste kwartier (":["Votre quart d’heure le plus élevé (","Your highest quarter-hour ("],"kW) is een kort moment. Op de uren dat je wagens er staan (":["kW) est un bref moment. Pendant les heures où vos véhicules sont présents (","kW) is a brief moment. During the hours your vehicles are there ("],") verbruik je gemiddeld ±":[") vous consommez en moyenne ±",") you consume on average ±"],"(zonder de korte pieken)":["(sans les pointes courtes)","(without the short peaks)"],"Daardoor kan er per laaddag ±":["Ainsi, par jour de recharge, ±","As a result, per charging day ±"],"extra door je aansluiting, zonder je toegangsvermogen te overschrijden: genoeg voor ±":["supplémentaires peuvent passer par votre raccordement sans dépasser votre puissance de raccordement : assez pour ±","extra can go through your connection without exceeding your contracted capacity: enough for ±"],"personenwagens slim gestuurd":["voitures pilotées intelligemment","cars with smart control"],", tegenover":[", contre",", versus"],"als ze allemaal tegelijk laden.":["si elles rechargent toutes en même temps.","if they all charge at the same time."],"Berekend per kwartier over een heel jaar: profiel «":["Calculé par quart d’heure sur une année entière : profil «","Calculated per quarter-hour over a full year: profile «"],"» op je jaarverbruik van ±":["» sur votre consommation annuelle de ±","» on your annual consumption of ±"],"MWh (bron:":["MWh (source :","MWh (source:"],", dag/nacht zoals op je factuur":[", jour/nuit comme sur votre facture",", day/night as on your invoice"],". We houden 10 % marge onder je toegangsvermogen.":[". Nous gardons une marge de 10 % sous votre puissance de raccordement.",". We keep a 10 % margin below your contracted capacity."],"Je factuur toont een hoogste kwartier van":["Votre facture indique un quart d’heure le plus élevé de","Your invoice shows a highest quarter-hour of"],"kW, een standaardprofiel komt maar tot":["kW, un profil standard n’atteint que","kW, a standard profile only reaches"],"kW. Daarom voegen we korte pieken toe (één per werkdag, op een willekeurig tijdstip, tot je gemeten piek). Met je eigen kwartierdata wordt dit exact.":["kW. Nous ajoutons donc des pointes courtes (une par jour ouvrable, à un moment aléatoire, jusqu’à votre pointe mesurée). Avec vos propres données quart-horaires, cela devient exact.","kW. That is why we add short peaks (one per working day, at a random time, up to your measured peak). With your own quarter-hour data this becomes exact."],"Cabine:":["Cabine :","Substation:"],"door jou gekozen.":["choisie par vous.","chosen by you."],", geschat als de standaardmaat net boven je piek van":[", estimée comme la taille standard juste au-dessus de votre pointe de",", estimated as the standard size just above your peak of"],"geschat als de standaardmaat net boven je piek van":["estimée comme la taille standard juste au-dessus de votre pointe de","estimated as the standard size just above your peak of"],"Is je cabine groter? Kies de juiste maat: we rekenen dan met die cabine.":["Votre cabine est plus grande ? Choisissez la bonne taille : nous calculons alors avec cette cabine.","Is your substation larger? Choose the right size: we will then calculate with that substation."],"Bezet ±":["Occupé ±","In use ±"],"Vrij voor laden ±":["Libre pour la recharge ±","Free for charging ±"],"Aansluiting":["Raccordement","Grid connection"],"Op je aansluiting is nog ±":["Sur votre raccordement, il reste ±","On your connection there is still ±"],"vrij. Daarmee laad je ±":["de libre. Vous rechargez ainsi ±","free. With that you charge ±"],"personenwagens slim":["voitures intelligemment","cars smartly"],"Je aansluiting zit al dicht bij haar grens. Slim laden wordt hier het verschil tussen laden en verzwaren.":["Votre raccordement est déjà proche de sa limite. La recharge intelligente fait ici la différence entre recharger et renforcer.","Your connection is already close to its limit. Smart charging makes the difference here between charging and upgrading."],"Kies een PDF-bestand.":["Choisissez un fichier PDF.","Choose a PDF file."],"⏳ Je factuur wordt ingelezen (± 20 seconden)…":["⏳ Votre facture est en cours de lecture (± 20 secondes)…","⏳ Reading your invoice (± 20 seconds)…"],"We konden deze factuur niet lezen":["Nous n’avons pas pu lire cette facture","We could not read this invoice"],". Probeer een andere PDF of mail ze naar":[". Essayez un autre PDF ou envoyez-la par e-mail à",". Try another PDF or e-mail it to"],"✓ Factuur ingelezen.":["✓ Facture lue.","✓ Invoice read."],"Inlezen mislukt:":["Lecture échouée :","Reading failed:"],"↻ Opnieuw opladen":["↻ Charger à nouveau","↻ Upload again"],"Type":["Type","Type"],"Merk":["Marque","Make"],"Weet ik nog niet":["Je ne sais pas encore","Not sure yet"],"Model":["Modèle","Model"],"Typische wagen":["Véhicule type","Typical vehicle"],"Over 1 jaar":["Dans 1 an","In 1 year"],"Over 2 jaar":["Dans 2 ans","In 2 years"],"Over 3 jaar":["Dans 3 ans","In 3 years"],"km per jaar per wagen":["km par an par véhicule","km per year per vehicle"],"bedrijfswagen (CREG)":["véhicule de société (CREG)","company car (CREG)"],"Kies een model":["Choisissez un modèle","Choose a model"],"Zo laadt deze wagen":["Ainsi se recharge ce véhicule","How this vehicle charges"],"Typische":["Type","Typical"],"kWh per dag":["kWh par jour","kWh per day"],"rijdt ±":["roule ±","drives ±"],"werkdagen op één laadbeurt":["jours ouvrables sur une recharge","working days on one charge"],"laadt in ±":["se recharge en ±","charges in ±"],"u van 20 naar 90 % aan":["h de 20 à 90 %","h from 20 to 90 %"],"een paal van 22 kW heeft voor deze wagen geen zin (laadt max.":["une borne de 22 kW n’a pas de sens pour ce véhicule (charge max.","a 22 kW charger makes no sense for this vehicle (charges max."],"Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.":["Une analyse complète vaut alors la peine : une batterie ou des panneaux solaires peuvent éviter un renforcement.","Then a full analysis pays off: a battery or solar panels can avoid an upgrade."],"volstaat je toegangsvermogen (":["votre puissance de raccordement (","your contracted capacity ("],"kVA) niet meer, ook niet met slim laden. Je cabine":["kVA) ne suffit plus, même avec la recharge intelligente. Votre cabine","kVA) is no longer enough, not even with smart charging. Your substation"],"kan wel meer: verhoog je toegangsvermogen tot ±":["peut en revanche davantage : augmentez votre puissance de raccordement jusqu’à ±","can handle more: increase your contracted capacity to ±"],"kVA. Dat is een aanpassing van je contract bij de netbeheerder, geen werk aan de cabine.":["kVA. C’est une adaptation de votre contrat auprès du gestionnaire de réseau, pas de travaux à la cabine.","kVA. That is a change to your contract with the grid operator, not work on the substation."],"passen je wagens ook met slim laden niet meer":["vos véhicules ne tiennent plus, même avec la recharge intelligente,","your vehicles no longer fit, even with smart charging,"],"onder je cabine (":["sous votre cabine (","under your substation ("],"op je aansluiting":["sur votre raccordement","on your connection"],"halen je laadpalen de dagbehoefte niet binnen je laaduren: kies snellere palen of een langer laadvenster.":["vos bornes ne couvrent pas le besoin journalier dans vos heures de recharge : choisissez des bornes plus rapides ou une fenêtre de recharge plus longue.","your chargers do not meet the daily need within your charging hours: choose faster chargers or a longer charging window."],"Let op:":["Attention :","Note:"],"is een ingreep op je aansluiting nodig.":["une intervention sur votre raccordement est nécessaire.","an intervention on your connection is needed."],"is een ingreep op je aansluiting nodig":["une intervention sur votre raccordement est nécessaire","an intervention on your connection is needed"],"Met dit aantal wagens volstaat slim laden alleen niet meer. Bereid je erop voor: na de kwaliteitscheck van je eerste laadpalen bestuderen we gratis hoe je je aansluiting het best aanpast.":["Avec ce nombre de véhicules, la recharge intelligente seule ne suffit plus. Préparez-vous : après le contrôle de qualité de vos premières bornes, nous étudions gratuitement la meilleure façon d’adapter votre raccordement.","With this number of vehicles, smart charging alone is no longer enough. Be prepared: after the quality check of your first chargers we study for free how best to adapt your connection."],"moet je toegangsvermogen omhoog":["votre puissance de raccordement doit augmenter","your contracted capacity must go up"],"tot ±":["jusqu’à ±","to ±"],"Vul het aantal laadbeurten, de tijd aan de kade en de kWh per laadbeurt in.":["Indiquez le nombre de recharges, le temps au quai et les kWh par recharge.","Fill in the number of sessions, the time at the dock and the kWh per session."],"Je aanvraag wordt verstuurd…":["Votre demande est en cours d’envoi…","Sending your request…"],"Versturen lukte niet. Probeer het opnieuw.":["L’envoi a échoué. Veuillez réessayer.","Sending failed. Please try again."],"Bedankt! We nemen contact met je op voor de studie":["Merci ! Nous vous contacterons pour l’étude","Thank you! We will contact you about the study"],"· toegangsvermogen":["· puissance de raccordement","· contracted capacity"],"kWh per laaddag vrij om te laden":["kWh par jour de recharge libres pour recharger","kWh per charging day free for charging"],"nog ±":["encore ±","still ±"],"kW vrij voor laden":["kW libres pour la recharge","kW free for charging"],"Totaal":["Total","Total"],"op het werk (personeelswagens)":["au travail (voitures du personnel)","at work (staff cars)"],"op de eigen site (bestel- en vrachtwagens)":["sur votre propre site (camionnettes et camions)","on your own site (vans and trucks)"],"Je wagenpark":["Votre parc de véhicules","Your fleet"],"Wagen":["Véhicule","Vehicle"],"Batterij · laden":["Batterie · recharge","Battery · charging"],"Laden":["Recharge","Charging"],"uur aan de laadpaal":["heures à la borne","hours at the charger"],"per dag":["par jour","per day"],"per werkdag":["par jour ouvrable","per working day"],"· verbruiksprofiel «":["· profil de consommation «","· consumption profile «"],"», jaarverbruik ±":["», consommation annuelle ±","», annual consumption ±"],"zie je bevestigingsmail":["voir votre e-mail de confirmation","see your confirmation e-mail"],"incl. btw":["TVA incl.","incl. VAT"],"excl. btw":["hors TVA","excl. VAT"],"Hoeveel elektrische wagens kan ik laden op mijn huidige aansluiting?":["Combien de véhicules électriques puis-je recharger sur mon raccordement actuel ?","How many electric vehicles can I charge on my current connection?"],"wagens slim gestuurd":["véhicules pilotés intelligemment","vehicles with smart control"],"Zonder verzwaring, berekend per kwartier over een heel jaar.":["Sans renforcement, calculé par quart d’heure sur une année entière.","Without upgrade, calculated per quarter-hour over a full year."],"Zonder verzwaring.":["Sans renforcement.","Without upgrade."],"Slim gestuurd":["Pilotage intelligent","Smart-controlled"],"Allemaal tegelijk":["Tous en même temps","All at once"],"Hoeveel laadpunten heb ik nodig?":["De combien de points de recharge ai-je besoin ?","How many charge points do I need?"],"laadpunten voor":["points de recharge pour","charge points for"],"Minder punten dan wagens: een volle wagen rijdt meerdere dagen. Dat vraagt een badge of reservatie om te wisselen.":["Moins de points que de véhicules : un véhicule plein roule plusieurs jours. Cela demande un badge ou une réservation pour alterner.","Fewer points than vehicles: a full vehicle drives several days. That requires a badge or reservation to rotate."],"Elke wagen laadt dagelijks, dus één punt per wagen.":["Chaque véhicule recharge chaque jour, donc un point par véhicule.","Every vehicle charges daily, so one point per vehicle."],"Wagens":["Véhicules","Vehicles"],"Laadpunten":["Points de recharge","Charge points"],"Welk vermogen per laadpunt heeft zin?":["Quelle puissance par point de recharge a du sens ?","Which power per charge point makes sense?"],"per punt":["par point","per point"],"Begrensd op wat je wagens zelf kunnen laden. Meer vermogen kost meer en levert niets op.":["Limité à ce que vos véhicules peuvent eux-mêmes recharger. Plus de puissance coûte plus et ne rapporte rien.","Limited to what your vehicles can charge themselves. More power costs more and yields nothing."],"maandpiek €":["pointe mensuelle €","monthly peak €"],"per kW per jaar":["par kW par an","per kW per year"],"en, boven je toegangsvermogen, €":["et, au-delà de votre puissance de raccordement, €","and, above your contracted capacity, €"],"Hoeveel extra piek vraagt dat?":["Quelle pointe supplémentaire cela demande-t-il ?","How much extra peak does that require?"],"Geen extra piek":["Pas de pointe supplémentaire","No extra peak"],"slim gestuurd":["piloté intelligemment","smart-controlled"],"Zonder sturing ga je over je toegangsvermogen: verzwaren.":["Sans pilotage, vous dépassez votre puissance de raccordement : renforcement.","Without control you exceed your contracted capacity: upgrade."],"Slim gestuurd volstaat ±":["Avec pilotage intelligent, ±","With smart control ±"],"kW toegangsvermogen (nu":["kW de puissance de raccordement suffisent (aujourd’hui","kW contracted capacity is enough (now"],"Zonder sturing, slechtste geval":["Sans pilotage, pire des cas","Without control, worst case"],"Zonder sturing, drukste dag":["Sans pilotage, jour le plus chargé","Without control, busiest day"],"Snelle palen en sturing gaan samen: met":["Bornes rapides et pilotage vont de pair : avec","Fast chargers and control go together: with"],"kW per paal loopt je piek zonder sturing op tot":["kW par borne, votre pointe sans pilotage monte jusqu’à","kW per charger your peak without control rises to"],"kW, gestuurd blijft hij op":["kW ; avec pilotage, elle reste à","kW; controlled it stays at"],"Wat levert slim laden op?":["Que rapporte la recharge intelligente ?","What does smart charging deliver?"],"per 100 km goedkoper dan zonder sturing (":["par 100 km moins cher que sans pilotage (","per 100 km cheaper than without control ("],"Netkost van de extra piek:":["Coût réseau de la pointe supplémentaire :","Grid cost of the extra peak:"],". Laagste cijfer: onze jaarsimulatie, dag per dag je verbruik (met de korte pieken) plus het laden, per maand de hoogste piek. Hoogste cijfer: elke maand valt het laden samen met je hoogste kwartier. Slim laden kiest binnen de laaduren ook de goedkoopste uren op de spotmarkt. Dat vraagt een slimme laadpartner zoals":[". Chiffre le plus bas : notre simulation annuelle, jour par jour votre consommation (avec les pointes courtes) plus la recharge, par mois la pointe la plus haute. Chiffre le plus haut : chaque mois, la recharge coïncide avec votre quart d’heure le plus élevé. Dans les heures de recharge, la recharge intelligente choisit aussi les heures les moins chères sur le marché spot. Cela demande un partenaire de recharge intelligent comme",". Lowest figure: our annual simulation, day by day your consumption (with the short peaks) plus charging, per month the highest peak. Highest figure: every month charging coincides with your highest quarter-hour. Within the charging hours, smart charging also picks the cheapest hours on the spot market. That requires a smart charging partner such as"],"Netkost zonder sturing":["Coût réseau sans pilotage","Grid cost without control"],"Netkost slim":["Coût réseau intelligent","Grid cost smart"],"Goedkopere uren (spot)":["Heures moins chères (spot)","Cheaper hours (spot)"],"per jaar voor":["par an pour","per year for"],"Met een dynamisch contract: spotprijs + ± €":["Avec un contrat dynamique : prix spot + ± €","With a dynamic contract: spot price + ± €"],"per MWh (opslag":["par MWh (marge","per MWh (supplier margin"],", vergroening":[", écologisation",", greening"],", groenestroom- en WKK-certificaten":[", certificats verts et de cogénération",", green power and CHP certificates"],", netkost per kWh":[", coût réseau par kWh",", grid cost per kWh"],", accijns":[", accise",", excise"],"), plus de netkost van de extra piek.":["), plus le coût réseau de la pointe supplémentaire.","), plus the grid cost of the extra peak."],"Incl. 6 % btw (de onderdelen per MWh zijn excl. btw).":["TVA 6 % incl. (les composantes par MWh sont hors TVA).","Incl. 6 % VAT (the components per MWh are excl. VAT)."],"Excl. btw.":["Hors TVA.","Excl. VAT."],"Stroom aan je huidige prijs (± €":["Électricité à votre prix actuel (± €","Electricity at your current price (± €"],"per kWh), plus de netkost van de extra piek.":["par kWh), plus le coût réseau de la pointe supplémentaire.","per kWh), plus the grid cost of the extra peak."],"Wat kost een kilometer elektrisch rijden?":["Combien coûte un kilomètre en électrique ?","What does a kilometre of electric driving cost?"],"per 100 km met slim laden (":["par 100 km avec recharge intelligente (","per 100 km with smart charging ("],"Slim laden":["Recharge intelligente","Smart charging"],"Zonder sturing":["Sans pilotage","Without control"],"Wat kost een kWh thuis laden, tegenover de CREG-vergoeding?":["Combien coûte un kWh rechargé à domicile, par rapport à l’indemnité CREG ?","What does a kWh of home charging cost, compared to the CREG reimbursement?"],"per kWh met slim laden (incl. btw)":["par kWh avec recharge intelligente (TVA incl.)","per kWh with smart charging (incl. VAT)"],"Laadt een werknemer thuis een bedrijfswagen, dan mag de werkgever dat terugbetalen tegen het CREG-tarief: in":["Si un travailleur recharge un véhicule de société à domicile, l’employeur peut le rembourser au tarif CREG : en","If an employee charges a company car at home, the employer may reimburse it at the CREG rate: in"],"per kWh in":["par kWh en","per kWh in"],", zonder sturing ±":[", sans pilotage ±",", without control ±"],"(incl. btw). Zelfde basis als de kost per 100 km: dynamisch contract, netkost van de extra piek, heffingen en accijns.":["(TVA incl.). Même base que le coût par 100 km : contrat dynamique, coût réseau de la pointe supplémentaire, prélèvements et accise.","(incl. VAT). Same basis as the cost per 100 km: dynamic contract, grid cost of the extra peak, levies and excise."],"per jaar":["par an","per year"],"de CREG-vergoeding, voor ±":["l’indemnité CREG, pour ±","the CREG reimbursement, for ±"],"kWh van de bedrijfswagen":["kWh du véhicule de société","kWh of the company car"],"Duid bij je wagens de bedrijfswagen aan om het verschil per jaar te zien.":["Indiquez le véhicule de société parmi vos véhicules pour voir la différence par an.","Mark the company car among your vehicles to see the difference per year."],"Hoeveel extra vermogen vraagt dat?":["Quelle puissance supplémentaire cela demande-t-il ?","How much extra power does that require?"],"Elke wagen een paal":["Une borne par véhicule","A charger per vehicle"],"Met wisselen (max.)":["En alternant (max.)","With rotation (max.)"],"Vrij op je aansluiting":["Libre sur votre raccordement","Free on your connection"],"Wat bespaar ik met slim laden?":["Qu’est-ce que j’économise avec la recharge intelligente ?","What do I save with smart charging?"],"per jaar op je capaciteitstarief":["par an sur votre tarif capacitaire","per year on your capacity tariff"],"Je piek ligt ±":["Votre pointe est ±","Your peak is ±"],"kW lager.":["kW plus basse.","kW lower."],"per jaar met een dynamisch contract (laden op goedkope uren)":["par an avec un contrat dynamique (recharge aux heures bon marché)","per year with a dynamic contract (charging at cheap hours)"],"per 100 km met slim laden":["par 100 km avec recharge intelligente","per 100 km with smart charging"],"Gerekend met je huidige stroomprijs (± €":["Calculé avec votre prix actuel de l’électricité (± €","Calculated with your current electricity price (± €"],"per kWh).":["par kWh).","per kWh)."],"Wanneer bots ik op de grens van mijn aansluiting?":["Quand vais-je atteindre la limite de mon raccordement ?","When will I hit the limit of my connection?"],"Ook over 3 jaar past alles":["Dans 3 ans aussi, tout tient","In 3 years everything still fits"],"kom je aan je grens, ook met slim laden":["vous atteignez votre limite, même avec la recharge intelligente","you reach your limit, even with smart charging"],"als je slim laadt":["si vous rechargez intelligemment","if you charge smartly"],"Laad je zonder sturing, dan heb je wel tot":["Si vous rechargez sans pilotage, il vous faut jusqu’à","If you charge without control, you need up to"],"kW nodig":["kW","kW"],", in het slechtste geval":[", dans le pire des cas",", in the worst case"],"We rekenen elke laaddag van het jaar door (je verbruik van die dag + het laden) en tonen de dag met de hoogste piek zonder sturing:":["Nous calculons chaque jour de recharge de l’année (votre consommation de ce jour + la recharge) et montrons le jour avec la pointe la plus haute sans pilotage :","We calculate every charging day of the year (your consumption that day + charging) and show the day with the highest peak without control:"],"Valt het laden samen met je eigen hoogste kwartier (":["Si la recharge coïncide avec votre propre quart d’heure le plus élevé (","If charging coincides with your own highest quarter-hour ("],"kW), dan wordt het tot":["kW), cela monte jusqu’à","kW), it becomes up to"],"Op die dag valt een piek van je eigen verbruik (":["Ce jour-là, une pointe de votre propre consommation (","On that day a peak of your own consumption ("],"kW) samen met het laden. Slim gestuurd pauzeert het laden op dat kwartier.":["kW) coïncide avec la recharge. Avec le pilotage intelligent, la recharge fait une pause pendant ce quart d’heure.","kW) coincides with charging. With smart control, charging pauses during that quarter-hour."],"Slim gestuurd vult het laden de dalen in je verbruik, onder je hoogste kwartier. Zonder sturing laden alle wagens meteen bij aankomst.":["Avec le pilotage intelligent, la recharge remplit les creux de votre consommation, sous votre quart d’heure le plus élevé. Sans pilotage, tous les véhicules rechargent dès leur arrivée.","With smart control, charging fills the dips in your consumption, below your highest quarter-hour. Without control, all vehicles charge immediately on arrival."],"Je drukste laaddag":["Votre jour de recharge le plus chargé","Your busiest charging day"],"Zo ziet een gemiddelde laaddag eruit":["Voici à quoi ressemble un jour de recharge moyen","This is what an average charging day looks like"],"Hoe lezen we deze grafiek?":["Comment lire ce graphique ?","How to read this chart?"],"Per punt (kW)":["Par point (kW)","Per point (kW)"],"Elke wagen een paal, zonder sturing":["Une borne par véhicule, sans pilotage","A charger per vehicle, without control"],"Piek op je aansluiting zonder sturing":["Pointe sur votre raccordement sans pilotage","Peak on your connection without control"],"Piek op je aansluiting slim gestuurd":["Pointe sur votre raccordement avec pilotage intelligent","Peak on your connection with smart control"],"Past op je aansluiting?":["Tient sur votre raccordement ?","Fits on your connection?"],"ja, slim":["oui, avec pilotage","yes, smart"],"Open je Energie-Compas-dossier":["Ouvrir votre dossier Energie-Compas","Open your Energie-Compas file"],"Geef minstens één wagen in.":["Indiquez au moins un véhicule.","Enter at least one vehicle."],"Geef een geldig e-mailadres.":["Indiquez une adresse e-mail valide.","Enter a valid e-mail address."],"Er ging iets mis.":["Une erreur s’est produite.","Something went wrong."],"De mail kon niet vertrekken. Probeer later opnieuw.":["L’e-mail n’a pas pu être envoyé. Réessayez plus tard.","The e-mail could not be sent. Please try again later."],"Netwerkfout.":["Erreur réseau.","Network error."],"Die code klopt niet.":["Ce code n’est pas correct.","That code is not correct."],"Bewaren mislukt.":["L’enregistrement a échoué.","Saving failed."],"⏳ Je aanvraag vertrekt…":["⏳ Votre demande part…","⏳ Sending your request…"],"✓ Je aanvraag is vertrokken naar":["✓ Votre demande a été transmise à","✓ Your request has been sent to"],"de partner":["le partenaire","the partner"],". Je krijgt een bevestiging per mail en wordt binnen 2 werkdagen gecontacteerd.":[". Vous recevez une confirmation par e-mail et serez contacté dans les 2 jours ouvrables.",". You will receive a confirmation by e-mail and be contacted within 2 working days."],"⏳ We maken je Energie-Compas-dossier aan…":["⏳ Nous créons votre dossier Energie-Compas…","⏳ Creating your Energie-Compas file…"],"Dat lukte niet.":["Cela n’a pas fonctionné.","That did not work."],"✓ Nieuw Energie-Compas-dossier":["✓ Nouveau dossier Energie-Compas","✓ New Energie-Compas file"],". Je factuur, wagens en invoer zijn meegenomen. Voeg er je verbruiksprofiel aan toe voor een exacte analyse.":[". Votre facture, vos véhicules et vos données ont été repris. Ajoutez-y votre profil de consommation pour une analyse exacte.",". Your invoice, vehicles and input have been carried over. Add your consumption profile for an exact analysis."],"De afspraken voor de installatie waren duidelijk en werden nagekomen.":["Les accords pour l’installation étaient clairs et ont été respectés.","The arrangements for the installation were clear and were kept."],"De installateurs kwamen op het afgesproken tijdstip.":["Les installateurs sont venus à l’heure convenue.","The installers came at the agreed time."],"De werken waren klaar binnen de afgesproken termijn.":["Les travaux ont été terminés dans le délai convenu.","The works were finished within the agreed time."],"De werf werd netjes en veilig achtergelaten.":["Le chantier a été laissé propre et sûr.","The site was left clean and safe."],"De laadpalen werken goed sinds de installatie.":["Les bornes fonctionnent bien depuis l’installation.","The chargers have worked well since the installation."],"Je kreeg een duidelijke uitleg over de laadpalen, de badges en de app.":["Vous avez reçu une explication claire sur les bornes, les badges et l’application.","You received a clear explanation of the chargers, the badges and the app."],"De installatie werd gekeurd en je kreeg de keuringsdocumenten.":["L’installation a été contrôlée et vous avez reçu les documents de contrôle.","The installation was inspected and you received the inspection documents."],"De factuur kwam overeen met de offerte.":["La facture correspondait au devis.","The invoice matched the quote."],"Je zou {*} aanbevelen aan andere bedrijven.":["Vous recommanderiez {*} à d’autres entreprises.","You would recommend {*} to other companies."],"Helemaal akkoord":["Tout à fait d’accord","Strongly agree"],"Akkoord":["D’accord","Agree"],"Neutraal":["Neutre","Neutral"],"Niet akkoord":["Pas d’accord","Disagree"],"Helemaal niet akkoord":["Pas du tout d’accord","Strongly disagree"],"je projectcode":["votre code de projet","your project code"],"je naam":["votre nom","your name"],"je telefoonnummer":["votre numéro de téléphone","your phone number"],"Nog in te vullen:":["Encore à remplir :","Still to fill in:"],"Alles ingevuld. Je kan de enquête indienen.":["Tout est rempli. Vous pouvez envoyer l’enquête.","All filled in. You can submit the survey."],"⏳ Je enquête wordt verstuurd…":["⏳ Votre enquête est en cours d’envoi…","⏳ Sending your survey…"],"✓ Bedankt! Je enquête is verstuurd":["✓ Merci ! Votre enquête a été envoyée","✓ Thank you! Your survey has been sent"],"voor project":["pour le projet","for project"],". We nemen contact met je op voor de gratis analyse van je aansluiting.":[". Nous vous contacterons pour l’analyse gratuite de votre raccordement.",". We will contact you for the free analysis of your connection."],"✓ De kwaliteitsenquête is ingevuld op":["✓ L’enquête de qualité a été remplie le","✓ The quality survey was filled in on"],". De analyse van je aansluiting is aangevraagd.":[". L’analyse de votre raccordement a été demandée.",". The analysis of your connection has been requested."],"✓ Je factuur is al ingelezen":["✓ Votre facture a déjà été lue","✓ Your invoice has already been read"],"— dossier":["— dossier","— file"],"✓ Je offerteaanvraag is al vertrokken":["✓ Votre demande de devis est déjà partie","✓ Your quote request has already been sent"],"Beheerweergave: nog geen offerteaanvraag.":["Vue gestionnaire : pas encore de demande de devis.","Manager view: no quote request yet."],"Nu":["Aujourd’hui","Now"],"Past onder je toegangsvermogen ({*} kW)?":["Tient sous votre puissance de raccordement ({*} kW) ?","Fits within your contracted capacity ({*} kW)?"],"Past op je aansluiting (cabine {*} kVA)?":["Tient sur votre raccordement (cabine {*} kVA) ?","Fits on your connection (substation {*} kVA)?"],"te krap":["trop juste","too tight"],"palen te traag":["bornes trop lentes","chargers too slow"],"ja":["oui","yes"],"nee":["non","no"],"wagens":["véhicules","vehicles"],"gemiddeld":["en moyenne","average"],"km/jaar":["km/an","km/year"],"jaarverbruik":["consommation annuelle","annual consumption"],"werkdagen {*}–{*} u":["jours ouvrables {*}–{*} h","working days {*}:00–{*}:00"],"van {*} u, {*} uur lang":["à partir de {*} h, pendant {*} heures","from {*}:00, for {*} hours"],". Bereid je voor op een ingreep op je aansluiting. Om die goed te dimensioneren is een grondigere studie nodig (batterij, zonnepanelen, toegangsvermogen, cabine); die doen we gratis na de kwaliteitscheck van je eerste laadpalen.":[". Préparez-vous à une intervention sur votre raccordement. Pour bien la dimensionner, une étude plus approfondie est nécessaire (batterie, panneaux solaires, puissance de raccordement, cabine) ; nous la réalisons gratuitement après le contrôle de qualité de vos premières bornes.",". Prepare for an intervention on your connection. To size it properly a more thorough study is needed (battery, solar panels, contracted capacity, substation); we do it for free after the quality check of your first chargers."],"kVA. Je cabine kan dat aan; na de kwaliteitscheck bekijken we gratis of een batterij of zonnepanelen dat kunnen vermijden.":["kVA. Votre cabine peut le supporter ; après le contrôle de qualité, nous examinons gratuitement si une batterie ou des panneaux solaires peuvent l’éviter.","kVA. Your substation can handle that; after the quality check we examine for free whether a battery or solar panels can avoid it."],". Dat is een all-in bedrag incl. btw; op de terugbetaling zelf komt geen btw. Met slim laden kost een kWh je ±":[". C’est un montant tout compris TVA incluse ; le remboursement lui-même n’est pas soumis à la TVA. Avec la recharge intelligente, un kWh vous coûte ±",". That is an all-in amount incl. VAT; the reimbursement itself carries no VAT. With smart charging a kWh costs you ±"],"Je zou PARTNER aanbevelen aan andere bedrijven.":["Vous recommanderiez PARTNER à d’autres entreprises.","You would recommend PARTNER to other companies."],"Taal":["Langue","Language"],"jaarverbruik op de factuur":["consommation annuelle sur la facture","annual consumption on the invoice"],"factuurperiode geëxtrapoleerd met het profiel":["période de facturation extrapolée avec le profil","invoice period extrapolated with the profile"],"factuur × 12 (ruw)":["facture × 12 (brut)","invoice × 12 (rough)"],"Van":["De","From"],"Tot":["À","To"],"Betere Lader":["Chargeur Malin","Smart Charger"],"Kies je wagens":["Choisissez vos véhicules","Choose your vehicles"],"werkdag":["journée de travail","working day"],"nacht 18–6 u":["nuit 18–6 h","night 6 pm–6 am"],"Resultaat*":["Résultat*","Result*"],"nodig":["nécessaires","needed"],"Past het op je":["Cela tient-il sur votre","Does it fit on your"],"aansluiting?":["raccordement ?","connection?"],"Wagens op je aansluiting":["Véhicules sur votre raccordement","Vehicles on your connection"],"van vandaag":["d’aujourd’hui","today"],"Kost per 100 km,":["Coût par 100 km,","Cost per 100 km,"],"slim geladen":["recharge intelligente","smart charged"],"Thuis laden":["Recharge à domicile","Home charging"],"per kWh":["par kWh","per kWh"],"Besparing met":["Économie avec la","Savings with"],"slim laden":["recharge intelligente","smart charging"],"Ingreep nodig":["Intervention nécessaire","Intervention needed"],"Te krap":["Trop juste","Too tight"],"Ja, slim gestuurd":["Oui, avec pilotage intelligent","Yes, with smart control"],"ook over 3 jaar":["aussi dans 3 ans","also in 3 years"],": slim laden volstaat niet meer":[" : la recharge intelligente ne suffit plus",": smart charging is no longer enough"],": toegangsvermogen omhoog tot ±":[" : puissance de raccordement à augmenter jusqu’à ±",": contracted capacity up to ±"],"kVA, je cabine kan het aan":["kVA, votre cabine peut le supporter","kVA, your substation can handle it"],", ook met slim laden":[", même avec la recharge intelligente",", even with smart charging"],"over 1 jaar":["dans 1 an","in 1 year"],"over 2 jaar":["dans 2 ans","in 2 years"],"over 3 jaar":["dans 3 ans","in 3 years"],"kW per punt":["kW par point","kW per point"],"slim gestuurd, zonder verzwaring (allemaal tegelijk:":["avec pilotage intelligent, sans renforcement (tous en même temps :","with smart control, without upgrade (all at once:"],"zonder sturing":["sans pilotage","without control"],"per jaar (capaciteitstarief en goedkope uren)":["par an (tarif capacitaire et heures bon marché)","per year (capacity tariff and cheap hours)"],"CREG-vergoeding":["Indemnité CREG","CREG reimbursement"],"* Indicatief: berekend op je factuur en een standaard verbruiksprofiel, kwartier per kwartier over een heel jaar. De uitleg bij elk cijfer staat in je laadplan (PDF).":["* Indicatif : calculé sur votre facture et un profil de consommation standard, quart d’heure par quart d’heure sur une année entière. L’explication de chaque chiffre figure dans votre plan de recharge (PDF).","* Indicative: calculated from your invoice and a standard consumption profile, quarter-hour by quarter-hour over a full year. The explanation of each figure is in your charging plan (PDF)."],"Download je laadplan met uitleg (PDF)":["Télécharger votre plan de recharge avec explications (PDF)","Download your charging plan with explanations (PDF)"],"Bijlage · De uitleg bij je laadplan":["Annexe · Les explications de votre plan de recharge","Annex · The explanations of your charging plan"],"met":["avec","with"]};
+  var RX={"fr": [["(\\d) u\\b", "$1 h"], ["\\bzo (?=\\d)", "dim. "], ["\\bma (?=\\d)", "lun. "], ["\\bdi (?=\\d)", "mar. "], ["\\bwo (?=\\d)", "mer. "], ["\\bdo (?=\\d)", "jeu. "], ["\\bvr (?=\\d)", "ven. "], ["\\bza (?=\\d)", "sam. "]], "en": [["(\\d) u\\b", "$1h"], ["\\bzo (?=\\d)", "Sun "], ["\\bma (?=\\d)", "Mon "], ["\\bdi (?=\\d)", "Tue "], ["\\bwo (?=\\d)", "Wed "], ["\\bdo (?=\\d)", "Thu "], ["\\bvr (?=\\d)", "Fri "], ["\\bza (?=\\d)", "Sat "]]};
+  var M={}, ks=[], W=[], LET=/[A-Za-zÀ-ɏ]/;
+  function esc(x){ return x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+  function bouw(){
+    var ix=window.BL_LANG==='fr'?0:1; M={}; ks=[]; W=[];
+    Object.keys(D).forEach(function(k){ if(k.indexOf('{*}')>=0){ var a=k.split('{*}'), b=D[k][ix].split('{*}'); W.push([new RegExp(a.map(esc).join('(.{1,80}?)')), b]); } else { M[k]=D[k][ix]; ks.push(k); } });
+    ks.sort(function(a,b){ return b.length-a.length; });
+    window.__blRe=ks.length?new RegExp(ks.map(esc).join('|'),'g'):null;
+  }
+  function tr(t){
+    if(window.BL_LANG==='nl'||!t||!/[a-z]/i.test(t)) return t;
+    var u=t;
+    W.forEach(function(w){ u=u.replace(w[0],function(){ var g=[].slice.call(arguments,1,w[1].length), o=w[1][0]; for(var i=0;i<g.length;i++) o+=g[i]+w[1][i+1]; return o; }); });
+    (RX[window.BL_LANG]||[]).forEach(function(r){ u=u.replace(new RegExp(r[0],'g'),r[1]); });
+    var re=window.__blRe; if(re) u=u.replace(re,function(m,o,str){
+      if(LET.test(m.charAt(0))&&o>0&&LET.test(str.charAt(o-1))) return m;
+      if(LET.test(m.charAt(m.length-1))&&LET.test(str.charAt(o+m.length)||'')) return m;
+      return M[m]; });
+    return u;
+  }
+  window.blTr=tr;
+  var AT=['placeholder','title','aria-label','alt'], gedaan=new WeakMap();
+  function node(n){
+    if(n.nodeType===3){ var p=n.parentNode; if(!p||/^(SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)||(p.closest&&p.closest('.notr'))) return;
+      var v=n.nodeValue; if(gedaan.get(n)===v) return; var t=tr(v); gedaan.set(n,t); if(t!==v) n.nodeValue=t; return; }
+    if(n.nodeType!==1||/^(SCRIPT|STYLE)$/.test(n.nodeName)||n.classList.contains('notr')) return;
+    AT.forEach(function(a){ var v=n.getAttribute(a); if(v){ var t=tr(v); if(t!==v) n.setAttribute(a,t); } });
+    if(n.nodeName==='IMG'){ var sr=n.getAttribute('src')||''; if(/betere-lader-logo(-wit)?\.svg/.test(sr)) n.setAttribute('src',sr.replace(/\.svg/,'-'+window.BL_LANG+'.svg')); }   /* merknaam per taal: Chargeur Malin / Smart Charger */
+    if(n.nodeName==='INPUT'&&/^(button|submit)$/i.test(n.type)&&n.value){ var t2=tr(n.value); if(t2!==n.value) n.value=t2; }
+    for(var c=n.firstChild;c;c=c.nextSibling) node(c);
+  }
+  window.blTrAlles=function(){ if(window.BL_LANG!=='nl'){ node(document.body); document.title=tr(document.title); } };
+  window.blZetTaal=function(nl){ window.BL_LANG=nl; window.BL_LOC={nl:'nl-BE',fr:'fr-BE',en:'en-GB'}[nl]; document.documentElement.lang=nl; bouw(); window.blTrAlles(); };
+  bouw();
+  var mo=new MutationObserver(function(ms){ if(window.BL_LANG==='nl') return; ms.forEach(function(m){
+    if(m.type==='characterData') node(m.target);
+    else if(m.type==='attributes') node(m.target);
+    else m.addedNodes.forEach(function(x){ node(x); }); }); });
+  mo.observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:AT.concat(['src'])});
+  document.addEventListener('DOMContentLoaded',function(){ window.blTrAlles();
+    var b=document.getElementById('blTaal'); if(!b) return;
+    b.innerHTML=L.map(function(x){ return '<button type="button" data-l="'+x+'" class="'+(x===window.BL_LANG?'aan':'')+'">'+x.toUpperCase()+'</button>'; }).join('');
+    b.addEventListener('click',function(e){ var x=e.target&&e.target.getAttribute('data-l'); if(!x||x===window.BL_LANG) return;
+      try{ localStorage.setItem('bl_lang',x); }catch(e2){}
+      var go=function(){ var u=new URL(location.href); u.searchParams.set('lang',x); location.href=u.toString(); };
+      if(window.blTaalNaarServer) window.blTaalNaarServer(x,'knop').then(go,go); else go(); });
+  });
+})();
+</script>
+<header class="top"><div class="in">
+  <div id="plogo" class="plogo"><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" class="bllogo"></div>
+  <div class="met" id="metbl"></div>
+  <div class="taal noprint notr" id="blTaal" aria-label="Taal"></div>
+</div></header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Als we niet slim samen laden, kan straks niemand nog laden.</h1>
+    <p id="herop">Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar.</p>
+    <p class="klein" id="heroi">Onafhankelijke berekening</p>
+    <div class="voortgang noprint" id="voortgang">
+      <div class="vs aan" data-s="s1"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg></div><span>1 · Je factuur</span></div>
+      <div class="vs" data-s="s2"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M4 17v-4l2-5h12l2 5v4"/><circle cx="7.5" cy="17.5" r="1.6"/><circle cx="16.5" cy="17.5" r="1.6"/><path d="M4 13h16"/></svg></div><span>2 · Je wagens</span></div>
+      <div class="vs" data-s="s4"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg></div><span>3 · Je laadplan</span></div>
+    </div>
+  </section>
+
+  <!-- STAP 1: FACTUUR -->
+  <section class="card" id="s1">
+    <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg></div><div><div class="stap">Stap 1 van 3</div><h2>Je energiefactuur (PDF)</h2></div></div>
+    <div id="fupl">
+    <label class="drop" for="fpdf"><b>Kies je factuur (PDF)</b><br><span class="klein">Je jaarafrekening of een recente maandfactuur. We lezen ze automatisch in.</span></label>
+    <input type="file" id="fpdf" accept="application/pdf,.pdf" class="verborgen">
+    <p class="klein" id="mailinstap">Liever mailen? Stuur je factuur naar <b id="aliasmail">dossier@energie-compas.eu</b>. Je krijgt een link terug.</p>
+    </div>
+    <div id="fmsg" class="msg"></div>
+    <div id="fok" class="verborgen">
+      <div class="kv" id="fkv"></div>
+      <div class="prof verborgen"><select id="prof" aria-hidden="true" tabindex="-1"><option value="industrie_met_zomersluiting">Industrie met zomersluiting</option><option value="residentieel">Residentieel</option></select></div>
+      <div class="haak" id="haak"></div>
+      <p class="klein verborgen" id="cabbox"></p>
+      <p class="klein">Klopt het toegangsvermogen niet? <a href="#" id="toegaanpas">Pas aan</a><span id="toegbox" class="verborgen"> <input type="number" id="toeg" style="width:110px;display:inline-block"> kW</span></p>
+      <button class="btn" id="naar2">Verder: je wagens</button>
+    </div>
+  </section>
+
+  <!-- STAP 2: WAGENS -->
+  <section class="card verborgen" id="s2">
+    <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M4 17v-4l2-5h12l2 5v4"/><circle cx="7.5" cy="17.5" r="1.6"/><circle cx="16.5" cy="17.5" r="1.6"/><path d="M4 13h16"/></svg></div><div><div class="stap">Stap 2 van 3</div><h2>Je wagens, nu en de komende 3 jaar</h2></div></div>
+    <div class="vkop">Waar laden ze?</div>
+    <div class="chips" id="dg">
+      <button class="chip" data-dg="thuisladen"><svg class="bico" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22 24 8l18 14"/><path d="M10 19v21h28V19"/><path d="M25.5 25l-4 7h5l-4 7"/></svg>Thuis (woning)</button>
+      <button class="chip aan" data-dg="kmo"><svg class="bico" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="18" height="33" rx="1.5"/><path d="M12 13h2.5M17.5 13H20M12 19h2.5M17.5 19H20M12 25h2.5M17.5 25H20M14 40v-6h4v6"/><path d="M27 35l2.4-5.6c.4-.9 1.2-1.4 2.2-1.4h7.8c1 0 1.8.5 2.2 1.4L44 35v4.5H27z"/><circle cx="31" cy="40" r="2"/><circle cx="40" cy="40" r="2"/></svg>Bedrijf: personeelswagens</button>
+      <button class="chip" data-dg="logistiek"><svg class="bico" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h24v21H4z"/><path d="M28 19h8.5l6.5 7.5V34H28"/><path d="M32 19v7.5h11"/><circle cx="12" cy="36" r="3.5"/><circle cx="35" cy="36" r="3.5"/></svg>Bedrijf: bestel- en vrachtwagens</button>
+    </div>
+    <div class="vkop">Kies je wagens</div>
+    <div id="wrijen"></div>
+    <button class="btn ghost klein" id="wplus">+ Ander type wagen</button>
+    <div class="vkop">Hoe lang staan ze aan de laadpaal?</div>
+    <div class="tegels" id="vtegels"></div>
+    <div class="rij" style="display:none">
+      <div style="flex:1;min-width:150px"><label class="l" for="venster">Hoe lang staan ze aan de laadpaal?</label>
+        <select id="venster"><option value="4">± 4 uur</option><option value="6">± 6 uur</option><option value="8" selected>± 8 uur (werkdag)</option><option value="10">± 10 uur</option><option value="12">± 12 uur (nacht, 18–6 u)</option></select></div>
+    </div>
+    <p class="klein">Het aantal per periode is het totaal op dat moment (bv. nu 10, over 2 jaar 25).</p>
+    <button class="btn" id="naar3" style="margin-top:6px">Verder: bekijk je resultaat</button>
+  </section>
+
+  <!-- STAP 3: MAIL + CODE -->
+  <section class="card verborgen" id="s3">
+    <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></div><div><div class="stap">Stap 3 van 3</div><h2>Waar mogen we je laadplan naartoe sturen?</h2></div></div>
+    <div class="rij"><div style="flex:1;min-width:220px"><input type="email" id="mail" placeholder="naam@bedrijf.be" autocomplete="email"></div><button class="btn" id="stuurcode">Stuur mijn code</button></div>
+    <div id="codebox" class="verborgen" style="margin-top:12px">
+      <p class="klein">We stuurden een code van 6 cijfers naar <b id="mailtoon"></b>.</p>
+      <div class="rij"><input id="code" class="code" inputmode="numeric" maxlength="6" placeholder="••••••"><button class="btn" id="checkcode">Bevestig</button><a href="#" id="opnieuw" class="klein">Nieuwe code</a></div>
+    </div>
+    <div id="cmsg" class="msg"></div>
+  </section>
+
+  <!-- RESULTAAT -->
+  <section class="card verborgen" id="s4">
+    <div class="a4kop"><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" style="height:30px"><div id="a4p" style="font-size:13px;color:#6B7280;text-align:right"></div></div>
+    <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg></div><div><div class="stap" id="dossnr">Je laadplan</div><h2 id="rtitel">Je laadplan</h2></div></div>
+    <div class="klein" id="rsub"></div>
+    <div class="samen" id="samen"></div>
+    <div class="pdfdeel" id="detail"><div class="pgbr0"></div><div class="bijlkop">Bijlage · De uitleg bij je laadplan</div>
+    <div class="wpark" id="wpark"></div>
+    <div class="vragen" id="vragen"></div>
+    <div class="pgbr"></div>
+    <div class="kop" style="margin:18px 0 0"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V11M10 20V5M16 20v-7M2 20h20"/></svg></div><div><div class="stap">Nu en de komende 3 jaar</div><h2 style="font-size:17px">Zo groeit je laadplein</h2></div></div>
+    <div class="tabwrap"><table class="hz" id="hz"></table></div>
+    <div class="kop" style="margin:18px 0 0"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></div><div><div class="stap">Checklist</div><h2 style="font-size:17px">Vraag bij je offerte</h2></div></div>
+    <ul class="vraagbij"><li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>Stuurbare laadpalen (OCPP)</li><li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>Dynamische load balancing</li><li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>Een MID-meter per laadpunt</li><li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>Badge of reservatie (nodig om te wisselen)</li><li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>Koppelbaar met een energiebeheersysteem</li></ul>
+    <p class="klein" id="indic">Indicatieve berekening</p>
+    </div>
+    <div class="noprint" id="acties" style="margin-top:14px">
+      <div id="offbox" class="blok">
+        <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></div><div><div class="stap">Volgende stap</div><h2 style="font-size:17px">Een offerte op maat</h2></div></div>
+        <div class="rij"><input id="tel" type="tel" placeholder="Telefoon (optioneel)" style="max-width:240px"><input id="opm" placeholder="Opmerking (optioneel)" style="flex:1;min-width:200px"></div>
+        <label class="check"><input type="checkbox" id="akkoord"> <span id="akkoordtxt">Ik wil dat mijn laadplan en gegevens naar de partner gaan en dat ik gecontacteerd word voor een offerte.</span></label>
+        <button class="btn" id="offerte" disabled>Vraag een offerte aan</button>
+      </div>
+      <div id="omsg" class="msg"></div>
+      <div class="rij" style="margin-top:14px">
+        <button class="btn ghost klein" id="print">Download je laadplan met uitleg (PDF)</button>
+        <button class="btn ghost klein verborgen" id="ek">Volledige analyse met batterij en zonnepanelen</button>
+      </div>
+    </div>
+    <div class="blok verborgen" id="snel">
+      <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></div><div><div class="stap">Vrachtwagens</div><h2>Snelladen tijdens laden en lossen?</h2></div></div>
+      <p>Laden je vrachtwagens ook bij tussen het laden en lossen door (bv. een uur aan de kade) en moeten ze dan weer vol? Dan gaat het om korte, hoge pieken die je niet met sturing alleen opvangt. Dat rekenen we apart door in een studie met Energie-Compas (laadpalen, batterijbuffer, aansluiting).</p>
+      <div class="kv" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+        <div><label class="l" for="snaant">Laadbeurten per dag</label><input type="number" id="snaant" min="1" max="500" step="1" value="10"></div>
+        <div><label class="l" for="snduur">Tijd aan de kade (min)</label><input type="number" id="snduur" min="10" max="240" step="5" value="60"></div>
+        <div><label class="l" for="snkwh">kWh per laadbeurt</label><input type="number" id="snkwh" min="10" max="1000" step="10" value="150"></div>
+        <div><label class="l" for="snvan">Van (uur)</label><input type="number" id="snvan" min="0" max="24" step="0.5" value="8"></div>
+        <div><label class="l" for="sntot">Tot (uur)</label><input type="number" id="sntot" min="0" max="24" step="0.5" value="17"></div>
+      </div>
+      <div style="margin-top:8px"><label class="l" for="snopm">Opmerking (optioneel)</label><textarea id="snopm" rows="2" maxlength="1000" style="width:100%"></textarea></div>
+      <button class="btn" id="snknop" style="margin-top:10px">Vraag een Energie-Compas-studie</button>
+      <div id="snmsg" class="msg"></div>
+    </div>
+    <div class="blok goedk" id="goedk">
+      <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 21M16 3l4 18M12 4v3M12 11v3M12 18v2"/></svg></div><div><div class="stap">Na de installatie</div><h2>Nog goedkoper rijden?</h2></div></div>
+      <p id="goedktxt">Zodra <b class="pnaam">je laadpartner</b> je eerste laadpalen heeft geplaatst, analyseren we gratis je aansluiting: kan je kost per kilometer nog omlaag, bijvoorbeeld met zonnepanelen, een batterij of een slimmer contract? In ruil vragen we je een korte kwaliteitsenquête over de installatiewerken in te vullen.</p>
+      <p id="goedkingreep" class="verborgen"></p>
+      <p class="pcode">Bewaar je projectcode goed: <b id="pcode">–</b>. Je hebt ze nodig voor de enquête.</p>
+      <button class="btn noprint" id="naarenq">Kwaliteitsenquête invullen</button>
+      <div id="enqal" class="msg"></div>
+    </div>
+  </section>
+
+  <!-- v0.8.0: KWALITEITSENQUÊTE -->
+  <section class="card verborgen" id="s5">
+    <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div><div class="stap">Kwaliteitsenquête</div><h2>Hoe verliep de installatie?</h2></div></div>
+    <p>Geef bij elke stelling aan in hoeverre je akkoord gaat. Zodra alles is ingevuld, kan je de enquête indienen en vraag je meteen de gratis analyse van je aansluiting aan.</p>
+    <label class="l" for="eproj">Projectcode</label>
+    <input id="eproj" placeholder="FLX-…" style="max-width:240px;text-transform:uppercase">
+    <div id="evragen"></div>
+    <label class="l" for="eopm" style="margin-top:12px">Wat kan er beter? (optioneel)</label>
+    <textarea id="eopm" rows="3" style="width:100%"></textarea>
+    <div class="rij" style="margin-top:10px"><input id="enaam" placeholder="Je naam" style="flex:1;min-width:200px"><input id="etel" type="tel" placeholder="Je telefoonnummer" style="flex:1;min-width:200px"></div>
+    <p class="klein" id="estatus">Nog te beantwoorden: alle stellingen, je naam en je telefoonnummer.</p>
+    <button class="btn" id="eindien" disabled>Enquête indienen en analyse aanvragen</button>
+    <div id="emsg" class="msg"></div>
+  </section>
+</div>
+
+<footer><div class="in">
+  <div>Betere Lader · <span id="fpartner"></span>powered by <a href="https://www.energie-compas.eu" target="_blank" rel="noopener">Energie-Compas</a> · Fluctus.net CVSO</div>
+  <img src="/apps/ec-logo.png" alt="Energie-Compas">
+</div></footer>
+
+<script>
+(function(){
+'use strict';
+var API='https://lucid-amazement-production.up.railway.app';
+var Q=new URLSearchParams(location.search);
+var host=location.hostname.toLowerCase(), mh=host.match(/^([a-z0-9-]+)\.energie-compas\.eu$/);
+var mp=location.pathname.match(/^\/(dieteren|pluon)\/?$/);
+var SLUG=(Q.get('p')||(mp?mp[1]:'')||((mh&&['www','app'].indexOf(mh[1])<0)?mh[1]:'')||'').toLowerCase().replace(/[^a-z0-9-]/g,'');
+var P=null, S={prof:'industrie_met_zomersluiting',sim:null,jaarKwh:0,normaal:0,bc:null,fb:[],toeg:0,piek:0,afn:0,prijs:0.25,dg:'kmo',venster:8,token:'',verified:false,res:null,pid:'',ek:''};
+var VEH={}, TYPES=[['personenwagen','Personenwagen'],['bestelwagen','Bestelwagen'],['lichte_vracht','Lichte vracht'],['vrachtwagen','Vrachtwagen'],['bus','Bus']];
+var TYP={personenwagen:{batt:60,kwhkm:0.18,ac:11,km:15000},bestelwagen:{batt:70,kwhkm:0.27,ac:11,km:25000},lichte_vracht:{batt:110,kwhkm:0.38,ac:22,km:30000},vrachtwagen:{batt:450,kwhkm:1.25,ac:22,km:60000},bus:{batt:350,kwhkm:1.0,ac:22,km:50000}};
+var CAP_EUR_KW=100, SLIM_KORTING=0.03;
+// v0.9.3 (Johan 19-11): marktmaten cabine (zoals bl-ruimte) en CREG-vergoeding thuisladen bedrijfswagen (all-in incl. btw, per gewest; elk kwartaal bijwerken)
+var CABINES=[100,250,400,630,800,1000,1500,2000];
+// v0.9.4 (Johan 19-11): CREG per kwartaal; het tarief van het lopende kwartaal geldt automatisch (nieuw kwartaal = één regel erbij)
+var CREG_KW=[{v:'2026-07-01',kwartaal:'het 3de kwartaal van 2026',vl:0.3222,br:0.3719,wa:0.3783},{v:'2026-10-01',kwartaal:'het 4de kwartaal van 2026',vl:0.3225,br:0.3688,wa:0.3779},{v:'2027-01-01',kwartaal:'het 1ste kwartaal van 2027',vl:0.3616,br:0.4136,wa:0.4188}];
+function cregNu(){ var d=new Date(), s=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2), r=CREG_KW[0]; CREG_KW.forEach(function(x){ if(x.v<=s) r=x; }); return r; }
+var CREG=cregNu();
+function cregGewest(adres){ var pc=+((String(adres||'').match(/\b(\d{4})\b/)||[])[1]||0); if(pc>=1000&&pc<1300) return {v:CREG.br,g:'Brussel'}; if((pc>=1300&&pc<1500)||(pc>=4000&&pc<8000)) return {v:CREG.wa,g:'Wallonië'}; return {v:CREG.vl,g:'Vlaanderen'}; }   // v0.6.0: € per kW extra piek per jaar (Johan)
+function $(i){return document.getElementById(i);}
+var ICO48D={"huis": "<path d=\"M6 22 24 8l18 14\"/><path d=\"M10 19v21h28V19\"/><path d=\"M25.5 25l-4 7h5l-4 7\"/>", "kantoor": "<rect x=\"7\" y=\"7\" width=\"18\" height=\"33\" rx=\"1.5\"/><path d=\"M12 13h2.5M17.5 13H20M12 19h2.5M17.5 19H20M12 25h2.5M17.5 25H20M14 40v-6h4v6\"/><path d=\"M27 35l2.4-5.6c.4-.9 1.2-1.4 2.2-1.4h7.8c1 0 1.8.5 2.2 1.4L44 35v4.5H27z\"/><circle cx=\"31\" cy=\"40\" r=\"2\"/><circle cx=\"40\" cy=\"40\" r=\"2\"/>", "truck": "<path d=\"M4 13h24v21H4z\"/><path d=\"M28 19h8.5l6.5 7.5V34H28\"/><path d=\"M32 19v7.5h11\"/><circle cx=\"12\" cy=\"36\" r=\"3.5\"/><circle cx=\"35\" cy=\"36\" r=\"3.5\"/>", "klok": "<circle cx=\"24\" cy=\"26\" r=\"15\"/><path d=\"M24 17v9l6 4\"/><path d=\"M19 6h10M24 6v5\"/><path d=\"M37 12l3-3\"/>", "auto": "<path d=\"M6 31l4.2-9.8c.7-1.6 2.2-2.7 4-2.7h19.6c1.8 0 3.3 1.1 4 2.7L42 31v8H6z\"/><path d=\"M6 31h36\"/><circle cx=\"14\" cy=\"39\" r=\"3.5\"/><circle cx=\"34\" cy=\"39\" r=\"3.5\"/><path d=\"M14 25.5h20\"/>", "laadpaal": "<rect x=\"9\" y=\"6\" width=\"19\" height=\"34\" rx=\"3\"/><path d=\"M5 42h27\"/><rect x=\"13.5\" y=\"11\" width=\"10\" height=\"8\" rx=\"1\"/><path d=\"M20 23l-3.5 5.5h4.5L17.5 34\"/><path d=\"M28 15h4a4 4 0 0 1 4 4v13a3 3 0 0 0 6 0V18l-3-4\"/>", "bliksem": "<circle cx=\"24\" cy=\"24\" r=\"18\"/><path d=\"M26.5 11 16 27h8l-2 10 10.5-16h-8z\"/>", "meter": "<path d=\"M7 33a17 17 0 0 1 34 0\"/><path d=\"M24 33l8.5-10\"/><circle cx=\"24\" cy=\"33\" r=\"2.2\"/><path d=\"M5 40h38\"/><path d=\"M12 22l2 2M24 16v3M36 22l-2 2\"/>", "weg": "<path d=\"M17 6 8 42M31 6l9 36\"/><path d=\"M24 8v5M24 19v6M24 31v8\"/>", "spaar": "<path d=\"M9 27c0-7.2 6.5-12.5 15-12.5S39 19.8 39 27c0 4-2 7-5 9v5h-5v-3h-9v3h-5v-5c-3-2-6-4.6-6-9z\"/><path d=\"M39 23.5h3.5v6H39\"/><circle cx=\"31\" cy=\"23\" r=\"1.3\" fill=\"currentColor\"/><path d=\"M19.5 15.5a5 5 0 0 1 9.5-1.8\"/>", "euro": "<circle cx=\"24\" cy=\"24\" r=\"18\"/><path d=\"M30 17a8.5 8.5 0 1 0 0 14M14 21.5h12M14 26.5h12\"/>", "kalender": "<rect x=\"6\" y=\"9\" width=\"36\" height=\"33\" rx=\"3\"/><path d=\"M6 17h36M15 5v8M33 5v8\"/><path d=\"M17 29l5 5 9-10\"/>", "pdf": "<path d=\"M12 5h17l8 8v30H12z\"/><path d=\"M29 5v8h8\"/><path d=\"M24 19v15M18.5 28.5 24 34l5.5-5.5\"/>", "factuur": "<path d=\"M12 5h17l8 8v30H12z\"/><path d=\"M29 5v8h8\"/><path d=\"M17.5 21h13M17.5 27h13M17.5 33h7\"/><path d=\"M33.5 30l-3 5h4l-3 5\"/>"};   /* v0.11.0: eigen lijn-iconen */
+function ICO48(k){ return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICO48D[k]||'')+'</svg>'; }
+// v0.7.0: uitleg achter een i-knopje → modal (afdrukken: uitgeschreven via .sprint)
+function ib(titel,tekst){ return tekst?('<button type="button" class="ib" aria-label="Uitleg" data-t="'+encodeURIComponent(titel||'Hoe berekenen we dit?')+'" data-i="'+encodeURIComponent(tekst)+'">i</button>'):''; }
+function sprint(tekst,stijl){ return tekst?('<div class="klein sprint"'+(stijl?(' style="'+stijl+'"'):'')+'>'+esc(tekst)+'</div>'):''; }
+(function(){ var m=document.createElement('div'); m.id='imod'; m.className='verborgen'; m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true');
+  m.innerHTML='<div class="box"><div class="kopm"><h3 id="imodt"></h3><button type="button" class="sluit" aria-label="Sluiten">×</button></div><div class="tekst" id="imodx"></div></div>';
+  document.body.appendChild(m); var laatste=null;
+  function dicht(){ m.classList.add('verborgen'); if(laatste) try{laatste.focus();}catch(e){} }
+  m.addEventListener('click',function(e){ if(e.target===m||e.target.classList.contains('sluit')) dicht(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&!m.classList.contains('verborgen')) dicht(); });
+  document.addEventListener('click',function(e){ var b=e.target.closest&&e.target.closest('.ib'); if(!b) return; e.preventDefault(); laatste=b;
+    try{ $('imodt').textContent=decodeURIComponent(b.getAttribute('data-t')||''); $('imodx').textContent=decodeURIComponent(b.getAttribute('data-i')||''); }catch(x){ $('imodx').textContent=b.getAttribute('data-i')||''; }
+    m.classList.remove('verborgen'); m.querySelector('.sluit').focus(); });
+})();
+(function(){ var t1='We rekenen op basis van je energiefactuur (toegangsvermogen, verbruik, hoogste kwartier) en een standaard verbruiksprofiel voor je soort bedrijf, kwartier per kwartier over een heel jaar. Je wagens tellen we met hun echte verbruik per km en laadvermogen.';
+  var t2='Berekend op je factuur en een standaard verbruiksprofiel. Met je eigen kwartierdata (via een mandaat bij Fluvius) wordt het exact: dan kennen we elk kwartier van je verbruik, ook de korte pieken.';
+  $('heroi').innerHTML='Onafhankelijke berekening'+ib('Hoe rekenen we?',t1)+'<span class="sprint">: '+esc(t1)+'</span>';
+  $('indic').innerHTML='Indicatieve berekening'+ib('Indicatief',t2)+'<span class="sprint">: '+esc(t2)+'</span>'; })();
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function n0(x){return Math.round(+x||0).toLocaleString('nl-BE');}
+function n1(x){return (Math.round((+x||0)*10)/10).toLocaleString('nl-BE');}
+function eur(x){return '€ '+n0(x);}
+function toon(id,ja){var e=$(id); if(e) e.classList.toggle('verborgen',!ja); if(ja && /^s[1-4]$/.test(id)) voortgang(id);}
+// v0.5.0: voortgangsbalk bovenaan (factuur → wagens → laadplan); stap 3 (mail + code) hoort bij «laadplan»
+var _VG=0; function voortgang(id){ var n={s1:1,s2:2,s3:3,s4:3}[id]||1; if(n<_VG) return; _VG=n;
+  Array.prototype.forEach.call(document.querySelectorAll('#voortgang .vs'),function(x,i){ x.classList.toggle('aan',i===n-1); x.classList.toggle('klaar',i<n-1 || (id==='s4' && i===2)); }); }
+function sbTok(){try{var k=Object.keys(localStorage).filter(function(x){return /auth-token/.test(x);})[0];return k?(JSON.parse(localStorage.getItem(k))||{}).access_token||'':'';}catch(e){return '';}}   // manager (MijnEC-sessie op www)
+function hdrs(j){var h=j?{'Content-Type':'application/json'}:{};var t=sbTok();if(t)h.Authorization='Bearer '+t;return h;}
+function post(pad,body){return fetch(API+pad,{method:'POST',headers:hdrs(true),body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){j._st=r.status;return j;});});}
+function bewaarLokaal(){try{sessionStorage.setItem('bl_state',JSON.stringify({token:S.token,mail:$('mail').value}));}catch(e){}}
+
+// ── Partner ──
+function zetPartner(p){
+  P=p; if(!p) return;
+  var r=document.documentElement.style; r.setProperty('--p',p.kleur); r.setProperty('--a',p.accent); r.setProperty('--pt',p.tekstOpAccent||'#fff');
+  var donker=(p.slug==='pluon');
+  $('plogo').innerHTML='<a href="'+esc(p.site)+'" target="_blank" rel="noopener" class="plogo'+(donker?' donker':'')+'"><img src="'+esc(p.logo)+'" alt="'+esc(p.naam)+'"></a>';
+  $('metbl').innerHTML='<span>met</span><img src="/apps/bl/betere-lader-logo.svg" alt="Betere Lader" class="bllogo" style="height:24px">';
+  $('aliasmail').textContent=p.alias; $('fpartner').textContent=p.naam+' · ';
+  $('herop').textContent='Ontdek in 2 minuten hoeveel laadpunten je nodig hebt, welk vermogen zin heeft en wat er op je aansluiting past. Nu en de komende 3 jaar. Een service van '+p.naam+'.';
+  $('offerte').textContent='Vraag een offerte aan bij '+p.naam;
+  $('akkoordtxt').textContent='Ik wil dat mijn laadplan en gegevens naar '+p.naam+' gaan en dat ik gecontacteerd word voor een offerte.';
+  document.title='Betere Lader · '+p.naam;
+}
+if(SLUG) fetch(API+'/api/bl/partner/'+encodeURIComponent(SLUG)).then(function(r){return r.json();}).then(function(j){if(j&&j.ok) zetPartner(j.partner);}).catch(function(){});
+
+// ── Stap 1: factuur ──
+function b64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||'');res(s.slice(s.indexOf(',')+1));};r.onerror=function(){rej(new Error('Kon het bestand niet lezen'));};r.readAsDataURL(file);});}
+function dagen(a,b){var d=(new Date(b)-new Date(a))/86400000;return (isFinite(d)&&d>0)?d:0;}
+function leesBc(bc){
+  S.bc=bc;
+  var br=bc._aansluitvermogenBron||{};
+  S.toeg=+bc.toegangsvermogenKw||+br.gekozenMaxKw||+br.capaciteitKw||Math.round((+bc.aansluitVermogenKva||0)*0.9)||0;
+  var d=dagen(bc.periodeVan,bc.periodeTot), jf=d>20?365/d:1;
+  S.afn=(+bc.afnameKwh||0)*jf/1000;
+  var jv=+bc.jaarverbruikKwh||0; S.jaarKwh=(jv>0&&jv>=(+bc.afnameKwh||0)*0.9&&jv<=(+bc.afnameKwh||0)*40)?jv:0; if(S.jaarKwh) S.afn=S.jaarKwh/1000;   // v0.6.0: jaarverbruik zoals op de factuur
+  var dk=+bc.afnameDagKwh||0, nk=+bc.afnameNachtKwh||0; S.normaal=(dk>0&&nk>0)?dk/(dk+nk):0;
+  var gem=S.afn*1000/8760;
+  S.piek=+br.maandpiekKw||Math.min(S.toeg*0.8,gem*3)||0;
+  var kost=+bc.totaalEnergieExclBtw||+bc.totaalExclBtw||0;
+  var p=(kost>0&&bc.afnameKwh>0)?kost/bc.afnameKwh:0; S.prijs=(p>0.08&&p<0.8)?p:0.25;
+  var ean=bc.ean||((bc.eanBlokken||[])[0]||{}).ean||'';
+  $('fkv').className='';   // v0.5.0: tegels i.p.v. lijst
+  $('fkv').innerHTML='<div class="tegels"><div class="tegel"><div class="k">Toegangsvermogen</div><div class="w" id="kvtoeg">'+n0(S.toeg)+' kW</div><div class="e">wat je aansluiting mag</div></div>'+
+    '<div class="tegel"><div class="k">Verbruik</div><div class="w" id="kvafn">± '+n0(S.afn)+'</div><div class="e">MWh per jaar</div></div>'+
+    '<div class="tegel"><div class="k">Huidige piek</div><div class="w">± '+n0(S.piek)+' kW</div><div class="e">'+(br.maandpiekKw?'hoogste kwartier':'geschat')+'</div></div></div>'+
+    '<div class="wie"><b>'+esc(bc.klantNaam||'–')+'</b> · '+esc(bc.leveringsadres||'–')+(ean?' · EAN '+esc(ean):'')+'</div>';
+  $('toeg').value=Math.round(S.toeg); haak(); toon('fok',true);
+}
+// v0.6.0 (Johan 18-11): kwartieranalyse op de server (/api/bl/ruimte)
+function simIn(R){
+  var bc=S.bc||{}, o={profiel:S.prof,doelgroep:S.dg,venster_u:S.venster,toeg_kw:S.toeg,piek_kw:S.piek,jaar_kwh:S.jaarKwh,afname_kwh:+bc.afnameKwh||0,
+    periodeVan:bc.periodeVan||null,periodeTot:bc.periodeTot||null,normaal_aandeel:S.normaal,eur_kw:CAP_EUR_KW,adres:bc.leveringsadres||'',spanning:bc.spanningsniveau||'',dnb:bc.dnb||'',paal_kw:11,wagen_kwh_dag:15000/dagenJaar()*0.16,cabine_kva:S.cabine||0};
+  if(R){ var h0=['nu','m12','m24','m36'].filter(function(h){return R[h]&&R[h].ev>0;}), ref=R[h0[0]]; if(ref){ o.wagen_kwh_dag=ref.edag_kwh/ref.ev; o.paal_kw=ref.paal_kw||11; }
+    o.horizons={}; h0.forEach(function(h){ var x=R[h]; o.horizons[h]={ev:x.ev,edag_kwh:x.edag_kwh,lp:x.laadpunten,paal_kw:x.paal_kw,cap_kw:x.p_rot_kw,km_jaar:x.km_jaar||0,kwh_km:x.kwh_km}; }); }
+  return o;
+}
+function sim(R){ return post('/api/bl/ruimte',simIn(R)).then(function(j){ return (j&&j.ok)?j:null; }).catch(function(){ return null; }); }
+function dagGrafiek(m,h){   // m = sim-antwoord, h = horizon (optioneel): gemiddelde laaddag, 24 u
+  var pd=h&&h.piekdag, L=pd?pd.last_kw:(m.dag_last_kw||[]), sl=pd?pd.slim_kw:(h&&h.gem_slim_kw||[]), dm=pd?pd.dom_kw:(h&&h.gem_dom_kw||[]), W=640, Hh=190, pl=40, pb=22, pt=8;
+  var top=Math.max(m.toeg_kw, m.piek_kw), dmax=0, dmi=-1; L.forEach(function(v,i){ var t=v+(+dm[i]||0); top=Math.max(top,t,v+(+sl[i]||0)); if(dm.length&&t>dmax){dmax=t;dmi=i;} }); top=top*1.08;
+  function x(i){return pl+(W-pl-6)*i/96;} function y(v){return pt+(Hh-pt-pb)*(1-v/top);}
+  var v0=m.venster.start_u*4, v1=v0+m.venster.duur_u*4, band='';
+  [[v0,Math.min(96,v1)],[0,Math.max(0,v1-96)]].forEach(function(b){ if(b[1]>b[0]) band+='<rect x="'+x(b[0])+'" y="'+pt+'" width="'+(x(b[1])-x(b[0]))+'" height="'+(Hh-pt-pb)+'" fill="var(--a)" opacity=".10"/>'; });
+  function pad(f){ var d=''; for(var i=0;i<96;i++){ d+=(i?'L':'M')+x(i).toFixed(1)+' '+y(f(i)).toFixed(1)+' L'+x(i+1).toFixed(1)+' '+y(f(i)).toFixed(1)+' '; } return d; }
+  var basis=pad(function(i){return L[i]||0;}), slim=pad(function(i){return (L[i]||0)+(+sl[i]||0);});
+  var g='<svg viewBox="0 0 '+W+' '+Hh+'" role="img" aria-label="Verbruik op een gemiddelde laaddag">'+band;
+  for(var t=0;t<=4;t++){ var v=top/1.08*t/4; g+='<line x1="'+pl+'" x2="'+(W-6)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#E5E9F0"/><text x="'+(pl-6)+'" y="'+(y(v)+4)+'" font-size="10" text-anchor="end" fill="#8A93A3">'+n0(v)+'</text>'; }
+  for(var u=0;u<=24;u+=4) g+='<text x="'+x(u*4)+'" y="'+(Hh-6)+'" font-size="10" text-anchor="middle" fill="#8A93A3">'+u+' u</text>';
+  if(sl.length) g+='<path d="'+slim+' L'+x(96)+' '+y(0)+' L'+x(0)+' '+y(0)+' Z" fill="var(--a)" opacity=".85"/>';
+  g+='<path d="'+basis+' L'+x(96)+' '+y(0)+' L'+x(0)+' '+y(0)+' Z" fill="#94A3B8"/>';
+  if(dm.length) g+='<path d="'+pad(function(i){return (L[i]||0)+(+dm[i]||0);})+'" fill="none" stroke="#C0392B" stroke-width="1.6" stroke-dasharray="4 3"/>';
+  if(dmi>=0) g+='<text x="'+Math.min(W-60,x(dmi)+4)+'" y="'+(y(dmax)-4)+'" font-size="11" font-weight="700" fill="#C0392B">'+n0(dmax)+' kW</text>';
+  g+='<line x1="'+pl+'" x2="'+(W-6)+'" y1="'+y(m.toeg_kw)+'" y2="'+y(m.toeg_kw)+'" stroke="var(--p)" stroke-width="2"/>';
+  g+='<line x1="'+pl+'" x2="'+(W-6)+'" y1="'+y(m.piek_kw)+'" y2="'+y(m.piek_kw)+'" stroke="#475569" stroke-width="1.2" stroke-dasharray="2 3"/>';
+  g+='</svg>';
+  var lg='<div class="lgd"><span><i style="background:#94A3B8"></i>Je verbruik ('+(pd?'die dag':'gemiddeld')+')</span>'+(sl.length?'<span><i style="background:var(--a)"></i>Laden, slim gestuurd</span>':'')+(dm.length?'<span><i class="ds" style="border-color:#C0392B"></i>Laden zonder sturing</span>':'')+
+    '<span><i class="ln" style="border-color:var(--p)"></i>Toegangsvermogen '+n0(m.toeg_kw)+' kW</span><span><i class="ds" style="border-color:#475569"></i>Hoogste kwartier '+n0(m.piek_kw)+' kW</span><span><i style="background:var(--a);opacity:.25"></i>Wagens aanwezig</span></div>';
+  return '<div class="dagchart">'+g+lg+'</div>';
+}
+var _hk=null;
+function haak(){ clearTimeout(_hk); _hk=setTimeout(function(){ sim(null).then(function(m){ S.sim=m; cabRij(m); if(!m) return haakOud();
+    if(m.jaar_mwh&&$('kvafn')){ S.afn=m.jaar_mwh; $('kvafn').textContent='± '+n0(m.jaar_mwh); }
+    var uren=S.dg==='kmo'?('werkdagen '+m.venster.start_u+'–'+((m.venster.start_u+m.venster.duur_u)%24)+' u'):('van '+m.venster.start_u+' u, '+m.venster.duur_u+' uur lang');
+    $('haak').innerHTML=dagGrafiek(m,null)+'Je hoogste kwartier ('+n0(m.piek_kw)+' kW) is een kort moment. Op de uren dat je wagens er staan ('+uren+') verbruik je gemiddeld ± <b>'+n0(m.last_venster_gem_kw)+' kW</b>'+(m.pieken?' (zonder de korte pieken)':'')+'. '+
+      'Daardoor kan er per laaddag ± <b>'+n0(m.ruimte_kwh_dag_p5)+' kWh</b> extra door je aansluiting, zonder je toegangsvermogen te overschrijden: genoeg voor ± <b>'+n0(m.wagens_slim)+' personenwagens slim gestuurd</b>, tegenover '+n0(m.wagens_dom)+' als ze allemaal tegelijk laden.'+
+      (function(){ var tx='Berekend per kwartier over een heel jaar: profiel «'+$('prof').selectedOptions[0].text+'» op je jaarverbruik van ± '+n0(m.jaar_mwh)+' MWh (bron: '+m.jaar_bron+')'+(m.dag_nacht?', dag/nacht zoals op je factuur':'')+'. We houden 10 % marge onder je toegangsvermogen.'+(m.pieken?(' Je factuur toont een hoogste kwartier van '+n0(m.pieken.piek_kw)+' kW, een standaardprofiel komt maar tot '+n0(m.pieken.profiel_max_kw)+' kW. Daarom voegen we korte pieken toe (één per werkdag, op een willekeurig tijdstip, tot je gemeten piek). Met je eigen kwartierdata wordt dit exact.'):'')+''; return ib('Hoe berekenen we dit?',tx)+sprint(tx,'margin-top:6px'); })();
+  }); },250); }
+// v0.9.3 (Johan 19-11): geschatte cabine tonen + een grotere maat laten kiezen
+function cabRij(m){ var e=$('cabbox'), A=m&&m.aansluiting; if(!e) return;
+  if(!A||!A.cabine_kva||S.dg==='thuisladen'){ e.innerHTML=''; toon('cabbox',false); return; }
+  if(A.cabine_bron==='geschat'||!S.cabEst) S.cabEst=S.cabEst&&A.cabine_bron!=='geschat'?S.cabEst:A.cabine_kva;
+  var gek=S.cabine||A.cabine_kva, opts=CABINES.filter(function(c){return c>=S.cabEst;}); if(opts.indexOf(gek)<0) opts.push(gek);
+  e.innerHTML='Cabine: <select id="cabsel" style="width:auto;display:inline-block;padding:3px 8px">'+opts.map(function(c){return '<option value="'+c+'"'+(c===gek?' selected':'')+'>'+n0(c)+' kVA</option>';}).join('')+'</select> '+
+    (S.cabine&&S.cabine!==S.cabEst?'door jou gekozen.':'geschat als de standaardmaat net boven je piek van '+n0(m.piek_kw)+' kW.')+' Is je cabine groter? Kies de juiste maat: we rekenen dan met die cabine.';
+  toon('cabbox',true);
+  $('cabsel').onchange=function(){ var v=+this.value; S.cabine=(v===S.cabEst)?0:v; haak(); };
+}
+function haakOud(){
+  var vrij=Math.max(0,S.toeg*0.95-S.piek), dagE=15000/230*0.16;
+  var slim=Math.floor(vrij*8/dagE), dom=Math.floor(vrij/11);
+  var pB=S.toeg>0?Math.min(100,Math.round(S.piek/S.toeg*100)):0, pV=S.toeg>0?Math.max(0,Math.min(100-pB,Math.round(vrij/S.toeg*100))):0;   // v0.5.0: balk bezet / vrij
+  var _cap='<div class="cap"><i class="bez" style="width:'+pB+'%"></i><i class="vrij" style="width:'+pV+'%"></i></div><div class="caplbl"><span>Bezet ± <b>'+n0(S.piek)+' kW</b></span><span>Vrij voor laden ± <b>'+n0(vrij)+' kW</b></span><span>Aansluiting <b>'+n0(S.toeg)+' kW</b></span></div>';
+  $('haak').innerHTML=_cap+(vrij>0?('Op je aansluiting is nog ± <b>'+n0(vrij)+' kW</b> vrij. Daarmee laad je ± <b>'+n0(slim)+' personenwagens slim</b>, tegenover '+n0(dom)+' als ze allemaal tegelijk laden.'):'Je aansluiting zit al dicht bij haar grens. Slim laden wordt hier het verschil tussen laden en verzwaren.');
+}
+$('fpdf').addEventListener('change',function(){
+  var f=this.files&&this.files[0]; this.value=''; if(!f) return;
+  if(!/pdf$/i.test(f.type||f.name)){ $('fmsg').className='msg fout'; $('fmsg').textContent='Kies een PDF-bestand.'; return; }
+  $('fmsg').className='msg'; $('fmsg').textContent='⏳ Je factuur wordt ingelezen (± 20 seconden)…'; toon('fok',false);
+  b64(f).then(function(b){return post('/api/factuur-extract',{files:[{base64:b,mediaType:'application/pdf',fileName:f.name}]});})
+  .then(function(r){
+    if(!r||!r.baseCase){ $('fmsg').className='msg fout'; $('fmsg').textContent='We konden deze factuur niet lezen'+(r&&r.error?(' ('+r.error+')'):'')+'. Probeer een andere PDF of mail ze naar '+$('aliasmail').textContent+'.'; return; }
+    S.fb=(r.baseCase.factuur_bestanden||[]).slice(0,3);
+    leesBc(r.baseCase); factuurKlaar('✓ Factuur ingelezen.');
+  }).catch(function(e){ $('fmsg').className='msg fout'; $('fmsg').textContent='Inlezen mislukt: '+(e&&e.message||'netwerkfout'); });
+});
+// v0.3.0 (Johan 18-11): factuur al ingelezen → opladen verbergen; klein knopje «Opnieuw opladen» als de klant dat toch wil
+function factuurKlaar(tekst){
+  toon('fupl',false); $('fmsg').className='msg';
+  $('fmsg').innerHTML=esc(tekst)+' <button type="button" id="fopnieuw" style="margin-left:8px;font:inherit;font-size:12.5px;padding:3px 10px;border:1px solid #CBD5E1;border-radius:6px;background:#fff;color:#334155;cursor:pointer">↻ Opnieuw opladen</button>';
+  $('fopnieuw').onclick=function(){ toon('fupl',true); $('fmsg').textContent=''; $('fupl').scrollIntoView({behavior:'smooth',block:'center'}); };
+}
+$('snknop').addEventListener('click',function(e){ e.preventDefault(); snelAanvraag(); });
+$('toegaanpas').addEventListener('click',function(e){e.preventDefault();toon('toegbox',true);$('toeg').focus();});
+$('toeg').addEventListener('input',function(){var v=+this.value; if(v>0){S.toeg=v; $('kvtoeg').textContent=n0(v)+' kW'; haak();}});
+$('naar2').addEventListener('click',function(){toon('s2',true); if(!$('wrijen').children.length) wRij(); $('s2').scrollIntoView({behavior:'smooth'});});
+
+// ── Stap 2: wagens ──
+function laadType(t){ if(VEH[t]) return Promise.resolve(VEH[t]); return fetch(API+'/api/vehicles?type='+t).then(function(r){return r.json();}).then(function(j){VEH[t]=(j&&j.merken)||[];return VEH[t];}).catch(function(){VEH[t]=[];return [];}); }
+function wRij(def){
+  def=def||{}; var d=document.createElement('div'); d.className='wrij';
+  var t0=def.type||(S.dg==='logistiek'?'bestelwagen':'personenwagen');
+  d.innerHTML='<div class="r1"><div><label class="l">Type</label><select class="wt">'+TYPES.map(function(t){return '<option value="'+t[0]+'"'+(t[0]===t0?' selected':'')+'>'+t[1]+'</option>';}).join('')+'</select></div>'+
+    '<div><label class="l">Merk</label><select class="wm"><option value="">Weet ik nog niet</option></select></div></div>'+
+    '<div style="margin-top:8px"><label class="l">Model</label><select class="wmo"><option value="">Typische wagen</option></select></div>'+
+    '<div class="r2"><div><label class="l">Nu</label><input type="number" min="0" class="wn" value="'+(def.nu!=null?def.nu:'')+'" placeholder="0"></div><div><label class="l">Over 1 jaar</label><input type="number" min="0" class="w12" placeholder="="></div><div><label class="l">Over 2 jaar</label><input type="number" min="0" class="w24" placeholder="="></div><div><label class="l">Over 3 jaar</label><input type="number" min="0" class="w36" placeholder="="></div></div>'+
+    '<div class="r3"><span>km per jaar per wagen <input type="number" class="wkm" style="width:100px;display:inline-block;padding:5px 8px" value="'+TYP[t0].km+'"></span><label class="wbwz"'+(S.dg==='thuisladen'?'':' style="display:none"')+'><input type="checkbox" class="wbw"'+((def.bw!=null?def.bw:!$('wrijen').children.length)?' checked':'')+'> bedrijfswagen (CREG)</label><a href="#" class="wdel">verwijder</a></div><div class="wauto"></div>';
+  $('wrijen').appendChild(d);
+  var st=d.querySelector('.wt'), sm=d.querySelector('.wm'), smo=d.querySelector('.wmo');
+  function vulMerken(){ return laadType(st.value).then(function(M){ sm.innerHTML='<option value="">Weet ik nog niet</option>'+M.map(function(m,i){return '<option value="'+i+'">'+esc(m.merk)+'</option>';}).join(''); vulModellen(); }); }
+  function vulModellen(){ var M=VEH[st.value]||[], m=M[+sm.value]; smo.innerHTML='<option value="">'+(m?'Kies een model':'Typische wagen')+'</option>'+(m?m.modellen.map(function(x,i){return '<option value="'+i+'">'+esc(x.label)+'</option>';}).join(''):''); info(); }
+  function info(){ var w=leesRij(d), u=w?uitleg(w):''; d.querySelector('.wauto').innerHTML=u?('Zo laadt deze wagen'+ib('Zo laadt deze wagen',u.split(' · ').join('\n'))):''; }   // v0.7.1: achter een i
+  st.addEventListener('change',function(){ d.querySelector('.wkm').value=TYP[st.value].km; vulMerken(); });
+  sm.addEventListener('change',vulModellen); smo.addEventListener('change',info);
+  d.querySelector('.wkm').addEventListener('input',info);
+  d.querySelector('.wdel').addEventListener('click',function(e){e.preventDefault(); d.remove();});
+  d._def=def;   // v0.7.5: bewaard merk/model terugzetten (keuzelijst als die het kent, anders blijven de bewaarde waarden gelden)
+  d._klaar=vulMerken().then(function(){ if(!def.merk) return; var M=VEH[st.value]||[], mi=-1;
+    M.forEach(function(m,i){ if(mi<0&&String(m.merk).toLowerCase()===String(def.merk).toLowerCase()) mi=i; });
+    if(mi<0) return; sm.value=String(mi); vulModellen(); var xs=M[mi].modellen||[], xi=-1;
+    xs.forEach(function(x,i){ if(xi<0&&((def.id&&x.id===def.id)||(def.model&&x.label===def.model))) xi=i; });
+    if(xi>=0){ smo.value=String(xi); info(); } }).catch(function(){});
+}
+function leesRij(d){
+  var t=d.querySelector('.wt').value, M=VEH[t]||[], mi=d.querySelector('.wm').value, m=mi!==''?M[+mi]:null, xi=d.querySelector('.wmo').value, x=(m&&xi!=='')?m.modellen[+xi]:null, T=TYP[t];
+  function g(c){var v=d.querySelector(c).value;return v===''?null:Math.max(0,Math.round(+v||0));}
+  var nu=g('.wn')||0, a=g('.w12'), b=g('.w24'), c=g('.w36');
+  if(a==null) a=nu; if(b==null) b=a; if(c==null) c=b;
+  var D=d._def||{}; if(!m&&D.merk&&D.type===t){ return {type:t,merk:D.merk,model:D.model||'',id:D.id||'',batt_kwh:+D.batt_kwh||T.batt,kwh_km:+D.kwh_km||T.kwhkm,ac_kw:+D.ac_kw||T.ac,nu:nu,m12:a,m24:b,m36:c,km_jaar:Math.max(0,+d.querySelector('.wkm').value||T.km),bw:!!(d.querySelector('.wbw')&&d.querySelector('.wbw').checked)}; }   // v0.7.5
+  return {type:t,merk:m?m.merk:'',model:x?x.label:(m?'':'Typische '+TYPES.filter(function(z){return z[0]===t;})[0][1].toLowerCase()),id:x?x.id:'',
+    batt_kwh:x&&x.batt_kwh?+x.batt_kwh:T.batt,kwh_km:x&&x.kwh_km?+x.kwh_km:T.kwhkm,ac_kw:x&&x.ac_kw?+x.ac_kw:T.ac,
+    nu:nu,m12:a,m24:b,m36:c,km_jaar:Math.max(0,+d.querySelector('.wkm').value||T.km),bw:!!(d.querySelector('.wbw')&&d.querySelector('.wbw').checked)};
+}
+function dagenJaar(){return S.dg==='thuisladen'?365:(S.dg==='logistiek'?260:230);}
+function rotatie(w,dagE){ if(S.dg==='thuisladen'||w.type!=='personenwagen') return 1; return Math.max(1,Math.min(5,Math.floor(0.7*w.batt_kwh/Math.max(0.1,dagE)))); }
+function paalKw(w,nodig){ var cap=w.ac_kw||11; if(S.dg==='thuisladen') return Math.min(cap,nodig>7.4?11:7.4);
+  // v0.9.0 (Johan 19-11): bestel-/vrachtwagens die hun dagbehoefte niet halen op 22 kW AC krijgen een DC-paal (50/100/150/400 kW, 10 % marge)
+  if(w.type!=='personenwagen' && nodig>Math.min(cap,22)){ var dc=[50,100,150,400]; for(var i=0;i<dc.length;i++){ if(dc[i]>=nodig*1.1) return dc[i]; } return 400; }
+  return Math.min(cap,nodig>11?22:11); }
+function uitleg(w){
+  var dagE=w.km_jaar/dagenJaar()*w.kwh_km, R=rotatie(w,dagE), pk=paalKw(w,R*dagE/S.venster), uren=w.batt_kwh*0.7/Math.max(1,pk);
+  var s=['± '+n1(dagE)+' kWh per dag'];
+  if(R>1) s.push('rijdt ± '+R+' werkdagen op één laadbeurt');
+  s.push('laadt in ± '+n1(uren)+' u van 20 naar 90 % aan '+n1(pk)+' kW'+(pk>22?' (DC-paal)':''));
+  if(w.ac_kw&&w.ac_kw<22&&S.dg!=='thuisladen') s.push('een paal van 22 kW heeft voor deze wagen geen zin (laadt max. '+n1(w.ac_kw)+' kW)');
+  return s.join(' · ');
+}
+Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(b){b.addEventListener('click',function(){
+  Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x===b);});
+  S.dg=b.getAttribute('data-dg'); $('venster').value=S.dg==='kmo'?'8':(S.dg==='thuisladen'?'12':'10'); S.venster=+$('venster').value; vT(); Array.prototype.forEach.call(document.querySelectorAll('.wbwz'),function(x){x.style.display=S.dg==='thuisladen'?'':'none';});   /* v0.9.5: thuis 18–6 u; vinkje bedrijfswagen */
+  S.prof=S.dg==='thuisladen'?'residentieel':'industrie_met_zomersluiting'; $('prof').value=S.prof;   /* v0.8.2: profiel volgt de doelgroep, geen keuze */
+  if(S.bc) haak();
+});});
+$('venster').addEventListener('change',function(){S.venster=+this.value; if(S.bc) haak();});
+/* v0.11.0: laadduur als tegels (de keuzelijst blijft de bron) */
+var VT=[[4,'± 4 u',''],[6,'± 6 u',''],[8,'± 8 u','werkdag'],[10,'± 10 u',''],[12,'± 12 u','nacht 18–6 u']];
+function vT(){ var v=+$('venster').value, e=$('vtegels'); if(!e) return; e.innerHTML=VT.map(function(x){ return '<button type="button" class="tegel2'+(x[0]===v?' aan':'')+'" data-v="'+x[0]+'">'+ICO48('klok')+x[1]+(x[2]?'<small>'+x[2]+'</small>':'')+'</button>'; }).join(''); }
+$('vtegels').addEventListener('click',function(e){ var b=e.target.closest('[data-v]'); if(!b) return; $('venster').value=b.getAttribute('data-v'); $('venster').dispatchEvent(new Event('change')); vT(); });
+vT();
+$('wplus').addEventListener('click',function(){wRij();});
+
+// ── Berekening ──
+function bereken(){
+  var W=Array.prototype.map.call(document.querySelectorAll('.wrij'),leesRij).filter(function(w){return w.nu+w.m12+w.m24+w.m36>0;});
+  var vrij=Math.max(0,S.toeg*0.95-S.piek), R={beschikbaar_kw:Math.round(vrij),wagens:W};
+  ['nu','m12','m24','m36'].forEach(function(h){
+    var ev=0,lp=0,pdom=0,prot=0,edag=0,km=0,kwhkm=0,pk=0;
+    W.forEach(function(w){ var n=w[h]; if(!n) return; var dagE=w.km_jaar/dagenJaar()*w.kwh_km, r=rotatie(w,dagE), p=paalKw(w,r*dagE/S.venster), l=r>1?Math.ceil(n/r*1.15):n;
+      ev+=n; lp+=l; pdom+=n*p; prot+=l*p; edag+=n*dagE; km+=n*w.km_jaar; kwhkm+=n*w.km_jaar*w.kwh_km; pk=Math.max(pk,p); });
+    var pslim=Math.min(prot,edag/S.venster);
+    R[h]={km_jaar:km,ev:ev,laadpunten:lp,paal_kw:pk,p_dom_kw:Math.round(pdom),p_rot_kw:Math.round(prot),p_slim_kw:Math.round(pslim),edag_kwh:Math.round(edag),kwh_km:km>0?kwhkm/km:0.16,past:pslim<=vrij,past_rot:prot<=vrij};
+  });
+  var h0=['nu','m12','m24','m36'].filter(function(h){return R[h].ev>0;}), ref=R[h0[0]]||R.nu, dagEgem=ref.ev?ref.edag_kwh/ref.ev:9.6;
+  R.q1={slim:Math.floor(vrij*S.venster/Math.max(1,dagEgem)),dom:Math.floor(vrij/Math.max(3.7,ref.paal_kw||11))};
+  var hl=R[h0[h0.length-1]]||ref;
+  R.q4={kw_minder:Math.max(0,hl.p_rot_kw-hl.p_slim_kw),eur_cap:Math.max(0,hl.p_rot_kw-hl.p_slim_kw)*CAP_EUR_KW,eur_energie:hl.edag_kwh*dagenJaar()*SLIM_KORTING};
+  R.q5={dom:hl.kwh_km*100*S.prijs,slim:hl.kwh_km*100*Math.max(0.05,S.prijs-SLIM_KORTING)};
+  var grens=['nu','m12','m24','m36'].filter(function(h){return R[h].ev>0&&!R[h].past;})[0];
+  R.q7={grens:grens||null}; R.horizon_ek=h0.indexOf('m12')>=0?'m12':(h0[h0.length-1]||'nu');   // v0.8.1 (Johan 19-11): naar Energie-Compas gaan de wagens van «over 1 jaar»
+  return R;
+}
+function mengSim(R,m){   // v0.6.0: kwartieranalyse overschrijft de ruwe schatting
+  if(!m) return R; R.sim=m; R.beschikbaar_kw=null;
+  R.q1={slim:m.wagens_slim,dom:m.wagens_dom};
+  ['nu','m12','m24','m36'].forEach(function(h){ var x=m.horizons&&m.horizons[h]; if(x&&R[h]&&R[h].ev>0){ R[h].past=!!x.past; R[h].piek_dom_kw=x.piek_dom_kw; R[h].piek_slim_kw=x.piek_slim_kw; R[h].extra_dom_kw=x.extra_dom_kw; R[h].extra_slim_kw=x.extra_slim_kw; R[h].verzwaren_dom=!!x.verzwaren_dom; R[h].aansl=x.aansluiting||null; R[h].toeg_nodig_kw=x.toeg_nodig_kw||null; } });
+  R.aansl=m.aansluiting||null;   // v0.9.0: cabine/toegang per horizon
+  var grens=['nu','m12','m24','m36'].filter(function(h){return R[h].ev>0&&!R[h].past;})[0]; R.q7={grens:grens||null};
+  return R;
+}
+function berekenSim(){ var R=bereken(); if(!R.wagens.length) return Promise.resolve(R); return sim(R).then(function(m){ return mengSim(R,m); }); }
+var HZ={nu:'Nu',m12:'Over 1 jaar',m24:'Over 2 jaar',m36:'Over 3 jaar'};
+// v0.9.0 (Johan 19-11): CABINE — passen de wagens met slim laden niet onder het toegangsvermogen, dan kijken we naar de cabine
+//   (gekend, of geschat als de marktmaat net boven de piek op de factuur). Onder de cabine = toegangsvermogen verhogen (contract);
+//   erboven = ingreep op de aansluiting → grondigere studie, gratis na de kwaliteitscheck. Het laadplan zelf rekent gewoon door.
+function aanslTekst(R){
+  var A=R.aansl, piek=R.sim?R.sim.piek_kw:S.piek;
+  if(!A) return 'Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.';
+  var cab=A.cabine_kva?(n0(A.cabine_kva)+' kVA'+(A.cabine_bron==='geschat'?(', geschat als de standaardmaat net boven je piek van '+n0(piek)+' kW'):'')):null;
+  var hT=A.eerste_toegang, hI=A.eerste_ingreep, t='';
+  if(hT){ var x=R[hT]||{}; t+=HZ[hT]+' volstaat je toegangsvermogen ('+n0(A.toeg_kw)+' kVA) niet meer, ook niet met slim laden. Je cabine'+(cab?(' ('+cab+')'):'')+' kan wel meer: verhoog je toegangsvermogen tot ± '+n0(x.toeg_nodig_kw)+' kVA. Dat is een aanpassing van je contract bij de netbeheerder, geen werk aan de cabine. '; }
+  if(hI){ t+=HZ[hI]+' passen je wagens ook met slim laden niet meer '+(cab?('onder je cabine ('+cab+')'):'op je aansluiting')+'. Bereid je voor op een ingreep op je aansluiting. Om die goed te dimensioneren is een grondigere studie nodig (batterij, zonnepanelen, toegangsvermogen, cabine); die doen we gratis na de kwaliteitscheck van je eerste laadpalen.'; }
+  if(A.eerste_palen){ t+=HZ[A.eerste_palen]+' halen je laadpalen de dagbehoefte niet binnen je laaduren: kies snellere palen of een langer laadvenster. '; }
+  return t||'Dan loont een volledige analyse: een batterij of zonnepanelen kunnen een verzwaring vermijden.';
+}
+function aanslBanner(R){
+  var e=$('goedkingreep'); if(!e) return; var A=R&&R.aansl;
+  if(!A||!(A.eerste_ingreep||A.eerste_toegang)){ e.className='verborgen'; e.innerHTML=''; return; }
+  e.className='ingreep'+(A.eerste_ingreep?'':' toeg');
+  e.innerHTML=A.eerste_ingreep?('<b>Let op: '+esc(HZ[A.eerste_ingreep].toLowerCase())+' is een ingreep op je aansluiting nodig.</b> Met dit aantal wagens volstaat slim laden alleen niet meer. Bereid je erop voor: na de kwaliteitscheck van je eerste laadpalen bestuderen we gratis hoe je je aansluiting het best aanpast.')
+    :('<b>'+esc(HZ[A.eerste_toegang])+' moet je toegangsvermogen omhoog</b> tot ± '+n0((R[A.eerste_toegang]||{}).toeg_nodig_kw)+' kVA. Je cabine kan dat aan; na de kwaliteitscheck bekijken we gratis of een batterij of zonnepanelen dat kunnen vermijden.');
+}
+// v0.9.1 (Johan 19-11): snelladen bij laden/lossen → aanvraag Energie-Compas-studie (lead naar Fluctus, dossier klaar in EK)
+function snelAanvraag(){
+  var k=$('snknop'), v=function(id){ return +$(id).value||0; };
+  var d={ token:S.token, beurten_dag:v('snaant'), duur_min:v('snduur'), kwh_beurt:v('snkwh'), van_u:v('snvan'), tot_u:v('sntot'), opmerking:$('snopm').value||'' };
+  if(!(d.beurten_dag>0&&d.duur_min>0&&d.kwh_beurt>0)){ $('snmsg').className='msg fout'; $('snmsg').textContent='Vul het aantal laadbeurten, de tijd aan de kade en de kWh per laadbeurt in.'; return; }
+  k.disabled=true; $('snmsg').className='msg'; $('snmsg').textContent='Je aanvraag wordt verstuurd…';
+  post('/api/bl/snelladen',d).then(function(j){
+    if(!j||!j.ok){ k.disabled=false; $('snmsg').className='msg fout'; $('snmsg').textContent=(j&&j.error)||'Versturen lukte niet. Probeer het opnieuw.'; return; }
+    $('snmsg').className='msg ok'; $('snmsg').textContent='Bedankt! We nemen contact met je op voor de studie'+(j.project_id?(' (dossier '+j.project_id+')'):'')+'.';
+  }).catch(function(){ k.disabled=false; $('snmsg').className='msg fout'; $('snmsg').textContent='Versturen lukte niet. Probeer het opnieuw.'; });
+}
+function render(){
+  var R=S.res, P2=P?P.naam:'';
+  var bc=S.bc||{}; $('rtitel').textContent='Je laadplan'+(bc.klantNaam?(' · '+bc.klantNaam):'');
+  $('dossnr').textContent=S.pid?('Dossier '+S.pid):'Je laadplan';
+  $('rsub').textContent=(bc.leveringsadres||'')+' · toegangsvermogen '+n0(S.toeg)+' kW · '+(R.sim?('± '+n0(R.sim.ruimte_kwh_dag_p5)+' kWh per laaddag vrij om te laden'):('nog ± '+n0(R.beschikbaar_kw)+' kW vrij voor laden'));
+  (function(){   // v0.7.4: het voorziene wagenpark
+    var W=(R.wagens||[]); if(!W.length){ $('wpark').innerHTML=''; return; }
+    var lab=function(t){ var x=TYPES.filter(function(z){return z[0]===t;})[0]; return x?x[1]:t; };
+    var tot={nu:0,m12:0,m24:0,m36:0};
+    var rij=W.map(function(w){ ['nu','m12','m24','m36'].forEach(function(h){tot[h]+=(+w[h]||0);}); var naam=w.merk?((w.merk||'')+' '+(w.model||'')).trim():'';
+      return '<tr><td><b>'+esc(naam||lab(w.type))+'</b></td><td>'+n0(w.nu)+'</td><td>'+n0(w.m12)+'</td><td>'+n0(w.m24)+'</td><td>'+n0(w.m36)+'</td>'+
+        '<td class="opt">'+n0(w.km_jaar)+'</td><td class="opt">'+n1((+w.kwh_km||0)*100)+'</td><td class="opt">'+n0(w.batt_kwh)+' kWh · '+n1(w.ac_kw)+' kW</td></tr>'; }).join('');
+    if(W.length>1) rij+='<tr><td><b>Totaal</b></td><td><b>'+n0(tot.nu)+'</b></td><td><b>'+n0(tot.m12)+'</b></td><td><b>'+n0(tot.m24)+'</b></td><td><b>'+n0(tot.m36)+'</b></td><td class="opt"></td><td class="opt"></td><td class="opt"></td></tr>';
+    var waar={kmo:'op het werk (personeelswagens)',logistiek:'op de eigen site (bestel- en vrachtwagens)',thuisladen:'thuis'}[S.dg]||'';
+    var po=$('prof')&&$('prof').selectedOptions[0]?$('prof').selectedOptions[0].text:'';
+    $('wpark').innerHTML='<div class="wt">Je wagenpark</div><table><tr><th>Wagen</th><th>Nu</th><th>Over 1 jaar</th><th>Over 2 jaar</th><th>Over 3 jaar</th><th class="opt">km/jaar</th><th class="opt">kWh/100 km</th><th class="opt">Batterij · laden</th></tr>'+rij+'</table>'+
+      '<div class="wm">Laden '+esc(waar)+', ± '+n0(S.venster)+' uur aan de laadpaal'+(S.dg==='thuisladen'?' per dag':' per werkdag')+(R.sim&&po?(' · verbruiksprofiel «'+esc(po)+'», jaarverbruik ± '+n0(R.sim.jaar_mwh)+' MWh'):'')+'.</div>';
+  })();
+  aanslBanner(R);   // v0.9.0
+  toon('snel', S.dg==='logistiek' || (R.wagens||[]).some(function(w){ return w.type==='vrachtwagen'||w.type==='bus'||w.type==='lichte_vracht'; }));   // v0.9.1
+  $('pcode').textContent=S.pid||'zie je bevestigingsmail'; Array.prototype.forEach.call(document.querySelectorAll('.pnaam'),function(e){ e.textContent=pNaam(); });   // v0.8.0
+  $('a4p').innerHTML=(P2?esc(P2)+'<br>':'')+(S.pid?esc(S.pid)+'<br>':'')+new Date().toLocaleDateString(window.BL_LOC||'nl-BE');
+  var hl=['m36','m24','m12','nu'].map(function(h){return R[h];}).filter(function(x){return x.ev>0;})[0]||R.nu;
+  // v0.4.0 (Johan 18-11): grafische kaarten — icoon in partnerkleur, groot kerncijfer, mini-staafjes en tijdlijn
+  var IC={ wagen:'<path d="M5 17h14M4 17v-4l2-5h12l2 5v4"/><circle cx="7.5" cy="17.5" r="1.6"/><circle cx="16.5" cy="17.5" r="1.6"/><path d="M4 13h16"/>',
+    stekker:'<path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5"/>',
+    bliksem:'<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    meter:'<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4.5-6"/><path d="M7 18h10"/>',
+    euro:'<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5a4.2 4.2 0 1 0 0 7M7.5 11h6M7.5 13.2h6"/>',
+    weg:'<path d="M8 3 4 21M16 3l4 18M12 4v3M12 11v3M12 18v2"/>',
+    kalender:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>' };
+  function ico(k){ return '<div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+IC[k]+'</svg></div>'; }
+  function bars(rows){ var mx=Math.max.apply(null,rows.map(function(r){return +r[1]||0;}).concat([1]));
+    return '<div class="bars">'+rows.map(function(r){ var w=Math.max(2,Math.round((+r[1]||0)/mx*100)); return '<div class="bar'+(r[3]?(' '+r[3]):'')+'"><span>'+esc(r[0])+'</span><span class="t"><i style="width:'+w+'%"></i></span><b>'+esc(r[2])+'</b></div>'; }).join('')+'</div>'; }
+  function kaart(k,q,groot,klein,s,extra,breed){ return '<div class="v'+(breed?' breed':'')+'">'+ico(k)+'<div class="in"><div class="q">'+esc(q)+ib(q,s)+'</div>'+(s&&!breed?'<div class="s sprint">'+esc(s)+'</div>':'')+'<div class="groot">'+esc(groot)+(klein?'<small>'+esc(klein)+'</small>':'')+'</div>'+(extra||'')+(s&&breed?'<div class="s sprint">'+esc(s)+'</div>':'')+'</div></div>'; }   // v0.7.3: uitleg vóór het cijfer in de DOM (float rechts bij afdrukken)
+  var BT=S.dg==='thuisladen'?1.06:1, BTL=BT>1?'incl. btw':'excl. btw';   // v0.9.3: bedrijf excl. btw, thuisladen incl. 6 % btw
+  var eu2=function(x){ return '€ '+(Math.round((+x||0)*BT*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var eurB=function(x){ return eur((+x||0)*BT); };
+  var K=[], KP={};   /* v0.11.0: kerncijfers voor het resultaatpaneel */
+  var M=R.sim, hs0=M&&M.horizons?(['m36','m24','m12','nu'].map(function(h){return M.horizons[h];}).filter(function(x){return x&&x.ev>0;})[0]):null;
+  K.push(kaart('wagen','Hoeveel elektrische wagens kan ik laden op mijn huidige aansluiting?','± '+n0(R.q1.slim),'wagens slim gestuurd',M?'Zonder verzwaring, berekend per kwartier over een heel jaar.':'Zonder verzwaring.',
+    bars([['Slim gestuurd',R.q1.slim,n0(R.q1.slim),'hl'],['Allemaal tegelijk',R.q1.dom,n0(R.q1.dom)]])));
+  KP.wagens={g:'± '+n0(R.q1.slim),s:'slim gestuurd, zonder verzwaring (allemaal tegelijk: '+n0(R.q1.dom)+')'};
+  K.push(kaart('stekker','Hoeveel laadpunten heb ik nodig?',n0(hl.laadpunten),'laadpunten voor '+n0(hl.ev)+' wagens',
+    hl.laadpunten<hl.ev?'Minder punten dan wagens: een volle wagen rijdt meerdere dagen. Dat vraagt een badge of reservatie om te wisselen.':'Elke wagen laadt dagelijks, dus één punt per wagen.',
+    bars([['Wagens',hl.ev,n0(hl.ev)],['Laadpunten',hl.laadpunten,n0(hl.laadpunten),'hl']])));
+  K.push(kaart('bliksem','Welk vermogen per laadpunt heeft zin?',n1(hl.paal_kw)+' kW','per punt','Begrensd op wat je wagens zelf kunnen laden. Meer vermogen kost meer en levert niets op.'));
+  if(hs0){
+    var pn=P2||'je laadpartner', netD=+hs0.net_eur100_dom||0, netX=+hs0.net_eur100_dom_max||netD, netS=+hs0.net_eur100_slim||0, spt=Math.max(0,+hs0.spot_eur100||0);
+    var totMin=Math.max(0,netD-netS)+spt, totMax=Math.max(0,netX-netS)+spt, vork=function(a,b){ return Math.abs(b-a)<0.005?('± '+eu2(a)):(eu2(a)+' – '+eu2(b)); };
+    var T=M.tarief, kwTxt=T?('maandpiek € '+n0(T.mp_eur_kw*BT)+' per kW per jaar'+(T.tv_eur_kw?(' en, boven je toegangsvermogen, € '+n0(T.tv_eur_kw*BT)+' per kW per jaar'):'')+' ('+esc(T.dnb||'')+' '+esc(T.spanning||'')+(T.jaar?(' '+T.jaar):'')+')'):('€ '+n0(M.eur_kw*BT)+' per kW per jaar'); kwTxt+=' ('+BTL+')';
+    K.push(kaart('meter','Hoeveel extra piek vraagt dat?',hs0.extra_slim_kw>0?('+ '+n0(hs0.extra_slim_kw)+' kW'):'Geen extra piek','slim gestuurd',
+      (hs0.verzwaren_dom?'Zonder sturing ga je over je toegangsvermogen: verzwaren. ':'')+(M.toegang_volstaat_kw<M.toeg_kw?('Slim gestuurd volstaat ± '+n0(M.toegang_volstaat_kw)+' kW toegangsvermogen (nu '+n0(M.toeg_kw)+' kW).'):''),
+      bars([['Zonder sturing, slechtste geval',hs0.piek_dom_max_kw||hs0.piek_dom_kw,n0(hs0.piek_dom_max_kw||hs0.piek_dom_kw)+' kW'],['Zonder sturing, drukste dag',hs0.piek_dom_kw,n0(hs0.piek_dom_kw)+' kW'],['Slim gestuurd',hs0.piek_slim_kw,n0(hs0.piek_slim_kw)+' kW','hl'],['Toegangsvermogen',M.toeg_kw,n0(M.toeg_kw)+' kW','acc']])+
+      // v0.9.1 (Johan 19-11): snelle (DC-)palen en sturing horen samen
+      ((+hl.paal_kw>22 && +hs0.piek_dom_kw>+hs0.piek_slim_kw)?('<span class="pil">Snelle palen en sturing gaan samen: met '+n0(hl.paal_kw)+' kW per paal loopt je piek zonder sturing op tot '+n0(hs0.piek_dom_kw)+' kW, gestuurd blijft hij op '+n0(hs0.piek_slim_kw)+' kW.</span>'):'')));
+    K.push(kaart('euro','Wat levert slim laden op?',vork(totMin,totMax),'per 100 km goedkoper dan zonder sturing ('+BTL+')',
+      'Netkost van de extra piek: '+kwTxt+'. Laagste cijfer: onze jaarsimulatie, dag per dag je verbruik (met de korte pieken) plus het laden, per maand de hoogste piek. Hoogste cijfer: elke maand valt het laden samen met je hoogste kwartier. Slim laden kiest binnen de laaduren ook de goedkoopste uren op de spotmarkt. Dat vraagt een slimme laadpartner zoals '+pn+'.',
+      bars([['Netkost zonder sturing',netX,vork(netD,netX)],['Netkost slim',netS,eu2(netS),'hl'],['Goedkopere uren (spot)',spt,'− '+eu2(spt),'acc']])+
+      (function(a,b){ return '<span class="pil">'+esc(Math.abs(b-a)<1?('± '+eurB(a)):(eurB(a)+' – '+eurB(b)))+' per jaar voor '; })((+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0),(+(hs0.net_eur_jaar_dom_max||hs0.net_eur_jaar_dom)-hs0.net_eur_jaar_slim)+(+hs0.spot_eur_jaar||0))+n0(hs0.ev)+' wagens</span>'));
+    var s100, d100, d100x, vtxt;
+    if(hs0.kost100_slim!=null){ s100=hs0.kost100_slim; d100=hs0.kost100_dom; d100x=hs0.kost100_dom_max; var V=hs0.var_eur_mwh||{};
+      vtxt='Met een dynamisch contract: spotprijs + ± € '+n0(V.totaal)+' per MWh (opslag '+n0(V.opslag)+', vergroening '+n1(V.vergroening)+', groenestroom- en WKK-certificaten '+n1((+V.gsc||0)+(+V.wkk||0))+', netkost per kWh '+n1(V.net)+', accijns '+n1(V.accijns)+'), plus de netkost van de extra piek. '+(BT>1?'Incl. 6 % btw (de onderdelen per MWh zijn excl. btw).':'Excl. btw.'); }
+    else { var e100=hl.kwh_km*100*S.prijs; s100=Math.max(0,e100-spt)+netS; d100=e100+netD; d100x=e100+netX; vtxt='Stroom aan je huidige prijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh), plus de netkost van de extra piek.'; }
+    K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(s100),'per 100 km met slim laden ('+BTL+')',vtxt,
+      bars([['Slim laden',s100,eu2(s100),'hl'],['Zonder sturing',d100x,vork(d100,d100x)]])));
+    KP.km={g:eu2(s100),s:'zonder sturing '+vork(d100,d100x)+' ('+BTL+')'};
+    (function(){ var sp=+hs0.spot_eur_jaar||0, a=(+hs0.net_eur_jaar_dom-hs0.net_eur_jaar_slim)+sp, b=(+(hs0.net_eur_jaar_dom_max||hs0.net_eur_jaar_dom)-hs0.net_eur_jaar_slim)+sp; KP.spaar={g:Math.abs(b-a)<1?('± '+eurB(a)):(eurB(a)+' – '+eurB(b)),s:'per jaar voor '+n0(hs0.ev)+' wagens'}; })();
+    // v0.9.3 (Johan 19-11): thuisladen — gerealiseerde prijs per kWh tegenover de CREG-vergoeding (werkgever betaalt het thuisladen van een bedrijfswagen terug)
+    if(S.dg==='thuisladen'){ var kwh100=Math.max(1,(+hl.kwh_km||0.16)*100), C=cregGewest(bc.leveringsadres), pS=s100/kwh100*1.06, pD=d100/kwh100*1.06, hkB=['m36','m24','m12','nu'].filter(function(h){return R[h]&&R[h].ev>0;})[0]||'nu', kwhJ=(R.wagens||[]).reduce(function(t,w){return t+(w.bw?(+w[hkB]||0)*(+w.km_jaar||0)*(+w.kwh_km||0.16):0);},0);   /* v0.9.5: enkel bedrijfswagens krijgen de CREG-vergoeding */
+      var e3=function(x){ return '€ '+(Math.round(x*1000)/1000).toLocaleString('nl-BE',{minimumFractionDigits:3,maximumFractionDigits:3}); }, vS=(C.v-pS)*kwhJ; var e4=function(x){ return '€ '+(Math.round(x*10000)/10000).toLocaleString('nl-BE',{minimumFractionDigits:4,maximumFractionDigits:4}); };
+      K.push(kaart('euro','Wat kost een kWh thuis laden, tegenover de CREG-vergoeding?','± '+e3(pS),'per kWh met slim laden (incl. btw)',
+        'Laadt een werknemer thuis een bedrijfswagen, dan mag de werkgever dat terugbetalen tegen het CREG-tarief: in '+CREG.kwartaal+' '+e4(C.v)+' per kWh in '+C.g+'. Dat is een all-in bedrag incl. btw; op de terugbetaling zelf komt geen btw. Met slim laden kost een kWh je ± '+e3(pS)+', zonder sturing ± '+e3(pD)+' (incl. btw). Zelfde basis als de kost per 100 km: dynamisch contract, netkost van de extra piek, heffingen en accijns.',
+        bars([['Slim laden',pS,e3(pS),'hl'],['Zonder sturing',pD,e3(pD)],['CREG-vergoeding',C.v,e4(C.v),'acc']])+
+        (kwhJ>0?'<span class="pil">'+esc('± '+eur(Math.abs(vS))+' per jaar '+(vS>=0?'onder':'boven')+' de CREG-vergoeding, voor ± '+n0(kwhJ)+' kWh van de bedrijfswagen')+'</span>':'<span class="pil">Duid bij je wagens de bedrijfswagen aan om het verschil per jaar te zien.</span>')));
+      KP.creg={g:e3(pS),s:'CREG-vergoeding '+e4(C.v)+' (incl. btw)'};
+    }
+  } else {
+  K.push(kaart('meter','Hoeveel extra vermogen vraagt dat?','± '+n0(hl.p_slim_kw)+' kW','slim gestuurd','',
+    bars([['Elke wagen een paal',hl.p_dom_kw,n0(hl.p_dom_kw)+' kW'],['Met wisselen (max.)',hl.p_rot_kw,n0(hl.p_rot_kw)+' kW'],['Slim gestuurd',hl.p_slim_kw,n0(hl.p_slim_kw)+' kW','hl'],['Vrij op je aansluiting',R.beschikbaar_kw,'± '+n0(R.beschikbaar_kw)+' kW','acc']])));
+  K.push(kaart('euro','Wat bespaar ik met slim laden?','± '+eurB(R.q4.eur_cap),'per jaar op je capaciteitstarief','Je piek ligt ± '+n0(R.q4.kw_minder)+' kW lager.',
+    (+R.q4.eur_energie>0?'<span class="pil">+ ± '+esc(eurB(R.q4.eur_energie))+' per jaar met een dynamisch contract (laden op goedkope uren)</span>':'')));
+  K.push(kaart('weg','Wat kost een kilometer elektrisch rijden?','± '+eu2(R.q5.slim),'per 100 km met slim laden','Gerekend met je huidige stroomprijs (± € '+(Math.round(S.prijs*100)/100).toLocaleString('nl-BE',{minimumFractionDigits:2})+' per kWh).',
+    bars([['Slim laden',R.q5.slim,eu2(R.q5.slim),'hl'],['Zonder sturing',R.q5.dom,eu2(R.q5.dom)]])));
+  KP.km={g:eu2(R.q5.slim),s:'zonder sturing '+eu2(R.q5.dom)}; KP.spaar={g:'± '+eurB((+R.q4.eur_cap||0)+(+R.q4.eur_energie||0)),s:'per jaar (capaciteitstarief en goedkope uren)'};
+  }
+  var tl='<div class="tl">'+['nu','m12','m24','m36'].map(function(h){ var x=R[h]||{}; var c=!x.ev?'leeg':(x.past?'ja':(x.aansl==='toegang'?'deels':'nee'));   /* 'ingreep' en 'palen' = ✕ */ return '<div class="st '+c+'"><div class="dot">'+(!x.ev?'–':(x.past?'✓':(x.aansl==='toegang'?'!':'✕')))+'</div>'+esc(HZ[h])+'</div>'; }).join('')+'</div>';
+  K.push(kaart('kalender','Wanneer bots ik op de grens van mijn aansluiting?',R.q7.grens?HZ[R.q7.grens]:'Ook over 3 jaar past alles',R.q7.grens?((R.aansl&&R.aansl.eerste_ingreep===R.q7.grens)?'is een ingreep op je aansluiting nodig':((R.aansl&&R.aansl.eerste_toegang===R.q7.grens)?'moet je toegangsvermogen omhoog':'kom je aan je grens, ook met slim laden')):'als je slim laadt',
+    R.q7.grens?aanslTekst(R):('Laad je zonder sturing, dan heb je wel tot '+n0(hs0?hs0.piek_dom_kw:hl.p_dom_kw)+' kW nodig'+(hs0?(' op je aansluiting'+(hs0.piek_dom_max_kw>hs0.piek_dom_kw?(', in het slechtste geval '+n0(hs0.piek_dom_max_kw)+' kW.'):'.')):'.')), tl, true));
+  var _gt=hs0?((hs0.piekdag?('We rekenen elke laaddag van het jaar door (je verbruik van die dag + het laden) en tonen de dag met de hoogste piek zonder sturing: '+n0(hs0.piek_dom_kw)+' kW. '+(hs0.piek_dom_max_kw-hs0.piek_dom_kw>5?('Valt het laden samen met je eigen hoogste kwartier ('+n0(M.piek_kw)+' kW), dan wordt het tot '+n0(hs0.piek_dom_max_kw)+' kW. '):('Op die dag valt een piek van je eigen verbruik ('+n0(M.piek_kw)+' kW) samen met het laden. Slim gestuurd pauzeert het laden op dat kwartier. '))):'')+'Slim gestuurd vult het laden de dalen in je verbruik, onder je hoogste kwartier. Zonder sturing laden alle wagens meteen bij aankomst.'):'';
+  if(hs0) K.push('<div class="v breed">'+ico('meter')+'<div class="in"><div class="q">'+(hs0.piekdag?'Je drukste laaddag':'Zo ziet een gemiddelde laaddag eruit')+' ('+(hs0.piekdag?(['zo','ma','di','wo','do','vr','za'][hs0.piekdag.weekdag]+' '+new Date(hs0.piekdag.datum+'T12:00:00Z').toLocaleDateString(window.BL_LOC||'nl-BE',{day:'numeric',month:'long'})+', '):'')+esc(HZ[['m36','m24','m12','nu'].filter(function(h){return M.horizons[h]&&M.horizons[h].ev>0;})[0]])+', '+n0(hs0.ev)+' wagens)'+ib('Hoe lezen we deze grafiek?',_gt)+'</div>'+dagGrafiek(M,hs0)+'<div class="s sprint">'+esc(_gt)+'</div></div></div>');
+  if(K.length>4) K.splice(4,0,'<div class="pgbr"></div>');   // v0.7.3: PDF pagina 2 start bij «Wat levert slim laden op?» (leeg blok: werkt ook in Safari)
+  $('vragen').innerHTML=K.join('');
+  (function(){   /* v0.11.0 (Johan 20-11): één paneel met de kerncijfers — de uitleg staat in de PDF */
+    var hk=['m36','m24','m12','nu'].filter(function(h){return R[h]&&R[h].ev>0;})[0]||'nu', A=R.aansl||{}, g, lo=function(h){ return HZ[h].toLowerCase(); };
+    if(A.eerste_ingreep) g={c:'nee',g:'Ingreep nodig',s:lo(A.eerste_ingreep)+': slim laden volstaat niet meer'};
+    else if(A.eerste_toegang) g={c:'krap',g:'Te krap',s:lo(A.eerste_toegang)+': toegangsvermogen omhoog tot ± '+n0((R[A.eerste_toegang]||{}).toeg_nodig_kw)+' kVA, je cabine kan het aan'};
+    else if(R.q7&&R.q7.grens) g={c:'krap',g:'Te krap',s:lo(R.q7.grens)+', ook met slim laden'};
+    else g={c:'',g:'Ja, slim gestuurd',s:'ook over 3 jaar'};
+    var T=[['laadpaal',['Laadpunten','nodig'],n0(hl.laadpunten),n0(hl.ev)+' wagens · '+n1(hl.paal_kw)+' kW per punt · '+lo(hk),''],
+           ['meter',['Past het op je','aansluiting?'],g.g,g.s,g.c]];
+    if(KP.wagens) T.push(['auto',['Wagens op je aansluiting','van vandaag'],KP.wagens.g,KP.wagens.s,'']);
+    if(KP.km) T.push(['weg',['Kost per 100 km,','slim geladen'],KP.km.g,KP.km.s,'']);
+    if(KP.creg) T.push(['euro',['Thuis laden','per kWh'],KP.creg.g,KP.creg.s,'']);
+    if(KP.spaar) T.push(['spaar',['Besparing met','slim laden'],KP.spaar.g,KP.spaar.s,'']);
+    $('samen').innerHTML='<h3>Resultaat*</h3><div class="sgrid">'+T.map(function(t){ return '<div class="sk '+t[4]+'">'+ICO48(t[0])+'<div><div class="l">'+esc(t[1][0])+' <em>'+esc(t[1][1])+'</em></div><div class="g">'+esc(t[2])+'</div><div class="s">'+esc(t[3])+'</div></div></div>'; }).join('')+'</div>'+
+      '<p class="vt">* Indicatief: berekend op je factuur en een standaard verbruiksprofiel, kwartier per kwartier over een heel jaar. De uitleg bij elk cijfer staat in je laadplan (PDF).</p>'+
+      '<div class="pdfk"><button type="button" class="btn licht" id="pdf2">'+ICO48('pdf')+'Download je laadplan met uitleg (PDF)</button></div>';
+    $('pdf2').addEventListener('click',pdfDl);
+  })();
+  var hs=['nu','m12','m24','m36'];
+  $('hz').innerHTML='<tr><th></th>'+hs.map(function(h){return '<th>'+HZ[h]+'</th>';}).join('')+'</tr>'+
+    [['Wagens','ev',n0],['Laadpunten','laadpunten',n0],['Per punt (kW)','paal_kw',n1],['Elke wagen een paal, zonder sturing','p_dom_kw',function(x){return n0(x)+' kW';}],['Met wisselen (max.)','p_rot_kw',function(x){return n0(x)+' kW';}],['Slim gestuurd','p_slim_kw',function(x){return n0(x)+' kW';}]].concat(R.sim?[['Piek op je aansluiting zonder sturing','piek_dom_kw',function(x){return x?n0(x)+' kW':'–';}],['Piek op je aansluiting slim gestuurd','piek_slim_kw',function(x){return x?n0(x)+' kW':'–';}]]:[])
+    .map(function(r){return '<tr><td>'+r[0]+'</td>'+hs.map(function(h){return '<td>'+r[2](R[h][r[1]])+'</td>';}).join('')+'</tr>';}).join('')+
+    '<tr><td>Past onder je toegangsvermogen ('+n0(S.toeg)+' kW)?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(!x.ev?'–':(x.past?'<span class="ok">ja, slim</span>':(x.aansl==='palen'?'<span class="krap">palen te traag</span>':'<span class="krap">te krap</span>'+(x.toeg_nodig_kw?'<br><small>→ '+n0(x.toeg_nodig_kw)+' kW</small>':''))))+'</td>';}).join('')+'</tr>'+
+      /* v0.10.0 (Johan 20-11): krap op het toegangsvermogen ≠ nee — tweede lijn: past het op de aansluiting zelf (cabine)? */
+      ((R.aansl&&R.aansl.cabine_kva)?'<tr><td>Past op je aansluiting (cabine '+n0(R.aansl.cabine_kva)+' kVA)?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(!x.ev?'–':((x.past||x.aansl==='toegang'||x.aansl==='palen')?'<span class="ok">ja</span>':'<span class="nok">nee</span>'))+'</td>';}).join('')+'</tr>':'');
+  $('ek').textContent=S.ek?'Open je Energie-Compas-dossier':'Volledige analyse met batterij en zonnepanelen';
+  toon('s4',true);
+}
+
+$('naar3').addEventListener('click',function(){
+  var R0=bereken(); if(!R0.wagens.length){ alert(window.blTr('Geef minstens één wagen in.')); return; }
+  var k=this; k.disabled=true;
+  berekenSim().then(function(R){ k.disabled=false; S.res=R;
+    if(S.verified){ return bewaar(); }
+    toon('s3',true); $('s3').scrollIntoView({behavior:'smooth'}); $('mail').focus(); });
+});
+
+// ── Stap 3: mail + code ──
+$('stuurcode').addEventListener('click',function(){
+  var m=$('mail').value.trim(); $('cmsg').className='msg'; $('cmsg').textContent='';
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)){ $('cmsg').className='msg fout'; $('cmsg').textContent='Geef een geldig e-mailadres.'; return; }
+  this.disabled=true; var knop=this;
+  post('/api/bl/start',{mail:m,partner:SLUG,token:S.token,lang:window.BL_LANG}).then(function(j){
+    knop.disabled=false;
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Er ging iets mis.'; return; }
+    S.token=j.token; bewaarLokaal();
+    if(j.verified){ S.verified=true; return bewaar(); }
+    $('mailtoon').textContent=m; toon('codebox',true); $('code').focus();
+    if(j.sent===false) { $('cmsg').className='msg fout'; $('cmsg').textContent='De mail kon niet vertrekken. Probeer later opnieuw.'; }
+  }).catch(function(){knop.disabled=false; $('cmsg').className='msg fout'; $('cmsg').textContent='Netwerkfout.';});
+});
+$('opnieuw').addEventListener('click',function(e){e.preventDefault(); $('stuurcode').click();});
+$('checkcode').addEventListener('click',function(){
+  post('/api/bl/code',{token:S.token,code:$('code').value}).then(function(j){
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Die code klopt niet.'; return; }
+    S.verified=true; $('cmsg').textContent=''; bewaar();
+  });
+});
+$('code').addEventListener('keyup',function(e){ if(this.value.replace(/\D/g,'').length===6&&e.key!=='Tab') $('checkcode').click(); });
+
+function bewaar(){
+  var R=S.res;
+  var inv={profiel:S.prof,wagens:R.wagens,doelgroep:S.dg,venster_u:S.venster,toegang_kw:S.toeg,piek_kw:S.piek,afname_mwh:S.afn,prijs_kwh:S.prijs,horizon_ek:R.horizon_ek,cabine_kva:S.cabine||0};
+  var res={beschikbaar_kw:R.beschikbaar_kw}; ['nu','m12','m24','m36'].forEach(function(h){res[h]=R[h];});
+  if(R.sim){ var m=R.sim, hz={}; Object.keys(m.horizons||{}).forEach(function(h){ var x=Object.assign({},m.horizons[h]); delete x.gem_slim_kw; delete x.gem_dom_kw; hz[h]=x; });
+    res.sim={versie:m.versie,profiel:m.profiel,jaar_mwh:m.jaar_mwh,jaar_bron:m.jaar_bron,toeg_kw:m.toeg_kw,piek_kw:m.piek_kw,last_venster_gem_kw:m.last_venster_gem_kw,ruimte_kwh_dag_p5:m.ruimte_kwh_dag_p5,wagens_slim:m.wagens_slim,wagens_dom:m.wagens_dom,toegang_volstaat_kw:m.toegang_volstaat_kw,eur_kw:m.eur_kw,horizons:hz,aansluiting:m.aansluiting||null}; }
+  return post('/api/bl/bewaar',{token:S.token,baseCase:S.bc,factuur_bestanden:S.fb,invoer:inv,resultaat:res}).then(function(j){
+    if(!j.ok){ $('cmsg').className='msg fout'; $('cmsg').textContent=j.error||'Bewaren mislukt.'; return; }
+    S.pid=j.project_id||''; S.ek=j.ek_link||''; toon('s3',false); render(); $('s4').scrollIntoView({behavior:'smooth'});
+  });
+}
+
+// ── Offerte ──
+$('akkoord').addEventListener('change',function(){ $('offerte').disabled=!this.checked; });
+$('offerte').addEventListener('click',function(){
+  var k=this; k.disabled=true; $('omsg').className='msg'; $('omsg').textContent='⏳ Je aanvraag vertrekt…';
+  post('/api/bl/offerte',{token:S.token,tel:$('tel').value,opmerking:$('opm').value}).then(function(j){
+    if(!j.ok){ k.disabled=false; $('omsg').className='msg fout'; $('omsg').textContent=j.error||'Er ging iets mis.'; return; }
+    toon('offbox',false); $('omsg').innerHTML='✓ Je aanvraag is vertrokken naar <b>'+esc(j.partner||'de partner')+'</b>. Je krijgt een bevestiging per mail en wordt binnen 2 werkdagen gecontacteerd.';
+  }).catch(function(){k.disabled=false; $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.';});
+});
+function pdfDl(){ try{ if(S.token) post('/api/ek/log',{token:S.token,items:[{ev:'bl_pdf',data:{taal:window.BL_LANG||'nl'}}]}).catch(function(){}); }catch(e){} window.print(); }   /* v0.11.0: de PDF openen = interesse, komt in de projectlog */
+$('print').addEventListener('click',pdfDl);
+// v0.2.0: opschalen = KOPIE naar een nieuw Energie-Compas-dossier (eigen FLX-nummer); het laadproject blijft bestaan
+$('ek').addEventListener('click',function(){
+  if(S.ek){ window.open(S.ek,'_blank','noopener'); return; }
+  var w=window.open('about:blank','_blank'); var k=this; k.disabled=true; $('omsg').className='msg'; $('omsg').textContent='⏳ We maken je Energie-Compas-dossier aan…';
+  post('/api/bl/naar-compas',{token:S.token}).then(function(j){ k.disabled=false;
+    if(!j.ok){ if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent=j.error||'Dat lukte niet.'; return; }
+    S.ek=j.ek_link; $('ek').textContent='Open je Energie-Compas-dossier';
+    $('omsg').innerHTML='✓ Nieuw Energie-Compas-dossier'+(j.project_id?' <b>'+esc(j.project_id)+'</b>':'')+'. Je factuur, wagens en invoer zijn meegenomen. Voeg er je verbruiksprofiel aan toe voor een exacte analyse.';
+    if(w) w.location=j.ek_link; else window.open(j.ek_link,'_blank','noopener');
+  }).catch(function(){ k.disabled=false; if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.'; });
+});
+
+// ── Heropenen via link (mail-instap of terugkeer) ──
+// ── v0.8.0: kwaliteitsenquête ──
+var EQ=['De afspraken voor de installatie waren duidelijk en werden nagekomen.',
+  'De installateurs kwamen op het afgesproken tijdstip.',
+  'De werken waren klaar binnen de afgesproken termijn.',
+  'De werf werd netjes en veilig achtergelaten.',
+  'De laadpalen werken goed sinds de installatie.',
+  'Je kreeg een duidelijke uitleg over de laadpalen, de badges en de app.',
+  'De installatie werd gekeurd en je kreeg de keuringsdocumenten.',
+  'De factuur kwam overeen met de offerte.',
+  'Je zou PARTNER aanbevelen aan andere bedrijven.'];
+var EL=[[5,'Helemaal akkoord'],[4,'Akkoord'],[3,'Neutraal'],[2,'Niet akkoord'],[1,'Helemaal niet akkoord']];
+function pNaam(){ return (P&&P.naam)||'je laadpartner'; }
+function enqBouw(){ $('evragen').innerHTML=EQ.map(function(v,i){ return '<div class="evr"><div class="st">'+(i+1)+'. '+esc(v.replace('PARTNER',pNaam()))+'</div><div class="likert">'+EL.map(function(o){ return '<label><input type="radio" name="eq'+i+'" value="'+o[0]+'"> '+o[1]+'</label>'; }).join('')+'</div></div>'; }).join(''); enqCheck(); }
+function enqCheck(){ var open=EQ.filter(function(v,i){ return !document.querySelector('input[name="eq'+i+'"]:checked'); }).length;
+  var naam=$('enaam').value.trim(), tel=$('etel').value.trim(), pr=$('eproj').value.trim(), mis=[];
+  if(open) mis.push(open+(open===1?' stelling':' stellingen')); if(!pr) mis.push('je projectcode'); if(!naam) mis.push('je naam'); if(!tel) mis.push('je telefoonnummer');
+  $('eindien').disabled=mis.length>0; $('estatus').textContent=mis.length?('Nog in te vullen: '+mis.join(', ')+'.'):'Alles ingevuld. Je kan de enquête indienen.'; }
+function toonEnquete(){ ['s1','s2','s3','s4'].forEach(function(id){ toon(id,false); }); var v=$('voortgang'); if(v) v.classList.add('verborgen');
+  if(S.pid) $('eproj').value=S.pid; if(!$('evragen').children.length) enqBouw(); toon('s5',true); $('s5').scrollIntoView({behavior:'smooth'}); }
+document.addEventListener('change',function(e){ if(e.target&&/^eq\d+$/.test(e.target.name||'')) enqCheck(); });
+['enaam','etel','eproj'].forEach(function(id){ $(id).addEventListener('input',enqCheck); });
+$('naarenq').addEventListener('click',function(){ toonEnquete(); });
+$('eindien').addEventListener('click',function(){
+  var k=this; k.disabled=true; $('emsg').className='msg'; $('emsg').textContent='⏳ Je enquête wordt verstuurd…';
+  var A=EQ.map(function(v,i){ var x=document.querySelector('input[name="eq'+i+'"]:checked'); return {v:v.replace('PARTNER',pNaam()),a:x?+x.value:0}; });
+  post('/api/bl/enquete',{token:S.token,project:$('eproj').value.trim(),antwoorden:A,opmerking:$('eopm').value,naam:$('enaam').value.trim(),tel:$('etel').value.trim()}).then(function(j){
+    if(!j.ok){ k.disabled=false; $('emsg').className='msg fout'; $('emsg').textContent=j.error||'Er ging iets mis.'; return; }
+    $('emsg').innerHTML='✓ Bedankt! Je enquête is verstuurd'+(j.project_id?' voor project <b>'+esc(j.project_id)+'</b>':'')+'. We nemen contact met je op voor de gratis analyse van je aansluiting.';
+    k.classList.add('verborgen'); $('estatus').textContent='';
+  }).catch(function(){ k.disabled=false; $('emsg').className='msg fout'; $('emsg').textContent='Netwerkfout.'; });
+});
+if(Q.get('enquete')){ toonEnquete(); }
+
+var T0=Q.get('t');
+window.blTaalNaarServer=function(l,bron){ if(!S.token) return Promise.resolve(); return fetch(API+'/api/ek/taal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:S.token,lang:l,bron:bron||'knop'})}).catch(function(){}); };   /* v0.10.0 */
+if(T0){
+  S.token=T0;
+  fetch(API+'/api/bl/dossier/'+encodeURIComponent(T0)+(Q.get('via')==='mail'?'?via=mail':''),{headers:hdrs(false)}).then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok) return;
+    /* v0.10.0: taal — knop in de mail (?lang=) wordt de dossiertaal; zonder ?lang= volgen we de taal van het dossier */
+    if(window.BL_LANG_URL){ if(j.lang!==window.BL_LANG_URL) window.blTaalNaarServer(window.BL_LANG_URL,'link'); }
+    else if(j.lang&&j.lang!==window.BL_LANG){ if(window.BL_LANG==='nl') window.blZetTaal(j.lang); else { var _u=new URL(location.href); _u.searchParams.set('lang',j.lang); location.replace(_u.toString()); return; } }
+    S.verified=!!j.verified; S.pid=j.project_id||''; S.ek=j.ek_link||''; S.mgr=!!j.manager;
+    if(S.pid){ $('fmsg').textContent='Dossier '+S.pid; }
+    if(j.partner&&!SLUG){ SLUG=j.partner; fetch(API+'/api/bl/partner/'+SLUG).then(function(r){return r.json();}).then(function(x){if(x&&x.ok) zetPartner(x.partner);}); }
+    if(j.bl&&j.bl.enquete){ $('enqal').innerHTML='✓ De kwaliteitsenquête is ingevuld op '+new Date(j.bl.enquete.ts).toLocaleDateString(window.BL_LOC||'nl-BE')+'. De analyse van je aansluiting is aangevraagd.'; toon('naarenq',false); }   // v0.8.0
+    if(j.baseCase){ leesBc(j.baseCase); factuurKlaar('✓ Je factuur is al ingelezen'+(S.pid?(' — dossier '+S.pid):'')+'.'); }
+    var I=j.bl&&j.bl.invoer;
+    if(I){
+      S.dg=I.doelgroep||S.dg; S.venster=+I.venster_u||S.venster; $('venster').value=String(S.venster); vT(); S.prof=S.dg==='thuisladen'?'residentieel':'industrie_met_zomersluiting'; $('prof').value=S.prof;   /* v0.8.2: bewaarde profielkeuze genegeerd */
+      Array.prototype.forEach.call(document.querySelectorAll('#dg .chip'),function(x){x.classList.toggle('aan',x.getAttribute('data-dg')===S.dg);});
+      if(+I.toegang_kw) S.toeg=+I.toegang_kw; if(+I.cabine_kva) S.cabine=+I.cabine_kva;   /* v0.9.3 */
+      toon('s2',true); $('wrijen').innerHTML='';
+      var _kl=[]; (I.wagens||[]).forEach(function(w){ wRij({type:w.type,nu:w.nu,merk:w.merk,model:w.model,id:w.id,batt_kwh:w.batt_kwh,kwh_km:w.kwh_km,ac_kw:w.ac_kw}); var d=$('wrijen').lastChild; _kl.push(d._klaar); d.querySelector('.w12').value=w.m12; d.querySelector('.w24').value=w.m24; d.querySelector('.w36').value=w.m36; d.querySelector('.wkm').value=w.km_jaar; });
+      if(!$('wrijen').children.length) wRij();   /* v0.9.3: dossier zonder wagens (demo) */
+      if(j.verified&&j.bl.resultaat){ S.res=Object.assign({wagens:I.wagens},j.bl.resultaat); Promise.all(_kl).then(function(){ return berekenSim(); }).then(function(R){ S.res=R.wagens.length?R:S.res; render(); }); if(j.offerte){ toon('offbox',false); $('omsg').innerHTML='✓ Je offerteaanvraag is al vertrokken'+(j.offerte.partner_naam?' naar '+esc(j.offerte.partner_naam):'')+'.'; } else if(S.mgr){ toon('offbox',false); $('omsg').textContent='Beheerweergave: nog geen offerteaanvraag.'; } }
+    } else if(j.baseCase){ toon('s2',true); wRij(); }
+    if(Q.get('enquete')) toonEnquete();   // v0.8.0: rechtstreeks naar de enquête
+  }).catch(function(){});
+}
+})();
+</script>
+</body>
+</html>
