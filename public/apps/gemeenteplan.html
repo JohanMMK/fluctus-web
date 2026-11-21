@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR  v1.9.0  (build 21-11h)
+     ENERGIE-COMPAS LEAD GENERATOR  v1.9.1  (build 21-11i)
+     v1.9.1 (21-11, Johan): destination-rapport knop ook op de OC-laag (tooltip → popup), luchtfoto nu via de
+       EK-methode (Esri World Imagery export, token-vrij) in de proxy, en een oekene "Rapport-parameters"-editor
+       in de kaart (leest/schrijft /api/destination-params).
      v1.9.0 (21-11, Johan): DESTINATION-RAPPORT — knop "Genereer destination-rapport" in de marker-popups
        (sport/zorg/scholen), POST naar de proxy /api/destination-rapport → PDF (AC- en AC+DC-scenario,
        concessie + eigen financiering). Parameters: data/rapport_parameters.json (per locatietype, oekene calibreert).
@@ -669,6 +672,7 @@
         SL.init();   // Sportclub-concessieleads (enkel voor oekene)
         ZG.init();   // Zorginstellingen (enkel voor oekene)
         SCH.init();  // Scholen per net (enkel voor oekene)
+        PE.init();   // Rapport-parameters-editor (enkel voor oekene)
         // ?adres=… (bv. vanuit de kaart per gemeente) → meteen de juiste kaart in DIT tabblad openen
         var qAdr = new URLSearchParams(location.search).get('adres');
         if (qAdr){
@@ -772,7 +776,11 @@
       }
       function marker(e){
         var m=L.circleMarker([e.lat,e.lng],{ renderer:fkCanvas, radius:5, weight:1.5, color:'#fff', fillColor:kleur(e.s), fillOpacity:0.9 });
-        m.bindTooltip('<b>'+esc(e.n)+'</b><br>'+esc(e.s||'')+' &middot; '+esc(e.g||''),{ direction:'top', className:'fk-tip', opacity:1 });
+        m.bindPopup('<div style="min-width:150px;font-family:Arial,sans-serif"><b>'+esc(e.n)+'</b><br>'+esc(e.s||'')+(e.g?(' &middot; '+esc(e.g)):'')+'</div>');
+        m.on('popupopen', function(ev){ var el=ev.popup.getElement(); if(!el) return;
+          var t=(e.s==='Onderwijs')?'school':((e.s==='Zorg'||e.s==='Ziekenhuis'||e.s==='Ouderenzorg')?'zorg':'oc-overig');
+          fkInjectDest(el, e, t);
+        });
         return m;
       }
       function toon(list){
@@ -1111,6 +1119,60 @@
       }
       function init(){ if((CURRENT_EMAIL||'').toLowerCase()!==OEKENE)return; build(); }
       return {init:init};
+    })();
+
+    // =====================================================================
+    //  RAPPORT-PARAMETERS  (oekene-laag) — bewerk de rekenstanden van het
+    //  destination-rapport vanuit de kaart. Leest/schrijft /api/destination-params.
+    // =====================================================================
+    var PE = (function(){
+      var OEKENE='oekene@gmail.com', box, peCss=false;
+      function tok(){ return (typeof verseToken==='function'?verseToken():Promise.resolve(CURRENT_TOKEN)).then(function(t){return t||CURRENT_TOKEN;}, function(){return CURRENT_TOKEN;}); }
+      function injectCss(){ if(peCss)return; peCss=true; var s=document.createElement('style');
+        s.textContent='.fk-pe-ov{position:fixed;inset:0;background:rgba(10,18,32,.5);z-index:4000;display:flex;align-items:center;justify-content:center}'
+          +'.fk-pe-modal{background:#fff;border-radius:12px;width:min(680px,92vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4);font-family:Arial,sans-serif;overflow:hidden}'
+          +'.fk-pe-h{background:#1F3864;color:#fff;font-weight:bold;font-size:14px;padding:11px 14px;display:flex;justify-content:space-between;align-items:center}'
+          +'.fk-pe-x{cursor:pointer;font-size:20px;line-height:1}.fk-pe-sub{color:#5b6b85;font-size:11px;margin:10px 14px 4px}'
+          +'.fk-pe-ta{margin:0 14px;flex:1;min-height:320px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid #C9D6EC;border-radius:8px;padding:10px;resize:vertical;color:#1b2430}'
+          +'.fk-pe-foot{display:flex;align-items:center;gap:12px;padding:12px 14px}'
+          +'.fk-pe-save{background:#05803B;color:#fff;border:0;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:bold;cursor:pointer}'
+          +'.fk-pe-msg{font-size:11.5px;color:#5b6b85}';
+        document.head.appendChild(s); }
+      function openEditor(){
+        injectCss();
+        var ov=document.createElement('div'); ov.className='fk-pe-ov';
+        ov.innerHTML='<div class="fk-pe-modal"><div class="fk-pe-h"><span>Rapport-parameters (destination-rapport)</span><span class="fk-pe-x">&times;</span></div>'
+          +'<div class="fk-pe-sub">Pas de rekenstanden aan en klik Opslaan. Deze gelden meteen voor elk nieuw destination-rapport.</div>'
+          +'<textarea class="fk-pe-ta" spellcheck="false">Laden…</textarea>'
+          +'<div class="fk-pe-foot"><button class="fk-pe-save">Opslaan</button><span class="fk-pe-msg"></span></div></div>';
+        document.body.appendChild(ov);
+        var ta=ov.querySelector('.fk-pe-ta'), msg=ov.querySelector('.fk-pe-msg');
+        function close(){ ov.remove(); }
+        ov.querySelector('.fk-pe-x').onclick=close; ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+        tok().then(function(t){ return fetch(PROXY_BASE+'/api/destination-params',{ headers:{ 'Authorization':'Bearer '+t } }); })
+          .then(function(r){ return r.json(); })
+          .then(function(j){ ta.value=JSON.stringify(j.params||{}, null, 2); if(j.is_oekene===false){ ta.readOnly=true; msg.textContent='(alleen-lezen — geen oekene)'; } })
+          .catch(function(){ ta.value='{}'; msg.textContent='kon niet laden'; });
+        ov.querySelector('.fk-pe-save').onclick=function(){
+          var p; try{ p=JSON.parse(ta.value); }catch(e){ msg.style.color='#C0392B'; msg.textContent='Ongeldige JSON: '+String(e.message).slice(0,44); return; }
+          msg.style.color='#5b6b85'; msg.textContent='opslaan…';
+          tok().then(function(t){ return fetch(PROXY_BASE+'/api/destination-params',{ method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+t }, body:JSON.stringify({ params:p }) }); })
+            .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+            .then(function(){ msg.style.color='#05803B'; msg.textContent='✓ opgeslagen'; })
+            .catch(function(err){ msg.style.color='#C0392B'; msg.textContent='✗ '+String(err.message).slice(0,44); });
+        };
+      }
+      function build(){
+        var ctl=L.control({position:'bottomleft'});
+        ctl.onAdd=function(){ box=L.DomUtil.create('div','fk-oc');
+          box.innerHTML='<div class="h"><span><span class="fk-chev"></span> Rapport-parameters</span> <span class="o">oekene</span></div>'
+            +'<div class="bd"><button data-k="edit">Parameters bewerken</button><div class="st" style="font-size:10.5px;color:#5b6b85;margin-top:3px">rekenstanden van het destination-rapport</div></div>';
+          L.DomEvent.disableClickPropagation(box); fkMakeCollapsible(box,true); return box; };
+        ctl.addTo(map);
+        box.addEventListener('click', function(ev){ var bn=ev.target.closest('button[data-k]'); if(!bn) return; openEditor(); });
+      }
+      function init(){ if((CURRENT_EMAIL||'').toLowerCase()!==OEKENE) return; build(); }
+      return { init:init };
     })();
 
     // start: eerst de auth-gate, dan pas de kaart
