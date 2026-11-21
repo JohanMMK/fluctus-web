@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR  v1.8.0  (build 21-11g)
+     ENERGIE-COMPAS LEAD GENERATOR  v1.9.0  (build 21-11h)
+     v1.9.0 (21-11, Johan): DESTINATION-RAPPORT — knop "Genereer destination-rapport" in de marker-popups
+       (sport/zorg/scholen), POST naar de proxy /api/destination-rapport → PDF (AC- en AC+DC-scenario,
+       concessie + eigen financiering). Parameters: data/rapport_parameters.json (per locatietype, oekene calibreert).
      build 21-11g: markerlagen op canvas-renderer (geen flikker/verdwijnen bij zoom) + dikkere witte rand.
      build 21-11f: sportclub-popup — &middot; tussen sporten nu correct (niet meer ge-escaped).
      build 21-11e: sportclub-subtitel → "Goede club + buurt gebruikt de parking".
@@ -709,6 +712,29 @@
       if (h) h.addEventListener('click', function(){ box.classList.toggle('collapsed'); });
     }
 
+    // Destination-rapport: knop onderaan een marker-popup → POST naar de proxy → PDF in nieuw tabblad (enkel oekene)
+    function fkInjectDest(el, e, type){
+      if (!el) return; var host = el.querySelector('.leaflet-popup-content') || el;
+      if (host.querySelector('.fk-dest')) return;
+      var bn = document.createElement('button'); bn.className='fk-dest'; bn.innerHTML='&#128196; Genereer destination-rapport';
+      bn.style.cssText='display:block;width:100%;margin-top:6px;padding:5px 9px;border:1px solid #05803B;border-radius:6px;background:#fff;color:#05803B;font-size:11px;font-weight:bold;cursor:pointer';
+      host.appendChild(bn);
+      bn.addEventListener('click', function(){
+        bn.textContent='⏳ rapport wordt gemaakt…'; bn.disabled=true; bn.style.cursor='default';
+        var body = { naam:e.n, type:type, lat:e.lat, lng:e.lng, gemeente:e.g||'' };
+        var go = function(t){
+          return fetch(PROXY_BASE + '/api/destination-rapport', {
+            method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + (t||CURRENT_TOKEN) }, body: JSON.stringify(body)
+          }).then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error((j&&j.error)||('HTTP '+r.status)); }).catch(function(){ throw new Error('HTTP '+r.status); }); return r.blob(); })
+            .then(function(blob){ var url=URL.createObjectURL(blob); var w=window.open(url,'_blank');
+              bn.textContent = w ? '✓ rapport geopend' : '✓ rapport klaar (sta pop-ups toe)'; bn.style.background='#05803B'; bn.style.color='#fff'; bn.style.borderColor='#05803B';
+              logActie('destination_rapport', { bron:type, naam:e.n, lat:e.lat, lng:e.lng, gemeente:e.g||'' }, e.n); })
+            .catch(function(err){ bn.textContent='✗ '+String(err.message).slice(0,40); bn.disabled=false; bn.style.cursor='pointer'; bn.style.borderColor='#C0392B'; bn.style.color='#C0392B'; });
+        };
+        (typeof verseToken==='function' ? verseToken() : Promise.resolve(CURRENT_TOKEN)).then(go, function(){ go(CURRENT_TOKEN); });
+      });
+    }
+
     var OC = (function(){
       var OEKENE = 'oekene@gmail.com';
       var DATA_URL = '/apps/data/oc_entiteiten.json';
@@ -859,6 +885,7 @@
         m.bindPopup(html);
         m.on('popupopen', function(ev){
           var el = ev.popup.getElement(); if(!el) return;
+          fkInjectDest(el, e, 'sport');
           var bn = el.querySelector('.sl-df'); if(!bn) return;
           bn.addEventListener('click', function(){
             logActie('concessie_lead', { bron:'sportclub', club:e.n, sport:e.s, lat:e.lat, lng:e.lng, gemeente:e.g||'', school_m:e.schd, dubbelgebruik:dub }, e.n);
@@ -958,7 +985,7 @@
           +(e.web?('<br><a href="'+esc(e.web)+'" target="_blank" rel="noopener" style="color:#1F3864">website</a>'):'')
           +'<br><button class="zg-df" style="margin-top:7px;padding:5px 9px;border:1px solid #1F3864;border-radius:6px;background:#1F3864;color:#fff;font-size:11px;cursor:pointer">+ Deal-flow</button></div>';
         m.bindPopup(html);
-        m.on('popupopen',function(ev){ var el=ev.popup.getElement(); if(!el)return; var bn=el.querySelector('.zg-df'); if(!bn)return;
+        m.on('popupopen',function(ev){ var el=ev.popup.getElement(); if(!el)return; fkInjectDest(el, e, 'zorg'); var bn=el.querySelector('.zg-df'); if(!bn)return;
           bn.addEventListener('click',function(){ logActie('zorg_lead',{bron:'zorg',naam:e.n,type:e.t,lat:e.lat,lng:e.lng,gemeente:e.g||'',in_oc:inoc},e.n);
             bn.textContent='✓ genoteerd'; bn.disabled=true; bn.style.background='#05803B'; bn.style.borderColor='#05803B'; bn.style.cursor='default';
             showToast('Zorginstelling <b>'+esc(e.n)+'</b> genoteerd in de opvolging.'); }); });
@@ -1030,7 +1057,7 @@
           +'net: '+esc(NETLBL[e.net]||e.net)+(e.g?(' &middot; '+esc(e.g)):'')+(e.k?' &middot; kleuter':'')
           +'<br><button class="sc-df" style="margin-top:7px;padding:5px 9px;border:1px solid #1F3864;border-radius:6px;background:#1F3864;color:#fff;font-size:11px;cursor:pointer">+ Deal-flow</button></div>';
         m.bindPopup(html);
-        m.on('popupopen',function(ev){ var el=ev.popup.getElement(); if(!el)return; var bn=el.querySelector('.sc-df'); if(!bn)return;
+        m.on('popupopen',function(ev){ var el=ev.popup.getElement(); if(!el)return; fkInjectDest(el, e, 'school'); var bn=el.querySelector('.sc-df'); if(!bn)return;
           bn.addEventListener('click',function(){ logActie('school_lead',{bron:'school',naam:e.n,net:e.net,lat:e.lat,lng:e.lng,gemeente:e.g||''},e.n);
             bn.textContent='✓ genoteerd'; bn.disabled=true; bn.style.background='#05803B'; bn.style.borderColor='#05803B'; bn.style.cursor='default';
             showToast('School <b>'+esc(e.n)+'</b> genoteerd in de opvolging.'); }); });
