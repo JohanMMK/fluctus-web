@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR  v1.6.0
+     ENERGIE-COMPAS LEAD GENERATOR  v1.7.0
+     v1.7.0 (21-11, Johan): 4de oekene-laag "Sportclub-concessieleads" (control linksonder, ENKEL oekene@gmail.com).
+       Uit data/sportclub_leads.json (1.632 clubs voetbal/basket/volley/hockey, uit OSM, gededupliceerd).
+       Knoppen "Alle sportclub-leads" en "Dubbelgebruik (school <=400 m — type KFC Wambeek)" + sport-filters.
+       Marker-popup → "+ Deal-flow" logt concessie_lead (club, sport, gemeente, school-afstand) in de opvolging.
      v1.6.0 (21-11, Johan): OC-lagen (Opdrachtencentrale) — control linksonder ENKEL voor oekene@gmail.com:
        knoppen "Alle OC-adressen" (1.581 entiteiten uit data/oc_entiteiten.json), "Eigen parking"
        (bedrijfsparking <=150 m, client-side gematcht op de in beeld zijnde adressen via de bestaande
@@ -649,6 +653,7 @@
         setStatus(n ? '' : 'Geometrie geladen, maar geen cijfers gevonden (gemeenten_stats.json ontbreekt nog).');
         adresTypeahead(document.getElementById('fk-adr-input'), document.getElementById('fk-adr-list'), function(a){ kiesAdres(a, 'adreszoek'); });
         OC.init();   // OC-lagen (enkel voor oekene)
+        SL.init();   // Sportclub-concessieleads (enkel voor oekene)
         // ?adres=… (bv. vanuit de kaart per gemeente) → meteen de juiste kaart in DIT tabblad openen
         var qAdr = new URLSearchParams(location.search).get('adres');
         if (qAdr){
@@ -777,6 +782,116 @@
             else if (k==='tender'){ active='tender'; paint(); var t=ENT.filter(function(x){ return OVERHEID[x.s]||x.s==='Onderwijs'||x.s==='Zorg'||x.s==='Ziekenhuis'||x.s==='Ouderenzorg'; }); toon(t); setLbl('publieke tendering'); setLbl2(t.length+' publieke entiteiten'); logActie('oc_laag',{laag:'tender'}); }
             else if (k==='parking'){ matchParking(); logActie('oc_laag',{laag:'parking'}); }
           }).catch(function(){ showToast('Kon de OC-adressen niet laden.'); });
+        });
+      }
+      function init(){ if ((CURRENT_EMAIL||'').toLowerCase() !== OEKENE) return; build(); }
+      return { init:init };
+    })();
+
+    // =====================================================================
+    //  SPORTCLUB-CONCESSIELEADS  (4de oekene-laag — type KFC Wambeek)
+    //  Bron: /apps/data/sportclub_leads.json (voetbal/basket/volley/hockey,
+    //  uit OSM, gededupliceerd). "Dubbelgebruik" = school <=400 m (kiss&ride /
+    //  buurt gebruikt de parking), de constellatie van KFC Wambeek Ternat.
+    //  Marker → "+ Deal-flow" logt een concessie_lead in de opvolging.
+    // =====================================================================
+    var SL = (function(){
+      var OEKENE = 'oekene@gmail.com';
+      var DATA_URL = '/apps/data/sportclub_leads.json';
+      var LEADS = [], grp = null, built = false, box, lblEl, lbl2El;
+      var mode = null; // 'alle' | 'dubbel' | null
+      var sportOn = { voetbal:true, basketbal:true, volleybal:true, hockey:true };
+      var KLEUR = { voetbal:'#1F3864', basketbal:'#E8821E', volleybal:'#05803B', hockey:'#7A3FF2' };
+      function kleur(e){ var s=(e.s&&e.s[0])||''; return KLEUR[s]||'#8A6A00'; }
+      function laadData(){
+        if (built) return Promise.resolve();
+        return fetch(DATA_URL).then(function(r){ return r.json(); }).then(function(j){ LEADS=j; built=true; });
+      }
+      function pasFilter(list){
+        return list.filter(function(e){
+          if (mode==='dubbel' && e.sch!==1) return false;
+          return e.s.some(function(sp){ return sportOn[sp]; });
+        });
+      }
+      function marker(e){
+        var dub = e.sch===1;
+        var m = L.circleMarker([e.lat,e.lng],{ radius:dub?6:4.5, weight:dub?2.5:1.2, color:dub?'#05B050':'#fff', fillColor:kleur(e), fillOpacity:0.9 });
+        var html = '<div style="min-width:172px;font-family:Arial,sans-serif"><b>'+esc(e.n)+'</b><br>'
+          + esc(e.s.join(' &middot; ')) + (e.g?(' &middot; '+esc(e.g)):'')
+          + (dub?('<br><span style="color:#05803B;font-weight:bold">&#9679; dubbelgebruik &middot; school '+e.schd+' m</span>'):'')
+          + (e.web?('<br><a href="'+esc(e.web)+'" target="_blank" rel="noopener" style="color:#1F3864">website</a>'):'')
+          + '<br><button class="sl-df" style="margin-top:7px;padding:5px 9px;border:1px solid #1F3864;border-radius:6px;background:#1F3864;color:#fff;font-size:11px;cursor:pointer">+ Deal-flow (concessie-lead)</button></div>';
+        m.bindPopup(html);
+        m.on('popupopen', function(ev){
+          var el = ev.popup.getElement(); if(!el) return;
+          var bn = el.querySelector('.sl-df'); if(!bn) return;
+          bn.addEventListener('click', function(){
+            logActie('concessie_lead', { bron:'sportclub', club:e.n, sport:e.s, lat:e.lat, lng:e.lng, gemeente:e.g||'', school_m:e.schd, dubbelgebruik:dub }, e.n);
+            bn.textContent='✓ genoteerd in deal-flow'; bn.disabled=true; bn.style.background='#05803B'; bn.style.borderColor='#05803B'; bn.style.cursor='default';
+            showToast('Sportclub <b>'+esc(e.n)+'</b> genoteerd als concessie-lead in de opvolging.');
+          });
+        });
+        return m;
+      }
+      function toon(){
+        if (grp) grp.clearLayers(); else grp=L.layerGroup().addTo(map);
+        var list = pasFilter(LEADS);
+        list.forEach(function(e){ grp.addLayer(marker(e)); });
+        var dn = list.filter(function(e){ return e.sch===1; }).length;
+        setLbl2(list.length+' leads'+(mode==='dubbel'?'':(' &middot; '+dn+' dubbelgebruik')));
+        return list.length;
+      }
+      function verberg(){ if (grp) grp.clearLayers(); mode=null; paint(); setLbl(''); setLbl2(''); }
+      function setLbl(t){ if (lblEl) lblEl.textContent=t; }
+      function setLbl2(t){ if (lbl2El) lbl2El.innerHTML=t; }
+      function paint(){ if (!box) return;
+        Array.prototype.forEach.call(box.querySelectorAll('button[data-k]'), function(bn){ bn.classList.toggle('on', bn.getAttribute('data-k')===mode); });
+        Array.prototype.forEach.call(box.querySelectorAll('button[data-sp]'), function(bn){ bn.classList.toggle('on', !!sportOn[bn.getAttribute('data-sp')]); });
+      }
+      function build(){
+        var st=document.createElement('style');
+        st.textContent='.fk-sl{background:#fff;border:1px solid #E2E8F2;border-radius:10px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-family:Arial,sans-serif;width:212px;margin-top:8px}'
+          +'.fk-sl .h{font-weight:bold;color:#1F3864;font-size:12px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center}'
+          +'.fk-sl .h .o{background:#05B050;color:#fff;border-radius:999px;font-size:9px;padding:1px 6px}'
+          +'.fk-sl .sub{font-size:10px;color:#5b6b85;margin:0 0 6px}'
+          +'.fk-sl button{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 9px;border:1px solid #C9D6EC;border-radius:7px;background:#fff;color:#1F3864;font-size:12px;cursor:pointer}'
+          +'.fk-sl button:hover{background:#EAF0F8}.fk-sl button.on{background:#1F3864;color:#fff;border-color:#1F3864}'
+          +'.fk-sl .sp{display:flex;gap:4px;margin:6px 0}'
+          +'.fk-sl .sp button{display:inline-block;width:auto;flex:1;text-align:center;padding:4px 2px;margin:0;font-size:10px}'
+          +'.fk-sl button.uit{border-color:#E2E8F2;color:#9E480E}'
+          +'.fk-sl .st{font-size:10.5px;color:#5b6b85;margin-top:3px}';
+        document.head.appendChild(st);
+        var ctl=L.control({position:'bottomleft'});
+        ctl.onAdd=function(){
+          box=L.DomUtil.create('div','fk-sl');
+          box.innerHTML='<div class="h">Sportclub-concessieleads <span class="o">oekene</span></div>'
+            +'<div class="sub">type KFC Wambeek &middot; goede club + buurt gebruikt de parking</div>'
+            +'<button data-k="alle">Alle sportclub-leads</button>'
+            +'<button data-k="dubbel">Dubbelgebruik (school &le;400 m)</button>'
+            +'<div class="sp"><button data-sp="voetbal" class="on">Voet</button><button data-sp="basketbal" class="on">Basket</button><button data-sp="volleybal" class="on">Volley</button><button data-sp="hockey" class="on">Hockey</button></div>'
+            +'<button data-k="uit" class="uit">Verberg</button>'
+            +'<div class="st" id="fk-sl-st"></div><div class="st" id="fk-sl-st2"></div>';
+          L.DomEvent.disableClickPropagation(box);
+          return box;
+        };
+        ctl.addTo(map);
+        lblEl=document.getElementById('fk-sl-st'); lbl2El=document.getElementById('fk-sl-st2');
+        box.addEventListener('click', function(ev){
+          var bn=ev.target.closest('button'); if(!bn) return;
+          laadData().then(function(){
+            if (bn.hasAttribute('data-sp')){
+              var sp=bn.getAttribute('data-sp'); sportOn[sp]=!sportOn[sp]; paint();
+              if (mode) toon();
+              return;
+            }
+            var k=bn.getAttribute('data-k');
+            if (k==='uit'){ verberg(); return; }
+            mode=k; paint();
+            if (k==='alle') setLbl('alle sportclub-leads');
+            else if (k==='dubbel') setLbl('dubbelgebruik — type KFC Wambeek');
+            toon();
+            logActie('sportclub_laag', { laag:k, sporten:Object.keys(sportOn).filter(function(s){ return sportOn[s]; }) });
+          }).catch(function(){ showToast('Kon de sportclub-leads niet laden.'); });
         });
       }
       function init(){ if ((CURRENT_EMAIL||'').toLowerCase() !== OEKENE) return; build(); }
