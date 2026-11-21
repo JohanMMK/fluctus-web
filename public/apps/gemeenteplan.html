@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR  v1.5.1
+     ENERGIE-COMPAS LEAD GENERATOR  v1.6.0
+     v1.6.0 (21-11, Johan): OC-lagen (Opdrachtencentrale) — control linksonder ENKEL voor oekene@gmail.com:
+       knoppen "Alle OC-adressen" (1.581 entiteiten uit data/oc_entiteiten.json), "Eigen parking"
+       (bedrijfsparking <=150 m, client-side gematcht op de in beeld zijnde adressen via de bestaande
+       Kaart_bedrijfsparkings_<slug>-bron) en "Publieke tendering" (publieke sectoren). Logt oc_laag.
      v1.5.1: adres-rangschikking — resultaten in de genoemde gemeente/postcode eerst.
      v1.5 (17-10, Johan): ADRES ZOEKEN — «📍 zoek een adres» (Photon/OSM-typeahead, fallback Nominatim) → gemeente via punt-in-polygoon →
        kaart van die gemeente opent op dat adres (&lat&lng&adres). ?adres=… in de URL opent meteen de juiste kaart. Logt adres_gezocht.
@@ -644,6 +648,7 @@
         var n = Object.keys(STATS).length;
         setStatus(n ? '' : 'Geometrie geladen, maar geen cijfers gevonden (gemeenten_stats.json ontbreekt nog).');
         adresTypeahead(document.getElementById('fk-adr-input'), document.getElementById('fk-adr-list'), function(a){ kiesAdres(a, 'adreszoek'); });
+        OC.init();   // OC-lagen (enkel voor oekene)
         // ?adres=… (bv. vanuit de kaart per gemeente) → meteen de juiste kaart in DIT tabblad openen
         var qAdr = new URLSearchParams(location.search).get('adres');
         if (qAdr){
@@ -661,6 +666,122 @@
         setStatus('Kon de kaartdata niet laden: '+err.message+'. Staat gemeenten_be.geojson al in de repo?');
       });
     }
+
+    // =====================================================================
+    //  OC-LAGEN (Opdrachtencentrale) — enkel voor oekene
+    //  v1.0 (2026-11-21): toggle-lagen "alle OC-adressen", "eigen parking"
+    //  (bedrijfsparking <=150 m, client-side), "publieke tendering".
+    // =====================================================================
+    var OC = (function(){
+      var OEKENE = 'oekene@gmail.com';
+      var DATA_URL = '/apps/data/oc_entiteiten.json';
+      var ENT = [], grp = null, built = false, parkCache = {}, active = null, box, lblEl, lbl2El;
+      var OVERHEID = { 'Stad / Gemeente':1,'OCMW / CPAS':1,'Politiezone':1,'Hulpverleningszone':1,'Federaal':1,'Provinciaal':1,'Gewestelijk':1,'AGB / RCA':1 };
+      function kleur(s){
+        if (s==='Onderwijs') return '#9E480E';
+        if (OVERHEID[s]) return '#1F3864';
+        if (s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg') return '#05803B';
+        return '#8A6A00';
+      }
+      function dist(a,b){
+        var R=6371000, toR=Math.PI/180;
+        var dLa=(b[0]-a[0])*toR, dLo=(b[1]-a[1])*toR, la1=a[0]*toR, la2=b[0]*toR;
+        var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dLo/2)*Math.sin(dLo/2);
+        return 2*R*Math.asin(Math.sqrt(h));
+      }
+      function literalNa(src, marker){
+        var i=src.indexOf(marker); if(i<0) return null;
+        i=src.indexOf('[', i); if(i<0) return null;
+        var depth=0;
+        for (var k=i;k<src.length;k++){ var c=src[k];
+          if (c==='[') depth++;
+          else if (c===']'){ depth--; if (depth===0){ try{ return JSON.parse(src.slice(i,k+1)); }catch(e){ return null; } } }
+        }
+        return null;
+      }
+      function parkingsVoor(slug){
+        if (parkCache[slug]) return parkCache[slug];
+        var p = fetch(REPO_BASE+'Kaart_bedrijfsparkings_'+encodeURIComponent(slug)+'.html',{cache:'force-cache'})
+          .then(function(r){ return r.ok?r.text():''; })
+          .then(function(h){ return literalNa(h,'var sites=')||[]; })
+          .catch(function(){ return []; });
+        parkCache[slug]=p; return p;
+      }
+      function marker(e){
+        var m=L.circleMarker([e.lat,e.lng],{ radius:5, weight:1.5, color:'#fff', fillColor:kleur(e.s), fillOpacity:0.9 });
+        m.bindTooltip('<b>'+esc(e.n)+'</b><br>'+esc(e.s||'')+' &middot; '+esc(e.g||''),{ direction:'top', className:'fk-tip', opacity:1 });
+        return m;
+      }
+      function toon(list){
+        if (grp) grp.clearLayers(); else grp=L.layerGroup().addTo(map);
+        list.forEach(function(e){ grp.addLayer(marker(e)); });
+      }
+      function verberg(){ if (grp) grp.clearLayers(); active=null; paint(); setLbl(''); setLbl2(''); }
+      function setLbl(t){ if (lblEl) lblEl.textContent=t; }
+      function setLbl2(t){ if (lbl2El) lbl2El.textContent=t; }
+      function paint(){ if (!box) return; Array.prototype.forEach.call(box.querySelectorAll('button'), function(bn){ bn.classList.toggle('on', bn.getAttribute('data-k')===active); }); }
+      function laadData(){
+        if (built) return Promise.resolve();
+        return fetch(DATA_URL).then(function(r){ return r.json(); }).then(function(j){ ENT=j; built=true; });
+      }
+      function matchParking(){
+        var b=map.getBounds();
+        var vis=ENT.filter(function(e){ return b.contains([e.lat,e.lng]); });
+        if (!vis.length){ showToast('Zoom in op een regio en klik opnieuw op &ldquo;eigen parking&rdquo;.'); return; }
+        var bySlug={};
+        vis.forEach(function(e){ var f=gemeenteVoorPunt(e.lat,e.lng); if(!f) return; var slug=slugVan(f.properties.niscode,f); if(!slug) return; (bySlug[slug]=bySlug[slug]||[]).push(e); });
+        var slugs=Object.keys(bySlug), flagged=[], done=0;
+        active='parking'; paint(); setLbl('eigen parking'); setLbl2('matchen 0/'+slugs.length+'…');
+        Promise.all(slugs.map(function(slug){
+          return parkingsVoor(slug).then(function(sites){
+            bySlug[slug].forEach(function(e){
+              var near=sites.some(function(s){
+                var la=s.lat!=null?s.lat:(s.latitude!=null?s.latitude:(s.coord&&s.coord[0]));
+                var ln=s.lng!=null?s.lng:(s.lon!=null?s.lon:(s.longitude!=null?s.longitude:(s.coord&&s.coord[1])));
+                return (la!=null&&ln!=null)&&dist([e.lat,e.lng],[la,ln])<=150;
+              });
+              if (near) flagged.push(e);
+            });
+            done++; setLbl2('matchen '+done+'/'+slugs.length+'…');
+          });
+        })).then(function(){ toon(flagged); setLbl2(flagged.length+' met eigen parking'); showToast(flagged.length+' OC-adres(sen) met een bedrijfsparking &le;150 m in beeld.'); });
+      }
+      function build(){
+        var st=document.createElement('style');
+        st.textContent='.fk-oc{background:#fff;border:1px solid #E2E8F2;border-radius:10px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-family:Arial,sans-serif;width:196px}'
+          +'.fk-oc .h{font-weight:bold;color:#1F3864;font-size:12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}'
+          +'.fk-oc .h .o{background:#05B050;color:#fff;border-radius:999px;font-size:9px;padding:1px 6px}'
+          +'.fk-oc button{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 9px;border:1px solid #C9D6EC;border-radius:7px;background:#fff;color:#1F3864;font-size:12px;cursor:pointer}'
+          +'.fk-oc button:hover{background:#EAF0F8}.fk-oc button.on{background:#1F3864;color:#fff;border-color:#1F3864}'
+          +'.fk-oc button.uit{border-color:#E2E8F2;color:#9E480E}.fk-oc .st{font-size:10.5px;color:#5b6b85;margin-top:3px}';
+        document.head.appendChild(st);
+        var ctl=L.control({position:'bottomleft'});
+        ctl.onAdd=function(){
+          box=L.DomUtil.create('div','fk-oc');
+          box.innerHTML='<div class="h">Opdrachtencentrale <span class="o">oekene</span></div>'
+            +'<button data-k="alle">Alle OC-adressen</button>'
+            +'<button data-k="parking">Eigen parking (&le;150 m)</button>'
+            +'<button data-k="tender">Publieke tendering</button>'
+            +'<button data-k="uit" class="uit">Verberg</button>'
+            +'<div class="st" id="fk-oc-st"></div><div class="st" id="fk-oc-st2"></div>';
+          L.DomEvent.disableClickPropagation(box);
+          return box;
+        };
+        ctl.addTo(map);
+        lblEl=document.getElementById('fk-oc-st'); lbl2El=document.getElementById('fk-oc-st2');
+        box.addEventListener('click', function(ev){
+          var bn=ev.target.closest('button'); if(!bn) return; var k=bn.getAttribute('data-k');
+          laadData().then(function(){
+            if (k==='uit'){ verberg(); return; }
+            if (k==='alle'){ active='alle'; paint(); toon(ENT); setLbl('alle OC-adressen'); setLbl2(ENT.length+' entiteiten'); logActie('oc_laag',{laag:'alle'}); }
+            else if (k==='tender'){ active='tender'; paint(); var t=ENT.filter(function(x){ return OVERHEID[x.s]||x.s==='Onderwijs'||x.s==='Zorg'||x.s==='Ziekenhuis'||x.s==='Ouderenzorg'; }); toon(t); setLbl('publieke tendering'); setLbl2(t.length+' publieke entiteiten'); logActie('oc_laag',{laag:'tender'}); }
+            else if (k==='parking'){ matchParking(); logActie('oc_laag',{laag:'parking'}); }
+          }).catch(function(){ showToast('Kon de OC-adressen niet laden.'); });
+        });
+      }
+      function init(){ if ((CURRENT_EMAIL||'').toLowerCase() !== OEKENE) return; build(); }
+      return { init:init };
+    })();
 
     // start: eerst de auth-gate, dan pas de kaart
     guard().then(function(ok){ if (ok) boot(); });
