@@ -883,6 +883,7 @@
         if (CHARGERS.length) ov['⚡ Snelladen ≥40 kW (' + CHARGERS.length + ')'] = chgLayer;
         ov['🔌 Bestaande laadpalen'] = lpLayer;
         LAYERCTL = L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
+        installOekeneLagen();   // 4 bestemmings-lagen (sportclub/school/zorg/OC), enkel oekene, gefilterd op deze gemeente
         var lg = L.control({ position:'bottomright' });
         lg.onAdd = function(){ var d = L.DomUtil.create('div', 'gk-legend');
           d.innerHTML = '<i style="background:#34568C"></i>Industrie / magazijn<br><i style="background:#9E480E"></i>Handel / winkel<br><i style="background:#8A6A00"></i>Auto / tankstation<br><i style="background:#05803B"></i>Kantoor<br><i style="background:#FFD400;border-color:#6b5300"></i>MS-cabine<br><i style="background:#05B050;border-radius:3px"></i>Snelladen ≥40 kW<br><i style="background:#2F80ED"></i>Laadpaal AC<br><i style="background:#7B3FA0"></i>Laadpaal DC / snel<br><span style="font-size:11px;color:#5b6b85">cijfer = geschatte plaatsen · geel kader = uw lead</span>';
@@ -924,6 +925,84 @@
         if (document.visibilityState === 'hidden') log('tab_verborgen', { na_s: Math.round((Date.now() - T0) / 1000) }, null, true);
         else if (!gesloten) log('tab_terug', { na_s: Math.round((Date.now() - T0) / 1000) });
       });
+    }
+
+    // =====================================================================
+    //  OEKENE-BESTEMMINGSLAGEN op de gemeentekaart (enkel oekene@gmail.com)
+    //  De 4 blokken uit de Belgische kaart (sportclub/school/zorg/OC), maar
+    //  gefilterd op DEZE gemeente (point-in-polygon tegen BOUNDARY) en
+    //  toggelbaar via de bestaande laagcontrole. Klik een dot → destination-PDF.
+    // =====================================================================
+    function installOekeneLagen(){
+      try {
+        if (String(EMAIL || '').toLowerCase() !== 'oekene@gmail.com') return;
+        if (!BOUNDARY || !LAYERCTL) return;
+        var geom = BOUNDARY.type === 'Feature' ? BOUNDARY.geometry
+                 : BOUNDARY.type === 'FeatureCollection' ? (BOUNDARY.features[0] && BOUNDARY.features[0].geometry)
+                 : BOUNDARY;
+        if (!geom || !geom.coordinates) return;
+
+        function bboxOf(g){ var b = [Infinity, Infinity, -Infinity, -Infinity];
+          (function scan(cs){ cs.forEach(function(p){ if (typeof p[0] === 'number'){ if (p[0]<b[0])b[0]=p[0]; if (p[1]<b[1])b[1]=p[1]; if (p[0]>b[2])b[2]=p[0]; if (p[1]>b[3])b[3]=p[1]; } else scan(p); }); })(g.coordinates); return b; }
+        function inRing(lng, lat, ring){ var inside = false; for (var i=0,j=ring.length-1;i<ring.length;j=i++){ var xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1]; if (((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
+        function inPoly(lng, lat){ var polys = geom.type==='MultiPolygon' ? geom.coordinates : [geom.coordinates];
+          for (var p=0;p<polys.length;p++){ var rings=polys[p]; if (!inRing(lng,lat,rings[0])) continue; var hole=false; for (var h=1;h<rings.length;h++){ if (inRing(lng,lat,rings[h])){ hole=true; break; } } if (!hole) return true; } return false; }
+        var bb = bboxOf(geom);
+        function inGem(lat, lng){ return !(lng<bb[0]||lng>bb[2]||lat<bb[1]||lat>bb[3]) && inPoly(lng, lat); }
+
+        if (!map.getPane('fkMarkers')){ map.createPane('fkMarkers'); map.getPane('fkMarkers').style.zIndex = 620; }
+        var ren = L.canvas({ pane:'fkMarkers', padding:0.5 });
+
+        // Destination-rapport: knop in de popup → POST naar de proxy → PDF in nieuw tabblad
+        function dest(el, e, type){
+          if (!el) return; var host = el.querySelector('.leaflet-popup-content') || el;
+          if (host.querySelector('.fk-dest')) return;
+          var bn = document.createElement('button'); bn.className='fk-dest'; bn.innerHTML='&#128196; Genereer destination-rapport';
+          bn.style.cssText='display:block;width:100%;margin-top:6px;padding:5px 9px;border:1px solid #05803B;border-radius:6px;background:#fff;color:#05803B;font-size:11px;font-weight:bold;cursor:pointer';
+          host.appendChild(bn);
+          bn.addEventListener('click', function(){
+            bn.textContent='⏳ rapport wordt gemaakt…'; bn.disabled=true; bn.style.cursor='default';
+            var body = { naam:e.n, type:type, lat:+e.lat, lng:+e.lng, gemeente:e.g||GEM||'' };
+            verseToken().then(function(t){
+              return fetch(PROXY_BASE + '/api/destination-rapport', {
+                method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + (t||TOKEN) }, body: JSON.stringify(body)
+              }).then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error((j&&j.error)||('HTTP '+r.status)); }).catch(function(){ throw new Error('HTTP '+r.status); }); return r.blob(); })
+                .then(function(blob){ var url=URL.createObjectURL(blob); var w=window.open(url,'_blank');
+                  bn.textContent = w ? '✓ rapport geopend' : '✓ rapport klaar (sta pop-ups toe)'; bn.style.background='#05803B'; bn.style.color='#fff'; bn.style.borderColor='#05803B';
+                  log('destination_rapport', { bron:type, naam:e.n, lat:+e.lat, lng:+e.lng }, e.n); });
+            }).catch(function(err){ bn.textContent='✗ '+String(err.message).slice(0,40); bn.disabled=false; bn.style.cursor='pointer'; bn.style.borderColor='#C0392B'; bn.style.color='#C0392B'; });
+          });
+        }
+
+        var NETLBL = { go:'GO!', gemeente:'gemeente', katholiek:'katholiek' };
+        var defs = [
+          { url:'/apps/data/sportclub_leads.json', naam:'⚽ Sportclubs',
+            kleur:function(){ return '#8E44AD'; }, sub:function(e){ return (e.s||[]).join(', ')||'sportclub'; }, type:function(){ return 'sport'; } },
+          { url:'/apps/data/scholen.json', naam:'🏫 Scholen',
+            kleur:function(e){ return { go:'#1F3864', gemeente:'#05B050', katholiek:'#9E480E' }[e.net] || '#5b6b85'; }, sub:function(e){ return NETLBL[e.net]||'onderwijs'; }, type:function(){ return 'school'; } },
+          { url:'/apps/data/zorg_leads.json', naam:'🏥 Zorg',
+            kleur:function(){ return '#05803B'; }, sub:function(e){ return e.t||'zorg'; }, type:function(){ return 'zorg'; } },
+          { url:'/apps/data/oc_entiteiten.json', naam:'🏛️ OC-entiteiten',
+            kleur:function(e){ var s=e.s; if (s==='Onderwijs') return '#9E480E'; if (s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg') return '#05803B'; return '#1F3864'; },
+            sub:function(e){ return e.s||''; },
+            type:function(e){ var s=e.s; return s==='Onderwijs'?'school':((s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg')?'zorg':'oc-overig'); } }
+        ];
+
+        defs.forEach(function(d){
+          fetch(d.url).then(function(r){ return r.ok ? r.json() : []; }).then(function(arr){
+            var list = (Array.isArray(arr)?arr:[]).filter(function(e){ return isFinite(+e.lat) && isFinite(+e.lng) && inGem(+e.lat, +e.lng); });
+            if (!list.length) return;
+            var grp = L.layerGroup();
+            list.forEach(function(e){
+              var m = L.circleMarker([+e.lat, +e.lng], { renderer:ren, radius:5, weight:1.5, color:'#fff', fillColor:d.kleur(e), fillOpacity:0.92 });
+              m.bindPopup('<div style="min-width:150px;font-family:Arial,sans-serif"><b>'+esc(e.n||'—')+'</b><br>'+esc(d.sub(e))+(e.g?(' &middot; '+esc(e.g)):'')+'</div>');
+              m.on('popupopen', function(ev){ var el=ev.popup.getElement(); if (el) dest(el, e, d.type(e)); });
+              grp.addLayer(m);
+            });
+            LAYERCTL.addOverlay(grp, d.naam + ' (' + list.length + ')');
+          }).catch(function(){});
+        });
+      } catch(e){ /* nooit de kaart breken */ }
     }
 
     guard().then(function(ok){ if (ok) boot(); });
