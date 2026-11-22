@@ -974,33 +974,109 @@
           });
         }
 
-        var NETLBL = { go:'GO!', gemeente:'gemeente', katholiek:'katholiek' };
-        var defs = [
-          { url:'/apps/data/sportclub_leads.json', naam:'⚽ Sportclubs',
-            kleur:function(){ return '#8E44AD'; }, sub:function(e){ return (e.s||[]).join(', ')||'sportclub'; }, type:function(){ return 'sport'; } },
-          { url:'/apps/data/scholen.json', naam:'🏫 Scholen',
-            kleur:function(e){ return { go:'#1F3864', gemeente:'#05B050', katholiek:'#9E480E' }[e.net] || '#5b6b85'; }, sub:function(e){ return NETLBL[e.net]||'onderwijs'; }, type:function(){ return 'school'; } },
-          { url:'/apps/data/zorg_leads.json', naam:'🏥 Zorg',
-            kleur:function(){ return '#05803B'; }, sub:function(e){ return e.t||'zorg'; }, type:function(){ return 'zorg'; } },
-          { url:'/apps/data/oc_entiteiten.json', naam:'🏛️ OC-entiteiten',
-            kleur:function(e){ var s=e.s; if (s==='Onderwijs') return '#9E480E'; if (s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg') return '#05803B'; return '#1F3864'; },
-            sub:function(e){ return e.s||''; },
-            type:function(e){ var s=e.s; return s==='Onderwijs'?'school':((s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg')?'zorg':'oc-overig'); } }
+        // --- stijl + helpers voor de inklapbare subfilter-boxen (zoals de Belgische kaart) ---
+        if (!document.getElementById('fkbox-style')){
+          var st=document.createElement('style'); st.id='fkbox-style';
+          st.textContent='.fkbox{background:#fff;border:1px solid #E2E8F2;border-radius:10px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-family:Arial,sans-serif;width:208px;margin-bottom:8px}'
+            +'.fkbox .h{font-weight:bold;color:#1F3864;font-size:12px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}'
+            +'.fkbox .h .o{background:#05B050;color:#fff;border-radius:999px;font-size:9px;padding:1px 6px}'
+            +'.fkbox .sub{font-size:10px;color:#5b6b85;margin:2px 0 6px}'
+            +'.fkbox.collapsed .bd{display:none}'
+            +'.fkbox .fk-chev::before{content:"\\25B8"}.fkbox:not(.collapsed) .fk-chev::before{content:"\\25BE"}'
+            +'.fkbox button{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 9px;border:1px solid #C9D6EC;border-radius:7px;background:#fff;color:#1F3864;font-size:12px;cursor:pointer}'
+            +'.fkbox button:hover{background:#EAF0F8}.fkbox button.on{background:#1F3864;color:#fff;border-color:#1F3864}'
+            +'.fkbox button.uit{border-color:#E2E8F2;color:#9E480E}'
+            +'.fkbox .sp{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}'
+            +'.fkbox .sp button{display:inline-block;width:auto;flex:1 1 46%;text-align:center;padding:4px 2px;margin:0;font-size:10px}'
+            +'.fkbox .st{font-size:10.5px;color:#5b6b85;margin-top:3px}';
+          document.head.appendChild(st);
+        }
+        function toast(msg){ var t=document.createElement('div'); t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1F3864;color:#fff;padding:8px 14px;border-radius:8px;font:13px Arial;z-index:99999;box-shadow:0 2px 10px rgba(0,0,0,.3)'; t.innerHTML=msg; document.body.appendChild(t); setTimeout(function(){ t.remove(); },3200); }
+        function nk(n){ return ({go:1,gemeente:1,katholiek:1})[n] ? n : 'overig'; }
+        var OVERHEID={ 'Stad / Gemeente':1,'OCMW / CPAS':1,'Politiezone':1,'Hulpverleningszone':1,'Federaal':1,'Provinciaal':1,'Gewestelijk':1,'AGB / RCA':1 };
+
+        var CATS=[
+          { id:'sl', titel:'Sportclub-concessieleads', sub:'Goede club + buurt gebruikt de parking', url:'/apps/data/sportclub_leads.json',
+            kleur:function(e){ return ({voetbal:'#1F3864',basketbal:'#E8821E',volleybal:'#05803B',hockey:'#7A3FF2'})[(e.s&&e.s[0])]||'#8A6A00'; },
+            subtxt:function(e){ return (e.s||[]).join(' · '); }, type:function(){ return 'sport'; }, hi:function(e){ return e.sch===1; },
+            modes:[{k:'alle',label:'Alle sportclub-leads'},{k:'dubbel',label:'Dubbelgebruik (school ≤400 m)',pred:function(e){ return e.sch===1; }}],
+            chips:[{k:'voetbal',label:'Voet'},{k:'basketbal',label:'Basket'},{k:'volleybal',label:'Volley'},{k:'hockey',label:'Hockey'}],
+            chipPred:function(e,on){ return (e.s||[]).some(function(sp){ return on[sp]; }); }, logKind:'sportclub_laag', leadKind:'concessie_lead', leadLabel:'+ Deal-flow (concessie-lead)' },
+          { id:'zg', titel:'Zorginstellingen', url:'/apps/data/zorg_leads.json',
+            kleur:function(e){ return ({ziekenhuis:'#C0392B',wzc:'#1F3864',assist:'#05803B',overig:'#8A6A00'})[e.t]||'#8A6A00'; },
+            subtxt:function(e){ return ({ziekenhuis:'ziekenhuis',wzc:'woonzorgcentrum',assist:'assistentiewoningen',overig:'zorgvoorziening'})[e.t]||e.t; },
+            type:function(){ return 'zorg'; }, hi:function(e){ return e.oc===1; },
+            modes:[{k:'alle',label:'Alle zorg'},{k:'oc',label:'Alleen in Opdrachtencentrale',pred:function(e){ return e.oc===1; }}],
+            chips:[{k:'ziekenhuis',label:'Ziek.huis'},{k:'wzc',label:'WZC'},{k:'assist',label:'Assist.'},{k:'overig',label:'Overig'}],
+            chipPred:function(e,on){ return !!on[e.t]; }, logKind:'zorg_laag', leadKind:'zorg_lead', leadLabel:'+ Deal-flow' },
+          { id:'sch', titel:'Scholen (net)', url:'/apps/data/scholen.json',
+            kleur:function(e){ return ({go:'#1F3864',gemeente:'#E8821E',katholiek:'#7A3FF2',overig:'#9AA3B0'})[nk(e.net)]; },
+            subtxt:function(e){ return ({go:'GO!',gemeente:'gemeentelijk/stedelijk',katholiek:'katholiek/vrij',overig:'overig'})[nk(e.net)]; },
+            type:function(){ return 'school'; }, hi:function(){ return false; },
+            modes:[{k:'alle',label:'Toon alle scholen'}],
+            chips:[{k:'go',label:'GO!'},{k:'gemeente',label:'Gemeente'},{k:'katholiek',label:'Katholiek'},{k:'overig',label:'Overig'}],
+            chipPred:function(e,on){ return !!on[nk(e.net)]; }, logKind:'school_laag', leadKind:'school_lead', leadLabel:'+ Deal-flow' },
+          { id:'oc', titel:'Opdrachtencentrale', url:'/apps/data/oc_entiteiten.json',
+            kleur:function(e){ var s=e.s; if(s==='Onderwijs') return '#9E480E'; if(OVERHEID[s]) return '#1F3864'; if(s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg') return '#05803B'; return '#8A6A00'; },
+            subtxt:function(e){ return e.s||''; },
+            type:function(e){ var s=e.s; return s==='Onderwijs'?'school':((s==='Zorg'||s==='Ziekenhuis'||s==='Ouderenzorg')?'zorg':'oc-overig'); }, hi:function(){ return false; },
+            modes:[{k:'alle',label:'Alle OC-adressen'},{k:'parking',label:'Eigen parking (≤150 m)'},{k:'tender',label:'Publieke tendering',pred:function(e){ return OVERHEID[e.s]||e.s==='Onderwijs'||e.s==='Zorg'||e.s==='Ziekenhuis'||e.s==='Ouderenzorg'; }}],
+            chips:null, logKind:'oc_laag', leadKind:null }
         ];
 
-        defs.forEach(function(d){
-          fetch(d.url).then(function(r){ return r.ok ? r.json() : []; }).then(function(arr){
-            var list = (Array.isArray(arr)?arr:[]).filter(function(e){ return isFinite(+e.lat) && isFinite(+e.lng) && inGem(+e.lat, +e.lng); });
-            if (!list.length) return;
-            var grp = L.layerGroup();
-            list.forEach(function(e){
-              var m = L.circleMarker([+e.lat, +e.lng], { renderer:ren, radius:5, weight:1.5, color:'#fff', fillColor:d.kleur(e), fillOpacity:0.92 });
-              m.bindPopup('<div style="min-width:150px;font-family:Arial,sans-serif"><b>'+esc(e.n||'—')+'</b><br>'+esc(d.sub(e))+(e.g?(' &middot; '+esc(e.g)):'')+'</div>');
-              m.on('popupopen', function(ev){ var el=ev.popup.getElement(); if (el) dest(el, e, d.type(e)); });
-              grp.addLayer(m);
+        function mkMarker(cat, e){
+          var hi=cat.hi(e);
+          var m=L.circleMarker([+e.lat,+e.lng],{ renderer:ren, radius:hi?6:4.8, weight:hi?2.5:1.5, color:hi?'#05B050':'#fff', fillColor:cat.kleur(e), fillOpacity:0.95 });
+          var html='<div style="min-width:160px;font-family:Arial,sans-serif"><b>'+esc(e.n||'—')+'</b><br>'
+            +esc(cat.subtxt(e)||'')+(e.g?(' &middot; '+esc(e.g)):'')
+            +(e.web?('<br><a href="'+esc(e.web)+'" target="_blank" rel="noopener" style="color:#1F3864">website</a>'):'');
+          if (cat.leadKind) html+='<br><button class="fk-lead" style="margin-top:7px;padding:5px 9px;border:1px solid #1F3864;border-radius:6px;background:#1F3864;color:#fff;font-size:11px;cursor:pointer">'+cat.leadLabel+'</button>';
+          html+='</div>';
+          m.bindPopup(html);
+          m.on('popupopen', function(ev){ var el=ev.popup.getElement(); if(!el) return;
+            dest(el, e, cat.type(e));
+            var bn=el.querySelector('.fk-lead'); if(bn){ bn.addEventListener('click', function(){
+              log(cat.leadKind, { bron:cat.type(e), naam:e.n, lat:+e.lat, lng:+e.lng, gemeente:e.g||'' }, e.n);
+              bn.textContent='✓ genoteerd in deal-flow'; bn.disabled=true; bn.style.background='#05803B'; bn.style.borderColor='#05803B'; bn.style.cursor='default';
+              toast('<b>'+esc(e.n)+'</b> genoteerd in de opvolging.'); }); }
+          });
+          return m;
+        }
+
+        CATS.forEach(function(cat){
+          cat._mode=null; cat._chipOn={}; (cat.chips||[]).forEach(function(c){ cat._chipOn[c.k]=true; });
+          cat._grp=L.layerGroup().addTo(map); cat._data=null; cat._cnt=function(){};
+          cat._load=function(){ if(cat._data) return Promise.resolve(); return fetch(cat.url).then(function(r){ return r.ok?r.json():[]; }).then(function(arr){ cat._data=(Array.isArray(arr)?arr:[]).filter(function(e){ return isFinite(+e.lat)&&isFinite(+e.lng)&&inGem(+e.lat,+e.lng); }); }); };
+          cat._redraw=function(){ cat._grp.clearLayers(); if(!cat._mode){ cat._cnt(''); return; }
+            var base=cat._data||[];
+            if (cat._mode==='parking'){ base=base.filter(function(e){ return SITES.some(function(s){ return afstandM(+e.lat,+e.lng,+s.lat,+s.lng)<=150; }); }); }
+            else { var md=cat.modes.filter(function(m){ return m.k===cat._mode; })[0]; if (md&&md.pred) base=base.filter(md.pred); if (cat.chips) base=base.filter(function(e){ return cat.chipPred(e,cat._chipOn); }); }
+            base.forEach(function(e){ cat._grp.addLayer(mkMarker(cat,e)); }); cat._cnt(base.length+' in beeld'); };
+
+          var ctl=L.control({position:'topleft'});
+          ctl.onAdd=function(){ var d=L.DomUtil.create('div','fkbox collapsed');
+            var chipHtml=cat.chips?('<div class="sp">'+cat.chips.map(function(c){ return '<button data-chip="'+c.k+'" class="on">'+c.label+'</button>'; }).join('')+'</div>'):'';
+            d.innerHTML='<div class="h"><span><span class="fk-chev"></span> '+cat.titel+'</span> <span class="o">oekene</span></div>'
+              +'<div class="bd">'+(cat.sub?('<div class="sub">'+cat.sub+'</div>'):'')
+              + cat.modes.map(function(m){ return '<button data-mode="'+m.k+'">'+m.label+'</button>'; }).join('')
+              + chipHtml
+              + '<button data-mode="uit" class="uit">Verberg</button><div class="st"></div></div>';
+            L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+            var stEl=d.querySelector('.st'); cat._cnt=function(t){ stEl.textContent=t; };
+            d.querySelector('.h').addEventListener('click', function(){ d.classList.toggle('collapsed'); });
+            function paint(){ Array.prototype.forEach.call(d.querySelectorAll('button[data-mode]'),function(bn){ bn.classList.toggle('on', bn.getAttribute('data-mode')===cat._mode); });
+              Array.prototype.forEach.call(d.querySelectorAll('button[data-chip]'),function(bn){ bn.classList.toggle('on', !!cat._chipOn[bn.getAttribute('data-chip')]); }); }
+            d.addEventListener('click', function(ev){ var bn=ev.target.closest('button'); if(!bn) return;
+              if (bn.hasAttribute('data-chip')){ var c=bn.getAttribute('data-chip'); cat._chipOn[c]=!cat._chipOn[c]; paint(); if(cat._mode&&cat._mode!=='parking') cat._redraw(); return; }
+              var k=bn.getAttribute('data-mode');
+              cat._load().then(function(){
+                if (k==='uit'){ cat._mode=null; paint(); cat._redraw(); return; }
+                cat._mode=k; paint(); cat._redraw();
+                try{ log(cat.logKind, { laag:k }); }catch(e2){}
+              }).catch(function(){ toast('Kon de data niet laden.'); });
             });
-            LAYERCTL.addOverlay(grp, d.naam + ' (' + list.length + ')');
-          }).catch(function(){});
+            return d; };
+          ctl.addTo(map);
         });
       } catch(e){ /* nooit de kaart breken */ }
     }
