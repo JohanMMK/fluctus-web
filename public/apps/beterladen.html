@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.12.9 (2026-11-22, Johan): snelladen-blok voorgevuld uit het wagenpark (1 beurt per bestel-/vrachtwagen, ± 40 % van wat hij per werkdag rijdt, tijd aan de kade volgt uit 50/150 kW) i.p.v. vast 10 × 150 kWh. -->
 <!-- beterladen.html v0.12.8 (2026-11-20, Johan): (1) resultaat «Past het op je toegang?»: past het nu wel en later niet → «Ja, nu wel» + «Over 1 jaar te krap» in vet oranje; (2) «Volledig rapport (PDF)» toont meteen de PDF (smalle opmaak zoals op de iPhone, 560 px) in een nieuw tabblad i.p.v. het afdrukvenster. -->
 <!-- beterladen.html v0.12.7 (2026-11-20, Johan): PDF op Mac/pc met alle kleurvakjes (print-color-adjust:exact overal). -->
 <!-- beterladen.html v0.12.6 (2026-11-20, Johan): PDF op Mac/pc zoals op de iPhone (smalle opmaak, vergroot tot A4-breedte; html.pdfdesk). -->
@@ -804,6 +805,20 @@ function aanslBanner(R){
   e.innerHTML=A.eerste_ingreep?('<b>Let op: '+esc(HZ[A.eerste_ingreep].toLowerCase())+' is een ingreep op je aansluiting nodig.</b> Met dit aantal wagens volstaat slim laden alleen niet meer. Bereid je erop voor: na de kwaliteitscheck van je eerste laadpalen bestuderen we gratis hoe je je aansluiting het best aanpast.')
     :('<b>'+esc(HZ[A.eerste_toegang])+' moet je toegangsvermogen omhoog</b> tot ± '+n0((R[A.eerste_toegang]||{}).toeg_nodig_kw)+' kVA. Je cabine kan dat aan; na de kwaliteitscheck bekijken we gratis of een batterij of zonnepanelen dat kunnen vermijden.');
 }
+// v0.12.9 (Johan 22-11): SNELLADEN VOORINVULLEN UIT HET WAGENPARK — niet meer vast 10 × 150 kWh, maar zoals de wagens rijden:
+//   1 beurt per bestel-/vrachtwagen per dag, ± 40 % van wat die wagen per werkdag rijdt (de rest 's nachts), vermogen van een
+//   DC-paal voor dat type (bestelwagen 50 kW, vrachtwagen/bus 150 kW) → de tijd aan de kade volgt daaruit. Zelf aangepast = blijft.
+function snelVoorinvullen(W){ try{
+  var ids=['snaant','snduur','snkwh']; if(ids.some(function(id){ return $(id)&&$(id).dataset.aangepast==='1'; })) return;
+  var n=0, dag=0, zwaar=false;
+  (W||[]).forEach(function(w){ if(!/vrachtwagen|bus|lichte_vracht|bestelwagen/.test(String(w.type||''))) return;
+    var a=Math.max(+w.nu||0,+w.m12||0,+w.m24||0,+w.m36||0); if(!(a>0)) return;
+    n+=a; dag+=a*(+w.km_jaar||0)*(+w.kwh_km||0)/260; if(/vrachtwagen|bus/.test(String(w.type))) zwaar=true; });
+  if(!(n>0&&dag>0)) return;
+  var kwh=Math.max(20,Math.min(400,Math.round(0.4*dag/n/10)*10)), kw=zwaar?150:50, duur=Math.max(15,Math.min(120,Math.round(kwh/kw*60/5)*5));
+  $('snaant').value=Math.round(n); $('snkwh').value=kwh; $('snduur').value=duur;
+}catch(e){} }
+['snaant','snduur','snkwh'].forEach(function(id){ var e=document.getElementById(id); if(e) e.addEventListener('input',function(){ e.dataset.aangepast='1'; }); });
 // v0.9.1 (Johan 19-11): snelladen bij laden/lossen → aanvraag Energie-Compas-studie (lead naar Fluctus, dossier klaar in EK)
 function snelAanvraag(){
   var k=$('snknop'), v=function(id){ return +$(id).value||0; };
@@ -835,6 +850,7 @@ function render(){
   })();
   aanslBanner(R);   // v0.9.0
   toon('snel', S.dg==='logistiek' || (R.wagens||[]).some(function(w){ return w.type==='vrachtwagen'||w.type==='bus'||w.type==='lichte_vracht'; }));   // v0.9.1
+  snelVoorinvullen(R.wagens);   // v0.12.9: voorinvullen zoals de wagens rijden
   $('pcode').textContent=S.pid||'zie je bevestigingsmail'; Array.prototype.forEach.call(document.querySelectorAll('.pnaam'),function(e){ e.textContent=pNaam(); });   // v0.8.0
   $('a4p').innerHTML=(P2?esc(P2)+'<br>':'')+(S.pid?esc(S.pid)+'<br>':'')+new Date().toLocaleDateString(window.BL_LOC||'nl-BE');
   var hl=['m36','m24','m12','nu'].map(function(h){return R[h];}).filter(function(x){return x.ev>0;})[0]||R.nu;
