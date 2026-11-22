@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.227.0 (2026-11-22, Johan): KADE ZOALS ZE RIJDEN — snelladen aan de kade per dag begrensd op wat de wagens van die rij rijden (rest 's nachts, minstens 5 %): eerst kortere tijd aan de paal, dan minder beurten; zelfde waarden in simulatie, A4 en V&A; melding in de invoer. -->
 <!-- ek.html v0.226.1 (2026-11-22): laadkost-noemer telt enkel de eigen vloot (incl. kade), niet het betalend laadplein → dossiers met betalende bezoekers ongewijzigd. -->
 <!-- ek.html v0.226.0 (2026-11-22, Johan): laadsessie-besparing deelt de laadkost door alles wat geladen wordt, ook de kade (snelladen bij laden/lossen). Zonder die fix rekende EK enkel PV + batterij en weken de documenten af (DEMO Productie BV). -->
 <!-- ek.html v0.225.0 (2026-11-19, Johan): CREG-tarief thuisladen per kwartaal (all-in incl. btw), automatisch het lopende kwartaal (Q1 2027 vanaf 1 januari). -->
@@ -2073,9 +2074,21 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function _kadeSan(k){ if(!k||typeof k!=='object') return undefined; var n=function(x,mn,mx){ x=+x; return isFinite(x)?Math.max(mn,Math.min(mx,x)):mn; };
     return { aan:!!k.aan, beurten:Math.round(n(k.beurten,1,2000)), duur:n(k.duur,10,480), kwh:n(k.kwh,5,2000), vs:_evUur(k.vs,8), ve:_evUur(k.ve,17), palen:Math.round(n(k.palen,1,500)) }; }
   function _kadeKw(k){ return (k&&k.duur>0)?Math.round(k.kwh/(k.duur/60)):0; }
+  // v0.227.0 (Johan 22-11): KADE ZOALS ZE RIJDEN — de kade levert per dag nooit meer dan wat de wagens van die rij rijden; de rest
+  //   (minstens 5 %) laden ze 's nachts in het depot. Vraagt de invoer meer (DEMO: 10 × 150 kWh/dag voor 6 bestelwagens die ± 126 kWh
+  //   per dag rijden), dan wordt eerst de tijd aan de paal korter (in kwartieren), daarna het aantal beurten kleiner. Het vermogen van
+  //   de snellader blijft (piek per kwartier, capex). Zelfde waarden in de simulatie, de A4 en de V&A.
+  function _kadeEff(r){ var k=r&&r.kade; if(!k) return null;
+    var t0=_evType(r.type)||{}, vd=_vehVd(r), kwhkm=(vd&&+vd.kwh_km>0)?+vd.kwh_km:(+t0.kwhkm||1), dpw=(r.weekend?7:5), nW=Math.max(1,Math.round(+r.aantal||0));
+    var kKw=Math.max(1,_kadeKw(k)), vdc=(vd&&+vd.dc_kw>0)?+vd.dc_kw:0; if(vdc>0) kKw=Math.min(kKw,vdc);
+    var q=Math.max(1,Math.round(+k.duur/15)), b=Math.max(1,Math.round(+k.beurten||1)), perQ=kKw*0.25;
+    var dagNood=nW*(+t0.kmjaar||0)*kwhkm/(dpw*52), doel=0.95*dagNood, gevr=b*q*perQ, begrensd=false;
+    if(doel>0 && gevr>doel){ begrensd=true; var q2=Math.floor(doel/(b*perQ)); if(q2>=1) q=q2; else { q=1; b=Math.max(1,Math.floor(doel/perQ)); } }
+    return { kw:kKw, q:q, duur:q*15, beurten:b, kwhBeurt:q*perQ, dagKwh:b*q*perQ, dagNood:dagNood, gevraagdDag:gevr, begrensd:begrensd }; }
+  window._ekKadeEff=_kadeEff;
   // v0.224.0 (Johan 19-11): kade-regels voor de documenten (A4-voertuigtabel, payload.kade voor de V&A)
   window._ekKadeLijst=function(){ try{ return (window._ekEvRows?window._ekEvRows():[]).filter(function(r){ return r && +r.aantal>0 && _kadeKan(r) && r.kade && r.kade.aan && +r.kade.beurten>0 && +r.kade.kwh>0; })
-      .map(function(r){ var t=_evType(r.type)||{}, k=r.kade; return { type:r.type, label:(t.label||t.naam||r.type||''), aantal:+r.aantal, beurten:Math.round(+k.beurten), kwh:Math.round(+k.kwh), duur:Math.round(+k.duur||60),
+      .map(function(r){ var t=_evType(r.type)||{}, k=r.kade, E=_kadeEff(r)||{}; return { type:r.type, label:(t.label||t.naam||r.type||''), aantal:+r.aantal, beurten:(E.begrensd?E.beurten:Math.round(+k.beurten)), kwh:(E.begrensd?Math.round(E.kwhBeurt):Math.round(+k.kwh)), duur:(E.begrensd?E.duur:Math.round(+k.duur||60)), begrensd:!!E.begrensd,
         vs:_evUur(k.vs,8), ve:_evUur(k.ve,17), palen:Math.max(1,Math.round(+k.palen||1)), kw:_kadeKw(k), weekend:!!r.weekend }; }); }catch(e){ return []; } };
   function _kadeHtml(r,i){ if(!_kadeKan(r)) return ''; var k=r.kade||null, aan=!!(k&&k.aan);
     var h='<div class="ev-kade" style="margin-top:6px;font-size:12px"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-i="'+i+'" data-f="kade_aan"'+(aan?' checked':'')+'> '+_ek3('Snelladen aan de kade (laden en lossen)','Recharge rapide au quai (chargement/déchargement)','Fast charging at the dock (loading/unloading)')+'</label>';
@@ -2087,7 +2100,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         inp('kwh',k.kwh,5,2000,5,56,'kWh per beurt')+' kWh/beurt · van '+
         inp('vs',k.vs,0,24,0.5,48,'aankomst vanaf (uur)')+' tot '+inp('ve',k.ve,0,24,0.5,48,'aankomst tot (uur)')+' u · '+
         inp('palen',k.palen,1,500,1,48,'aantal snelladers aan de kade')+' snelladers'+
-        '<span style="color:#5A6577">≈ '+kw+' kW per paal'+((cap>0&&kw>cap)?(' <b style="color:#B91C1C">(wagen laadt max. '+cap+' kW)</b>'):'')+'</span></div>'; }
+        '<span style="color:#5A6577">≈ '+kw+' kW per paal'+((cap>0&&kw>cap)?(' <b style="color:#B91C1C">(wagen laadt max. '+cap+' kW)</b>'):'')+'</span></div>';
+      var KE=_kadeEff(r); if(KE&&KE.begrensd) h+='<div style="margin-top:3px;color:#9A5B00">'+_ek3('Meer dan de wagens rijden (± '+Math.round(KE.dagNood)+' kWh per dag). We rekenen met '+KE.beurten+' × '+Math.round(KE.kwhBeurt)+' kWh aan de kade; de rest laden ze \'s nachts.',
+        'Plus que ce que roulent les véhicules (± '+Math.round(KE.dagNood)+' kWh par jour). Nous calculons avec '+KE.beurten+' × '+Math.round(KE.kwhBeurt)+' kWh au quai ; le reste se recharge la nuit.',
+        'More than the vehicles drive (± '+Math.round(KE.dagNood)+' kWh per day). We calculate with '+KE.beurten+' × '+Math.round(KE.kwhBeurt)+' kWh at the dock; the rest charges overnight.')+'</div>'; }
     return h+'</div>'; }
   function _evRowHtml(r,i){
     var t0=_evType(r.type);
@@ -2223,15 +2239,15 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
       km_per_jaar:kmW, kwh_per_km:t.kwhkm, laadverm_kw:lkw, venster_start:m.vs, venster_eind:m.ve, dagen_per_week:dpw, creg:true }, vInfo);
     // v0.223.0 (Johan 19-11): KADE — snelladen tijdens laden/lossen → apart plein (sessiemodel), energie gaat af van het depotladen.
     var k=r.kade; if(!(_kadeKan(r)&&k&&k.aan&&+k.beurten>0&&+k.duur>0&&+k.kwh>0)) return hoofd;
-    var kKw=Math.max(1,_kadeKw(k)); var vdc=(vd&&+vd.dc_kw>0)?+vd.dc_kw:0; if(vdc>0) kKw=Math.min(kKw,vdc);
-    var kKwhBeurt=kKw*(Math.max(1,Math.round(+k.duur/15))*0.25);                       // wat de sim levert: vast vermogen × duur (per kwartier)
-    var kJaarKwh=(+k.beurten)*kKwhBeurt*dpw*52, totJaarKwh=nW*kmW*t.kwhkm, kAand=Math.min(0.95,kJaarKwh/Math.max(1,totJaarKwh));
+    var KE=_kadeEff(r), kKw=KE.kw;   // v0.227.0: kade zoals ze rijden (begrensd op de dagnood, rest 's nachts)
+    var kKwhBeurt=KE.kwhBeurt;                       // wat de sim levert: vast vermogen × duur (per kwartier)
+    var kJaarKwh=KE.beurten*kKwhBeurt*dpw*52, totJaarKwh=nW*kmW*t.kwhkm, kAand=Math.min(0.95,kJaarKwh/Math.max(1,totJaarKwh));
     hoofd.km_per_jaar=Math.round(kmW*(1-kAand));
     var vs=_evUur(k.vs,8), ve=_evUur(k.ve,17); if(!(ve>vs)) ve=Math.min(24,vs+1);
     var kade=Object.assign({ naam:t0.label+' (kade)', type_plein:'kade', betalend:false, kade:true, type:t.key, voertuig:vLabel, aantal:nW,
       km_per_jaar:Math.round(kmW*kAand), kwh_per_km:t.kwhkm, paal_kw:kKw, paaltype:(kKw>=600?'DC600':(kKw>=50?'DC160':'AC22')),
-      aantal_palen:Math.max(1,Math.round(+k.palen||1)), duur_min:Math.max(15,Math.round(+k.duur/15)*15), dagen_per_week:dpw,
-      vensters:[{start:vs,eind:ve,sessies:Math.max(1,Math.round(+k.beurten))}], kade_kwh_beurt:Math.round(kKwhBeurt), kade_aandeel:Math.round(kAand*1000)/10 }, vInfo);
+      aantal_palen:Math.max(1,Math.round(+k.palen||1)), duur_min:KE.duur, dagen_per_week:dpw,
+      vensters:[{start:vs,eind:ve,sessies:KE.beurten}], kade_kwh_beurt:Math.round(kKwhBeurt), kade_aandeel:Math.round(kAand*1000)/10, kade_begrensd:KE.begrensd }, vInfo);
     return [hoofd, kade]; }).reduce(function(a,x){ return a.concat(x); },[]); }   // v0.34 (Johan): laadvermogen/voertuig per rij → server onbeheerst-profiel + aansluitingscapaciteit
   // v0.24.39 (Johan: "een woning mag eigenlijk ook een rooster"): thuislaad-buckets (nacht/dag/24u) → wagenpark-pleinen,
   //   zodat een woning via DEZELFDE bedrijf-sweep (PV×batterij-rooster) kan lopen. Personenwagen-defaults; venster per bucket.
