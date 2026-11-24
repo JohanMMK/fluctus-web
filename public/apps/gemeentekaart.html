@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.6.2
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.7.0
+     v1.7.0 (24-11, Johan): GEMEENTEGRENS IS DE WAARHEID — parkings van een naamgenoot (Bergen → NL/DE, Lille, Waterloo, …)
+       vallen weg (binnen de grens of band ±2 km); blijft er bijna niets over → live uit OpenStreetMap binnen de grens;
+       laadpalen-zone = enkel de grens (Bergen toonde 6.212 = heel België); kaart past altijd op de gemeente; cache gk_lp5_.
      v1.6.2: bij een adres meteen ingezoomd op dat adres (fitBounds op de gemeente overschreef de zoom).
      v1.6.1: adres-rangschikking — resultaten in de genoemde gemeente/postcode eerst.
      v1.6 (17-10, Johan): ADRES — &lat&lng&adres in de URL (vanuit de Lead Generator) of «📍 Zoek een adres» in de zijbalk →
@@ -325,6 +328,66 @@
       });
     }
 
+    // ── v1.7.0 (Johan 24-11): GEMEENTEGRENS IS DE WAARHEID ──────────────────────────────────────────────────────
+    //   Een aantal kaartbestanden kreeg bij het genereren parkings van een NAAMGENOOT (Bergen → Bergen NH/Limburg NL/
+    //   Niedersachsen, Lille → Rijsel, Waterloo, Beaumont, Bocholt, Lens, Limburg, …). Hier: elke parking moet binnen de
+    //   grens of in de band ±2 km liggen; de rest valt weg. Blijft er (bijna) niets over → parkings live uit OpenStreetMap
+    //   binnen de grens. De laadpalen-zone volgt enkel de grens (niet meer de parkings).
+    var GRENS_GEOM = null, GRENS_BB = null, WEG_NAAMGENOOT = 0, OSM_LIVE = false;
+    function grensGeom(){ if (!BOUNDARY) return null; return BOUNDARY.type === 'Feature' ? BOUNDARY.geometry : (BOUNDARY.type === 'FeatureCollection' ? (BOUNDARY.features[0] && BOUNDARY.features[0].geometry) : BOUNDARY); }
+    function gRing(lng, lat, ring){ var inside = false; for (var i = 0, j = ring.length - 1; i < ring.length; j = i++){ var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1]; if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside; } return inside; }
+    function inGrens(lat, lng){ var g = GRENS_GEOM; if (!g) return true; if (GRENS_BB && (lng < GRENS_BB[0] || lng > GRENS_BB[2] || lat < GRENS_BB[1] || lat > GRENS_BB[3])) return false;
+      var polys = g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates];
+      for (var p = 0; p < polys.length; p++){ var rings = polys[p]; if (!gRing(lng, lat, rings[0])) continue; var hole = false; for (var h = 1; h < rings.length; h++){ if (gRing(lng, lat, rings[h])){ hole = true; break; } } if (!hole) return true; }
+      return false; }
+    function dichtBijGrens(lat, lng, maxM){   // band: binnen maxM van een grenspunt
+      var g = GRENS_GEOM; if (!g) return true; if (GRENS_BB && (lng < GRENS_BB[0] - 0.05 || lng > GRENS_BB[2] + 0.05 || lat < GRENS_BB[1] - 0.03 || lat > GRENS_BB[3] + 0.03)) return false;
+      var best = Infinity; JSON.stringify(g.coordinates).replace(/\[(-?[\d.]+),(-?[\d.]+)\]/g, function(_, x, y){ var d = afstandM(lat, lng, +y, +x); if (d < best) best = d; return ''; });
+      return best <= maxM; }
+    function zuiverSites(){
+      GRENS_GEOM = grensGeom(); if (!GRENS_GEOM || !GRENS_GEOM.coordinates) return;
+      var b = [Infinity, Infinity, -Infinity, -Infinity]; JSON.stringify(GRENS_GEOM.coordinates).replace(/\[(-?[\d.]+),(-?[\d.]+)\]/g, function(_, x, y){ x = +x; y = +y; if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; return ''; });
+      GRENS_BB = b;
+      var voor = SITES.length;
+      SITES = SITES.filter(function(s){ if (inGrens(s.lat, s.lng)) return true; if (dichtBijGrens(s.lat, s.lng, 2500)){ s.o = true; return true; } return false; });
+      WEG_NAAMGENOOT = voor - SITES.length;
+    }
+    function osmParkings(){   // live: amenity=parking binnen de grens (bbox-query, daarna punt-in-polygoon)
+      var b = GRENS_BB; if (!b) return Promise.resolve([]);
+      var key = 'gk_osmpark1_' + SLUG; try { var c = JSON.parse(localStorage.getItem(key) || 'null'); if (c && c.ts && Date.now() - c.ts < 7 * 86400000 && Array.isArray(c.s)) return Promise.resolve(c.s); } catch(e){}
+      var bb = [rnd(b[1], 4), rnd(b[0], 4), rnd(b[3], 4), rnd(b[2], 4)].join(',');
+      var q = '[out:json][timeout:60];(way["amenity"="parking"](' + bb + ');relation["amenity"="parking"](' + bb + '););out geom tags;';
+      var i = 0, ronde = 0;
+      function poging(){
+        if (i >= OVERPASS.length){ if (ronde++ >= 1) return Promise.reject(new Error('overpass onbereikbaar')); i = 0; return new Promise(function(ok){ setTimeout(ok, 2500); }).then(poging); }
+        var url = OVERPASS[i++];
+        return fetch(url, { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body:'data=' + encodeURIComponent(q), signal: metTimeout(25000) })
+          .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); }).then(function(j){ if (!j || !Array.isArray(j.elements)) throw new Error('leeg'); return j; }).catch(function(){ return poging(); });
+      }
+      return poging().then(function(j){
+        var uit = [];
+        (j.elements || []).forEach(function(el){
+          var g = el.geometry || (el.members || []).reduce(function(a, m){ return a.concat(m.role === 'outer' && m.geometry ? m.geometry : []); }, []);
+          if (!g || g.length < 3) return;
+          var la = 0, lo = 0; g.forEach(function(p){ la += p.lat; lo += p.lon; }); la /= g.length; lo /= g.length;
+          if (!inGrens(la, lo)) return;
+          var k = Math.cos(la * Math.PI / 180) * 111320, A = 0;   // oppervlakte (m²) via shoelace
+          for (var a = 0, z = g.length - 1; a < g.length; z = a++) A += (g[z].lon * k) * (g[a].lat * 110540) - (g[a].lon * k) * (g[z].lat * 110540);
+          A = Math.abs(A / 2);
+          var tg = el.tags || {}, cap = parseInt(tg.capacity, 10), pl = !isNaN(cap) && cap > 0 ? cap : Math.round(A / 25);
+          if (pl < 15 || tg.access === 'no') return;
+          var acc = String(tg.access || ''), t = (acc === 'private' || acc === 'permit' || acc === 'employees') ? 'bedrijf' : (acc === 'customers' ? 'commercial' : 'parking');
+          uit.push({ n: tg.name || tg.operator || 'Parking', lat: rnd(la, 6), lng: rnd(lo, 6), p: pl, t: t, o: false, bron: 'osm' });
+        });
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), s: uit })); } catch(e){}
+        return uit;
+      });
+    }
+    function naamgenootMelding(){
+      var el = document.getElementById('gk-naamgenoot'); if (!el){ el = document.createElement('div'); el.id = 'gk-naamgenoot'; el.style.cssText = 'margin:8px 10px;padding:8px 10px;border:1px solid #E8A33D;background:#FFF6E5;border-radius:8px;font-size:12px;line-height:1.4;color:#7a3e00'; var k = document.querySelector('.gk-kpi'); if (k && k.parentNode) k.parentNode.insertBefore(el, k.nextSibling); }
+      el.innerHTML = '⚠ ' + nf(WEG_NAAMGENOOT) + ' parkings uit de brondata lagen niet in ' + esc(GEM) + ' (een naamgenoot elders) en zijn weggelaten.' + (OSM_LIVE ? ' De parkings hieronder komen live uit OpenStreetMap, binnen de gemeentegrens (plaatsen = capaciteit of geschat uit de oppervlakte).' : '');
+    }
+
     function terugvalIframe(reden){
       document.getElementById('gk-side').style.display = 'none';
       document.getElementById('gk-map').style.display = 'none';
@@ -437,7 +500,7 @@
     function lpBbox(){
       var la1 = 90, la2 = -90, lo1 = 180, lo2 = -180;
       function u(a, b){ if (a < la1) la1 = a; if (a > la2) la2 = a; if (b < lo1) lo1 = b; if (b > lo2) lo2 = b; }
-      SITES.forEach(function(s){ u(s.lat, s.lng); });
+      if (!(BOUNDARY && BOUNDARY.coordinates)) SITES.forEach(function(s){ u(s.lat, s.lng); });   // v1.7.0: met een grens enkel de grens (parkings van een naamgenoot rekten de zone op tot heel België)
       if (BOUNDARY && BOUNDARY.coordinates){ JSON.stringify(BOUNDARY.coordinates).replace(/\[(-?[\d.]+),(-?[\d.]+)\]/g, function(_, x, y){ u(+y, +x); return ''; }); }
       if (la1 > la2) return null;
       var pad = 0.01;
@@ -461,7 +524,7 @@
     }
     function lpLaden(){
       var bb = lpBbox(); if (!bb) return;
-      var key = 'gk_lp4_' + SLUG, cache = null;
+      var key = 'gk_lp5_' + SLUG, cache = null;
       try { cache = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
       var vers = cache && cache.ts && (Date.now() - cache.ts) < 24 * 3600 * 1000 && Array.isArray(cache.lp);
       function osm(){ return lpQuery(bb).then(function(j){ return { lp: (j.elements || []).map(lpVan).filter(Boolean), bron: 'OpenStreetMap' }; }); }
@@ -867,7 +930,15 @@
 
       status('Kaart van ' + GEM + ' laden…');
       laadData().then(function(){
+        zuiverSites();   // v1.7.0
+        var binnen0 = SITES.filter(function(s){ return !s.o; }).length;
+        if (WEG_NAAMGENOOT > 0 && binnen0 < Math.max(5, WEG_NAAMGENOOT * 0.25)){
+          status('Parkings van ' + GEM + ' live ophalen uit OpenStreetMap…');
+          return osmParkings().then(function(L2){ if (L2.length){ SITES = SITES.concat(L2); OSM_LIVE = true; } }, function(){});
+        }
+      }).then(function(){
         status('');
+        if (WEG_NAAMGENOOT > 0){ naamgenootMelding(); log('naamgenoot_gefilterd', { weg: WEG_NAAMGENOOT, osm_live: OSM_LIVE, parkings: SITES.length }); }
         verrijk();
         var binnen = SITES.filter(function(s){ return !s.o; });
         document.getElementById('k-park').textContent = nf(binnen.length);
@@ -892,7 +963,8 @@
 
         var pts = SITES.filter(function(s){ return !s.o; }).map(function(s){ return [s.lat, s.lng]; });
         if (!pts.length) pts = SITES.map(function(s){ return [s.lat, s.lng]; }).concat(CABINES.map(function(c){ return [c.la, c.lo]; }));
-        if (pts.length && !ADR) map.fitBounds(pts, { padding:[30, 30] });
+        if (GRENS_BB && !ADR) map.fitBounds([[GRENS_BB[1], GRENS_BB[0]], [GRENS_BB[3], GRENS_BB[2]]], { padding:[20, 20] });   // v1.7.0: altijd de gemeente in beeld
+        else if (pts.length && !ADR) map.fitBounds(pts, { padding:[30, 30] });
         if (ADR){ document.getElementById('f-adres').value = ADR.label; toonAdres(ADR, 'lead_generator'); }
 
         // logging van kaartgebruik
