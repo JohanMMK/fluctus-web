@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.231.1 (2026-11-24, Johan): gesprek-modal — tekst die je typt blijft staan (blok tekent enkel opnieuw bij nieuwe berichten en bewaart tekst/🔒/focus); modal sluit/heropent nooit vanzelf; mail-link &chat=1 (met &invoer=1, server ≥ 15.470.0) opent meteen de modal zonder op een berekening te wachten. -->
 <!-- ek.html v0.231.0 (2026-11-24, Johan): HULPVRAAG ALS OPEN GESPREK (server ≥ 15.468.0) — zwevende klantknop weg, iedereen gebruikt «💬 Hulpvraag» bovenaan (klant: zelfde module, «nieuw» bij een antwoord); klant leest het gesprek mee; vinkje «🔒 enkel intern» per bericht (adviseur ↔ Energie-Compas, paars); nieuwe vraag van de adviseur standaard open met 🔒-optie; klantchat toont berichten van de adviseur links met naam. -->
 <!-- ek.html v0.230.1 (2026-11-24, Johan): hulpvragen van de adviseur (intern) laden ook als de dossierlading ze eerst wegschreef (publieke lijst) of de eerste vernieuwing vóór de login viel — teller in de header klopt meteen. -->
 <!-- ek.html v0.230.0 (2026-11-24, Johan): HULPVRAAG IN DE HEADER — knop «💬 Hulpvraag» bovenaan (oekene + adviseur, niet in de klantweergave) met teller open vragen; klik opent een modal met het gesprek (zelfde blok als in de tab Adviseur, verhuist tijdelijk); link &chat=1 opent meteen die modal. -->
@@ -8634,7 +8635,12 @@ window._ekAmb=(function(){
     var L=(window._EK_HULP||[]).slice().sort(function(a,c){ return (+c.ts||0)-(+a.ts||0); });
     var TM=team();
     try{ b.classList.toggle('hidden', !(window._ekHulpBlokMag() && L.length)); }catch(e){}
-    if(!L.length){ b.innerHTML=''; return; }
+    if(!L.length){ b.innerHTML=''; b.__sig=''; return; }
+    // v0.231.1 (Johan 24-11): niet opnieuw tekenen als er niets veranderde, en wat je aan het typen bent (tekst, 🔒, focus) blijft staan
+    var _sig=JSON.stringify(L.map(function(x){ var B=berichten(x); return [x.id,x.status,B.length,(B[B.length-1]||{}).ts]; }))+'|'+TM;
+    if(b.__sig===_sig && b.innerHTML) return;
+    var _keep={}; Array.prototype.forEach.call(b.querySelectorAll('textarea[data-hid]'),function(t){ _keep[t.getAttribute('data-hid')]={ v:t.value, f:document.activeElement===t, s:t.selectionStart, e:t.selectionEnd }; });
+    var _keepC={}; Array.prototype.forEach.call(b.querySelectorAll('input[data-hint]'),function(c){ _keepC[c.getAttribute('data-hint')]=c.checked; });
     var nOpen=L.filter(function(h){ return h.status==='open' && (TM || !h.intern); }).length;   // v0.103.0: adviseur — enkel de vragen van zijn klant wachten op hem
     var h='<div style="border:1px solid #F0DDA8;background:#FFFBF0;border-radius:12px;padding:12px 14px">'+
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><div style="font-weight:800;color:#1F3864">💬 Hulpvragen'+(TM?' van deze klant':'')+(nOpen?' — <span style="color:#B45309">'+nOpen+(TM?' wacht op ons':' wacht op jou')+'</span>':' — alles beantwoord')+'</div><button type="button" class="btn ghost sm" data-hver="1" data-nolog="1" style="margin-left:auto">↻ Vernieuwen</button></div>';
@@ -8653,7 +8659,9 @@ window._ekAmb=(function(){
           ((x.status!=='gesloten'&&x.status!=='gebeld')?'<button type="button" class="btn ghost sm" data-hact="sluiten" data-hid="'+esc(x.id)+'" data-nolog="1">✔ Afsluiten zonder mail</button>':'')))+'</div>'+
         '<div class="sub" data-hst="'+esc(x.id)+'" style="margin-top:4px"></div></div>';
     });
-    b.innerHTML=h+'</div>';
+    b.innerHTML=h+'</div>'; b.__sig=_sig;
+    try{ Object.keys(_keep).forEach(function(id){ var t=b.querySelector('textarea[data-hid="'+id+'"]'), k=_keep[id]; if(!t) return; t.value=k.v; if(k.f){ t.focus(); try{ t.setSelectionRange(k.s,k.e); }catch(eS){} } });
+      Object.keys(_keepC).forEach(function(id){ var c=b.querySelector('input[data-hint="'+id+'"]'); if(c) c.checked=_keepC[id]; }); }catch(eK){}
     var vb=b.querySelector('[data-hver]'); if(vb) vb.onclick=function(){ vb.disabled=true; vernieuw(); };
     Array.prototype.forEach.call(b.querySelectorAll('[data-hact]'),function(bt){ bt.onclick=async function(){
       var id=bt.getAttribute('data-hid'), act=bt.getAttribute('data-hact'), ta=b.querySelector('textarea[data-hid="'+id+'"]'), st=b.querySelector('[data-hst="'+id+'"]');
@@ -8672,6 +8680,7 @@ window._ekAmb=(function(){
           ? await fetch(API_H+'/api/ek/hulp-bericht',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, tekst:tx, intern:INT||undefined }) })   // v0.103.0: adviseur → bericht aan het team (intern gesprek) · v0.231.0: + 🔒
           : await fetch(API_H+'/api/ek/hulp-antwoord',{ method:'POST', headers:hd, body:JSON.stringify({ token:window.TOKEN, id:id, actie:act, antwoord:tx, intern:INT||undefined }) });
         var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||('status '+r.status));
+        if(ta) ta.value=''; if(_ib) _ib.checked=false; b.__sig='';   // v0.231.1: verstuurd → vak leeg
         window._EK_HULP=j.hulp||window._EK_HULP; window._ekHulpAdvRender();
       }catch(e){ bt.disabled=false; st.style.color='#8a1f1f'; st.textContent='Lukte niet: '+e.message; }
     }; });
@@ -8706,7 +8715,9 @@ window._ekAmb=(function(){
     thuis=null; if(o) o.remove(); document.removeEventListener('keydown', esc); }
   function esc(ev){ if(ev.key==='Escape') sluit(); }
   window._ekHulpModal=function(){
-    if(!mag()){ if(klantMag() && window._ekHulpKlantKlik) window._ekHulpKlantKlik(); return; } sluit();
+    if(!mag()){ if(klantMag() && window._ekHulpKlantKlik) window._ekHulpKlantKlik(); return; }
+    if(document.getElementById('ek-hm-ov')) return;   // v0.231.1: staat al open → niets sluiten of heropenen (je getypte tekst blijft)
+    sluit();
     var hb=document.getElementById('ek-hulpadv-blok'); if(!hb) return;
     var o=document.createElement('div'); o.id='ek-hm-ov'; o.setAttribute('data-i18n-skip','1');
     o.style.cssText='position:fixed;inset:0;z-index:10003;background:rgba(15,28,48,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto';
@@ -9270,7 +9281,7 @@ window._ekAmb=(function(){
       if(!window._EK_GATE_KLAAR && (poging||0)<10){ setTimeout(function(){ chatViaLink((poging||0)+1); }, 800); return; }   // v0.103.0: eerst weten wie kijkt
       if(window._ekHulpBlokMag && window._ekHulpBlokMag()){   // v0.103.0: adviseur/oekene via de mail → blok «Hulpvragen» in de adviseurskaart
         _chatLinkGedaan=true; try{ q.delete('chat'); history.replaceState(history.state,'',location.pathname+(q.toString()?'?'+q.toString():'')+location.hash); }catch(eU){}
-        Promise.resolve(window._ekHulpVernieuw?window._ekHulpVernieuw():null).then(function(){ var _tp=0; (function naarAdv(){ var d=document.getElementById('dash'); if((!d||d.classList.contains('hidden')||!d.offsetParent) && _tp++<15){ setTimeout(naarAdv,800); return; } try{ if(window._ekHulpModal){ window._ekHulpModal(); return; } }catch(eM){} try{ if(window._ekTabZet) window._ekTabZet('a'); }catch(eT){} setTimeout(function(){ var hb=document.getElementById('ek-hulpadv-blok'); if(hb && !hb.classList.contains('hidden')) hb.scrollIntoView({behavior:'smooth',block:'start'}); }, 400); })(); });   // v0.230.0: meteen de modal   // 0.217.3: blok staat in de tab «Adviseur» → eerst die tab openen
+        Promise.resolve(window._ekHulpVernieuw?window._ekHulpVernieuw():null).then(function(){ var _tp=0; (function naarAdv(){ if(window._ekHulpModal && window.TOKEN){ try{ window._ekHulpModal(); return; }catch(eM0){} } var d=document.getElementById('dash'); if((!d||d.classList.contains('hidden')||!d.offsetParent) && _tp++<15){ setTimeout(naarAdv,800); return; } try{ if(window._ekHulpModal){ window._ekHulpModal(); return; } }catch(eM){} try{ if(window._ekTabZet) window._ekTabZet('a'); }catch(eT){} setTimeout(function(){ var hb=document.getElementById('ek-hulpadv-blok'); if(hb && !hb.classList.contains('hidden')) hb.scrollIntoView({behavior:'smooth',block:'start'}); }, 400); })(); });   // v0.230.0: meteen de modal   // 0.217.3: blok staat in de tab «Adviseur» → eerst die tab openen
         return; }
       if(!(window.TOKEN && (window._EK_HULP||[]).length)){ if((poging||0)<6) setTimeout(function(){ chatViaLink((poging||0)+1); }, 800); return; }
       _chatLinkGedaan=true; mChat(); klog('hulp_chat_via_mail',{});
