@@ -6,6 +6,7 @@
 <title>Betere Lader</title>
 <meta name="description" content="Betere Lader: hoeveel laadpunten heb je nodig en wat past op je aansluiting? Onafhankelijke berekening op basis van je factuur. Powered by Energie-Compas.">
 <link rel="icon" href="/apps/bl/betere-lader-logo.svg">
+<!-- beterladen.html v0.14.0 (2026-11-26, Johan): GROEIPAD — beheerder (MijnEC-sessie) kiest onder het resultaat het jaar (Y1 = nu … Y4 = over 3 jaar) en opent het Energie-Compas-dossier van dat jaar; de eerste keer maakt de server per jaar met wagens een eigen dossier (« — Yn» in de naam, server ≥ 15.479.0). -->
 <!-- beterladen.html v0.13.1 (2026-11-22, Johan): conclusie-accent onder de kaarten (.pil) = rechthoek met accentlijn links i.p.v. ronde pil — lange tekst werd een ovaal, op iPhone nog erger. -->
 <!-- beterladen.html v0.13.0 (2026-11-22, Johan): «PDF» opent het rapport eerst als pagina in een nieuw tabblad (PDF-opmaak ook op het scherm) met bovenaan «Bewaar als PDF of druk af»; geen automatisch afdrukvenster meer. -->
 <!-- beterladen.html v0.12.9 (2026-11-22, Johan): snelladen-blok voorgevuld uit het wagenpark (1 beurt per bestel-/vrachtwagen, ± 40 % van wat hij per werkdag rijdt, tijd aan de kade volgt uit 50/150 kW) i.p.v. vast 10 × 150 kWh. -->
@@ -463,7 +464,8 @@ table.hz tr:last-child td{border-bottom:0}
         <label class="check"><input type="checkbox" id="akkoord"> <span id="akkoordtxt">Ik wil dat mijn laadplan en gegevens naar de partner gaan en dat ik gecontacteerd word voor een offerte.</span></label>
         <button class="btn" id="offerte" disabled>Vraag een offerte aan</button>
       </div>
-      <div class="rij" style="margin-top:14px"><button class="btn ghost klein verborgen" id="ek">Volledige analyse met batterij en zonnepanelen</button></div>
+      <div class="rij verborgen" id="ekrij" style="margin-top:14px;align-items:center;gap:8px;flex-wrap:wrap"><select id="ekjaar" style="max-width:260px"></select><button class="btn ghost klein" id="ek">Open in Energie-Compas</button></div>   <!-- v0.14.0: beheerder — jaar Y1–Y4 kiezen -->
+      <div id="ekjaren" class="msg"></div>
     </div>
     <div class="blok verborgen" id="snel">
       <div class="kop"><div class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></div><div><div class="stap">Vrachtwagens</div><h2>Snelladen tijdens laden en lossen?</h2></div></div>
@@ -952,7 +954,14 @@ function render(){
     '<tr><td>Past op je toegang ('+n0(S.toeg)+' kW)?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(!x.ev?'–':(x.past?'<span class="ok">ja, slim</span>':(x.aansl==='palen'?'<span class="krap">palen te traag</span>':'<span class="krap">te krap</span>'+(x.toeg_nodig_kw?'<small class="tnod">toegang naar '+n0(x.toeg_nodig_kw)+' kW</small>':''))))+'</td>';}).join('')+'</tr>'+
       /* v0.10.0 (Johan 20-11): krap op het toegangsvermogen ≠ nee — tweede lijn: past het op de aansluiting zelf (cabine)? */
       ((R.aansl&&R.aansl.cabine_kva)?'<tr><td>Past op je aansluiting (cabine '+n0(R.aansl.cabine_kva)+' kVA)?</td>'+hs.map(function(h){var x=R[h];return '<td>'+(!x.ev?'–':((x.past||x.aansl==='toegang'||x.aansl==='palen')?'<span class="ok">ja</span>':'<span class="nok">nee</span>'))+'</td>';}).join('')+'</tr>':'');
-  $('ek').textContent=S.ek?'Open je Energie-Compas-dossier':'Volledige analyse met batterij en zonnepanelen';
+  $('ek').textContent='Open in Energie-Compas';
+  // v0.14.0 (Johan 26-11): GROEIPAD — per jaar met wagens een eigen Energie-Compas-dossier (Y1 = nu … Y4 = over 3 jaar). De beheerder
+  //   kiest hier welk jaar hij opent; de eerste keer maakt de server alle jaren aan (server ≥ 15.479.0).
+  (function(){ var r=$('ekrij'), s=$('ekjaar'), R=S.res||{}; if(!r||!s) return;
+    var Y=[['nu','Y1 · nu'],['m12','Y2 · over 1 jaar'],['m24','Y3 · over 2 jaar'],['m36','Y4 · over 3 jaar']].filter(function(x){ return R[x[0]]&&R[x[0]].ev>0; });
+    var cur=s.value||R.horizon_ek||'m12';
+    s.innerHTML=Y.map(function(x){ return '<option value="'+x[0]+'"'+(x[0]===cur?' selected':'')+'>'+x[1]+' ('+n0(R[x[0]].ev)+' wagens)</option>'; }).join('');
+    r.classList.toggle('verborgen', !(S.mgr && Y.length)); })();
   toon('s4',true);
 }
 
@@ -1104,11 +1113,11 @@ $('wna').addEventListener('click',function(){
 
 // v0.2.0: opschalen = KOPIE naar een nieuw Energie-Compas-dossier (eigen FLX-nummer); het laadproject blijft bestaan
 $('ek').addEventListener('click',function(){
-  if(S.ek){ window.open(S.ek,'_blank','noopener'); return; }
   var w=window.open('about:blank','_blank'); var k=this; k.disabled=true; $('omsg').className='msg'; $('omsg').textContent='⏳ We maken je Energie-Compas-dossier aan…';
-  post('/api/bl/naar-compas',{token:S.token}).then(function(j){ k.disabled=false;
+  post('/api/bl/naar-compas',{token:S.token,horizon:($('ekjaar')&&$('ekjaar').value)||undefined}).then(function(j){ k.disabled=false;
     if(!j.ok){ if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent=j.error||'Dat lukte niet.'; return; }
-    S.ek=j.ek_link; $('ek').textContent='Open je Energie-Compas-dossier';
+    S.ek=j.ek_link;
+    if(j.jaren&&j.jaren.length){ $('ekjaren').innerHTML='Energie-Compas per jaar: '+j.jaren.map(function(y){ return '<a href="'+esc(y.ek_link)+'&adv=1" target="_blank" rel="noopener"><b>'+esc(y.jaar)+'</b></a> '+esc(y.label.toLowerCase())+(y.project_id?' ('+esc(y.project_id)+')':''); }).join(' · '); }
     $('omsg').innerHTML='✓ Nieuw Energie-Compas-dossier'+(j.project_id?' <b>'+esc(j.project_id)+'</b>':'')+'. Je factuur, wagens en invoer zijn meegenomen. Voeg er je verbruiksprofiel aan toe voor een exacte analyse.';
     if(w) w.location=j.ek_link; else window.open(j.ek_link,'_blank','noopener');
   }).catch(function(){ k.disabled=false; if(w) w.close(); $('omsg').className='msg fout'; $('omsg').textContent='Netwerkfout.'; });
