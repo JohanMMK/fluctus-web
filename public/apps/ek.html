@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="ek-build" content="0.85.0">
 <!-- ek.html v0.205.0 (2026-11-16): V&A-PDF — knop «📄 V&A-PDF» naast de doelgroep in de tab Adviseur: klantrapport ?mode=vena&dg=<doelgroep> als server-PDF (/api/ek/doc-pdf, server ≥ 15.427.0, klantrapport ≥ 0.112.0), bestandsnaam …_Vraag-en-antwoord.pdf. -->
+<!-- ek.html v0.237.0 (2026-11-26, Johan): BTW PARTICULIER — een particulier ziet alles incl. btw. Stroom 6 % (server 15.474.0 + simulator 1.30.0 rekenen de factuur, besparing en laadkost incl. btw; injectie btw-vrij), installatie 21 % of 6 % (nieuw vinkje «Woning ouder dan 10 jaar» bij Type klant, bewaard in het dossier). PV/batterij/laadpalen, offerteprijzen (ingegeven excl. btw) en verzwaring × btw; huidige/nieuwe factuur en laadkost × 1,06. Rapport-payload D.btw → klantrapport 0.123.0. Bedrijf ongewijzigd. -->
 <!-- ek.html v0.236.0 (2026-11-26, Johan): ROOSTER-KENGETALLEN — nieuw «Kost per MWh, alle verbruik (€/MWh)» (= factuur na PV+batterij ÷ verbruik gebouw + laden) net na de jaarfactuur; keuzelijst in logische volgorde: investering, piek (kVA), loadfactor, TVT, rendement, besparing, factuur, kost/MWh, cycli, €/100 km, km-dekking. -->
 <!-- ek.html v0.235.0 (2026-11-25, Johan): cabine-kVA mee in het rapport (D.aansluiting.cabine_kva) — de server (≥ 15.473.0) gebruikt de cabine als injectiegrens, het klantrapport (≥ 0.122.0) toetst de injectie eraan. -->
 <!-- ek.html v0.234.1 (2026-11-24, Johan): «Controle cijfers» — vals alarm bij het bewegen over het rooster: hover tekent de Pas aan-tegels/investeringsblok (en zet prijsfactor/palen) van het aangewezen vakje, de controle vergeleek die met de kerncijfers van je keuze (MC technics: € 254.299/€ 355.000 ≠ € 453.599). Nu: renderRapport onthoudt welke cel op het scherm staat; toont dat een andere cel (hover), dan slaat de controle de Pas aan-checks en de prijsfactor-check over. -->
@@ -1322,6 +1323,7 @@ document.addEventListener('DOMContentLoaded', function(){ try{ if(window.EC_LANG
             <label><input type="radio" name="ktype" value="bedrijf"> Bedrijf</label>
           </div>
           <div class="sub" id="ktype-bron"></div>
+          <label class="sub" id="ktype-w10" style="display:none;margin-top:4px;cursor:pointer"><input type="checkbox" id="i-woning10"> Woning ouder dan 10 jaar <span style="opacity:.8">(6 % btw op de installatie, anders 21 %)</span></label>   <!-- v0.237.0: btw particulier -->
         </div>
       </div>
       <!-- v0.17: elektrische voertuigen — particulier (nacht/overdag/24u) of bedrijf (rijen: voertuigtype + aantal + laadmoment + weekend) -->
@@ -1972,6 +1974,14 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   window._ekEvRows=function(){ if(KLANTTYPE!=='bedrijf'){ var n=_evPartTotal(); return n>0?[{type:'personenwagen',aantal:n,betalend:false}]:[]; } return EV_ROWS; };   // v0.140.0: voor de iconen (type voertuig) · v0.201.1: residentieel = de wagens uit de tijdsblokken (toonde de oude bedrijfsrij)
   // v0.36 (Johan): één bron voor 'is dit een particulier dossier?' (CTX van de laatste berekening, anders de klanttype-keuze).
   function _ekIsPart(){ return !!((typeof CTX!=='undefined' && CTX && CTX.particulier!=null) ? CTX.particulier : (KLANTTYPE==='particulier')); }
+  // v0.237.0 (Johan 26-11): BTW PARTICULIER — een particulier ziet alles INCL. btw: stroom 6 % (server 15.474.0 / simulator 1.30.0 rekent de
+  //   factuur incl. btw), installatie (PV, batterij, laadpaal) 21 % of 6 % (woning ≥ 10 jaar, vinkje bij «Type klant»). Bedrijf: ongewijzigd (excl. btw).
+  function _ekW10(){ var c=document.getElementById('i-woning10'); return !!(c && c.checked); }
+  function _ekBtwStroomF(){ return _ekIsPart()?1.06:1; }
+  function _ekBtwInstPct(){ return _ekIsPart()?(_ekW10()?6:21):0; }
+  function _ekBtwInstF(){ return 1+_ekBtwInstPct()/100; }
+  function _ekBtwTxt(nl){ var L=window.EC_LANG, inc=_ekIsPart(); if(L==='fr') return inc?'TVAC':'HTVA'; if(L==='en') return inc?'incl. VAT':'excl. VAT'; return inc?'incl. btw':'excl. btw'; }
+  window._ekBtwInfo=function(){ return _ekIsPart()?{ particulier:true, stroom_pct:6, installatie_pct:_ekBtwInstPct(), woning10:_ekW10() }:{ particulier:false, stroom_pct:0, installatie_pct:0 }; };
   function _evNum(v){ return String(v).replace('.',','); }
   // v0.18: batterij RTE/DoD-control in het resultaat (enkel oekene) → opslaan (server-breed) + herberekenen
   function _battParamsSync(){ var a=$('bp-rte'),b=$('bp-dod'); if(a)a.value=BATT_RTE; if(b)b.value=BATT_DOD; }
@@ -2590,7 +2600,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return [g('i-profiel'),g('i-ev'),g('i-afname'),g('i-toegang'),g('i-kost'),g('i-best-pv'),g('i-best-inj'),g('i-cert-gsc'),g('i-cert-wkk'),g('i-cert-vrij'),g('i-netladen'),g('i-inj-fee'),   // v0.123.0: certificaten → herrekenen · v0.125.0: sturing + fee injectie
       (typeof KLANTTYPE!=='undefined'?(KLANTTYPE||''):''),STATE_EAN_AFNAME||'',STATE_EAN_INJECTIE||'',STATE_ADRES||'',
       g('i-klant'),g('i-btw'),g('i-adres'),   // v0.24.34 (Johan): klantnaam/BTW/adres in de signature → een naam-wijziging herrekent (en bewaart de nieuwe naam) i.p.v. de dedup te raken
-      g('ev-p-nacht'),g('ev-p-dag'),g('ev-p-24'),rows,(function(){ try{ return JSON.stringify(_ekEvPartBewaar()); }catch(e){ return ''; } })(),String(BATT_RTE),String(BATT_DOD),String(CRATE_OV||'')].join('|');
+      g('ev-p-nacht'),g('ev-p-dag'),g('ev-p-24'),rows,(function(){ try{ return JSON.stringify(_ekEvPartBewaar()); }catch(e){ return ''; } })(),String(BATT_RTE),String(BATT_DOD),String(CRATE_OV||''),(_ekW10()?'w10':'')].join('|');   // v0.237.0: woning ≥ 10 j → herrekenen
   }
   function terugNaarInput(){ try{ window._invAutoSave&&window._invAutoSave('opnieuw'); }catch(eAs){} var d=$('dash'); if(d) d.classList.add('hidden'); var ik=$('intake'); if(ik) ik.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
   // v0.23: spanningsniveau (LS/MS) uit het toegangsvermogen — >63 kW ⇒ MS. Live in de invoer + in resultaat/rapport.
@@ -2677,7 +2687,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var x={ nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
       fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
       ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),
-      ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),
+      ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), woning10:_ekW10(), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),
       elia:(STATE_ELIA||''), certificaten:_ekCertBody(), netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(), referentie:(REF_NIETS?'niets':''),
       custom_combos:(Array.isArray(CUSTOM_COMBOS)?CUSTOM_COMBOS.slice(0,20):[]),
       crate_ov:(CRATE_OV>0?CRATE_OV:null),   // v0.200.0: C-factor uit «Pas aan»
@@ -3524,7 +3534,9 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     // v0.64.0 (Johan): varia gesplitst — varia0 = kabels/ontkoppelbord van de PV/batterij zelf (zonder laadpalen) → in invPvBatt;
     //   variaLaden = de extra kabel naar de laadpalen → elektrificatie. Totaal (tot) ongewijzigd = pv+bt+palen+varia.
     var _v0=(_bedr && ((+pvKwp||0)>0 || (+battKwh||0)>0))?Math.min(kt.totaal, _varia0(pvKwp,battKwh,_part)):0;
-    return { pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, varia0:_v0, variaLaden:kt.totaal-_v0, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt+_v0, invInfra:acE+dcE+kt.totaal-_v0, kt:kt };
+    var _r={ pv:pv, bt:bt, acE:acE, dcE:dcE, overige:kt.totaal, varia0:_v0, variaLaden:kt.totaal-_v0, tot:pv+bt+acE+dcE+kt.totaal, invPvBatt:pv+bt+_v0, invInfra:acE+dcE+kt.totaal-_v0, kt:kt };
+    if(_part){ var _f=_ekBtwInstF(); if(_f!==1) ['pv','bt','acE','dcE','overige','varia0','variaLaden','tot','invPvBatt','invInfra'].forEach(function(k){ _r[k]=Math.round((+_r[k]||0)*_f); }); }   // v0.237.0: particulier incl. btw (= server 15.474.0)
+    return _r;
   }
   // v Fase 2 #3: prijs-prorata — elke component × PRIJS_FACTOR (uit de totale-prijs-override). f=1 → ongewijzigd gedrag.
   //   Zo schaalt ELKE heatmap-cel (investering → TVT → rendement) mee als de klant de totaalprijs van één combi aanpast.
@@ -3711,7 +3723,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
         ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),   // v0.60.0: handmatige LS/MS mee · v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
-        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
+        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), woning10:_ekW10(), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         certificaten:_ekCertBody(),   // v0.123.0
         netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
@@ -4061,7 +4073,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
         nethef:(+NETHEF||0), huidig_energie_mwh:(+STATE_HUIDIG_ENERGIE_MWH||0),
         fact_maand_mwh:(STATE_FACT_MAAND&&+STATE_FACT_MAAND.mwh)||0, fact_maand_label:(STATE_FACT_MAAND&&STATE_FACT_MAAND.label)||'',
         ev_rows:_ekEvRowsBewaar(), ev_part_veh:_ekEvPartBewaar(), klanttype:(KLANTTYPE||''), spanning:(STATE_SPANNING||''),   // v0.60.0: handmatige LS/MS mee · v0.24.52 (Johan): voertuig-rijen (type+aantal+laadmoment+weekend) onthouden
-        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
+        ev_cfg:_ekEvCfgForBody(), cabine_kva:(CABINE_KVA>0?CABINE_KVA:0), woning10:_ekW10(), palen_ac:(PALEN_AC>0?PALEN_AC:0), palen_dc:(PALEN_DC>0?PALEN_DC:0), generator:_ekGenBody(true), batt:(PROJ_BATT?_ekBattForBody():null),   // v0.34 (Johan): per-project voertuigdefaults + kVA bestaande cabine + batterij-eenheid/RTE/DoD · v0.78.0: batterij enkel als project-afwijking (anders volgt het dossier de standaard)
         elia:(STATE_ELIA||''),   // v0.78.0: handmatige DNB/Elia-keuze bewaren
         certificaten:_ekCertBody(),   // v0.123.0
         netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(),   // v0.125.0
@@ -4094,7 +4106,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   + fallback-combi (4,5 kWp/10 kWh), km/laadvraag-KPI's (kpi-modus particulier). Thuislaad-buckets → wagenpark-pleinen.
     var _toeEff = particulier?aansluitingKw:toegangKw;
     var _sweepPath = '/api/energiekompas/bedrijf-sweep';
-    var _sweepBody = { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:_toeEff, spanning:_spanningEff(_toeEff), toegangsvermogen_kw:_toeEff, profielNaam:profiel, klanttype:(particulier?'particulier':'bedrijf'), woning:particulier, pleinen:(particulier?_pleinenParticulier():_pleinenV2()), generator:_ekGenBody(), rte_pct:BATT_RTE, dod_pct:BATT_DOD, batt_eenheid_kw:BATT_EENHEID_KW, batt_eenheid_kwh:BATT_EENHEID_KWH, cabine_kva:(CABINE_KVA>0?CABINE_KVA:undefined), ev_cfg:_ekEvCfgForBody(), crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined), project_id:STATE_CODE||undefined,
+    var _sweepBody = { afname_mwh:afnameMwh, injectie_mwh:0, aansluiting_kva:_toeEff, spanning:_spanningEff(_toeEff), toegangsvermogen_kw:_toeEff, profielNaam:profiel, klanttype:(particulier?'particulier':'bedrijf'), woning:particulier, btw_particulier:(particulier?true:undefined), btw_inst_pct:(particulier?(_ekW10()?6:21):undefined), pleinen:(particulier?_pleinenParticulier():_pleinenV2()), generator:_ekGenBody(), rte_pct:BATT_RTE, dod_pct:BATT_DOD, batt_eenheid_kw:BATT_EENHEID_KW, batt_eenheid_kwh:BATT_EENHEID_KWH, cabine_kva:(CABINE_KVA>0?CABINE_KVA:undefined), ev_cfg:_ekEvCfgForBody(), crate:_crate(), bestaande_pv:(bestPvKwp>0?{aanwezig:true,kwp:bestPvKwp,inj_mwh_jaar:bestInjMwh}:undefined), project_id:STATE_CODE||undefined,
       elia:_eliaEff(), elia_net_vast_jaar:STATE_ELIA_NET_VAST, elia_cap_jaar:STATE_ELIA_CAP, elia_heffingen_vast_jaar:STATE_ELIA_HEF,
       certificaten:_ekCertBody(), cert_postcode:_ekCertPostcode(), netladen:_ekNetladen(), injectie_fee_eur_mwh:_ekInjFee(), sim_oud:((new URLSearchParams(location.search).get('simoud')==='1')||undefined) };   // v0.181.0: ?simoud=1 → oude rekenwijze (vergelijking, server ≥ 15.393.1)   // v0.123.0: certificaten per dossier   // v0.34 (Johan): batt-eenheid + cabine-kVA + per-project ev_cfg mee   // v0.18: RTE/DoD → sweep; Fase 2: crate (#2 C-factor) + bestaande_pv (#4) → rooster+cel+rapport; v0.24.4: project_id → server past opgeladen kwartierdata toe (databron); v0.24.41: Elia-aansluiting + verankerde net/heffingen → server _eliaSwap (sweep+cel+rapport delen _sweepBody)
     var _res = await Promise.allSettled([
@@ -4134,12 +4146,13 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     //   incl. laden (gebouw + laadplein). Beide all-in (energie + netkosten/heffingen). De stijging = louter het extra volume.
     var kostNu = Math.round(refMwh*afnameMwh);   // v0.24.9: refMwh is nu ALL-IN → geen net/heffingen meer bijtellen; kostNu = de echte jaarfactuur (= ingevulde kost)
     var kostNieuw= Math.round((dynMwh+netHef)*(afnameMwh+laadMwh));
+    var _bS=particulier?1.06:1; if(_bS!==1){ kostNu=Math.round(kostNu*_bS); kostNieuw=Math.round(kostNieuw*_bS); }   // v0.237.0: particulier → incl. 6 % btw (zoals de simulatie)
     var deltaFactuur = kostNieuw - kostNu;   // (whole-factuur delta — NIET voor €/100km; het bevat het contract-effect op de héle afname)
     // v0.24.17 (Johan): €/100 km = ENKEL de laadenergie per 100 km, niet het factuurverschil. (kostNieuw−kostNu) bevat het
     //   contract-effect op de héle afname (bij een grote afname domineert dat → absurd hoge €/100km). Correct: de laadkost =
     //   laadvolume × all-in laadtarief (dynMwh + net/heffingen), gedeeld door de elektrische km. ≈ kWh/km × tarief × 100.
     var _laadRateMwh = Math.max(0, dynMwh + netHef);   // all-in €/MWh voor de laadenergie op het nieuwe (dynamische) contract
-    var laadKostReeel = Math.round(laadMwh * _laadRateMwh);   // pure laadkost (geen afname-contract-effect, geen PV/batt-besparing)
+    var laadKostReeel = Math.round(laadMwh * _laadRateMwh * _bS);   // v0.237.0: × btw particulier   // pure laadkost (geen afname-contract-effect, geen PV/batt-besparing)
     var km100 = (laadMwh>0 && kmBehoefte>0) ? laadKostReeel/kmBehoefte*100 : 0;
     // Laadplafond op de BESTAANDE aansluiting bij een loadfactor-DOEL van 60% → toont dat er geen verzwaring nodig is.
     var LF_DOEL=0.60;
@@ -4855,6 +4868,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
           if(B.batt && Math.round(+B.batt.eenheid_kw)===125 && Math.round(+B.batt.eenheid_kwh)===261 && (!(+B.batt.rte_pct>0)||Math.round(+B.batt.rte_pct)===BATT_DEF.rte_pct) && (!(+B.batt.dod_pct>0)||Math.round(+B.batt.dod_pct)===BATT_DEF.dod_pct)) B.batt=null;   // v0.78.0: oude standaard 125/261 automatisch bewaard → geen project-afwijking (volgt nu 125/250)
           if(B.batt&&(+B.batt.eenheid_kw>0||+B.batt.rte_pct>0)){ PROJ_BATT={eenheid_kw:Math.max(1,Math.round(+B.batt.eenheid_kw||BATT_DEF.eenheid_kw)),eenheid_kwh:Math.max(1,Math.round(+B.batt.eenheid_kwh||BATT_DEF.eenheid_kwh)),rte_pct:Math.max(50,Math.min(100,Math.round(+B.batt.rte_pct||BATT_DEF.rte_pct))),dod_pct:Math.max(10,Math.min(100,Math.round(+B.batt.dod_pct||BATT_DEF.dod_pct)))}; } else { PROJ_BATT=null; } _applyBattDefaults();
           REF_NIETS=false; /* v0.116.0 (Johan 23-10): referentiekeuze weggelaten — één model */ try{ if($('i-referentie')) $('i-referentie').value=(REF_NIETS?'niets':''); if($('dim-referentie')) $('dim-referentie').value=(REF_NIETS?'niets':''); if(window._ekRefKnoppen) window._ekRefKnoppen(); }catch(eR){}   // v0.107.0
+          try{ var _w10=$('i-woning10'); if(_w10) _w10.checked=!!B.woning10; }catch(eW10){}   // v0.237.0
           CABINE_KVA=(+B.cabine_kva>0)?Math.round(+B.cabine_kva):0; if($('i-cabine-kva')) $('i-cabine-kva').value=(CABINE_KVA>0?CABINE_KVA:'');
           PALEN_AC=(+B.palen_ac>0)?Math.round(+B.palen_ac):0; PALEN_DC=(+B.palen_dc>0)?Math.round(+B.palen_dc):0;   // v0.66.0
           if($('i-palen-ac')) $('i-palen-ac').value=(PALEN_AC>0?PALEN_AC:''); if($('i-palen-dc')) $('i-palen-dc').value=(PALEN_DC>0?PALEN_DC:'');
@@ -5814,7 +5828,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     return {
       project_id: STATE_CODE||'', datum: datum, ek_link: _ekLink,
       locatie: (function(){ try{ return window._ekLocRapport?window._ekLocRapport():null; }catch(eLr){ return null; } })(),   // v0.81.0: hoofdstuk 1 «Locatie» (luchtfoto + cabines + laadpalen)
-      particulier: _ekIsPart(), klanttype: (_ekIsPart()?'particulier':'bedrijf'),   // v0.36 (Johan): klantrapport past het particulier-pad toe (geen recurrente kosten, geen onbalans/windfall, …)
+      particulier: _ekIsPart(), klanttype: (_ekIsPart()?'particulier':'bedrijf'), btw: window._ekBtwInfo(),   // v0.237.0: klantrapport toont «incl. btw» bij een particulier   // v0.36 (Johan): klantrapport past het particulier-pad toe (geen recurrente kosten, geen onbalans/windfall, …)
       klant: { naam: STATE_KLANT||'', btw: STATE_BTW||'' },
       scenario: (function(){ try{ var e=$('dim-scenario'); return e?String(e.value||'').trim().slice(0,80):''; }catch(eS){ return ''; } })(),   // v0.76.0: scenarionaam
       creg_eur_per_mwh: 322,
@@ -6390,7 +6404,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     } else if(soort==='bank'){
       h+='<p>'+L('In bijlage vindt u het bankdossier voor uw project','Vous trouverez en pièce jointe le dossier bancaire de votre projet','Attached you will find the bank file for your project')+wieT+L('. Met dit dossier kunt u naar uw bank of leasingmaatschappij gaan om de financiering te bespreken.','. Avec ce dossier, vous pouvez vous adresser à votre banque ou société de leasing pour discuter du financement.','. With this file you can go to your bank or leasing company to discuss the financing.')+'</p>';
       if(B){ h+='<p style="margin-bottom:2px"><b>'+L('Wat erin staat','Ce qu’il contient','What it contains')+'</b></p><ul style="margin-top:2px">'+
-        '<li>'+L('De investering van het hele project: ','L’investissement du projet complet : ','The investment for the whole project: ')+'<b>'+e(E(B.inv))+'</b>'+L(' (wat u betaalt, excl. btw).',' (ce que vous payez, HTVA).',' (what you pay, excl. VAT).')+'</li>'+
+        '<li>'+L('De investering van het hele project: ','L’investissement du projet complet : ','The investment for the whole project: ')+'<b>'+e(E(B.inv))+'</b>'+(_ekIsPart()?L(' (wat u betaalt, incl. btw).',' (ce que vous payez, TVAC).',' (what you pay, incl. VAT).'):L(' (wat u betaalt, excl. btw).',' (ce que vous payez, HTVA).',' (what you pay, excl. VAT).'))+'</li>'+
         '<li>'+L('Een indicatieve lening van 100 % over ','Un prêt indicatif de 100 % sur ','An indicative 100 % loan over ')+e(B.jaren)+L(' jaar aan ',' ans à ',' years at ')+e(NF(B.rente))+L(' %: aflossing ± ',' % : remboursement ± ',' %: repayment ± ')+'<b>'+e(E(B.ann))+'</b>'+PJ+'.</li>'+
         '<li>'+L('De besparing in het eerste jaar: ± ','L’économie la première année : ± ','The savings in the first year: ± ')+'<b>'+e(E(B.besp))+'</b>'+(B.dek!=null?L(' — die dekt de aflossing voor ',' — elle couvre le remboursement à ',' — covering the repayment for ')+'<b>'+e(B.dek)+' %</b>.':'.')+'</li>'+
         '<li>'+L('De kasstroom jaar per jaar, in drie scenario’s: basis, gunstig (met onbalans) en voorzichtig.','Le flux de trésorerie année par année, en trois scénarios : base, favorable (avec déséquilibre) et prudent.','The cash flow year by year, in three scenarios: base, favourable (with imbalance) and cautious.')+'</li></ul>'; }
@@ -7063,7 +7077,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     var prijsPv=som(/zonnepan|\bpv\b/i,'totaal'), prijsBatt=b.reduce(function(t,r){ return t+(+r.totaal||0); },0), prijsOk=som(/ontkoppel/i,'totaal');
     var prijsLp=som(/ac-laad|dc-laad/i,'totaal');
     return { pv:Math.round(pv*10)/10, kw:kw, kwh:kwh, rte:Math.round(rte*10)/10, dod:Math.round(dod*10)/10, ac:ac, dc:dc,
-      prijsPvBatt:Math.round(prijsPv+prijsBatt+prijsOk), prijsLp:Math.round(prijsLp), totaal:Math.round(+x.totaal||0) };
+      prijsPvBatt:Math.round((prijsPv+prijsBatt+prijsOk)*_ekBtwInstF()), prijsLp:Math.round(prijsLp*_ekBtwInstF()), totaal:Math.round(+x.totaal||0) };   // v0.237.0: offerte excl. btw → particulier incl.
   }
   function _offSimCel(pr){
     var body=Object.assign({}, window._RAP_PAYLOAD||{}, { pv_kwp:pr.pv, batt_kw:pr.kw, batt_kwh:pr.kwh });
@@ -7191,9 +7205,10 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
   function st(t,kl){ var s=el('off-st'); if(s){ s.textContent=t||''; s.style.color=kl==='err'?'#8a1f1f':(kl==='ok'?'var(--green)':'var(--muted)'); } }
   // offerte → simulatie-parameters (zelfde vorm als _offParams)
   function pr(d){
+    var _bF=(typeof window._ekBtwInfo==='function' && window._ekBtwInfo().particulier)?(1+window._ekBtwInfo().installatie_pct/100):1;   // v0.237.0
     var lp=(d.prijs_lp!=null)?+d.prijs_lp:0, pvb=(d.prijs_pv!=null||d.prijs_batt!=null)?((+d.prijs_pv||0)+(+d.prijs_batt||0)):((d.totaal!=null)?Math.max(0,(+d.totaal)-lp):0);
     return { pv:+d.pv_kwp||0, kw:+d.batt_kw||((+d.batt_kwh||0)>0?Math.round((+d.batt_kwh)/2):0), kwh:+d.batt_kwh||0, rte:+d.rte||0, dod:+d.dod||0, ac:d.ac!=null?+d.ac:null, dc:d.dc!=null?+d.dc:null,
-      prijsPvBatt:Math.round(pvb), prijsLp:Math.round(lp), totaal:(d.totaal!=null?Math.round(+d.totaal):null),
+      prijsPvBatt:Math.round(pvb*_bF), prijsLp:Math.round(lp*_bF), totaal:(d.totaal!=null?Math.round(+d.totaal):null),   // v0.237.0: particulier incl. btw
       dcbKw:+d.dc_buffer_kw||0, dcbKwh:+d.dc_buffer_kwh||0 };   // v0.127.0: DC-laadbuffer
   }
   function sleutel(o){ return o.id+'|'+JSON.stringify(o.data||{})+'|'+((window._RAP_PAYLOAD&&JSON.stringify(window._RAP_PAYLOAD).length)||0)+'|'+(HM&&HM.refKost); }
@@ -7853,6 +7868,7 @@ var EK_KLANTVIEW=false;   // v0.30.0 (Johan): adviseur kan wisselen tussen de ad
     if(!kl){ var dl=document.querySelector('.luik[data-luik="dossier"]'); var eigen=null; try{ eigen=localStorage.getItem('EK_LUIK_dossier'); }catch(e){} if(dl && dl.dataset.auto && eigen==='open'){ dl.classList.remove('dicht'); delete dl.dataset.auto; } }   // v0.138.0: enkel als je het zelf open zette
     // v0.99.3 (Johan): geen BTW-nummer bij een particulier
     var btw=el('i-btw'), bc=btw&&btw.closest('div'); var isPart=((document.querySelector('input[name=ktype]:checked')||{}).value==='particulier'); if(bc && bc.parentNode && bc.parentNode.id==='klant-btw-blok'){ bc.style.display=isPart?'none':''; }
+    var w10=el('ktype-w10'); if(w10) w10.style.display=isPart?'':'none';   // v0.237.0: btw particulier — woning ≥ 10 jaar → 6 % btw op de installatie
     var mr=el('ek-meer'); if(mr){ var t2=L3('Meer detail','Plus de détails','More detail'); if(mr.textContent!==t2) mr.textContent=t2; }
   }
   setInterval(function(){ try{ invoerKompas(); }catch(e){} }, 1000);

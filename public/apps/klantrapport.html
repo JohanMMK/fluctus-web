@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energie-analyse</title>
+<!-- klantrapport.html v0.123.0 (2026-11-26, Johan): BTW PARTICULIER — rapport van ek ≥ 0.237.0 met D.btw.particulier: alle bedragen incl. btw (stroom 6 %, installatie 21 % of 6 % bij een woning ≥ 10 jaar); elk «excl. btw / hors TVA / excl. VAT» wordt na de vertaling «incl. btw / TVA comprise / incl. VAT»; het offertetotaal (ingegeven excl. btw) × btw. Bedrijf en oudere rapporten ongewijzigd. -->
 <!-- klantrapport.html v0.122.0 (2026-11-25, Johan): vraag 1 «Uitbreiding nodig?» toetst ook de INJECTIE aan de cabine (D.aansluiting.cabine_kva, ek ≥ 0.235.0): onder de cabine → één zin met de cabine en de hoogste injectie; erboven (oud rapport, server < 15.473.0) → waarschuwing om te herberekenen. -->
 <!-- klantrapport.html v0.121.0 (2026-11-23, Johan): V&A blad 2 — vraag «zonnestroom via de batterij naar het net: zelfverbruik?» → blijft injectie, maar maakt waarde (MWh via de batterij op duurdere momenten + arbitrage op de spotmarkt in €). -->
 <!-- klantrapport.html v0.120.0 (2026-11-19, Johan): CREG-tarief thuisladen per kwartaal (all-in incl. btw), automatisch het lopende kwartaal (Q1 2027 vanaf 1 januari). -->
@@ -723,6 +724,12 @@ var _BZK=(function(){ if(!HAS_BZ) return null;
 var HAS_INJ  = HAS_PV || !!(D.aansluiting&&D.aansluiting.injectie);
 // v0.27.0 (Johan): PARTICULIER-pad — geen recurrente kosten, geen enkele verwijzing naar onbalans/windfall (EK v0.36 zet D.particulier).
 var IS_PART  = !!(D.particulier===true || D.klanttype==='particulier');
+// v0.123.0 (Johan 26-11): BTW PARTICULIER — rapport van ek ≥ 0.237.0 (D.btw.particulier): alle bedragen zijn INCL. btw (stroom 6 %, installatie
+//   D.btw.installatie_pct). Na de vertaling zet _krBtwIncl elk «excl. btw / hors TVA / excl. VAT» om naar incl. Oudere rapporten: ongewijzigd.
+var BTW_INCL = IS_PART && !!(D.btw && D.btw.particulier);
+var BTW_INST_F = BTW_INCL ? (1 + ((+D.btw.installatie_pct || 21) / 100)) : 1;
+window._krBtwIncl=function(root){ if(!BTW_INCL || !root) return; var P=[[/exclusief btw/g,'inclusief btw'],[/Exclusief btw/g,'Inclusief btw'],[/excl\.? btw/g,'incl. btw'],[/hors TVA/g,'TVA comprise'],[/HTVA/g,'TVAC'],[/excluding VAT/g,'including VAT'],[/excl\. VAT/g,'incl. VAT']];
+  try{ var w=document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), n; while((n=w.nextNode())){ var t=n.nodeValue; if(!t || !/btw|TVA|VAT/.test(t)) continue; var u=t; P.forEach(function(x){ u=u.replace(x[0],x[1]); }); if(u!==t) n.nodeValue=u; } }catch(e){} };
 var KR_VGL_VERZW = !IS_PART && D.vgl_laden==='verzwaring';
 function _krOnbPiek(fb){ try{ var o=KR_VGL_VERZW&&D.factuur&&D.factuur.onbeheerst_ref; return (o&&+o.piek_kw>0)?Math.round(+o.piek_kw):fb; }catch(e){ return fb; } }   // v0.101.1   // v0.98.0: vergelijking met laden op de site mét verzwaring (adviseur in EK)
 // v0.72.0 (Johan 24-10): GEWEST VAN DE INSTALLATIE (postcode verbruiksadres; ?gewest=vl|wal|bru) — het VEKA en het VEKA-sjabloon
@@ -1499,7 +1506,7 @@ function _locatieFoto(){
   var bKwh=(V.batt_kwh!=null?V.batt_kwh:combi.batt_kwh), bKw=V.batt_kw, bCy=(V.batt_cycli!=null?V.batt_cycli:CYCLI);
   var ac=V.laadpalen_ac||null, dc=V.laadpalen_dc||null;
   var rows=[];
-  if(D.offerte&&D.offerte.installateur) rows.push([(window.EC_LANG==='fr'?'Offre':(window.EC_LANG==='en'?'Quote':'Offerte')), D.offerte.installateur+([D.offerte.referentie,D.offerte.datum].filter(Boolean).length?' \u00b7 '+[D.offerte.referentie,D.offerte.datum].filter(Boolean).join(' \u00b7 '):'')+(D.offerte.totaal_excl_btw!=null?' \u00b7 '+eur(D.offerte.totaal_excl_btw)+' '+(window.EC_LANG==='fr'?'HTVA':(window.EC_LANG==='en'?'excl. VAT':'excl. btw')):'')]);   // v0.52.0
+  if(D.offerte&&D.offerte.installateur) rows.push([(window.EC_LANG==='fr'?'Offre':(window.EC_LANG==='en'?'Quote':'Offerte')), D.offerte.installateur+([D.offerte.referentie,D.offerte.datum].filter(Boolean).length?' \u00b7 '+[D.offerte.referentie,D.offerte.datum].filter(Boolean).join(' \u00b7 '):'')+(D.offerte.totaal_excl_btw!=null?' \u00b7 '+eur(Math.round(D.offerte.totaal_excl_btw*BTW_INST_F))+' '+(window.EC_LANG==='fr'?'HTVA':(window.EC_LANG==='en'?'excl. VAT':'excl. btw')):'')]);   // v0.52.0
   if(pvKwp) rows.push(['PV-systeem', _num(pvKwp,0)+' kWp']);
   if(bKwh||bKw) rows.push(['Batterij', [(bKw?_num(bKw,0)+' kW':''),(bKwh?_num(bKwh,0)+' kWh':''),(bCy!=null?'≈ '+_num(bCy,0)+' cycli/jaar':'')].filter(Boolean).join(' · ')]);
   if(D.offerte&&+D.offerte.dc_buffer_kwh>0) rows.push(['DC-laadbuffer (enkel voor de voertuigen)', [(+D.offerte.dc_buffer_kw>0?_num(D.offerte.dc_buffer_kw,0)+' kW':''),_num(D.offerte.dc_buffer_kwh,0)+' kWh'].filter(Boolean).join(' · ')]);   // v0.86.0 (B)
@@ -3590,6 +3597,7 @@ async function _genPdf(){
 // v0.75.3: vertaal (FR/EN) VÓÓR het pagineren — de i18n-laag vertaalde pas achteraf, waardoor langere FR/EN-teksten na de paginering
 //   toch onder de voettekst liepen (bv. FR-voorblad, «Votre parc de recharge payant»).
 try{ if(window.EC_LANG && window.EC_LANG!=='nl' && typeof window.EC_translate==='function' && R) window.EC_translate(R); }catch(e){}
+try{ if(R) window._krBtwIncl(R); }catch(eBtw){}   // v0.123.0: particulier → «incl. btw» (na de vertaling, vóór het pagineren)
 function _krPagineer(){
   // v0.75.0 (Johan 25-10): ALGEMENE PAGINERING voor ALLE pagina's (niet enkel pagina's met roosters):
   //   (1) niets wordt weggeknipt: wat niet past, verhuist als geheel blok (tabel, grafiek, rooster, kader, sectie) naar een
