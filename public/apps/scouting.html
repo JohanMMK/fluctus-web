@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EV-scouting · Energie-Compas</title>
+<!-- scouting.html v1.1.0 (2026-11-26, Johan): tab Agent-runs — agent AAN/UIT en zoekintensiteit (Licht ±15 · Normaal ±40 · Grondig ±80 pagina’s, max. pagina’s per run instelbaar); runs tonen het niveau of «⏸ uitgezet». Server ≥ 15.476.0. -->
 <!-- scouting.html v1.0.0 (2026-11-24, Johan): tegel «🔎 EV-scouting» (server ≥ 15.469.0). Tabs Dashboard · Leads · Kanalen & concurrenten · Agent-runs · Import.
      De scouting-agent schrijft via window.api('/api/scouting/…') in een tabblad van deze pagina. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -36,6 +37,9 @@
   textarea.imp{width:100%;min-height:200px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:12.5px/1.4 ui-monospace,Menlo,monospace}
   .lst div{padding:6px 0;border-bottom:1px solid #EEF2F7;font-size:13px}
   a{color:#2a44a8}
+  .sw{position:relative;display:inline-block;width:46px;height:26px;vertical-align:middle} .sw input{opacity:0;width:0;height:0} .sw i{position:absolute;inset:0;background:#C9D3DF;border-radius:999px;transition:.15s;cursor:pointer} .sw i:before{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s} .sw input:checked+i{background:var(--green)} .sw input:checked+i:before{transform:translateX(20px)}
+  .niv{display:flex;gap:8px;flex-wrap:wrap} .niv label{flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer;background:#fff} .niv label.on{border-color:var(--navy);box-shadow:0 0 0 2px rgba(31,56,100,.15)} .niv b{color:var(--navy)}
+  tr.skip td{color:var(--muted);background:#FAFAFB}
 </style>
 </head>
 <body>
@@ -69,11 +73,11 @@
   function pr(p){ return p?'<span class="pr p'+esc(p)+'">'+esc(p)+'</span>':''; }
   function opts(lijst, v, leeg){ return (leeg!=null?'<option value="">'+esc(leeg)+'</option>':'')+lijst.map(function(x){ return '<option'+(x===v?' selected':'')+' value="'+esc(x)+'">'+esc(x||'—')+'</option>'; }).join(''); }
   function render(){ if(!DATA) return; tabs(); var R=$('root');
-    if(TAB==='dash') R.innerHTML=dash(); else if(TAB==='leads'){ R.innerHTML=leads(); bindLeads(); } else if(TAB==='kan'){ R.innerHTML=kanalen(); bindKan(); } else if(TAB==='runs') R.innerHTML=runs(); else { R.innerHTML=imp(); bindImp(); } }
+    if(TAB==='dash') R.innerHTML=dash(); else if(TAB==='leads'){ R.innerHTML=leads(); bindLeads(); } else if(TAB==='kan'){ R.innerHTML=kanalen(); bindKan(); } else if(TAB==='runs'){ R.innerHTML=runs(); bindRuns(); } else { R.innerHTML=imp(); bindImp(); } }
   function dash(){ var K=DATA.kpi||{}, L=DATA.leads, S=DATA.keuzes.status, ps=K.per_status||{}, mx=Math.max(1,Math.max.apply(null,S.map(function(s){ return ps[s]||0; })));
     var lr=K.laatste_run;
     var h='<div class="kpis"><div><b>'+(K.totaal||0)+'</b><span>leads</span></div><div><b>'+(K.nieuw_week||0)+'</b><span>nieuw deze week</span></div><div><b>'+(K.open_a||0)+'</b><span>open A-leads</span></div>'+
-      '<div><b>'+((ps['Interesse']||0)+(ps['Overgedragen']||0))+'</b><span>interesse + overgedragen</span></div><div><b>'+(K.kanalen||0)+'</b><span>kanalen & concurrenten</span></div><div><b>'+(lr?dt(lr.ts):'—')+'</b><span>laatste agent-run'+(lr?' · '+lr.nieuw+' nieuw':'')+'</span></div></div>';
+      '<div><b>'+((ps['Interesse']||0)+(ps['Overgedragen']||0))+'</b><span>interesse + overgedragen</span></div><div><b>'+(K.kanalen||0)+'</b><span>kanalen & concurrenten</span></div><div><b>'+(lr?dt(lr.ts):'—')+'</b><span>laatste agent-run'+(lr?' · '+lr.nieuw+' nieuw':'')+(DATA.profiel?(DATA.profiel.actief?' · agent aan ('+esc(DATA.profiel.label)+')':' · <b style="color:#8a1f1f">agent uit</b>'):'')+'</span></div></div>';
     h+='<div class="grid2"><div class="card"><h3>Trechter per status</h3><div class="trech">'+S.map(function(s){ var n=ps[s]||0; return '<div class="r"><span>'+esc(s)+'</span><div class="b" style="width:'+Math.max(2,Math.round(n/mx*100))+'%;opacity:'+(n?1:.25)+'"></div><b>'+n+'</b></div>'; }).join('')+'</div></div>';
     var pf=K.per_flow||{}; h+='<div class="card"><h3>Flow</h3><div class="flow">'+['Betere Lader 1','Betere Lader 2','Energie-Compas 1'].map(function(f,i){ return (i?'<span>→</span>':'')+'<div><b>'+(pf[f]||0)+'</b>'+esc(f)+'</div>'; }).join('')+'</div>'+
       '<div class="sub" style="margin-top:8px">Per prio: '+['A','B','C'].map(function(p){ return pr(p)+' '+((K.per_prio||{})[p]||0); }).join(' &nbsp; ')+'</div></div></div>';
@@ -125,9 +129,24 @@
     return h; }
   function bindKan(){ $('k-go').onclick=async function(){ var p=$('k-partij').value.trim(); if(!p) return; try{ var j=await api('/api/scouting/kanalen',{kanalen:[{type:$('k-type').value,partij:p,waarom:$('k-waarom').value,bron:$('k-bron').value}]}); }catch(e){ $('k-st').textContent='Lukte niet: '+e.message; } };
     Array.prototype.forEach.call($('root').querySelectorAll('[data-kdel]'),function(b){ b.onclick=async function(){ if(!confirm('Verwijderen?')) return; try{ await api('/api/scouting/kanalen',{verwijder:b.getAttribute('data-kdel')}); }catch(e){ alert(e.message); } }; }); }
+  // v1.1.0 (Johan 26-11): agent aan/uit + zoekintensiteit (server ≥ 15.476.0). De agent leest DATA.profiel bij elke start.
+  function agentKaart(){ var I=DATA.instellingen||{}, P=DATA.profiel||{}, N=DATA.niveaus||[]; if(!N.length) return '<div class="card sub">Instellingen vragen server ≥ 15.476.0.</div>';
+    var nv=P.niveau||'normaal', std=(N.filter(function(n){ return n.k===nv; })[0]||{}).max_paginas;
+    return '<div class="card"><h3>Scouting-agent</h3><div class="bar" style="gap:12px"><label class="sw"><input type="checkbox" id="a-aan"'+(P.actief?' checked':'')+'><i></i></label>'+
+      '<b style="color:'+(P.actief?'var(--green)':'#8a1f1f')+'">'+(P.actief?'Agent staat AAN':'Agent staat UIT')+'</b><span class="sub">'+(P.actief?'zoekt bij de volgende geplande run':'een geplande run slaat over en meldt «uitgezet»')+'</span></div>'+
+      '<div class="sub" style="margin:4px 0 6px">Hoe hard zoeken?</div><div class="niv">'+N.map(function(n){ return '<label class="'+(n.k===nv?'on':'')+'"><input type="radio" name="a-niv" value="'+esc(n.k)+'"'+(n.k===nv?' checked':'')+'> <b>'+esc(n.label)+'</b><div class="sub">'+esc(n.uitleg)+'</div></label>'; }).join('')+'</div>'+
+      '<div class="bar" style="margin-top:10px"><span class="sub">Max. pagina’s per run</span><input type="number" id="a-max" min="5" max="120" step="5" value="'+(I.max_paginas||'')+'" placeholder="'+(std||'')+' (standaard)" style="width:130px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit">'+
+      '<span class="sub">nu: <b>'+(P.max_paginas||'—')+'</b> · vacatures '+esc(P.vacatures_periode||'')+' · dealers: '+esc(P.dealers||'')+'</span><span class="sub" id="a-st"></span></div>'+
+      '<div class="sub">Zoektermen: '+esc((P.zoektermen||[]).join(' · '))+'</div>'+
+      (I.gewijzigd_ts?'<div class="sub" style="margin-top:4px">Laatst gewijzigd '+esc(dt(I.gewijzigd_ts))+' door '+esc(I.gewijzigd_door||'?')+'</div>':'')+'</div>'; }
+  function bindRuns(){ var st=function(t,ok){ var e=$('a-st'); if(e){ e.textContent=t; e.style.color=ok?'#0a7d3c':'#8a1f1f'; } };
+    var zet=async function(b){ try{ await api('/api/scouting/instellingen',b); TAB='runs'; render(); st('✔ bewaard',true); }catch(e){ st('Lukte niet: '+e.message); } };
+    var a=$('a-aan'); if(a) a.onchange=function(){ zet({actief:a.checked}); };
+    Array.prototype.forEach.call($('root').querySelectorAll('input[name=a-niv]'),function(r){ r.onchange=function(){ zet({niveau:r.value}); }; });
+    var m=$('a-max'); if(m) m.onchange=function(){ var v=m.value.trim(); zet({max_paginas:(v===''?null:+v)}); }; }
   function runs(){ var L=(DATA.runs||[]).slice().reverse();
-    return '<div class="wrap"><table><thead><tr><th>Wanneer</th><th>Door</th><th>Pagina’s</th><th>Nieuw</th><th>Samenvatting</th><th>Problemen</th><th>Zoektermen</th></tr></thead><tbody>'+
-      (L.map(function(r){ return '<tr><td>'+esc(dt(r.ts))+'</td><td>'+esc(r.wie||'')+'</td><td>'+(r.paginas||0)+'</td><td><b>'+(r.nieuw||0)+'</b></td><td style="white-space:pre-wrap;max-width:420px">'+esc(r.samenvatting||'')+'</td><td class="sub" style="white-space:pre-wrap">'+esc(r.problemen||'')+'</td><td class="sub">'+esc((r.zoektermen||[]).join(', '))+'</td></tr>'; }).join('')||'<tr><td colspan="7" class="sub">Nog geen runs van de scouting-agent.</td></tr>')+'</tbody></table></div>'; }
+    return agentKaart()+'<div class="wrap"><table><thead><tr><th>Wanneer</th><th>Door</th><th>Niveau</th><th>Pagina’s</th><th>Nieuw</th><th>Samenvatting</th><th>Problemen</th><th>Zoektermen</th></tr></thead><tbody>'+
+      (L.map(function(r){ return '<tr'+(r.overgeslagen?' class="skip"':'')+'><td>'+esc(dt(r.ts))+'</td><td>'+esc(r.wie||'')+'</td><td>'+(r.overgeslagen?'⏸ uitgezet':esc(r.niveau||''))+'</td><td>'+(r.paginas||0)+'</td><td><b>'+(r.nieuw||0)+'</b></td><td style="white-space:pre-wrap;max-width:420px">'+esc(r.samenvatting||'')+'</td><td class="sub" style="white-space:pre-wrap">'+esc(r.problemen||'')+'</td><td class="sub">'+esc((r.zoektermen||[]).join(', '))+'</td></tr>'; }).join('')||'<tr><td colspan="8" class="sub">Nog geen runs van de scouting-agent.</td></tr>')+'</tbody></table></div>'; }
   function imp(){ return '<div class="card"><h3>Leads importeren</h3><div class="sub">Plak uit Excel/Sheets met de koprij (kolommen o.a. bedrijf, prio, type, regio, signaal, route, bericht, bron, bron_label, gevonden, status, flow, eigenaar) — of JSON: een lijst leads, of {leads:[…], kanalen:[…]}. Dubbels (zelfde bedrijfsnaam) worden overgeslagen.</div>'+
       '<textarea class="imp" id="i-txt" placeholder="bedrijf&#9;prio&#9;regio&#9;signaal…"></textarea><div class="bar" style="margin-top:8px"><label class="sub"><input type="checkbox" id="i-bij"> lege velden van bestaande leads aanvullen</label><button class="btn p" id="i-go" type="button">Importeren</button><span class="sub" id="i-st"></span></div></div>'; }
   // tab-gescheiden of ;-gescheiden tekst met koprij; aanhalingstekens rond cellen met regeleinden (Excel) worden gerespecteerd
