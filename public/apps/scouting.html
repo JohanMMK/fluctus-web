@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EV-scouting · Energie-Compas</title>
+<!-- scouting.html v1.2.0 (2026-11-26, Johan): «🗓 Volgende run» in de tab Agent-runs en op het dashboard (planning uit de instellingen, server ≥ 15.477.0; geplande taak «EV-scouting LinkedIn» ma + do 12:41). -->
 <!-- scouting.html v1.1.0 (2026-11-26, Johan): tab Agent-runs — agent AAN/UIT en zoekintensiteit (Licht ±15 · Normaal ±40 · Grondig ±80 pagina’s, max. pagina’s per run instelbaar); runs tonen het niveau of «⏸ uitgezet». Server ≥ 15.476.0. -->
 <!-- scouting.html v1.0.0 (2026-11-24, Johan): tegel «🔎 EV-scouting» (server ≥ 15.469.0). Tabs Dashboard · Leads · Kanalen & concurrenten · Agent-runs · Import.
      De scouting-agent schrijft via window.api('/api/scouting/…') in een tabblad van deze pagina. -->
@@ -77,7 +78,7 @@
   function dash(){ var K=DATA.kpi||{}, L=DATA.leads, S=DATA.keuzes.status, ps=K.per_status||{}, mx=Math.max(1,Math.max.apply(null,S.map(function(s){ return ps[s]||0; })));
     var lr=K.laatste_run;
     var h='<div class="kpis"><div><b>'+(K.totaal||0)+'</b><span>leads</span></div><div><b>'+(K.nieuw_week||0)+'</b><span>nieuw deze week</span></div><div><b>'+(K.open_a||0)+'</b><span>open A-leads</span></div>'+
-      '<div><b>'+((ps['Interesse']||0)+(ps['Overgedragen']||0))+'</b><span>interesse + overgedragen</span></div><div><b>'+(K.kanalen||0)+'</b><span>kanalen & concurrenten</span></div><div><b>'+(lr?dt(lr.ts):'—')+'</b><span>laatste agent-run'+(lr?' · '+lr.nieuw+' nieuw':'')+(DATA.profiel?(DATA.profiel.actief?' · agent aan ('+esc(DATA.profiel.label)+')':' · <b style="color:#8a1f1f">agent uit</b>'):'')+'</span></div></div>';
+      '<div><b>'+((ps['Interesse']||0)+(ps['Overgedragen']||0))+'</b><span>interesse + overgedragen</span></div><div><b>'+(K.kanalen||0)+'</b><span>kanalen & concurrenten</span></div><div><b>'+(lr?dt(lr.ts):'—')+'</b><span>laatste agent-run'+(lr?' · '+lr.nieuw+' nieuw':'')+(DATA.profiel?(DATA.profiel.actief?' · agent aan ('+esc(DATA.profiel.label)+')':' · <b style="color:#8a1f1f">agent uit</b>')+'<br>volgende: '+esc(volgTxt(DATA.profiel)):'')+'</span></div></div>';
     h+='<div class="grid2"><div class="card"><h3>Trechter per status</h3><div class="trech">'+S.map(function(s){ var n=ps[s]||0; return '<div class="r"><span>'+esc(s)+'</span><div class="b" style="width:'+Math.max(2,Math.round(n/mx*100))+'%;opacity:'+(n?1:.25)+'"></div><b>'+n+'</b></div>'; }).join('')+'</div></div>';
     var pf=K.per_flow||{}; h+='<div class="card"><h3>Flow</h3><div class="flow">'+['Betere Lader 1','Betere Lader 2','Energie-Compas 1'].map(function(f,i){ return (i?'<span>→</span>':'')+'<div><b>'+(pf[f]||0)+'</b>'+esc(f)+'</div>'; }).join('')+'</div>'+
       '<div class="sub" style="margin-top:8px">Per prio: '+['A','B','C'].map(function(p){ return pr(p)+' '+((K.per_prio||{})[p]||0); }).join(' &nbsp; ')+'</div></div></div>';
@@ -130,10 +131,21 @@
   function bindKan(){ $('k-go').onclick=async function(){ var p=$('k-partij').value.trim(); if(!p) return; try{ var j=await api('/api/scouting/kanalen',{kanalen:[{type:$('k-type').value,partij:p,waarom:$('k-waarom').value,bron:$('k-bron').value}]}); }catch(e){ $('k-st').textContent='Lukte niet: '+e.message; } };
     Array.prototype.forEach.call($('root').querySelectorAll('[data-kdel]'),function(b){ b.onclick=async function(){ if(!confirm('Verwijderen?')) return; try{ await api('/api/scouting/kanalen',{verwijder:b.getAttribute('data-kdel')}); }catch(e){ alert(e.message); } }; }); }
   // v1.1.0 (Johan 26-11): agent aan/uit + zoekintensiteit (server ≥ 15.476.0). De agent leest DATA.profiel bij elke start.
+  // v1.2.0: volgende geplande run (planning uit de instellingen, tijdzone van de planning)
+  function volgendeRun(pl){ if(!pl||!pl.dagen||!pl.uur) return null; var tz=pl.tz||'Europe/Madrid', hm=String(pl.uur).split(':'), H=+hm[0], M=+hm[1], nu=Date.now();
+    var fmt=new Intl.DateTimeFormat('en-GB',{timeZone:tz,weekday:'short',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+    var WD={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+    var t0=Math.floor(nu/60000)*60000; while(new Date(t0).getUTCMinutes()!==M) t0+=60000;   // tijdzones op hele uren → minuut = UTC-minuut
+    for(var k=0;k<8*24;k++){ var t=t0+k*3600000, p={}; fmt.formatToParts(new Date(t)).forEach(function(x){ p[x.type]=x.value; });
+      if(+p.hour===H && +p.minute===M && pl.dagen.indexOf(WD[p.weekday])>=0 && t>nu) return t; }
+    return null; }
+  function volgTxt(P){ var t=volgendeRun(P.planning); if(!t) return 'niet ingepland'; var d=new Date(t), dn=['zo','ma','di','wo','do','vr','za'][d.getDay()];
+    return dn+' '+dt(t)+(P.actief?'':' — wordt overgeslagen (agent uit)'); }
   function agentKaart(){ var I=DATA.instellingen||{}, P=DATA.profiel||{}, N=DATA.niveaus||[]; if(!N.length) return '<div class="card sub">Instellingen vragen server ≥ 15.476.0.</div>';
     var nv=P.niveau||'normaal', std=(N.filter(function(n){ return n.k===nv; })[0]||{}).max_paginas;
     return '<div class="card"><h3>Scouting-agent</h3><div class="bar" style="gap:12px"><label class="sw"><input type="checkbox" id="a-aan"'+(P.actief?' checked':'')+'><i></i></label>'+
       '<b style="color:'+(P.actief?'var(--green)':'#8a1f1f')+'">'+(P.actief?'Agent staat AAN':'Agent staat UIT')+'</b><span class="sub">'+(P.actief?'zoekt bij de volgende geplande run':'een geplande run slaat over en meldt «uitgezet»')+'</span></div>'+
+      '<div style="margin:2px 0 8px">🗓 Volgende run: <b>'+esc(volgTxt(P))+'</b>'+(P.planning?'<span class="sub"> · vast: '+esc(P.planning.dagen.map(function(x){ return ['zo','ma','di','wo','do','vr','za'][x]; }).join(' + '))+' om '+esc(P.planning.uur)+'</span>':'')+'</div>'+
       '<div class="sub" style="margin:4px 0 6px">Hoe hard zoeken?</div><div class="niv">'+N.map(function(n){ return '<label class="'+(n.k===nv?'on':'')+'"><input type="radio" name="a-niv" value="'+esc(n.k)+'"'+(n.k===nv?' checked':'')+'> <b>'+esc(n.label)+'</b><div class="sub">'+esc(n.uitleg)+'</div></label>'; }).join('')+'</div>'+
       '<div class="bar" style="margin-top:10px"><span class="sub">Max. pagina’s per run</span><input type="number" id="a-max" min="5" max="120" step="5" value="'+(I.max_paginas||'')+'" placeholder="'+(std||'')+' (standaard)" style="width:130px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit">'+
       '<span class="sub">nu: <b>'+(P.max_paginas||'—')+'</b> · vacatures '+esc(P.vacatures_periode||'')+' · dealers: '+esc(P.dealers||'')+'</span><span class="sub" id="a-st"></span></div>'+
