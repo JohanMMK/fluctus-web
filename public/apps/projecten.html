@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Projecten · Fluctus</title>
+<!-- projecten.html v1.8.0 (2026-11-27, Johan): ?ids= (Betere Lader «Nog meer besparen») toont enkel het laadproject + de jaren Y1–Y4 (chip «🔌 laadproject + jaren», × wist), 2 u bewaard over het aanmelden heen; ?li= meldt de klant automatisch aan (server ≥ 15.483.0). -->
 <!-- projecten.html v1.7.0 (2026-11-18, Johan): LAADPROJECTEN — Betere Lader-projecten krijgen een badge «🔌 laadproject · partner», filter «soort» (Energie-Compas / Laadprojecten), openen het laadplan (/beterladen?t=…) i.p.v. de EK; opgeschaald → badge met het nieuwe Compas-nummer (server ≥ 15.434.0). -->
 <!-- projecten.html v1.6.0 (2026-10-23, Johan): MAANDAFREKENING — knop «🧾 Maandafrekening» (managers, server ≥ 15.350.0): uren per klant, te factureren, per adviseur/partner, Excel. -->
 <!-- projecten.html v1.5.0 (2026-10-19, Johan): KERNCIJFERS (trechter + tegels) standaard ingeklapt — klik «📊 Kerncijfers» om te openen (onthouden in je weergave); klik op de PROJECTNAAM opent het dossier in Energie-Compas op de invoer (nieuw tabblad). -->
@@ -184,6 +185,14 @@
 
   <script>
     var $ = function(id){ return document.getElementById(id); };
+    // v1.8.0 (Johan 27-11): ?ids=FLX-…,FLX-… (Betere Lader «Nog meer besparen») → enkel dit laadproject + de jaren Y1–Y4; blijft 2 u bewaard
+    //   zodat het filter ook na het aanmelden nog staat. ?li= = aanmeldsleutel (zelfde als de EK-mailknop, server ≥ 15.483.0).
+    var IDS=null;
+    (function(){ try{ var q=new URLSearchParams(location.search), v=q.get('ids');
+      if(v){ var L=v.split(',').map(function(x){ return x.trim().toUpperCase(); }).filter(function(x){ return /^FLX-[A-Z0-9-]{6,}$/.test(x); });
+        if(L.length){ IDS=new Set(L); try{ localStorage.setItem('PROJ_IDS', JSON.stringify({ ids:L, ts:Date.now() })); }catch(e1){} } }
+      else { var o=JSON.parse(localStorage.getItem('PROJ_IDS')||'null'); if(o&&o.ids&&o.ids.length&&Date.now()-(+o.ts||0)<2*3600e3) IDS=new Set(o.ids); }
+    }catch(e){} })();
     var CFG=null, sb=null, SESSION=null, PROXY='', DATA=[], ZOEK='', ARCHIEF=false, EKBEZ=false, EKINP=false, SEL=new Set(), EANMAP={}, BEPERKT=false, IS_ADV=false, PM=null;   // v0.10.0: BEPERKT = geen manager → enkel eigen projecten, geen beheeracties
     function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
     function kort(iso){ try{ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d.getTime())) return '—'; var p=function(n){return(n<10?'0':'')+n;}; return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear(); }catch(e){ return '—'; } }
@@ -192,6 +201,12 @@
     async function initAuth(){
       if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){ $('root').innerHTML='<div class="fout">Supabase nog niet geconfigureerd op de server.</div>'; return; }
       sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+      try{ var _q=new URLSearchParams(location.search), _li=_q.get('li');   // v1.8.0: aanmelden via de sleutel uit Betere Lader
+        if(_li){ _q.delete('li'); try{ history.replaceState(null,'',location.pathname+(_q.toString()?'?'+_q.toString():'')); }catch(eH){}
+          var _d0=await sb.auth.getSession();
+          if(!(_d0&&_d0.data&&_d0.data.session)){ var _r=await fetch(PROXY+'/api/ek/inlog',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ li:_li }), cache:'no-store' });
+            var _j=await _r.json().catch(function(){ return {}; });
+            if(_r.ok&&_j.ok&&_j.otp&&_j.email){ var _v=await sb.auth.verifyOtp({ email:_j.email, token:String(_j.otp), type:'email' }); if(_v&&_v.error) await sb.auth.verifyOtp({ email:_j.email, token:String(_j.otp), type:'magiclink' }); } } } }catch(eLi){}
       var d = await sb.auth.getSession(); SESSION = d.data.session;
       if(!SESSION){ window.location.href='https://www.energie-compas.eu/login'; return; }
       $('who').textContent = (SESSION.user && SESSION.user.email) || '';
@@ -259,6 +274,7 @@
     function mijnBal(){ return BEPERKT?'adviseur':'ons'; }
     function blLink(p){ return '/beterladen?'+(p.bl_partner?('p='+encodeURIComponent(p.bl_partner)+'&'):'')+'t='+encodeURIComponent(p.lead_token)+'&adv=1'; }   // v1.7.0
     function filterRij(p){
+      if(IDS) return IDS.has(String(p.id||'').toUpperCase());   // v1.8.0: laadproject + jaren Y1–Y4 (overschrijft de andere filters)
       var q=pr(p), f=V.flt;
       if(f.soort && (p.soort||'compas')!==f.soort) return false;   // v1.7.0: laadprojecten (Betere Lader) vs Energie-Compas
       if(f.status==='actief' && (q.status==='verloren'||q.status==='on_hold')) return false;
@@ -332,6 +348,7 @@
     // ── filterchips ──
     function chipsRender(){
       var el=$('chips'); if(!el) return; var c=[], f=V.flt;
+      if(IDS) c.push(['ids','🔌 laadproject + jaren Y1–Y4 ('+IDS.size+' projecten)']);   // v1.8.0
       f.fase.forEach(function(k){ c.push(['fase:'+k, 'fase: '+(FASE_NAAM[k]||k)]); });
       f.bal.forEach(function(k){ c.push(['bal:'+k, 'bal bij: '+k]); });
       if(f.mijn) c.push(['mijn','👤 mijn werk']); if(f.telaat) c.push(['telaat','te laat']); if(f.vragen) c.push(['vragen','💬 wacht op ons']);
@@ -339,8 +356,9 @@
       if(f.status!=='actief') c.push(['status', {on_hold:'on hold',verloren:'verloren',alles:'alle statussen',factureren:'te factureren'}[f.status]||f.status]);
       el.innerHTML=c.length?(c.map(function(x){ return '<span class="chip">'+esc(x[1])+' <button onclick="chipWeg(\''+esc(x[0])+'\')" title="Wis">×</button></span>'; }).join('')+' <button class="chip-wis" onclick="chipsWis()">× wis alles</button>'):'';
     }
-    window.chipWeg=function(k){ var f=V.flt; if(k.indexOf('fase:')===0) f.fase=f.fase.filter(function(x){return 'fase:'+x!==k;}); else if(k.indexOf('bal:')===0) f.bal=f.bal.filter(function(x){return 'bal:'+x!==k;}); else if(k==='status') f.status='actief'; else if(k==='adviseur'||k==='bedrijf') f[k]=''; else f[k]=false; weergaveBewaar(); syncBar(); render(); };
-    window.chipsWis=function(){ V.flt=vClone(_vStd.flt); weergaveBewaar(); syncBar(); render(); };
+    window.chipWeg=function(k){ var f=V.flt; if(k==='ids'){ idsWis(); render(); return; } if(k.indexOf('fase:')===0) f.fase=f.fase.filter(function(x){return 'fase:'+x!==k;}); else if(k.indexOf('bal:')===0) f.bal=f.bal.filter(function(x){return 'bal:'+x!==k;}); else if(k==='status') f.status='actief'; else if(k==='adviseur'||k==='bedrijf') f[k]=''; else f[k]=false; weergaveBewaar(); syncBar(); render(); };
+    function idsWis(){ IDS=null; try{ localStorage.removeItem('PROJ_IDS'); var q=new URLSearchParams(location.search); q.delete('ids'); history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():'')); }catch(e){} }
+    window.chipsWis=function(){ idsWis(); V.flt=vClone(_vStd.flt); weergaveBewaar(); syncBar(); render(); };
     function syncBar(){
       var b=$('bMijn'); if(b) b.classList.toggle('on',!!V.flt.mijn);
       var s=$('fStatus'); if(s) s.value=(V.flt.status==='factureren')?'actief':V.flt.status;
