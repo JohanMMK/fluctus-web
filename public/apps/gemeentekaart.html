@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.10.0
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.10.1
+     v1.10.1 (28-11, Johan): knop «✅ Bevestigd» in de lead legt telefoon én eigen kWp blijvend vast (lege velden eerst
+       aangevuld met Google) en bewaart meteen; kWp toont «✅ bevestigd» of «GRB …, nog niet bevestigd».
      v1.10.0 (28-11, Johan): «📞 Verrijkte leads» linksboven (alle gebruikers): filters naam, periode van–tot, belstatus,
        adviseur (managers), min. kWp, enkel met telefoon; deze gemeente / alle gemeenten; op de kaart (kleur = belstatus) en
        «📋 Bellijst» (zijpaneel) met belresultaat, contactpersoon, door de klant bevestigd nummer, eigen naam/kWp, notitie;
@@ -1150,7 +1152,7 @@
         '<div class="vl-m">' + esc(l.gemeente || '') + (l.site ? ' · parking ' + esc(l.site) : '') + (g.adres ? '<br>' + esc(g.adres) : '') + '</div>' +
         '<div>' + (t ? '<a class="vl-tel" href="tel:' + esc(String(t.bel || t.nr).replace(/[^\d+]/g,'')) + '">' + esc(t.nr) + '</a> <span class="vl-m">' + t.bron + '</span>' : '<span class="vl-m">geen telefoon' + (l.google_verlopen ? ' (Google-gegevens verlopen)' : '') + '</span>') + '</div>' +
         (g.website ? '<div class="vl-m">🌐 <a href="' + esc(g.website) + '" target="_blank" rel="noopener">' + esc(String(g.website).replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,'').slice(0,38)) + '</a></div>' : '') +
-        '<div class="vl-m">☀️ ' + (l.kwp_eigen != null ? '<b>' + nf(l.kwp_eigen) + ' kWp</b> eigen (' + (l.kwp_bron === 'grb' ? 'GRB-dak ' + nf(l.dak_m2_grb) + ' m²' : 'adviseur') + ')' : 'geen eigen schatting') +
+        '<div class="vl-m">☀️ ' + (l.kwp_eigen != null ? '<b>' + nf(l.kwp_eigen) + ' kWp</b> eigen (' + (l.kwp_bron === 'grb' ? 'GRB-dak ' + nf(l.dak_m2_grb) + ' m², nog niet bevestigd' : '✅ bevestigd') + ')' : 'geen eigen schatting') +
           (z ? ' · Google ± ' + nf(z.kwp) + ' kWp' : '') + '</div>' +
         '<div class="vl-m">verrijkt ' + String(l.laatst_op || '').slice(0,10).split('-').reverse().join('/') + ' door ' + esc(l.laatst_door_naam || '–') +
           (l.bijgewerkt_op ? ' · bijgewerkt ' + String(l.bijgewerkt_op).slice(0,10).split('-').reverse().join('/') + ' door ' + esc(l.bijgewerkt_door_naam || '–') : '') + '</div>' +
@@ -1158,11 +1160,12 @@
         '<details class="vl-f"><summary>✏️ Belresultaat & eigen gegevens</summary>' +
           '<label>Belstatus<select data-lf="belstatus">' + opts + '</select></label>' +
           '<label>Contactpersoon<input data-lf="contactpersoon" value="' + esc(l.contactpersoon || '') + '"></label>' +
-          '<label>Telefoon bevestigd door klant<input data-lf="tel_bevestigd" value="' + esc(l.tel_bevestigd || '') + '" placeholder="enkel invullen als de klant het bevestigde"></label>' +
-          ((!l.tel_bevestigd && t && !t.eigen) ? '<button class="vl-btn" data-lact="bevestig" type="button">☎️ Klant bevestigde ' + esc(t.nr) + '</button>' : '') +
+          '<label>Telefoon (bevestigd)<input data-lf="tel_bevestigd" value="' + esc(l.tel_bevestigd || '') + '" placeholder="' + esc(t && !t.eigen ? t.nr : 'nummer') + '"></label>' +
+          '<div class="vl-m" style="margin-top:4px">«✅ Bevestigd» legt telefoon en eigen kWp vast (lege velden worden eerst aangevuld met de Google-waarde).</div>' +
           '<label>Bedrijfsnaam (eigen)<input data-lf="eigen_naam" value="' + esc(l.eigen_naam || '') + '" placeholder="' + esc((g.naam || l.site || '')) + '"></label>' +
           '<label>Eigen kWp-schatting<input data-lf="kwp_eigen" type="number" min="0" value="' + (l.kwp_eigen != null ? l.kwp_eigen : '') + '"></label>' +
           '<label>Notitie<textarea data-lf="notitie" rows="2">' + esc(l.notitie || '') + '</textarea></label>' +
+          '<button class="vl-btn vl-bew" data-lact="bevestig" type="button" style="background:#05803B;border-color:#05803B">✅ Bevestigd</button>' +
           '<button class="vl-btn vl-bew" data-lact="bewaar" type="button">💾 Bewaar</button>' +
         '</details>' +
         '<div class="vl-m" style="margin-top:4px"><a href="#" data-lact="kaart" data-url="' + esc(kaartUrl) + '">🗺 toon op kaart</a>' + (g.maps ? ' · <a href="' + esc(g.maps) + '" target="_blank" rel="noopener">Google</a>' : '') + '</div>' +
@@ -1221,7 +1224,20 @@
         else window.open(el.getAttribute('data-url'), '_blank');
         return;
       }
-      if (act === 'bevestig'){ var t = vlTel(l); var inp = k.querySelector('[data-lf=tel_bevestigd]'); if (inp && t) inp.value = t.nr; return; }
+      if (act === 'bevestig'){
+        // v1.10.1: één klik legt telefoon én eigen kWp vast (lege velden eerst aangevuld met de Google-waarde) en bewaart.
+        var tb = vlTel(l), ti = k.querySelector('[data-lf=tel_bevestigd]'), ki = k.querySelector('[data-lf=kwp_eigen]'), zg = l.google && l.google.solar;
+        if (ti && !ti.value.trim() && tb) ti.value = tb.nr;
+        if (ki && !String(ki.value).trim() && zg && zg.kwp != null) ki.value = Math.round(zg.kwp);
+        var bb = {}; Array.prototype.forEach.call(k.querySelectorAll('[data-lf]'), function(f){ bb[f.getAttribute('data-lf')] = f.value; });
+        bb.kwp_bevestigd = true;
+        el.disabled = true; el.textContent = '⏳ vastleggen…';
+        vlApi('/api/leadgen/lead/' + id, { method:'POST', body: JSON.stringify(bb) }).then(function(j){
+          if (j && j.ok){ vlVervang(j.lead); status('✅ Bevestigd: ' + vlNaam(j.lead), 2500); }
+          else { el.disabled = false; el.textContent = '✅ Bevestigd'; status('⚠ ' + ((j && (j.melding || j.error)) || 'vastleggen mislukt'), 4000); }
+        });
+        return;
+      }
       if (act === 'bewaar'){
         var body = {}; Array.prototype.forEach.call(k.querySelectorAll('[data-lf]'), function(f){ body[f.getAttribute('data-lf')] = f.value; });
         el.disabled = true; el.textContent = '⏳ bewaren…';
