@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — OPVOLGING  v1.4 (v1.4: adres-events; v1.3: laadpalen-events) (v1.1: terminologie «Lead Generator»; v1.2: Energie-Compas-logo + favicon)  (16-10-2026, Johan)
+     ENERGIE-COMPAS LEAD GENERATOR — OPVOLGING  v1.5 (v1.5: verrijkingen «📞 Verrijkt» per adviseur + in de tijdlijn; v1.4: adres-events; v1.3: laadpalen-events) (v1.1: terminologie «Lead Generator»; v1.2: Energie-Compas-logo + favicon)  (16-10-2026, Johan)
      public/apps/leadgen-log.html — managers (o.a. oekene) volgen op wie wat doet in de
      Lead Generator (overzicht + kaart per gemeente).
      Leest fluctus-proxy GET /api/manager/activity?app=gemeenteplan (manager-only, 403 anders).
@@ -33,7 +33,7 @@
     .kaart.act{border-color:var(--groen);box-shadow:0 0 0 3px rgba(5,176,80,.12);}
     .kaart .nm{font-weight:bold;font-size:14px;}
     .kaart .lt{font-size:12px;color:var(--grijs);margin:2px 0 8px;}
-    .kaart .gr{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;}
+    .kaart .gr{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center;}
     .kaart .gr div{background:#EAF0F8;border-radius:6px;padding:5px 2px;font-size:10.5px;color:var(--grijs);}
     .kaart .gr b{display:block;font-size:15px;color:var(--navy);}
     .kaart .gems{font-size:12px;color:var(--grijs);margin-top:8px;line-height:1.4;}
@@ -105,7 +105,7 @@
       kaart_geopend:'Kaart gemeente geopend', kaart_gesloten:'Kaart gesloten', kaart_terugval_iframe:'Kaart (terugval)',
       parking_bekeken:'Parking bekeken', parking_hover:'Parking gehoverd', cabine_bekeken:'Cabine bekeken', laadpunt_bekeken:'Laadpunt bekeken',
       lijst_klik:'Lijst-klik', filter:'Filter', kaart_beweging:'Kaart verschoven/gezoomd', basislaag:'Basislaag', laag_aan:'Laag aan', laag_uit:'Laag uit',
-      adres_gezocht:'📍 Adres gezocht', adres_bekeken:'📍 Adres bekeken', adres_buiten_gemeente:'Adres buiten gemeente', laadpalen_geladen:'Laadpalen geladen', laadpalen_fout:'Laadpalen niet geladen', laadpalen_aangevuld:'Laadpalen aangevuld (OSM)', laadpaal_bekeken:'Laadpaal bekeken', google_maps_klik:'Google Maps', streetview_klik:'Street View', lead_genoteerd:'⭐ Lead genoteerd', geen_lead:'✕ Geen lead',
+      adres_gezocht:'📍 Adres gezocht', adres_bekeken:'📍 Adres bekeken', adres_buiten_gemeente:'Adres buiten gemeente', laadpalen_geladen:'Laadpalen geladen', laadpalen_fout:'Laadpalen niet geladen', laadpalen_aangevuld:'Laadpalen aangevuld (OSM)', laadpaal_bekeken:'Laadpaal bekeken', google_maps_klik:'Google Maps', streetview_klik:'Street View', lead_genoteerd:'⭐ Lead genoteerd', geen_lead:'✕ Geen lead', lead_verrijkt:'📞 Verrijkt (Google)',
       tab_verborgen:'Tab verlaten', tab_terug:'Tab terug', terug_naar_gemeenteplan:'Terug naar Lead Generator', terug_naar_lead_generator:'Terug naar Lead Generator', laadplan_mail:'Laadplan gemaild (oud)'
     };
     var RIJ = [], timer = null;
@@ -172,7 +172,7 @@
       // --- per adviseur
       var P = {};
       rows.forEach(function(r){
-        var p = P[r.user_id] || (P[r.user_id] = { id:r.user_id, naam:r.verkoper_naam || r.user_id, laatst:r.ts, laatstActie:r.actie, laatstGem:gem(r), kaarten:0, bekeken:{}, leads:0, nee:0, duur:0, gems:{}, n:0 });
+        var p = P[r.user_id] || (P[r.user_id] = { id:r.user_id, naam:r.verkoper_naam || r.user_id, laatst:r.ts, laatstActie:r.actie, laatstGem:gem(r), kaarten:0, bekeken:{}, leads:0, nee:0, vr:0, vrBet:0, duur:0, gems:{}, n:0 });
         p.n++;
         if (new Date(r.ts) > new Date(p.laatst)){ p.laatst = r.ts; p.laatstActie = r.actie; p.laatstGem = gem(r); }
         var d = r.details || {};
@@ -180,6 +180,7 @@
         if (r.actie === 'parking_bekeken') p.bekeken[gem(r) + '|' + (d.lat || '') + ',' + (d.lng || '')] = 1;
         if (r.actie === 'lead_genoteerd') p.leads++;
         if (r.actie === 'geen_lead') p.nee++;
+        if (r.actie === 'lead_verrijkt'){ p.vr++; if (d.betaald) p.vrBet++; }
         if (r.actie === 'kaart_gesloten') p.duur += +d.duur_s || 0;
         if (gem(r)) p.gems[gem(r)] = (p.gems[gem(r)] || 0) + 1;
       });
@@ -191,7 +192,7 @@
         return '<div class="kaart' + (sel === p.id ? ' act' : '') + '" data-id="' + esc(p.id) + '">' +
           '<div class="nm">' + (actief ? '<span class="live" title="actief in de laatste 10 min"></span>' : '') + esc(p.naam) + '</div>' +
           '<div class="lt">' + geleden(p.laatst) + ' · ' + esc(ACTIE_LBL[p.laatstActie] || p.laatstActie) + (p.laatstGem ? ' · ' + esc(p.laatstGem) : '') + '</div>' +
-          '<div class="gr"><div>Kaarten<b>' + p.kaarten + '</b></div><div>Parkings<b>' + Object.keys(p.bekeken).length + '</b></div><div>Leads<b>' + p.leads + '</b></div><div>Tijd<b>' + duur(p.duur) + '</b></div></div>' +
+          '<div class="gr"><div>Kaarten<b>' + p.kaarten + '</b></div><div>Parkings<b>' + Object.keys(p.bekeken).length + '</b></div><div>Leads<b>' + p.leads + '</b></div><div title="verrijkingen (waarvan betaald bij Google)">Verrijkt<b>' + p.vr + (p.vrBet !== p.vr ? '<small style="font-size:10px;font-weight:normal"> (' + p.vrBet + ' bet.)</small>' : '') + '</b></div><div>Tijd<b>' + duur(p.duur) + '</b></div></div>' +
           '<div class="gems">' + (g.length ? esc(g.slice(0, 8).join(' · ')) + (g.length > 8 ? ' +' + (g.length - 8) : '') : '–') + '</div></div>';
       }).join('') : '<div class="leeg">Geen activiteit in deze periode.</div>';
 
@@ -231,8 +232,9 @@
           if (d.bron && r.actie === 'gemeente_gekozen') x.push('via ' + esc(d.bron));
           if (d.metriek) x.push(esc(d.metriek));
           if (d.gewest) x.push(esc(d.gewest) + (d.aan ? ' aan' : ' uit'));
+          if (r.actie === 'lead_verrijkt') x.push(d.gevonden ? ('gevonden' + (d.heeft_tel ? ' · 📞' : ' · geen tel.') + (d.heeft_web ? ' · 🌐' : '') + (d.afstand_m != null ? ' · ' + nf(d.afstand_m) + ' m' : '')) : 'niets gevonden', d.cache ? 'uit cache (gratis)' : (d.betaald ? 'betaald' : 'gratis'));
           if (d.opmerking) x.push('“' + esc(d.opmerking) + '”');
-          var cls = r.actie === 'lead_genoteerd' ? 'lead' : (r.actie === 'geen_lead' ? 'nee' : (r.actie === 'kaart_geopend' ? 'open' : ''));
+          var cls = r.actie === 'lead_verrijkt' ? 'open' : r.actie === 'lead_genoteerd' ? 'lead' : (r.actie === 'geen_lead' ? 'nee' : (r.actie === 'kaart_geopend' ? 'open' : ''));
           return '<tr><td class="t">' + tijd(r.ts) + '</td><td>' + esc(r.verkoper_naam) + '</td><td><span class="tag ' + cls + '">' + esc(ACTIE_LBL[r.actie] || r.actie) + '</span></td><td>' + esc(gem(r)) + '</td><td class="m">' + x.join(' · ') + '</td></tr>';
         }).join('') + '</tbody></table>' + (rows.length > 400 ? '<div class="m" style="font-size:12px;margin-top:6px">Enkel de laatste 400 getoond — filter verder.</div>' : '') : '<div class="leeg">Geen handelingen voor deze filter.</div>';
     }

@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.7.0
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.8.0
+     v1.8.0 (28-11, Johan): «📞 Verrijken» in de parking-popup → POST /api/leadgen/verrijk (Google Places): bedrijfsnaam,
+       telefoon (klikbaar), website, adres + afstand tot de parking; «➕ In opmerking» zet het in het opmerkingenveld.
+       De server registreert wie verrijkt (log «lead_verrijkt»); resultaat lokaal max. 30 dagen bewaard (gk_vr_<uid>).
      v1.7.0 (24-11, Johan): GEMEENTEGRENS IS DE WAARHEID — parkings van een naamgenoot (Bergen → NL/DE, Lille, Waterloo, …)
        vallen weg (binnen de grens of band ±2 km); blijft er bijna niets over → live uit OpenStreetMap binnen de grens;
        laadpalen-zone = enkel de grens (Bergen toonde 6.212 = heel België); kaart past altijd op de gemeente; cache gk_lp5_.
@@ -88,6 +91,11 @@
     .gk-pop button.lead:hover{background:var(--groen-d);}
     .gk-pop textarea{width:100%;box-sizing:border-box;margin-top:7px;font-family:inherit;font-size:12.5px;border:1px solid #C9D6EC;border-radius:7px;padding:6px 8px;resize:vertical;}
     .gk-pop .ok{color:var(--groen-d);font-weight:bold;margin-top:6px;}
+    .gk-pop .vr{margin-top:7px;padding:7px 9px;background:#EAF0F8;border-radius:7px;font-size:12.5px;}
+    .gk-pop .vr a{color:var(--navy);font-weight:bold;}
+    .gk-pop .vr .w{color:#9E480E;font-size:11.5px;}
+    .gk-pop button.vrk{background:var(--navy);border-color:var(--navy);color:#fff;}
+    .gk-pop button[disabled]{opacity:.6;cursor:wait;}
     .gk-legend{background:#fff;padding:8px 10px;border-radius:8px;border:1px solid var(--lijn);font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.08);}
     .gk-legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:1px solid #fff;}
     #gk-status{position:absolute;z-index:1000;left:50%;top:70px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 14px;border-radius:9px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.25);display:none;max-width:90%;}
@@ -271,6 +279,67 @@
     function siteId(s){ return rnd(s.lat, 5) + ',' + rnd(s.lng, 5); }
     function leadsLaden(){ try { LEADS = JSON.parse(localStorage.getItem(leadKey()) || '{}') || {}; } catch(e){ LEADS = {}; } }
     function leadsBewaar(){ try { localStorage.setItem(leadKey(), JSON.stringify(LEADS)); } catch(e){} }
+
+    // ------------------------------------------------------------ v1.8.0 verrijking (Google Places via de proxy), lokaal ≤ 30 dagen
+    var VR = {}, VR_TTL = 30 * 864e5, VR_BEZIG = {};
+    function vrKey(){ return 'gk_vr_' + (UID || 'anon'); }
+    function vrLaden(){
+      try { VR = JSON.parse(localStorage.getItem(vrKey()) || '{}') || {}; } catch(e){ VR = {}; }
+      var nu = Date.now(); Object.keys(VR).forEach(function(k){ if (!VR[k] || nu - (VR[k].t || 0) > VR_TTL) delete VR[k]; });
+    }
+    function vrBewaar(){ try { localStorage.setItem(vrKey(), JSON.stringify(VR)); } catch(e){} }
+    function vrHtml(s){
+      var v = VR[s._id];
+      if (VR_BEZIG[s._id]) return '<div class="vr">⏳ Bedrijfsgegevens opzoeken…</div>';
+      if (!v) return '';
+      if (v.fout) return '<div class="vr"><span class="w">⚠ ' + esc(v.fout) + '</span></div>';
+      if (!v.r) return '<div class="vr">Geen bedrijf gevonden op Google bij deze parking.</div>';
+      var r = v.r, tel = r.telefoon_int || r.telefoon;
+      return '<div class="vr">🏢 <b>' + esc(r.naam || '–') + '</b>' + (r.status && r.status !== 'OPERATIONAL' ? ' <span class="w">(' + (r.status === 'CLOSED_PERMANENTLY' ? 'definitief gesloten' : 'tijdelijk gesloten') + ')</span>' : '') +
+        (r.adres ? '<br><span class="m">' + esc(r.adres) + '</span>' : '') +
+        '<br>📞 ' + (tel ? '<a href="tel:' + esc(String(tel).replace(/[^\d+]/g, '')) + '">' + esc(r.telefoon || tel) + '</a>' : '<span class="m">geen telefoon op Google</span>') +
+        (r.website ? '<br>🌐 <a href="' + esc(r.website) + '" target="_blank" rel="noopener">' + esc(String(r.website).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').slice(0, 40)) + '</a>' : '') +
+        (r.maps ? ' · <a href="' + esc(r.maps) + '" target="_blank" rel="noopener">Google</a>' : '') +
+        (r.afstand_m != null ? '<br><span class="' + (r.ver ? 'w' : 'm') + '">' + (r.ver ? '⚠ ' : '') + 'op ' + nf(r.afstand_m) + ' m van de parking' + (r.ver ? ' — controleer of dit het juiste bedrijf is' : '') + '</span>' : '') +
+        '<div class="btns" style="margin-top:6px"><button data-act="vr_opm">➕ In opmerking</button></div>' +
+        '<span class="m" style="font-size:10.5px">Bron: Google · ' + new Date(v.t).toLocaleDateString('nl-BE') + '</span></div>';
+    }
+    function vrTekst(r){
+      return [r.naam, r.telefoon_int || r.telefoon, r.website].filter(Boolean).join(' · ');
+    }
+    function verrijk(s){
+      if (VR_BEZIG[s._id]) return;
+      VR_BEZIG[s._id] = 1; herteken(s);
+      verseToken().then(function(t){
+        return fetch(PROXY_BASE + '/api/leadgen/verrijk', {
+          method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + t },
+          body: JSON.stringify({ lat: s.lat, lng: s.lng, zoek: s.n || '', site: s.n || '', site_id: s._id, gemeente: GEM, nis: NIS, slug: SLUG })
+        }).then(function(res){ return res.json().catch(function(){ return { ok:false, melding:'HTTP ' + res.status }; }); });
+      }).then(function(j){
+        delete VR_BEZIG[s._id];
+        if (j && j.ok){
+          VR[s._id] = { t: Date.now(), r: j.gevonden ? j.resultaat : null };
+          var tl = j.teller && j.teller.dag_max ? ' (' + j.teller.dag + '/' + j.teller.dag_max + ' vandaag)' : '';
+          status(j.gevonden ? '📞 ' + (j.resultaat.naam || 'Bedrijf') + ' gevonden' + tl : 'Geen bedrijf gevonden bij deze parking' + tl, 3000);
+        } else {
+          VR[s._id] = { t: Date.now(), fout: (j && j.melding) || (j && j.error) || 'Verrijken mislukt' };
+          status('⚠ ' + VR[s._id].fout, 4000);
+        }
+        if (!VR[s._id].fout) vrBewaar();
+        herteken(s);
+        if (VR[s._id].fout) delete VR[s._id];   // fout niet onthouden: volgende klik probeert opnieuw
+        renderLijst();
+      }).catch(function(e){
+        delete VR_BEZIG[s._id];
+        VR[s._id] = { t: Date.now(), fout: 'Verrijken mislukt (' + (e && e.message || e) + ')' }; herteken(s); delete VR[s._id];
+      });
+    }
+    function herteken(s){
+      var m = MARKERS[s._id]; if (!m || !m.isPopupOpen()) return;
+      var el = m.getPopup() && m.getPopup().getElement(), ta = el && el.querySelector('textarea[data-act=opm]'), opm = ta ? ta.value : null;
+      m.setPopupContent(popHtml(s));
+      if (opm != null){ var el2 = m.getPopup().getElement(), ta2 = el2 && el2.querySelector('textarea[data-act=opm]'); if (ta2) ta2.value = opm; }
+    }
 
     // ------------------------------------------------------------ auth-gate
     function guard(){
@@ -648,9 +717,11 @@
         (LP_GELADEN ? (s._lp ? '<div>🔌 <b>' + s._lpPt + '</b> bestaande laadpunt' + (s._lpPt === 1 ? '' : 'en') + ' op ' + s._lp + ' locatie' + (s._lp === 1 ? '' : 's') + ' ≤' + LP_STRAAL + ' m' + (s._lpDc ? ' (waarvan ' + s._lpDc + ' DC)' : '') + ' — dichtste op ' + nf(s._lpM) + ' m</div>'
                                 : '<div>🔌 Geen bestaande laadpalen ≤' + LP_STRAAL + ' m</div>') : '') +
         (st ? '<div class="ok">' + (st.status === 'lead' ? '⭐ Genoteerd als lead' : '✕ Gemarkeerd als geen lead') + (st.opm ? ' — ' + esc(st.opm) : '') + '</div>' : '') +
+        vrHtml(s) +
         '<textarea rows="2" placeholder="Opmerking (bedrijf, contact, waarom interessant…)" data-act="opm">' + esc(st && st.opm || '') + '</textarea>' +
         '<div class="btns">' +
           '<button class="lead" data-act="lead">⭐ Noteren als lead</button>' +
+          (VR[s._id] ? '' : '<button class="vrk" data-act="verrijk" title="Telefoon en website van het bedrijf opzoeken (Google)"' + (VR_BEZIG[s._id] ? ' disabled' : '') + '>📞 Verrijken</button>') +
           '<button data-act="geen">✕ Geen lead</button>' +
           '<a class="bt" data-act="gmaps" href="' + gm + '" target="_blank" rel="noopener">📍 Google Maps</a>' +
           '<a class="bt" data-act="streetview" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + s.lat + ',' + s.lng + '" target="_blank" rel="noopener">👁 Street View</a>' +
@@ -845,6 +916,12 @@
       var opm = ta ? ta.value.trim().slice(0, 500) : '';
       var d = siteDetails(s);
       if (act === 'gmaps' || act === 'streetview'){ log(act === 'gmaps' ? 'google_maps_klik' : 'streetview_klik', d, s.n); return; }
+      if (act === 'verrijk'){ verrijk(s); return; }   // v1.8.0 — de server logt «lead_verrijkt» (wie, waar, gevonden)
+      if (act === 'vr_opm'){
+        var v = VR[id];
+        if (v && v.r && ta){ var tx = vrTekst(v.r); if (ta.value.indexOf(tx) < 0) ta.value = (ta.value.trim() ? ta.value.trim() + ' — ' : '') + tx; ta.focus(); }
+        return;
+      }
       if (act === 'lead' || act === 'geen'){
         LEADS[id] = { status: act === 'lead' ? 'lead' : 'geen', opm: opm, ts: new Date().toISOString(), naam: s.n || '' };
         leadsBewaar();
@@ -878,7 +955,8 @@
         return '<div class="gk-item' + (s.o ? ' band' : '') + '" data-id="' + esc(s._id) + '">' +
           '<span class="st">' + (st ? (st.status === 'lead' ? '⭐' : '✕') : '🅿️') + '</span>' +
           '<div class="nm">' + esc(s.n || 'Parking') + '<div class="sub">' + esc(typeLbl(s.t)) +
-          (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (LP_GELADEN && s._lp ? ' · 🔌 ' + s._lpPt : '') + (s.o ? ' · band' : '') + '</div></div>' +
+          (s._cabM != null ? ' · cabine ' + nf(s._cabM) + ' m' : '') + (LP_GELADEN && s._lp ? ' · 🔌 ' + s._lpPt : '') + (s.o ? ' · band' : '') +
+          (VR[s._id] && VR[s._id].r ? '<br>📞 ' + esc(VR[s._id].r.naam || '') + (VR[s._id].r.telefoon ? ' · ' + esc(VR[s._id].r.telefoon) : '') : '') + '</div></div>' +
           '<span class="pl">' + nf(s.p) + '</span></div>';
       }).join('') + (lst.length > 400 ? '<div class="gk-leeg">+' + (lst.length - 400) + ' meer — verfijn de filter.</div>' : '');
     }
@@ -915,7 +993,7 @@
     // ------------------------------------------------------------ boot
     function boot(){
       document.getElementById('gk-who').textContent = EMAIL ? ('Aangemeld als ' + EMAIL) : '';
-      leadsLaden();
+      leadsLaden(); vrLaden();
       if (!SLUG){ status('Geen gemeente opgegeven — open de kaart via de Lead Generator.'); return; }
 
       var basis = {
