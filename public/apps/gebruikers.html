@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gebruikersbeheer · Fluctus</title>
+<!-- Gebruikersbeheer v1.15 (28-11, Johan): veld TEL / GSM per gebruiker (onder bedrijf; action 'tel', server ≥ 15.489.0). Een manager met zijn WhatsApp-nummer hier kan via WhatsApp een contact doorsturen → adviseur. Zoeken ook op tel. -->
 <!-- Gebruikersbeheer v1.14 (19-11, Johan): Mailontvangers AANPASBAAR — per regel een nieuw adres invullen + «Bewaar» (voorrang op Railway) of «↺ Standaard» (terug naar Railway/standaard); laatste wijzigingen onderaan. Vereist server ≥ 15.448.0 (POST /api/manager/mail-ontvangers). -->
 <!-- Gebruikersbeheer v1.13 (19-11, Johan): knop «✉ Mailontvangers» in de filterbalk — modal met de effectieve ontvangers (LEAD_MAIL_TO, AUDIT_MAIL_TO, BL_MAIL_<partner>, afzender) en of ze uit Railway of de standaard komen. Vereist server ≥ 15.447.0 (/api/manager/mail-ontvangers). -->
 <!-- Gebruikersbeheer v1.12 (23-10, Johan): LOGRAPPORT — knop «Lograpport» in de filterbalk opent een modal met het activiteitslog van de gebruikers die op dat moment gefilterd in beeld staan (periode + app kiesbaar; overzicht per gebruiker met laatste login, aantal acties, gebruikte apps, laatste activiteit + details per gebruiker). Printbaar / te bewaren als PDF (A4, enkel het rapport). Vereist server ≥ 15.348.0 voor de multi-gebruiker-filter en de laatste login (oudere server: max. 1000 recentste regels, client filtert). -->
@@ -216,7 +217,7 @@
   function filtered(){
     var q=(FILT.q||'').trim().toLowerCase();
     return USERS.filter(function(u){
-      if(q){ var hay=((u.email||'')+' '+(u.name||'')+' '+(u.company||'')).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+      if(q){ var hay=((u.email||'')+' '+(u.name||'')+' '+(u.company||'')+' '+(u.tel||'')).toLowerCase(); if(hay.indexOf(q)<0) return false; }
       if(FILT.status && (u.status||'active')!==FILT.status) return false;
       if(FILT.app && FILT.access){ var h=heeftToegang(u,FILT.app); if(FILT.access==='heeft' && !h) return false; if(FILT.access==='geen' && h) return false; }
       return true;
@@ -307,7 +308,8 @@
         '<option value="manager"'+(u.role==='manager'?' selected':'')+'>manager</option>'+
         '<option value="klant"'+(u.role==='klant'?' selected':'')+'>klant</option>'+
       '</select>'+
-      '<input class="rolsel" id="'+rid+'_bedrijf" value="'+esc(u.company||'')+'" placeholder="bedrijf / EPC" title="EPC/bedrijf — enkel ter info. Wie de projecten van een bedrijf ziet, volgt uit de tegel Contracten (ondertekenaar + domein)." style="display:block;margin-top:5px;width:140px">';
+      '<input class="rolsel" id="'+rid+'_bedrijf" value="'+esc(u.company||'')+'" placeholder="bedrijf / EPC" title="EPC/bedrijf — enkel ter info. Wie de projecten van een bedrijf ziet, volgt uit de tegel Contracten (ondertekenaar + domein)." style="display:block;margin-top:5px;width:140px">'+
+      '<input class="rolsel" id="'+rid+'_tel" type="tel" value="'+esc(u.tel||'')+'" placeholder="tel / gsm" title="Telefoonnummer (bv. +32 470 12 34 56). Een manager met zijn WhatsApp-nummer hier kan via WhatsApp adviseurs aanmaken (contact doorsturen)." style="display:block;margin-top:5px;width:140px">';
     var appsCells=APPS.map(function(a){
       var mgr=u.role==='manager';
       var kanNiet=!u.auth_uid;
@@ -343,6 +345,7 @@
     var rid=idFor(u.email);
     var sel=$(rid+'_rol'); if(sel) sel.onchange=function(){ zetRol(u, sel.value); };
     var bd=$(rid+'_bedrijf'); if(bd) bd.onchange=function(){ zetBedrijf(u, bd.value); };
+    var tl=$(rid+'_tel'); if(tl) tl.onchange=function(){ zetTel(u, tl); };
     APPS.forEach(function(a){
       var cb=$(rid+'_'+a.id); if(cb && !cb.disabled) cb.onchange=function(){ zetToegang(u, a.id, cb.checked, cb); };
     });
@@ -435,6 +438,12 @@
   async function zetRol(u, role){
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'role', email:u.email, role:role }) });
     if(r.ok){ var _j=await r.json().catch(function(){return {};}); if(_j && _j.tegels_gewist) gmsg(u.email+' is geen adviseur meer — zijn toegekende tegels zijn ingetrokken.','ok'); await laadUsers(); } else { alert('Kon rol niet wijzigen ('+r.status+').'); renderTable(); }   // v1.10: herladen (standaardtegels volgen de rol)
+  }
+  async function zetTel(u, el){   // v1.15 (28-11): telefoonnummer per gebruiker (server ≥ 15.489.0)
+    var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'tel', email:u.email, tel:el.value }) });
+    var j=await r.json().catch(function(){ return {}; });
+    if(r.ok){ u.tel=j.tel||''; el.value=u.tel; el.style.borderColor='#1E7A42'; setTimeout(function(){ el.style.borderColor=''; },1500); }
+    else { alert('Kon telefoonnummer niet bewaren: '+(j.error||r.status)); el.value=u.tel||''; }
   }
   async function zetBedrijf(u, company){   // v1.8 (Fase 2): bedrijf/EPC-scopingsleutel instellen
     var r=await fetch(PROXY+'/api/manager/user',{ method:'POST', headers:await authHeaders(), body:JSON.stringify({ action:'company', email:u.email, company:company }) });
