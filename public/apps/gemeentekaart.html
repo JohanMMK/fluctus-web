@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.8.1
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.9.0
+     v1.9.0 (28-11, Johan): «📞 Verrijken» geeft ook het ZONPOTENTIEEL van het dichtste dak (Google Solar API): kWp, panelen,
+       dakoppervlak, kWh/jaar (AC), kWh/kWp, beeldjaar. Google ziet geen bestaande panelen → «max. op het hele dak». Mee in «➕ In opmerking».
      v1.8.1: fix — knop deed niets: mijn functie verrijk() werd overschaduwd door de bestaande verrijk() (cabine/laadpalen per parking); hernoemd naar gpVerrijk().
      v1.8.0 (28-11, Johan): «📞 Verrijken» in de parking-popup → POST /api/leadgen/verrijk (Google Places): bedrijfsnaam,
        telefoon (klikbaar), website, adres + afstand tot de parking; «➕ In opmerking» zet het in het opmerkingenveld.
@@ -294,7 +296,8 @@
       if (VR_BEZIG[s._id]) return '<div class="vr">⏳ Bedrijfsgegevens opzoeken…</div>';
       if (!v) return '';
       if (v.fout) return '<div class="vr"><span class="w">⚠ ' + esc(v.fout) + '</span></div>';
-      if (!v.r) return '<div class="vr">Geen bedrijf gevonden op Google bij deze parking.</div>';
+      var zon = zonHtml(v.z);
+      if (!v.r) return '<div class="vr">Geen bedrijf gevonden op Google bij deze parking.' + zon + ((v.z && v.z.gevonden) ? '<div class="btns" style="margin-top:6px"><button data-act="vr_opm">➕ In opmerking</button></div>' : '') + '</div>';
       var r = v.r, tel = r.telefoon_int || r.telefoon;
       return '<div class="vr">🏢 <b>' + esc(r.naam || '–') + '</b>' + (r.status && r.status !== 'OPERATIONAL' ? ' <span class="w">(' + (r.status === 'CLOSED_PERMANENTLY' ? 'definitief gesloten' : 'tijdelijk gesloten') + ')</span>' : '') +
         (r.adres ? '<br><span class="m">' + esc(r.adres) + '</span>' : '') +
@@ -302,11 +305,22 @@
         (r.website ? '<br>🌐 <a href="' + esc(r.website) + '" target="_blank" rel="noopener">' + esc(String(r.website).replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').slice(0, 40)) + '</a>' : '') +
         (r.maps ? ' · <a href="' + esc(r.maps) + '" target="_blank" rel="noopener">Google</a>' : '') +
         (r.afstand_m != null ? '<br><span class="' + (r.ver ? 'w' : 'm') + '">' + (r.ver ? '⚠ ' : '') + 'op ' + nf(r.afstand_m) + ' m van de parking' + (r.ver ? ' — controleer of dit het juiste bedrijf is' : '') + '</span>' : '') +
+        zon +
         '<div class="btns" style="margin-top:6px"><button data-act="vr_opm">➕ In opmerking</button></div>' +
         '<span class="m" style="font-size:10.5px">Bron: Google · ' + new Date(v.t).toLocaleDateString('nl-BE') + '</span></div>';
     }
-    function vrTekst(r){
-      return [r.naam, r.telefoon_int || r.telefoon, r.website].filter(Boolean).join(' · ');
+    function zonHtml(z){
+      if (!z || !z.gevonden) return (z && z.fout) ? '<br><span class="m">☀️ zonpotentieel niet beschikbaar</span>' : (z ? '<br><span class="m">☀️ geen dakgegevens van Google voor deze plek</span>' : '');
+      return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #d5deec">☀️ <b>± ' + nf(z.kwp) + ' kWp</b> mogelijk op het dak' +
+        '<br><span class="m">' + nf(z.panelen) + ' panelen × ' + nf(z.paneel_w) + ' W' + (z.dak_m2 ? ' · dak ' + nf(z.dak_m2) + ' m²' : '') +
+        (z.kwh_jaar ? ' · ± ' + nf(Math.round(z.kwh_jaar / 1000)) + ' MWh/jaar' + (z.kwh_per_kwp ? ' (' + nf(z.kwh_per_kwp) + ' kWh/kWp)' : '') : '') + '</span>' +
+        '<br><span class="' + (z.ver ? 'w' : 'm') + '" style="font-size:11px">' + (z.ver ? '⚠ dak op ' + nf(z.afstand_m) + ' m — controleer het gebouw · ' : '') +
+        'max. op het hele dak, bestaande panelen niet afgetrokken' + (z.beeld ? ' · beeld ' + esc(z.beeld) : '') + '</span></div>';
+    }
+    function vrTekst(r, z){
+      var t = r ? [r.naam, r.telefoon_int || r.telefoon, r.website] : [];
+      if (z && z.gevonden) t.push('dak ± ' + z.kwp + ' kWp (' + z.panelen + ' panelen, ± ' + Math.round((z.kwh_jaar || 0) / 1000) + ' MWh/j, Google Solar)');
+      return t.filter(Boolean).join(' · ');
     }
     function gpVerrijk(s){
       if (VR_BEZIG[s._id]) return;
@@ -319,9 +333,10 @@
       }).then(function(j){
         delete VR_BEZIG[s._id];
         if (j && j.ok){
-          VR[s._id] = { t: Date.now(), r: j.gevonden ? j.resultaat : null };
+          VR[s._id] = { t: Date.now(), r: j.gevonden ? j.resultaat : null, z: j.solar || null };
           var tl = j.teller && j.teller.dag_max ? ' (' + j.teller.dag + '/' + j.teller.dag_max + ' vandaag)' : '';
-          status(j.gevonden ? '📞 ' + (j.resultaat.naam || 'Bedrijf') + ' gevonden' + tl : 'Geen bedrijf gevonden bij deze parking' + tl, 3000);
+          var zt = (j.solar && j.solar.gevonden) ? ' · ☀️ ± ' + nf(j.solar.kwp) + ' kWp' : '';
+          status((j.gevonden ? '📞 ' + (j.resultaat.naam || 'Bedrijf') + ' gevonden' : 'Geen bedrijf gevonden bij deze parking') + zt + tl, 3500);
         } else {
           VR[s._id] = { t: Date.now(), fout: (j && j.melding) || (j && j.error) || 'Verrijken mislukt' };
           status('⚠ ' + VR[s._id].fout, 4000);
@@ -722,7 +737,7 @@
         '<textarea rows="2" placeholder="Opmerking (bedrijf, contact, waarom interessant…)" data-act="opm">' + esc(st && st.opm || '') + '</textarea>' +
         '<div class="btns">' +
           '<button class="lead" data-act="lead">⭐ Noteren als lead</button>' +
-          (VR[s._id] ? '' : '<button class="vrk" data-act="verrijk" title="Telefoon en website van het bedrijf opzoeken (Google)"' + (VR_BEZIG[s._id] ? ' disabled' : '') + '>📞 Verrijken</button>') +
+          (VR[s._id] ? '' : '<button class="vrk" data-act="verrijk" title="Telefoon, website en zonpotentieel van het dak opzoeken (Google)"' + (VR_BEZIG[s._id] ? ' disabled' : '') + '>📞 Verrijken</button>') +
           '<button data-act="geen">✕ Geen lead</button>' +
           '<a class="bt" data-act="gmaps" href="' + gm + '" target="_blank" rel="noopener">📍 Google Maps</a>' +
           '<a class="bt" data-act="streetview" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + s.lat + ',' + s.lng + '" target="_blank" rel="noopener">👁 Street View</a>' +
@@ -920,7 +935,7 @@
       if (act === 'verrijk'){ gpVerrijk(s); return; }   // v1.8.0 — de server logt «lead_verrijkt» (wie, waar, gevonden)
       if (act === 'vr_opm'){
         var v = VR[id];
-        if (v && v.r && ta){ var tx = vrTekst(v.r); if (ta.value.indexOf(tx) < 0) ta.value = (ta.value.trim() ? ta.value.trim() + ' — ' : '') + tx; ta.focus(); }
+        if (v && (v.r || (v.z && v.z.gevonden)) && ta){ var tx = vrTekst(v.r, v.z); if (ta.value.indexOf(tx) < 0) ta.value = (ta.value.trim() ? ta.value.trim() + ' — ' : '') + tx; ta.focus(); }
         return;
       }
       if (act === 'lead' || act === 'geen'){
