@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ============================================================
-     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.9.0
+     ENERGIE-COMPAS LEAD GENERATOR — KAART PER GEMEENTE  v1.10.0
+     v1.10.0 (28-11, Johan): «📞 Verrijkte leads» linksboven (alle gebruikers): filters naam, periode van–tot, belstatus,
+       adviseur (managers), min. kWp, enkel met telefoon; deze gemeente / alle gemeenten; op de kaart (kleur = belstatus) en
+       «📋 Bellijst» (zijpaneel) met belresultaat, contactpersoon, door de klant bevestigd nummer, eigen naam/kWp, notitie;
+       «🔄 Ververs» na 30 dagen; export CSV (standaard enkel eigen gegevens). Opslag server-side (tabel leadgen_leads).
      v1.9.0 (28-11, Johan): «📞 Verrijken» geeft ook het ZONPOTENTIEEL van het dichtste dak (Google Solar API): kWp, panelen,
        dakoppervlak, kWh/jaar (AC), kWh/kWp, beeldjaar. Google ziet geen bestaande panelen → «max. op het hele dak». Mee in «➕ In opmerking».
      v1.8.1: fix — knop deed niets: mijn functie verrijk() werd overschaduwd door de bestaande verrijk() (cabine/laadpalen per parking); hernoemd naar gpVerrijk().
@@ -342,6 +346,7 @@
           status('⚠ ' + VR[s._id].fout, 4000);
         }
         if (!VR[s._id].fout) vrBewaar();
+        if (!VR[s._id].fout && VL.geladen) vlLaden();
         herteken(s);
         if (VR[s._id].fout) delete VR[s._id];   // fout niet onthouden: volgende klik probeert opnieuw
         renderLijst();
@@ -1048,6 +1053,7 @@
         if (CHARGERS.length) ov['⚡ Snelladen ≥40 kW (' + CHARGERS.length + ')'] = chgLayer;
         ov['🔌 Bestaande laadpalen'] = lpLayer;
         LAYERCTL = L.control.layers(basis, ov, { collapsed: window.innerWidth < 760, position:'topright' }).addTo(map);
+        installVerrijkteLeads(); // v1.10.0 — laag/bellijst verrijkte leads (alle gebruikers)
         installOekeneLagen();   // 4 bestemmings-lagen (sportclub/school/zorg/OC), enkel oekene, gefilterd op deze gemeente
         var lg = L.control({ position:'bottomright' });
         lg.onAdd = function(){ var d = L.DomUtil.create('div', 'gk-legend');
@@ -1091,6 +1097,211 @@
         if (document.visibilityState === 'hidden') log('tab_verborgen', { na_s: Math.round((Date.now() - T0) / 1000) }, null, true);
         else if (!gesloten) log('tab_terug', { na_s: Math.round((Date.now() - T0) / 1000) });
       });
+    }
+
+    // =====================================================================
+    //  v1.10.0 — VERRIJKTE LEADS (alle gebruikers met toegang): laag + filters + bellijst + export
+    //  Bron: proxy /api/leadgen/leads (tabel leadgen_leads). Google-gegevens enkel zolang geldig (30 dagen);
+    //  eigen gegevens (bevestigd nummer, contact, belstatus, notitie, eigen kWp) blijven.
+    // =====================================================================
+    var VL = { leads: [], geladen: false, scope: 'gem', toon: false, grp: null, meta: null, drawer: null, box: null };
+    var VL_STATUS = { nieuw:['Nieuw','#1F3864'], geen_antwoord:['Geen antwoord','#7f8c9a'], terugbellen:['Terugbellen','#E8821E'],
+                      interesse:['Interesse','#05B050'], afspraak:['Afspraak','#05803B'], geen_interesse:['Geen interesse','#C0392B'], ongeldig_nummer:['Ongeldig nummer','#4a4a4a'] };
+    function vlFilters(){
+      var b = VL.box; if (!b) return {};
+      var v = function(s){ var e = b.querySelector(s); return e ? e.value : ''; };
+      var q = { naam: v('[data-vf=naam]').trim(), van: v('[data-vf=van]'), tot: v('[data-vf=tot]'), status: v('[data-vf=status]'), minkwp: v('[data-vf=minkwp]'), door: v('[data-vf=door]') };
+      if (b.querySelector('[data-vf=tel]').checked) q.tel = '1';
+      if (q.status === 'open'){ q.open = '1'; q.status = ''; }
+      if (VL.scope === 'gem') q.slug = SLUG;
+      return q;
+    }
+    function vlQs(q){ return Object.keys(q).filter(function(k){ return q[k] !== '' && q[k] != null; }).map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(q[k]); }).join('&'); }
+    function vlApi(pad, opts){
+      return verseToken().then(function(t){
+        opts = opts || {}; opts.headers = Object.assign({ 'Authorization':'Bearer ' + t }, opts.body ? { 'Content-Type':'application/json' } : {});
+        return fetch(PROXY_BASE + pad, opts).then(function(r){ return r.json().catch(function(){ return { ok:false, melding:'HTTP ' + r.status }; }); });
+      });
+    }
+    function vlLaden(){
+      var st = VL.box && VL.box.querySelector('.st'); if (st) st.textContent = '⏳ laden…';
+      return vlApi('/api/leadgen/leads?' + vlQs(vlFilters())).then(function(j){
+        if (!j || !j.ok){ if (st) st.textContent = '⚠ ' + ((j && (j.melding || j.error)) || 'laden mislukt'); return; }
+        VL.leads = j.leads || []; VL.meta = j; VL.geladen = true;
+        var sel = VL.box.querySelector('[data-vf=door]');
+        if (j.manager && sel && sel.options.length <= 1){ (j.adviseurs || []).forEach(function(a){ var o = document.createElement('option'); o.value = a.id; o.textContent = a.naam || a.id.slice(0,8); sel.appendChild(o); }); sel.style.display = ''; }
+        if (st) st.textContent = VL.leads.length + ' lead' + (VL.leads.length === 1 ? '' : 's') + (VL.scope === 'gem' ? ' in ' + GEM : ' (alle gemeenten)');
+        vlTekenKaart(); if (VL.drawer && VL.drawer.style.display !== 'none') vlTekenLijst();
+      }).catch(function(e){ if (st) st.textContent = '⚠ ' + (e && e.message || e); });
+    }
+    function vlTel(l){
+      var g = l.google || {};
+      if (l.tel_bevestigd) return { nr: l.tel_bevestigd, bron: '☎️ bevestigd door klant', eigen: true };
+      if (g.telefoon || g.telefoon_int) return { nr: g.telefoon || g.telefoon_int, bel: g.telefoon_int || g.telefoon, bron: '📞 Google (tot ' + String(l.google_tot || '').slice(0,10).split('-').reverse().join('/') + ')' };
+      return null;
+    }
+    function vlNaam(l){ return l.eigen_naam || (l.google && l.google.naam) || l.site || 'Parking'; }
+    function vlKaart(l){
+      var g = l.google || {}, t = vlTel(l), s = VL_STATUS[l.belstatus] || VL_STATUS.nieuw, z = g.solar;
+      var opts = Object.keys(VL_STATUS).map(function(k){ return '<option value="' + k + '"' + (k === l.belstatus ? ' selected' : '') + '>' + VL_STATUS[k][0] + '</option>'; }).join('');
+      var kaartUrl = '/apps/gemeentekaart.html?slug=' + encodeURIComponent(l.slug) + '&nis=' + encodeURIComponent(l.nis || '') + '&naam=' + encodeURIComponent(l.gemeente || l.slug) + '&lat=' + l.lat + '&lng=' + l.lng;
+      return '<div class="vl-k" data-lid="' + l.id + '" style="border-left:4px solid ' + s[1] + '">' +
+        '<div class="vl-t"><b>' + esc(vlNaam(l)) + '</b> <span class="vl-b" style="background:' + s[1] + '">' + s[0] + '</span></div>' +
+        '<div class="vl-m">' + esc(l.gemeente || '') + (l.site ? ' · parking ' + esc(l.site) : '') + (g.adres ? '<br>' + esc(g.adres) : '') + '</div>' +
+        '<div>' + (t ? '<a class="vl-tel" href="tel:' + esc(String(t.bel || t.nr).replace(/[^\d+]/g,'')) + '">' + esc(t.nr) + '</a> <span class="vl-m">' + t.bron + '</span>' : '<span class="vl-m">geen telefoon' + (l.google_verlopen ? ' (Google-gegevens verlopen)' : '') + '</span>') + '</div>' +
+        (g.website ? '<div class="vl-m">🌐 <a href="' + esc(g.website) + '" target="_blank" rel="noopener">' + esc(String(g.website).replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,'').slice(0,38)) + '</a></div>' : '') +
+        '<div class="vl-m">☀️ ' + (l.kwp_eigen != null ? '<b>' + nf(l.kwp_eigen) + ' kWp</b> eigen (' + (l.kwp_bron === 'grb' ? 'GRB-dak ' + nf(l.dak_m2_grb) + ' m²' : 'adviseur') + ')' : 'geen eigen schatting') +
+          (z ? ' · Google ± ' + nf(z.kwp) + ' kWp' : '') + '</div>' +
+        '<div class="vl-m">verrijkt ' + String(l.laatst_op || '').slice(0,10).split('-').reverse().join('/') + ' door ' + esc(l.laatst_door_naam || '–') +
+          (l.bijgewerkt_op ? ' · bijgewerkt ' + String(l.bijgewerkt_op).slice(0,10).split('-').reverse().join('/') + ' door ' + esc(l.bijgewerkt_door_naam || '–') : '') + '</div>' +
+        (l.google_verlopen ? '<button class="vl-btn" data-lact="ververs">🔄 Ververs bij Google (betaald)</button>' : '') +
+        '<details class="vl-f"><summary>✏️ Belresultaat & eigen gegevens</summary>' +
+          '<label>Belstatus<select data-lf="belstatus">' + opts + '</select></label>' +
+          '<label>Contactpersoon<input data-lf="contactpersoon" value="' + esc(l.contactpersoon || '') + '"></label>' +
+          '<label>Telefoon bevestigd door klant<input data-lf="tel_bevestigd" value="' + esc(l.tel_bevestigd || '') + '" placeholder="enkel invullen als de klant het bevestigde"></label>' +
+          ((!l.tel_bevestigd && t && !t.eigen) ? '<button class="vl-btn" data-lact="bevestig" type="button">☎️ Klant bevestigde ' + esc(t.nr) + '</button>' : '') +
+          '<label>Bedrijfsnaam (eigen)<input data-lf="eigen_naam" value="' + esc(l.eigen_naam || '') + '" placeholder="' + esc((g.naam || l.site || '')) + '"></label>' +
+          '<label>Eigen kWp-schatting<input data-lf="kwp_eigen" type="number" min="0" value="' + (l.kwp_eigen != null ? l.kwp_eigen : '') + '"></label>' +
+          '<label>Notitie<textarea data-lf="notitie" rows="2">' + esc(l.notitie || '') + '</textarea></label>' +
+          '<button class="vl-btn vl-bew" data-lact="bewaar" type="button">💾 Bewaar</button>' +
+        '</details>' +
+        '<div class="vl-m" style="margin-top:4px"><a href="#" data-lact="kaart" data-url="' + esc(kaartUrl) + '">🗺 toon op kaart</a>' + (g.maps ? ' · <a href="' + esc(g.maps) + '" target="_blank" rel="noopener">Google</a>' : '') + '</div>' +
+      '</div>';
+    }
+    function vlTekenKaart(){
+      if (!VL.grp) return; VL.grp.clearLayers(); if (!VL.toon) return;
+      VL.leads.filter(function(l){ return l.slug === SLUG && isFinite(+l.lat); }).forEach(function(l){
+        var s = VL_STATUS[l.belstatus] || VL_STATUS.nieuw;
+        var m = L.circleMarker([+l.lat, +l.lng], { radius:11, weight:3, color:s[1], fillColor:'#fff', fillOpacity:0.15, pane:'vlPane' });
+        m.bindPopup(function(){ return '<div class="vl-pop">' + vlKaart(l) + '</div>'; }, { maxWidth:320 });
+        m._vlId = l.id; VL.grp.addLayer(m);
+      });
+    }
+    function vlTekenLijst(){
+      var d = VL.drawer; if (!d) return;
+      d.querySelector('.vl-n').textContent = VL.leads.length + ' lead' + (VL.leads.length === 1 ? '' : 's');
+      d.querySelector('.vl-lijst').innerHTML = VL.leads.length ? VL.leads.map(vlKaart).join('') : '<div class="vl-m" style="padding:10px">Geen verrijkte leads met deze filters.</div>';
+    }
+    function vlDrawer(){
+      if (VL.drawer){ VL.drawer.style.display = ''; vlTekenLijst(); return; }
+      var d = document.createElement('div'); d.className = 'vl-drawer';
+      d.innerHTML = '<div class="vl-hd"><b>📋 Bellijst</b> <span class="vl-n vl-m"></span><span style="flex:1"></span>' +
+        '<button class="vl-btn" data-lact="csv">⬇ Export (eigen gegevens)</button>' +
+        '<button class="vl-btn" data-lact="csvg" title="Tijdelijke werklijst: na gebruik verwijderen">⬇ + Google (tijdelijk)</button>' +
+        '<button class="vl-x" data-lact="sluit" title="Sluiten">✕</button></div>' +
+        '<div class="vl-m" style="padding:0 12px 6px">Google-gegevens zijn max. 30 dagen zichtbaar. Een nummer dat de klant bevestigt en uw eigen notities blijven.</div>' +
+        '<div class="vl-lijst"></div>';
+      document.body.appendChild(d); VL.drawer = d; vlTekenLijst();
+    }
+    function vlZoek(id){ for (var i = 0; i < VL.leads.length; i++) if (String(VL.leads[i].id) === String(id)) return VL.leads[i]; return null; }
+    function vlVervang(lead){
+      for (var i = 0; i < VL.leads.length; i++) if (VL.leads[i].id === lead.id){ VL.leads[i] = lead; }
+      if (VL.drawer && VL.drawer.style.display !== 'none'){ var oud = VL.drawer.querySelector('.vl-k[data-lid="' + lead.id + '"]'); if (oud) oud.outerHTML = vlKaart(lead); }
+      vlTekenKaart();
+    }
+    function vlCsv(metG){
+      var q = vlFilters(); if (metG) q.google = '1';
+      verseToken().then(function(t){
+        return fetch(PROXY_BASE + '/api/leadgen/leads.csv?' + vlQs(q), { headers:{ 'Authorization':'Bearer ' + t } });
+      }).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then(function(b){
+        var a = document.createElement('a'); a.href = URL.createObjectURL(b);
+        a.download = 'bellijst_' + new Date().toISOString().slice(0,10) + (metG ? '_TIJDELIJK' : '') + '.csv'; document.body.appendChild(a); a.click(); a.remove();
+        if (metG) status('⚠ Tijdelijke werklijst met Google-gegevens — na gebruik verwijderen', 5000);
+      }).catch(function(e){ status('⚠ Export mislukt: ' + (e.message || e), 4000); });
+    }
+    function vlActie(ev){
+      var el = ev.target.closest('[data-lact]'); if (!el) return;
+      var act = el.getAttribute('data-lact'); ev.preventDefault();
+      if (act === 'sluit'){ VL.drawer.style.display = 'none'; return; }
+      if (act === 'csv' || act === 'csvg'){ vlCsv(act === 'csvg'); return; }
+      var k = el.closest('.vl-k'); if (!k) return; var id = k.getAttribute('data-lid'), l = vlZoek(id); if (!l) return;
+      if (act === 'kaart'){
+        if (l.slug === SLUG){ map.setView([+l.lat, +l.lng], 18); VL.toon = true; vlKnoppen(); vlTekenKaart();
+          VL.grp.eachLayer(function(m){ if (String(m._vlId) === String(id)) setTimeout(function(){ m.openPopup(); }, 300); }); }
+        else window.open(el.getAttribute('data-url'), '_blank');
+        return;
+      }
+      if (act === 'bevestig'){ var t = vlTel(l); var inp = k.querySelector('[data-lf=tel_bevestigd]'); if (inp && t) inp.value = t.nr; return; }
+      if (act === 'bewaar'){
+        var body = {}; Array.prototype.forEach.call(k.querySelectorAll('[data-lf]'), function(f){ body[f.getAttribute('data-lf')] = f.value; });
+        el.disabled = true; el.textContent = '⏳ bewaren…';
+        vlApi('/api/leadgen/lead/' + id, { method:'POST', body: JSON.stringify(body) }).then(function(j){
+          if (j && j.ok){ vlVervang(j.lead); status('💾 Bewaard: ' + vlNaam(j.lead), 2500); }
+          else { el.disabled = false; el.textContent = '💾 Bewaar'; status('⚠ ' + ((j && (j.melding || j.error)) || 'bewaren mislukt'), 4000); }
+        });
+        return;
+      }
+      if (act === 'ververs'){
+        el.disabled = true; el.textContent = '⏳ Google…';
+        vlApi('/api/leadgen/lead/' + id + '/ververs', { method:'POST', body:'{}' }).then(function(j){
+          if (j && j.ok){ vlVervang(j.lead); status('🔄 Ververst: ' + vlNaam(j.lead), 2500); }
+          else { el.disabled = false; el.textContent = '🔄 Ververs bij Google (betaald)'; status('⚠ ' + ((j && (j.melding || j.error)) || 'verversen mislukt'), 4000); }
+        });
+      }
+    }
+    function vlKnoppen(){
+      if (!VL.box) return;
+      Array.prototype.forEach.call(VL.box.querySelectorAll('[data-vscope]'), function(b){ b.classList.toggle('on', b.getAttribute('data-vscope') === VL.scope); });
+      var tb = VL.box.querySelector('[data-vact=toon]'); if (tb){ tb.classList.toggle('on', VL.toon); tb.textContent = VL.toon ? '🗺 Verberg op kaart' : '🗺 Toon op kaart'; }
+    }
+    function installVerrijkteLeads(){
+      try {
+        if (!document.getElementById('vl-style')){
+          var st = document.createElement('style'); st.id = 'vl-style';
+          st.textContent = '.vlbox{background:#fff;border:1px solid #E2E8F2;border-radius:10px;padding:8px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-family:Arial,sans-serif;width:228px;margin-bottom:8px;font-size:12px}'
+            + '.vlbox .h{font-weight:bold;color:#1F3864;font-size:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}'
+            + '.vlbox .h .o{background:#1F3864;color:#fff;border-radius:999px;font-size:9px;padding:1px 6px}'
+            + '.vlbox.collapsed .bd{display:none}.vlbox .chev::before{content:"\\25B8"}.vlbox:not(.collapsed) .chev::before{content:"\\25BE"}'
+            + '.vlbox input,.vlbox select{width:100%;box-sizing:border-box;margin:3px 0;padding:4px 6px;border:1px solid #C9D6EC;border-radius:6px;font-size:11.5px}'
+            + '.vlbox .rw{display:flex;gap:4px}.vlbox .rw > *{flex:1;min-width:0}.vlbox label.ck{display:flex;align-items:center;gap:5px;margin:3px 0;font-size:11.5px}.vlbox label.ck input{width:auto;margin:0}'
+            + '.vlbox button{display:block;width:100%;margin:4px 0;padding:5px 8px;border:1px solid #C9D6EC;border-radius:7px;background:#fff;color:#1F3864;font-size:11.5px;cursor:pointer;text-align:center}'
+            + '.vlbox button.on{background:#1F3864;color:#fff;border-color:#1F3864}.vlbox .st{font-size:10.5px;color:#5b6b85;margin-top:3px}'
+            + '.vl-drawer{position:fixed;top:0;right:0;bottom:0;width:430px;max-width:100vw;background:#F4F7FB;z-index:2000;box-shadow:-4px 0 18px rgba(0,0,0,.2);display:flex;flex-direction:column;font-family:Arial,sans-serif;font-size:12.5px}'
+            + '.vl-hd{display:flex;align-items:center;gap:6px;padding:10px 12px;background:#fff;border-bottom:1px solid #E2E8F2;flex-wrap:wrap}.vl-hd b{color:#1F3864;font-size:14px}'
+            + '.vl-lijst{overflow:auto;padding:8px 10px 30px;flex:1}.vl-x{border:0;background:none;font-size:18px;cursor:pointer;color:#1F3864}'
+            + '.vl-k{background:#fff;border-radius:8px;padding:8px 10px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)}.vl-pop .vl-k{box-shadow:none;padding:2px 4px 2px 8px;margin:0}'
+            + '.vl-t{display:flex;justify-content:space-between;gap:6px;align-items:flex-start;color:#1F3864}.vl-b{color:#fff;border-radius:999px;font-size:10px;padding:1px 7px;white-space:nowrap}'
+            + '.vl-m{color:#5b6b85;font-size:11.5px}.vl-tel{font-weight:bold;color:#1F3864;font-size:14px}'
+            + '.vl-btn{border:1px solid #1F3864;background:#fff;color:#1F3864;border-radius:6px;padding:4px 8px;font-size:11.5px;cursor:pointer;margin:4px 4px 0 0}.vl-bew{background:#1F3864;color:#fff}'
+            + '.vl-f{margin-top:5px}.vl-f summary{cursor:pointer;color:#1F3864;font-size:11.5px}.vl-f label{display:block;font-size:11px;color:#5b6b85;margin-top:4px}'
+            + '.vl-f input,.vl-f select,.vl-f textarea{display:block;width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #C9D6EC;border-radius:6px;font-size:12px;font-family:inherit}';
+          document.head.appendChild(st);
+        }
+        if (!map.getPane('vlPane')){ map.createPane('vlPane'); map.getPane('vlPane').style.zIndex = 640; }
+        VL.grp = L.layerGroup().addTo(map);
+        var vandaag = new Date().toISOString().slice(0,10);
+        var ctl = L.control({ position:'topleft' });
+        ctl.onAdd = function(){
+          var d = L.DomUtil.create('div', 'vlbox collapsed'); VL.box = d;
+          d.innerHTML = '<div class="h"><span><span class="chev"></span> 📞 Verrijkte leads</span> <span class="o">bellijst</span></div>' +
+            '<div class="bd">' +
+              '<input data-vf="naam" placeholder="Naam bedrijf / parking / gemeente">' +
+              '<div class="rw"><input data-vf="van" type="date" title="verrijkt vanaf"><input data-vf="tot" type="date" max="' + vandaag + '" title="verrijkt tot"></div>' +
+              '<select data-vf="status"><option value="">Alle belstatussen</option><option value="open">Nog te bellen / lopend</option>' +
+                Object.keys(VL_STATUS).map(function(k){ return '<option value="' + k + '">' + VL_STATUS[k][0] + '</option>'; }).join('') + '</select>' +
+              '<select data-vf="door" style="display:none"><option value="">Alle adviseurs</option></select>' +
+              '<div class="rw"><input data-vf="minkwp" type="number" min="0" placeholder="min. kWp"><label class="ck"><input type="checkbox" data-vf="tel"> met tel.</label></div>' +
+              '<div class="rw"><button data-vscope="gem" class="on">' + esc(GEM) + '</button><button data-vscope="alle">Alle gemeenten</button></div>' +
+              '<button data-vact="zoek">🔎 Zoek</button>' +
+              '<div class="rw"><button data-vact="toon">🗺 Toon op kaart</button><button data-vact="lijst">📋 Bellijst</button></div>' +
+              '<div class="st">Filter en klik «Zoek».</div>' +
+            '</div>';
+          L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+          d.querySelector('.h').addEventListener('click', function(){ d.classList.toggle('collapsed'); if (!d.classList.contains('collapsed') && !VL.geladen) vlLaden(); });
+          d.addEventListener('click', function(ev){
+            var b = ev.target.closest('button'); if (!b) return;
+            if (b.hasAttribute('data-vscope')){ VL.scope = b.getAttribute('data-vscope'); vlKnoppen(); vlLaden(); return; }
+            var a = b.getAttribute('data-vact');
+            if (a === 'zoek'){ vlLaden(); try { log('verrijkte_leads_zoek', vlFilters()); } catch(e){} }
+            if (a === 'toon'){ VL.toon = !VL.toon; vlKnoppen(); (VL.geladen ? Promise.resolve() : vlLaden()).then(vlTekenKaart); }
+            if (a === 'lijst'){ (VL.geladen ? Promise.resolve() : vlLaden()).then(vlDrawer); try { log('bellijst_geopend', { scope: VL.scope }); } catch(e){} }
+          });
+          d.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') vlLaden(); });
+          return d;
+        };
+        ctl.addTo(map);
+        document.addEventListener('click', function(ev){ if (ev.target.closest && ev.target.closest('.vl-drawer, .vl-pop')) vlActie(ev); }, true);   // capture: Leaflet-popups stoppen het bubbelen
+      } catch(e){ /* nooit de kaart breken */ }
     }
 
     // =====================================================================
